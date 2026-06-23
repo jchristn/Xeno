@@ -1,0 +1,198 @@
+namespace Xeno.Core.Services
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using Xeno.Core.Models;
+
+    /// <summary>
+    /// Tenant-aware platform state and domain operations.
+    /// </summary>
+    public class XenoPlatform
+    {
+        /// <summary>
+        /// Tenants.
+        /// </summary>
+        public List<Tenant> Tenants { get; } = new List<Tenant>();
+
+        /// <summary>
+        /// Users.
+        /// </summary>
+        public List<User> Users { get; } = new List<User>();
+
+        /// <summary>
+        /// Credentials.
+        /// </summary>
+        public List<Credential> Credentials { get; } = new List<Credential>();
+
+        /// <summary>
+        /// Clients.
+        /// </summary>
+        public List<XenoClientRecord> Clients { get; } = new List<XenoClientRecord>();
+
+        /// <summary>
+        /// Endpoints.
+        /// </summary>
+        public List<ModelRunnerEndpoint> Endpoints { get; } = new List<ModelRunnerEndpoint>();
+
+        /// <summary>
+        /// Model definitions.
+        /// </summary>
+        public List<ModelDefinition> ModelDefinitions { get; } = new List<ModelDefinition>();
+
+        /// <summary>
+        /// Model configurations.
+        /// </summary>
+        public List<ModelConfiguration> ModelConfigurations { get; } = new List<ModelConfiguration>();
+
+        /// <summary>
+        /// Load-balancing policies.
+        /// </summary>
+        public List<LoadBalancingPolicy> LoadBalancingPolicies { get; } = new List<LoadBalancingPolicy>();
+
+        /// <summary>
+        /// Model access policies.
+        /// </summary>
+        public List<ModelAccessPolicy> ModelAccessPolicies { get; } = new List<ModelAccessPolicy>();
+
+        /// <summary>
+        /// Virtual model runners.
+        /// </summary>
+        public List<VirtualModelRunner> VirtualModelRunners { get; } = new List<VirtualModelRunner>();
+
+        /// <summary>
+        /// Virtual model runner reservations.
+        /// </summary>
+        public List<VirtualModelRunnerReservation> VirtualModelRunnerReservations { get; } = new List<VirtualModelRunnerReservation>();
+
+        /// <summary>
+        /// Request history.
+        /// </summary>
+        public List<RequestHistoryEntry> RequestHistory { get; } = new List<RequestHistoryEntry>();
+
+        /// <summary>
+        /// Initialize seeded state.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public Task InitializeAsync(CancellationToken token = default)
+        {
+            token.ThrowIfCancellationRequested();
+            if (Tenants.Count > 0) return Task.CompletedTask;
+
+            Tenant tenant = new Tenant();
+            Tenants.Add(tenant);
+
+            User user = new User
+            {
+                TenantId = tenant.Id,
+                Email = "admin@xeno",
+                IsAdmin = true,
+                IsTenantAdmin = true,
+                Active = true
+            };
+            Users.Add(user);
+
+            Credential credential = new Credential
+            {
+                TenantId = tenant.Id,
+                UserId = user.Id,
+                AccessKey = "access_development",
+                SecretKey = "secret_development",
+                Active = true
+            };
+            Credentials.Add(credential);
+
+            XenoClientRecord client = new XenoClientRecord
+            {
+                TenantId = tenant.Id,
+                Name = "local-client",
+                Connected = true
+            };
+            Clients.Add(client);
+
+            ModelRunnerEndpoint endpoint = new ModelRunnerEndpoint
+            {
+                TenantId = tenant.Id,
+                ClientId = client.Id,
+                Name = "local-ollama",
+                Active = true
+            };
+            Endpoints.Add(endpoint);
+
+            ModelDefinition chatModel = new ModelDefinition
+            {
+                TenantId = tenant.Id,
+                Name = "llama3.2:latest",
+                SupportsCompletions = true,
+                SupportsEmbeddings = false,
+                Labels = new List<string> { "chat" }
+            };
+            ModelDefinitions.Add(chatModel);
+
+            ModelDefinition embeddingModel = new ModelDefinition
+            {
+                TenantId = tenant.Id,
+                Name = "text-embedding-3-small",
+                SupportsCompletions = false,
+                SupportsEmbeddings = true,
+                Labels = new List<string> { "embedding" }
+            };
+            ModelDefinitions.Add(embeddingModel);
+
+            ModelConfiguration modelConfiguration = new ModelConfiguration
+            {
+                TenantId = tenant.Id,
+                Name = "Default",
+                Model = chatModel.Name
+            };
+            ModelConfigurations.Add(modelConfiguration);
+
+            LoadBalancingPolicy loadBalancingPolicy = new LoadBalancingPolicy
+            {
+                TenantId = tenant.Id,
+                Name = "Default round robin"
+            };
+            LoadBalancingPolicies.Add(loadBalancingPolicy);
+
+            ModelAccessPolicy modelAccessPolicy = new ModelAccessPolicy
+            {
+                TenantId = tenant.Id,
+                Name = "Default permit"
+            };
+            ModelAccessPolicies.Add(modelAccessPolicy);
+
+            VirtualModelRunner vmr = new VirtualModelRunner
+            {
+                TenantId = tenant.Id,
+                Name = "default",
+                ModelRunnerEndpointIds = new List<string> { endpoint.Id },
+                ModelDefinitionIds = new List<string> { chatModel.Id, embeddingModel.Id }
+            };
+            VirtualModelRunners.Add(vmr);
+
+            VirtualModelRunnerReservations.Add(new VirtualModelRunnerReservation
+            {
+                TenantId = tenant.Id,
+                VirtualModelRunnerId = vmr.Id,
+                Name = "example-reservation",
+                Active = false
+            });
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Resolve the default tenant.
+        /// </summary>
+        /// <returns>Tenant.</returns>
+        public Tenant GetDefaultTenant()
+        {
+            Tenant? tenant = Tenants.FirstOrDefault(item => item.Active);
+            if (tenant == null) throw new InvalidOperationException("No active tenant exists.");
+            return tenant;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "Rest": {
+    "Hostname": "0.0.0.0",
+    "Port": 9000,
+    "Ssl": false
+  },
+  "Database": {
+    "Type": "Postgresql",
+    "Server": "xeno-postgres",
+    "Port": 5432,
+    "DatabaseName": "xeno",
+    "Username": "xeno",
+    "Password": "xeno"
+  }
+}

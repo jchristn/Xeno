@@ -1,0 +1,45 @@
+{
+  "CreatedUtc": "2026-06-23T00:00:00Z",
+  "Rest": {
+    "Hostname": "0.0.0.0",
+    "Port": 9000,
+    "Ssl": false
+  },
+  "Cors": {
+    "Enabled": true,
+    "AllowedOrigins": ["http://localhost:9100"],
+    "AllowedHeaders": ["Authorization", "Content-Type", "x-token", "x-tenant-guid"],
+    "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  },
+  "WebSocket": {
+    "Enabled": true,
+    "Path": "/ws/v1/clients",
+    "HeartbeatIntervalMs": 15000
+  },
+  "Database": {
+    "Type": "Sqlite",
+    "Filename": "data/xeno.db"
+  },
+  "Logging": {
+    "ConsoleLogging": true,
+    "FileLogging": true,
+    "LogDirectory": "logs",
+    "LogFilename": "xeno.log"
+  },
+  "Auth": {
+    "Issuer": "xeno",
+    "SigningKey": "development-only-change-me",
+    "AdminApiKey": "xenoadmin"
+  },
+  "RequestHistory": {
+    "Enabled": true,
+    "RetentionDays": 30
+  },
+  "ModelAccessControl": {
+    "Enabled": true,
+    "Mode": "Monitor"
+  },
+  "Routing": {
+    "DefaultTimeoutMs": 300000
+  }
+}

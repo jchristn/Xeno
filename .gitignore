@@ -1,0 +1,17 @@
+bin/
+obj/
+node_modules/
+dist/
+.env
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
+logs/
+artifacts/
+docker/data/*
+!docker/data/.gitkeep
+docker/logs/*
+!docker/logs/.gitkeep
+results.json

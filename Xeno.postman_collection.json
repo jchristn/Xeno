@@ -1,0 +1,152 @@
+{
+  "info": {
+    "name": "Xeno",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9000"
+    },
+    {
+      "key": "tenantId",
+      "value": "ten_default"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "OpenAPI",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/openapi.json"
+      }
+    },
+    {
+      "name": "Tenants",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/tenants"
+      }
+    },
+    {
+      "name": "Clients",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/clients"
+      }
+    },
+    {
+      "name": "Virtual Model Runners",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/virtual-model-runners"
+      }
+    },
+    {
+      "name": "OpenAI Models",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1/models"
+      }
+    },
+    {
+      "name": "Chat Completion",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+        },
+        "url": "{{baseUrl}}/v1/chat/completions"
+      }
+    },
+    {
+      "name": "Embeddings",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"text-embedding-3-small\",\"input\":\"hello\"}"
+        },
+        "url": "{{baseUrl}}/v1/embeddings"
+      }
+    },
+    {
+      "name": "Request History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/request-history"
+      }
+    },
+    {
+      "name": "Request History Summary",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/request-history/summary?bucketMinutes=60"
+      }
+    }
+  ]
+}

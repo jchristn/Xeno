@@ -1,0 +1,38 @@
+namespace Xeno.Core.Models
+{
+    using System;
+    using System.Collections.Generic;
+    using Xeno.Core.Enums;
+    using Xeno.Core.Helpers;
+
+    /// <summary>
+    /// Tenant record.
+    /// </summary>
+    public class Tenant
+    {
+        /// <summary>
+        /// Tenant ID.
+        /// </summary>
+        public string Id { get; set; } = Constants.DefaultTenantId;
+
+        /// <summary>
+        /// Tenant name.
+        /// </summary>
+        public string Name { get; set; } = "Default";
+
+        /// <summary>
+        /// Whether the tenant is active.
+        /// </summary>
+        public bool Active { get; set; } = true;
+
+        /// <summary>
+        /// Created timestamp.
+        /// </summary>
+        public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Updated timestamp.
+        /// </summary>
+        public DateTime LastUpdateUtc { get; set; } = DateTime.UtcNow;
+    }
+}

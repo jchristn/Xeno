@@ -1,0 +1,55 @@
+# Xeno
+
+Xeno is an AI control plane for routing OpenAI-compatible completions and embeddings to distributed computers running the `xeno` client.
+
+The first implementation includes:
+
+- multitenant server state with seeded tenant, user, credential, client, endpoint, models, and virtual model runner;
+- OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
+- management routes for health, OpenAPI, clients, VMRs, request history, and token bootstrap;
+- a WebSocket registration endpoint at `/ws/v1/clients`;
+- a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
+- a React/Vite dashboard under `dashboard/`;
+- Touchstone shared tests with automated, xUnit, and NUnit runners.
+
+## Quick Start
+
+```powershell
+dotnet build src/Xeno.sln
+dotnet run --project src/Test.Automated -- --results results.json
+dotnet run --project src/Xeno.Server -- xeno.json
+```
+
+Then call:
+
+```bash
+curl http://localhost:9000/health
+curl http://localhost:9000/v1/models
+```
+
+## Client
+
+```powershell
+dotnet run --project src/Xeno.Client -- init
+dotnet run --project src/Xeno.Client -- status
+dotnet run --project src/Xeno.Client -- inventory
+```
+
+The client stores settings at `~/.xeno/client.json`.
+
+## Docker
+
+```powershell
+build-server.bat
+build-dashboard.bat
+docker compose -f docker/compose.yaml up
+```
+
+Images:
+
+- `jchristn77/xeno-server:v0.1.0`
+- `jchristn77/xeno-dashboard:v0.1.0`
+
+## Requirements
+
+Implementation follows the repository, backend, frontend, authentication, i18n, and testing guidance in `C:\code\agents\requirements`. The implementation plan remains in `XENO_PLAN.md`.
