@@ -77,3 +77,4 @@ OpenAI-compatible aliases are also available under `/api/v1/openai/v1/...`.
 `GET /ws/v1/clients`
 
 Upgrades to WebSocket. Clients send `client.register` and periodic `client.heartbeat` envelopes. Server-dispatched inference requests use `server.request`; clients respond with `client.response`.
+The server waits `WebSocket.RequestTimeoutMs` for each routed inference response before returning a `504 ClientTimeout`.

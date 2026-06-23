@@ -14,7 +14,8 @@
   "WebSocket": {
     "Enabled": true,
     "Path": "/ws/v1/clients",
-    "HeartbeatIntervalMs": 15000
+    "HeartbeatIntervalMs": 15000,
+    "RequestTimeoutMs": 120000
   },
   "Database": {
     "Type": "Sqlite",

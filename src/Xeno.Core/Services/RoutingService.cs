@@ -90,6 +90,7 @@ namespace Xeno.Core.Services
                 .Where(item => vmr.ModelRunnerEndpointIds.Contains(item.Id))
                 .Where(item => item.Active)
                 .Where(item => item.ServiceState == EndpointServiceStateEnum.Normal)
+                .Where(item => _Platform.Clients.Any(client => client.TenantId == context.TenantId && client.Id == item.ClientId && client.Connected))
                 .Where(item => item.Models.Contains(effectiveModel, StringComparer.OrdinalIgnoreCase))
                 .Where(item => item.MaxParallelRequests == 0 || item.InFlightRequests < item.MaxParallelRequests)
                 .ToList();

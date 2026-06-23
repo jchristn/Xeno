@@ -26,6 +26,10 @@ namespace Xeno.Server
     {
         private readonly XenoSettings _Settings;
         private readonly Webserver _Webserver;
+        private readonly object _ClientConnectionsLock = new object();
+        private readonly object _PendingResponsesLock = new object();
+        private readonly Dictionary<string, ClientConnection> _ClientConnections = new Dictionary<string, ClientConnection>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, TaskCompletionSource<string>> _PendingClientResponses = new Dictionary<string, TaskCompletionSource<string>>(StringComparer.OrdinalIgnoreCase);
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
         private bool _Disposed;
@@ -58,6 +62,7 @@ namespace Xeno.Server
         {
             token.ThrowIfCancellationRequested();
             _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, token).ConfigureAwait(false);
+            MarkClientsDisconnected();
             _Routing = new RoutingService(_Database.Platform);
 
             _Webserver.Start();
@@ -83,7 +88,13 @@ namespace Xeno.Server
         /// </summary>
         public void Stop()
         {
-            _Webserver.Stop();
+            try
+            {
+                _Webserver.Stop();
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("already stopped", StringComparison.OrdinalIgnoreCase))
+            {
+            }
         }
 
         /// <summary>
@@ -95,6 +106,7 @@ namespace Xeno.Server
             Stop();
             IDisposable? disposable = _Webserver as IDisposable;
             disposable?.Dispose();
+            _Database?.Dispose();
             _Disposed = true;
         }
 
@@ -412,7 +424,11 @@ namespace Xeno.Server
             {
                 string id = path.Substring("/v1.0/api/request-history/".Length);
                 RequestHistoryEntry? entry = RequirePlatform().RequestHistory.FirstOrDefault(item => item.Id == id && item.TenantId == requestContext.TenantId);
-                if (entry != null) RequirePlatform().RequestHistory.Remove(entry);
+                if (entry != null)
+                {
+                    RequirePlatform().RequestHistory.Remove(entry);
+                    await SavePlatformAsync(token).ConfigureAwait(false);
+                }
                 context.Response.StatusCode = 204;
                 await context.Response.Send(context.Token).ConfigureAwait(false);
                 return;
@@ -427,31 +443,15 @@ namespace Xeno.Server
             Dictionary<string, object?> body = ReadJsonObject(context);
             string? model = body.TryGetValue("model", out object? modelValue) ? modelValue?.ToString() : null;
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, false, token).ConfigureAwait(false);
-            RequireRouting().RecordHistory(requestContext, path, decision);
 
             if (!decision.Success)
             {
+                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
 
-            await SendJsonAsync(context, new
-            {
-                id = "chatcmpl_" + Guid.NewGuid().ToString("N"),
-                @object = "chat.completion",
-                created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                model = decision.EffectiveModel,
-                choices = new[]
-                {
-                    new
-                    {
-                        index = 0,
-                        message = new { role = "assistant", content = "Xeno routed this request to " + decision.SelectedEndpointId + "." },
-                        finish_reason = "stop"
-                    }
-                },
-                xeno = new { decision.SelectedClientId, decision.SelectedEndpointId, routed = true, stream }
-            }).ConfigureAwait(false);
+            await RelayClientRequestAsync(context, requestContext, path, decision, body, false, stream, token).ConfigureAwait(false);
         }
 
         private async Task HandleEmbeddingAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
@@ -459,28 +459,166 @@ namespace Xeno.Server
             Dictionary<string, object?> body = ReadJsonObject(context);
             string? model = body.TryGetValue("model", out object? modelValue) ? modelValue?.ToString() : null;
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, true, token).ConfigureAwait(false);
-            RequireRouting().RecordHistory(requestContext, path, decision);
 
             if (!decision.Success)
             {
+                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
 
-            await SendJsonAsync(context, new
+            await RelayClientRequestAsync(context, requestContext, path, decision, body, true, false, token).ConfigureAwait(false);
+        }
+
+        private async Task RelayClientRequestAsync(
+            HttpContextBase context,
+            RequestContext requestContext,
+            string path,
+            RoutingDecision decision,
+            Dictionary<string, object?> body,
+            bool embeddings,
+            bool stream,
+            CancellationToken token)
+        {
+            ModelRunnerEndpoint? endpoint = RequirePlatform().Endpoints.FirstOrDefault(item => item.Id == decision.SelectedEndpointId && item.TenantId == requestContext.TenantId);
+            if (endpoint == null)
             {
-                @object = "list",
-                model = decision.EffectiveModel,
-                data = new[]
+                decision.Success = false;
+                decision.HttpStatusCode = 502;
+                decision.OutcomeCode = "EndpointMissing";
+                decision.Message = "The selected endpoint no longer exists.";
+                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
+                return;
+            }
+
+            ClientConnection? connection = GetClientConnection(decision.SelectedClientId);
+            if (connection == null || !connection.Session.IsConnected)
+            {
+                decision.Success = false;
+                decision.HttpStatusCode = 503;
+                decision.OutcomeCode = "ClientNotConnected";
+                decision.Message = "The selected client is not connected.";
+                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
+                return;
+            }
+
+            string requestId = requestContext.RequestId;
+            TaskCompletionSource<string> completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_PendingResponsesLock)
+            {
+                _PendingClientResponses[requestId] = completion;
+            }
+
+            endpoint.InFlightRequests++;
+            try
+            {
+                string relativePath = NormalizeOpenAiPath(path);
+                string payload = JsonUtil.Serialize(new
                 {
-                    new { @object = "embedding", index = 0, embedding = new[] { 0.01, 0.02, 0.03 } }
-                },
-                xeno = new { decision.SelectedClientId, decision.SelectedEndpointId, routed = true }
-            }).ConfigureAwait(false);
+                    type = "server.request",
+                    requestId,
+                    tenantId = requestContext.TenantId,
+                    endpointId = endpoint.Id,
+                    runnerName = endpoint.Name,
+                    provider = endpoint.Provider.ToString(),
+                    method = context.Request.Method.ToString().ToUpperInvariant(),
+                    relativePath,
+                    model = decision.EffectiveModel,
+                    embeddings,
+                    stream,
+                    body = JsonUtil.Serialize(body)
+                });
+
+                await SendToClientAsync(connection, payload, token).ConfigureAwait(false);
+                string responseJson = await WaitForClientResponseAsync(requestId, completion, token).ConfigureAwait(false);
+                await SendClientResponseAsync(context, requestContext, path, decision, responseJson, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                decision.Success = false;
+                decision.HttpStatusCode = 504;
+                decision.OutcomeCode = "ClientTimeout";
+                decision.Message = "The selected client did not respond before the timeout.";
+                await RecordAndSaveHistoryAsync(requestContext, path, decision, CancellationToken.None).ConfigureAwait(false);
+                await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
+            }
+            finally
+            {
+                endpoint.InFlightRequests = Math.Max(0, endpoint.InFlightRequests - 1);
+                lock (_PendingResponsesLock)
+                {
+                    _PendingClientResponses.Remove(requestId);
+                }
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+
+        private async Task SendClientResponseAsync(
+            HttpContextBase context,
+            RequestContext requestContext,
+            string path,
+            RoutingDecision decision,
+            string responseJson,
+            CancellationToken token)
+        {
+            using (JsonDocument document = JsonDocument.Parse(responseJson))
+            {
+                JsonElement root = document.RootElement;
+                bool success = root.TryGetProperty("success", out JsonElement successElement) && successElement.ValueKind == JsonValueKind.True;
+                int statusCode = 200;
+                if (root.TryGetProperty("statusCode", out JsonElement statusElement) && statusElement.TryGetInt32(out int parsedStatusCode))
+                {
+                    statusCode = parsedStatusCode;
+                }
+                else if (!success)
+                {
+                    statusCode = 502;
+                }
+
+                decision.Success = success;
+                decision.HttpStatusCode = statusCode;
+                decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
+                decision.Message = success ? "Client completed the routed request." : TryGetString(root, "error") ?? "Client request failed.";
+                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+
+                context.Response.StatusCode = statusCode;
+                string contentType = TryGetString(root, "contentType") ?? "application/json";
+                context.Response.ContentType = contentType;
+                string body = TryGetString(root, "body") ?? "{}";
+                await context.Response.Send(body, context.Token).ConfigureAwait(false);
+            }
+        }
+
+        private async Task SendToClientAsync(ClientConnection connection, string payload, CancellationToken token)
+        {
+            await connection.SendLock.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                await connection.Session.SendTextAsync(payload, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                connection.SendLock.Release();
+            }
+        }
+
+        private async Task<string> WaitForClientResponseAsync(string requestId, TaskCompletionSource<string> completion, CancellationToken token)
+        {
+            using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, _Settings.WebSocket.RequestTimeoutMs)));
+                using (timeout.Token.Register(delegate { completion.TrySetCanceled(timeout.Token); }))
+                {
+                    return await completion.Task.ConfigureAwait(false);
+                }
+            }
         }
 
         private async Task WebSocketRouteAsync(HttpContextBase context, WebSocketSession session)
         {
+            string? registeredClientId = null;
             await session.SendTextAsync(JsonUtil.Serialize(new
             {
                 type = "server.connected",
@@ -488,33 +626,45 @@ namespace Xeno.Server
                 heartbeatIntervalMs = _Settings.WebSocket.HeartbeatIntervalMs
             }), context.Token).ConfigureAwait(false);
 
-            while (session.IsConnected && !context.Token.IsCancellationRequested)
+            try
             {
-                WebSocketMessage message = await session.ReceiveAsync(context.Token).ConfigureAwait(false);
-                if (message.MessageType == WebSocketMessageType.Close) break;
+                while (session.IsConnected && !context.Token.IsCancellationRequested)
+                {
+                    WebSocketMessage message = await session.ReceiveAsync(context.Token).ConfigureAwait(false);
+                    if (message.MessageType == WebSocketMessageType.Close) break;
 
-                string text = message.Text ?? String.Empty;
-                string responseType;
-                try
-                {
-                    responseType = HandleClientMessage(text);
+                    string text = message.Text ?? String.Empty;
+                    string? responseType;
+                    try
+                    {
+                        responseType = await HandleClientMessageAsync(session, text, delegate(string clientId) { registeredClientId = clientId; }, context.Token).ConfigureAwait(false);
+                    }
+                    catch (JsonException)
+                    {
+                        responseType = "server.invalid-json";
+                    }
+
+                    if (String.IsNullOrWhiteSpace(responseType)) continue;
+                    await session.SendTextAsync(JsonUtil.Serialize(new
+                    {
+                        type = responseType,
+                        receivedUtc = DateTime.UtcNow,
+                        heartbeatIntervalMs = _Settings.WebSocket.HeartbeatIntervalMs
+                    }), context.Token).ConfigureAwait(false);
                 }
-                catch (JsonException)
+            }
+            finally
+            {
+                if (!String.IsNullOrWhiteSpace(registeredClientId))
                 {
-                    responseType = "server.invalid-json";
+                    await UnregisterClientConnectionAsync(registeredClientId, session, CancellationToken.None).ConfigureAwait(false);
                 }
-                await session.SendTextAsync(JsonUtil.Serialize(new
-                {
-                    type = responseType,
-                    receivedUtc = DateTime.UtcNow,
-                    heartbeatIntervalMs = _Settings.WebSocket.HeartbeatIntervalMs
-                }), context.Token).ConfigureAwait(false);
             }
 
             await session.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", context.Token).ConfigureAwait(false);
         }
 
-        private string HandleClientMessage(string json)
+        private async Task<string?> HandleClientMessageAsync(WebSocketSession session, string json, Action<string> registeredClientCallback, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(json)) return "server.empty";
 
@@ -524,21 +674,30 @@ namespace Xeno.Server
                 string type = TryGetString(root, "type") ?? String.Empty;
                 if (String.Equals(type, "client.register", StringComparison.OrdinalIgnoreCase))
                 {
-                    RegisterClient(root);
+                    string clientId = RegisterClient(root, session);
+                    registeredClientCallback(clientId);
+                    await SavePlatformAsync(token).ConfigureAwait(false);
                     return "server.registered";
                 }
 
                 if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
                 {
                     UpdateClientHeartbeat(TryGetString(root, "clientId"));
+                    await SavePlatformAsync(token).ConfigureAwait(false);
                     return "server.heartbeat";
+                }
+
+                if (String.Equals(type, "client.response", StringComparison.OrdinalIgnoreCase))
+                {
+                    CompleteClientResponse(root, json);
+                    return null;
                 }
             }
 
             return "server.ack";
         }
 
-        private void RegisterClient(JsonElement root)
+        private string RegisterClient(JsonElement root, WebSocketSession session)
         {
             XenoPlatform platform = RequirePlatform();
             string tenantId = TryGetString(root, "tenantId") ?? Constants.DefaultTenantId;
@@ -561,14 +720,20 @@ namespace Xeno.Server
             client.Name = name;
             client.Connected = true;
             client.LastHeartbeatUtc = DateTime.UtcNow;
+            lock (_ClientConnectionsLock)
+            {
+                _ClientConnections[clientId] = new ClientConnection(clientId, tenantId, session);
+            }
 
-            if (!root.TryGetProperty("inventory", out JsonElement inventory)) return;
-            if (!inventory.TryGetProperty("runners", out JsonElement runners) || runners.ValueKind != JsonValueKind.Array) return;
+            if (!root.TryGetProperty("inventory", out JsonElement inventory)) return clientId;
+            if (!inventory.TryGetProperty("runners", out JsonElement runners) || runners.ValueKind != JsonValueKind.Array) return clientId;
 
             foreach (JsonElement runner in runners.EnumerateArray())
             {
                 RegisterRunner(platform, client, runner);
             }
+
+            return clientId;
         }
 
         private static void RegisterRunner(XenoPlatform platform, XenoClientRecord client, JsonElement runner)
@@ -642,6 +807,96 @@ namespace Xeno.Server
             if (client == null) return;
             client.Connected = true;
             client.LastHeartbeatUtc = DateTime.UtcNow;
+        }
+
+        private void CompleteClientResponse(JsonElement root, string json)
+        {
+            string? requestId = TryGetString(root, "requestId");
+            if (String.IsNullOrWhiteSpace(requestId)) return;
+
+            TaskCompletionSource<string>? completion = null;
+            lock (_PendingResponsesLock)
+            {
+                if (_PendingClientResponses.TryGetValue(requestId, out completion))
+                {
+                    _PendingClientResponses.Remove(requestId);
+                }
+            }
+
+            completion?.TrySetResult(json);
+        }
+
+        private ClientConnection? GetClientConnection(string? clientId)
+        {
+            if (String.IsNullOrWhiteSpace(clientId)) return null;
+            lock (_ClientConnectionsLock)
+            {
+                _ClientConnections.TryGetValue(clientId, out ClientConnection? connection);
+                return connection;
+            }
+        }
+
+        private async Task UnregisterClientConnectionAsync(string clientId, WebSocketSession session, CancellationToken token)
+        {
+            bool disconnected = false;
+            lock (_ClientConnectionsLock)
+            {
+                if (_ClientConnections.TryGetValue(clientId, out ClientConnection? connection) && connection.Session.Id == session.Id)
+                {
+                    _ClientConnections.Remove(clientId);
+                    disconnected = true;
+                }
+            }
+
+            if (!disconnected) return;
+            XenoPlatform platform = RequirePlatform();
+            XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
+            if (client != null) client.Connected = false;
+            foreach (ModelRunnerEndpoint endpoint in platform.Endpoints.Where(item => item.ClientId == clientId))
+            {
+                endpoint.InFlightRequests = 0;
+                endpoint.ServiceState = EndpointServiceStateEnum.Quarantined;
+            }
+
+            await SavePlatformAsync(token).ConfigureAwait(false);
+        }
+
+        private void MarkClientsDisconnected()
+        {
+            XenoPlatform platform = RequirePlatform();
+            foreach (XenoClientRecord client in platform.Clients)
+            {
+                client.Connected = false;
+            }
+
+            foreach (ModelRunnerEndpoint endpoint in platform.Endpoints)
+            {
+                endpoint.InFlightRequests = 0;
+                endpoint.ServiceState = EndpointServiceStateEnum.Quarantined;
+            }
+        }
+
+        private async Task RecordAndSaveHistoryAsync(RequestContext requestContext, string path, RoutingDecision decision, CancellationToken token)
+        {
+            RequireRouting().RecordHistory(requestContext, path, decision);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+        }
+
+        private async Task SavePlatformAsync(CancellationToken token)
+        {
+            if (_Database == null) return;
+            await _Database.SaveAsync(token).ConfigureAwait(false);
+        }
+
+        private static string NormalizeOpenAiPath(string path)
+        {
+            const string ApiPrefix = "/api/v1/openai";
+            if (path.StartsWith(ApiPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(ApiPrefix.Length);
+            }
+
+            return path;
         }
 
         private RequestContext CreateRequestContext(HttpContextBase context)

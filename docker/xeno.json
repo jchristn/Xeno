@@ -4,6 +4,12 @@
     "Port": 9000,
     "Ssl": false
   },
+  "WebSocket": {
+    "Enabled": true,
+    "Path": "/ws/v1/clients",
+    "HeartbeatIntervalMs": 15000,
+    "RequestTimeoutMs": 120000
+  },
   "Database": {
     "Type": "Postgresql",
     "Server": "xeno-postgres",

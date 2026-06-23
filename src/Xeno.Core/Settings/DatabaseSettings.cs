@@ -43,5 +43,10 @@ namespace Xeno.Core.Settings
         /// Password.
         /// </summary>
         public string? Password { get; set; } = null;
+
+        /// <summary>
+        /// Complete provider-specific connection string.  When set, this overrides the individual connection fields.
+        /// </summary>
+        public string? ConnectionString { get; set; } = null;
     }
 }

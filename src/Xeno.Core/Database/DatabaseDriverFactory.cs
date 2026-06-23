@@ -27,13 +27,13 @@ namespace Xeno.Core.Database
             switch (settings.Type)
             {
                 case DatabaseTypeEnum.Sqlite:
-                    return new SqliteDatabaseDriver();
+                    return new SqliteDatabaseDriver(settings);
                 case DatabaseTypeEnum.Mysql:
-                    return new MysqlDatabaseDriver();
+                    return new MysqlDatabaseDriver(settings);
                 case DatabaseTypeEnum.Postgresql:
-                    return new PostgresqlDatabaseDriver();
+                    return new PostgresqlDatabaseDriver(settings);
                 case DatabaseTypeEnum.SqlServer:
-                    return new SqlServerDatabaseDriver();
+                    return new SqlServerDatabaseDriver(settings);
                 default:
                     throw new ArgumentException("Unknown database type " + settings.Type + ".", nameof(settings));
             }

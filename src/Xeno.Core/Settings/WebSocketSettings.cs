@@ -23,5 +23,10 @@ namespace Xeno.Core.Settings
         /// Heartbeat interval in milliseconds.
         /// </summary>
         public int HeartbeatIntervalMs { get; set; } = 15000;
+
+        /// <summary>
+        /// Timeout for server-to-client inference requests in milliseconds.
+        /// </summary>
+        public int RequestTimeoutMs { get; set; } = 120000;
     }
 }

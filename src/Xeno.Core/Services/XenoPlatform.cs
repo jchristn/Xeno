@@ -109,7 +109,7 @@ namespace Xeno.Core.Services
             {
                 TenantId = tenant.Id,
                 Name = "local-client",
-                Connected = true
+                Connected = false
             };
             Clients.Add(client);
 
@@ -182,6 +182,74 @@ namespace Xeno.Core.Services
             });
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Create a serializable snapshot of platform state.
+        /// </summary>
+        /// <returns>Platform state snapshot.</returns>
+        public PlatformState ToState()
+        {
+            return new PlatformState
+            {
+                Tenants = Tenants,
+                Users = Users,
+                Credentials = Credentials,
+                Clients = Clients,
+                Endpoints = Endpoints,
+                ModelDefinitions = ModelDefinitions,
+                ModelConfigurations = ModelConfigurations,
+                LoadBalancingPolicies = LoadBalancingPolicies,
+                ModelAccessPolicies = ModelAccessPolicies,
+                VirtualModelRunners = VirtualModelRunners,
+                VirtualModelRunnerReservations = VirtualModelRunnerReservations,
+                RequestHistory = RequestHistory
+            };
+        }
+
+        /// <summary>
+        /// Replace current platform state from a serialized snapshot.
+        /// </summary>
+        /// <param name="state">Platform state snapshot.</param>
+        public void LoadState(PlatformState state)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+
+            Tenants.Clear();
+            Tenants.AddRange(state.Tenants);
+
+            Users.Clear();
+            Users.AddRange(state.Users);
+
+            Credentials.Clear();
+            Credentials.AddRange(state.Credentials);
+
+            Clients.Clear();
+            Clients.AddRange(state.Clients);
+
+            Endpoints.Clear();
+            Endpoints.AddRange(state.Endpoints);
+
+            ModelDefinitions.Clear();
+            ModelDefinitions.AddRange(state.ModelDefinitions);
+
+            ModelConfigurations.Clear();
+            ModelConfigurations.AddRange(state.ModelConfigurations);
+
+            LoadBalancingPolicies.Clear();
+            LoadBalancingPolicies.AddRange(state.LoadBalancingPolicies);
+
+            ModelAccessPolicies.Clear();
+            ModelAccessPolicies.AddRange(state.ModelAccessPolicies);
+
+            VirtualModelRunners.Clear();
+            VirtualModelRunners.AddRange(state.VirtualModelRunners);
+
+            VirtualModelRunnerReservations.Clear();
+            VirtualModelRunnerReservations.AddRange(state.VirtualModelRunnerReservations);
+
+            RequestHistory.Clear();
+            RequestHistory.AddRange(state.RequestHistory);
         }
 
         /// <summary>
