@@ -163,10 +163,18 @@ xeno provider add --name vllm `
 
 The optional provider credential is sent to the upstream provider as a bearer token.
 
+Adding a provider with an existing name or endpoint is ignored so the same provider is not duplicated.
+
 Test a configured provider endpoint:
 
 ```powershell
 xeno provider test --name local-ollama
+```
+
+Delete a configured provider endpoint:
+
+```powershell
+xeno provider delete --name local-ollama
 ```
 
 ## Add Models

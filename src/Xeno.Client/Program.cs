@@ -18,8 +18,10 @@ namespace Xeno.Client
     public static class Program
     {
         private const string ClientVersion = "0.1.0";
+        private const int DefaultHeartbeatIntervalMs = 15000;
         private static bool _UseColors = true;
         private static bool _UseJson = false;
+        private static readonly SemaphoreSlim _SendLock = new SemaphoreSlim(1, 1);
 
         /// <summary>
         /// Run the Xeno client CLI.
@@ -402,6 +404,34 @@ namespace Xeno.Client
                 return success ? 0 : 2;
             }
 
+            if (args.Length >= 2 && (args[1] == "delete" || args[1] == "remove"))
+            {
+                string runnerName = String.Empty;
+                for (int i = 2; i < args.Length - 1; i += 2)
+                {
+                    if (args[i] == "--name") runnerName = args[i + 1];
+                }
+
+                if (String.IsNullOrWhiteSpace(runnerName))
+                {
+                    WriteError("Provider endpoint name is required.");
+                    PrintProviderHelp();
+                    return 1;
+                }
+
+                int removed = settings.Runners.RemoveAll(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                if (removed == 0)
+                {
+                    WriteError("Provider endpoint not found: " + runnerName);
+                    return 1;
+                }
+
+                settings.Save();
+                if (removed == 1) WriteSuccess("Deleted provider endpoint '" + runnerName + "'.");
+                else WriteSuccess("Deleted provider endpoint '" + runnerName + "' (" + removed + " entries removed).");
+                return 0;
+            }
+
             if (args.Length >= 2 && args[1] == "add")
             {
                 ClientRunnerSettings runner = new ClientRunnerSettings();
@@ -425,6 +455,21 @@ namespace Xeno.Client
                     WriteError("Missing required option(s): " + String.Join(", ", missing) + ".");
                     PrintProviderHelp();
                     return 1;
+                }
+
+                ClientRunnerSettings? duplicate = FindDuplicateProvider(settings, runner);
+                if (duplicate != null)
+                {
+                    if (String.Equals(duplicate.Name, runner.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        WriteInfo("Provider endpoint '" + duplicate.Name + "' already exists; no changes made.");
+                    }
+                    else
+                    {
+                        WriteInfo("Provider endpoint '" + duplicate.Name + "' already uses " + duplicate.Endpoint + "; no changes made.");
+                    }
+
+                    return 0;
                 }
 
                 settings.Runners.Add(runner);
@@ -530,14 +575,14 @@ namespace Xeno.Client
         private static async Task ReceiveLoopAsync(ClientWebSocket socket, ClientSettings settings, CancellationToken token)
         {
             byte[] buffer = new byte[65536];
-            while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+            using (CancellationTokenSource heartbeatTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                using (CancellationTokenSource receiveTimeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+                Task heartbeatTask = SendHeartbeatLoopAsync(socket, settings, heartbeatTokenSource.Token);
+                try
                 {
-                    receiveTimeout.CancelAfter(TimeSpan.FromSeconds(15));
-                    try
+                    while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
                     {
-                        WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), receiveTimeout.Token).ConfigureAwait(false);
+                        WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), token).ConfigureAwait(false);
                         if (result.MessageType == WebSocketMessageType.Close) return;
 
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
@@ -545,11 +590,38 @@ namespace Xeno.Client
                         PrintServerMessage(message);
                         await HandleServerMessageAsync(socket, settings, message, token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (!token.IsCancellationRequested)
-                    {
-                        await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow }, token).ConfigureAwait(false);
-                        ClientConnectionState.MarkHeartbeat(settings);
-                    }
+                }
+                finally
+                {
+                    heartbeatTokenSource.Cancel();
+                    await heartbeatTask.ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task SendHeartbeatLoopAsync(ClientWebSocket socket, ClientSettings settings, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(DefaultHeartbeatIntervalMs), token).ConfigureAwait(false);
+                    if (token.IsCancellationRequested || socket.State != WebSocketState.Open) return;
+
+                    await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow }, token).ConfigureAwait(false);
+                    ClientConnectionState.MarkHeartbeat(settings);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (InvalidOperationException)
+                {
+                    return;
+                }
+                catch (WebSocketException)
+                {
+                    return;
                 }
             }
         }
@@ -726,7 +798,15 @@ namespace Xeno.Client
         {
             string payload = JsonUtil.Serialize(value);
             byte[] bytes = Encoding.UTF8.GetBytes(payload);
-            await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
+            await _SendLock.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _SendLock.Release();
+            }
         }
 
         private static void WriteJson(object value)
@@ -948,8 +1028,10 @@ namespace Xeno.Client
             }
 
             WriteInfo("Configured provider endpoints");
-            foreach (ClientRunnerSettings runner in settings.Runners)
+            for (int i = 0; i < settings.Runners.Count; i++)
             {
+                if (i > 0) Console.WriteLine();
+                ClientRunnerSettings runner = settings.Runners[i];
                 Console.WriteLine("  - " + runner.Name);
                 Console.WriteLine("    Type:       " + runner.Provider);
                 Console.WriteLine("    Endpoint:   " + runner.Endpoint);
@@ -998,6 +1080,31 @@ namespace Xeno.Client
             }
 
             if (!any) WriteInfo("No models are configured.");
+        }
+
+        private static ClientRunnerSettings? FindDuplicateProvider(ClientSettings settings, ClientRunnerSettings candidate)
+        {
+            string candidateEndpoint = NormalizeEndpoint(candidate.Endpoint);
+            foreach (ClientRunnerSettings existing in settings.Runners)
+            {
+                if (String.Equals(existing.Name, candidate.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return existing;
+                }
+
+                if (!String.IsNullOrWhiteSpace(candidateEndpoint) &&
+                    String.Equals(NormalizeEndpoint(existing.Endpoint), candidateEndpoint, StringComparison.OrdinalIgnoreCase))
+                {
+                    return existing;
+                }
+            }
+
+            return null;
+        }
+
+        private static string NormalizeEndpoint(string? endpoint)
+        {
+            return String.IsNullOrWhiteSpace(endpoint) ? String.Empty : endpoint.Trim().TrimEnd('/');
         }
 
         private static string DescribeAuth(ClientSettings settings)
@@ -1146,6 +1253,8 @@ namespace Xeno.Client
             Console.WriteLine("      Show configured provider endpoints.");
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("      Test connectivity to one configured provider endpoint.");
+            Console.WriteLine("  xeno provider delete --name <name>");
+            Console.WriteLine("      Delete one configured provider endpoint.");
             Console.WriteLine("  xeno provider add --name <name>");
             Console.WriteLine("                    --provider <provider>");
             Console.WriteLine("                    --endpoint <url>");
@@ -1200,6 +1309,7 @@ namespace Xeno.Client
         private static void PrintHelp()
         {
             WriteInfo("xeno " + ClientVersion);
+            Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  xeno <command> [options]");
             Console.WriteLine();
@@ -1227,6 +1337,7 @@ namespace Xeno.Client
             Console.WriteLine("Providers:");
             Console.WriteLine("  xeno provider list");
             Console.WriteLine("  xeno provider test --name <name>");
+            Console.WriteLine("  xeno provider delete --name <name>");
             Console.WriteLine("  xeno provider add --name <name>");
             Console.WriteLine("                    --provider <provider>");
             Console.WriteLine("                    --endpoint <url>");
