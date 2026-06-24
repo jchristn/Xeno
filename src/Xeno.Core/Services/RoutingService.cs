@@ -102,7 +102,7 @@ namespace Xeno.Core.Services
                 .Where(item => vmr.ModelRunnerEndpointIds.Contains(item.Id))
                 .Where(item => item.Active)
                 .Where(item => item.ServiceState == EndpointServiceStateEnum.Normal)
-                .Where(item => _Platform.Clients.Any(client => client.TenantId == context.TenantId && client.Id == item.ClientId && client.Connected))
+                .Where(item => _Platform.Clients.Any(client => IsClientEligible(context, item, client)))
                 .Where(item => item.Models.Contains(effectiveModel, StringComparer.OrdinalIgnoreCase))
                 .Where(item => item.MaxParallelRequests == 0 || item.InFlightRequests < item.MaxParallelRequests)
                 .ToList();
@@ -263,6 +263,14 @@ namespace Xeno.Core.Services
             decision.OutcomeCode = "ReservationDenied";
             decision.Message = "The active reservation does not include this principal.";
             return false;
+        }
+
+        private static bool IsClientEligible(RequestContext context, ModelRunnerEndpoint endpoint, XenoClientRecord client)
+        {
+            return client.TenantId == context.TenantId &&
+                   client.Id == endpoint.ClientId &&
+                   client.Connected &&
+                   client.LastHeartbeatUtc >= DateTime.UtcNow.AddSeconds(-60);
         }
 
         private ModelRunnerEndpoint Select(List<ModelRunnerEndpoint> candidates, LoadBalancingModeEnum mode, LoadBalancingPolicy? policy)

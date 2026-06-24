@@ -9,6 +9,7 @@ dotnet test src/Test.Nunit/Test.Nunit.csproj || exit /b 1
 dotnet pack src/Xeno.Client/Xeno.Client.csproj -c Release -o artifacts/packages || exit /b 1
 pushd dashboard
 npm audit --audit-level=low || exit /b 1
+npm test || exit /b 1
 npm run build || exit /b 1
 popd
 docker compose -f docker/compose.yaml config > nul || exit /b 1

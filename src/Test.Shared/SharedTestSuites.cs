@@ -306,6 +306,21 @@ namespace Test.Shared
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.SelectedEndpointId != endpoint.Id) throw new InvalidOperationException("Least in-flight endpoint was not selected.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "StaleHeartbeatExcluded",
+                        "Stale client heartbeat excludes endpoint from routing",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.Clients[0].LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-5);
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (decision.Success) throw new InvalidOperationException("Stale heartbeat endpoint unexpectedly routed.");
+                            if (decision.OutcomeCode != "NoEligibleEndpoints") throw new InvalidOperationException("Unexpected stale heartbeat outcome.");
                         })
                 });
         }

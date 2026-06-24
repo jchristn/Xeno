@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 9100",
+    "test": "node scripts/verify-i18n.mjs",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 9100"
   },
