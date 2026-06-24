@@ -45,11 +45,14 @@ The seeded development user is `admin@xeno` with password `xeno`. `xeno login -u
 ## Docker
 
 ```powershell
+docker login
 build-server.bat v0.1.0
 build-dashboard.bat v0.1.0
 build-all.bat v0.1.0
 docker compose -f docker/compose.yaml up
 ```
+
+The build scripts build and push both the requested tag and `latest` to Docker Hub. `docker compose pull` requires those tags to exist in Docker Hub, so run `docker login` with access to `jchristn77` before invoking the build scripts.
 
 The default compose stack uses PostgreSQL. `xeno-postgres-init` runs before `xeno-server` and creates the `xeno` role/database expected by `docker/xeno.json`. MySQL and SQL Server remain optional compose profiles.
 

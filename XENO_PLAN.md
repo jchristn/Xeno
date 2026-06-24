@@ -87,9 +87,9 @@ The root must be created first so later work lands in stable locations.
 
 Root scripts:
 
-- `build-server.bat <docker-image-tag>` builds `jchristn77/xeno-server:<docker-image-tag>` and `jchristn77/xeno-server:latest` from `src/Xeno.Server/Dockerfile`.
-- `build-dashboard.bat <docker-image-tag>` builds `jchristn77/xeno-dashboard:<docker-image-tag>` and `jchristn77/xeno-dashboard:latest` from `dashboard/Dockerfile`.
-- `build-all.bat <docker-image-tag>` delegates only to `build-server.bat` and `build-dashboard.bat`, passing the requested tag to both subordinate scripts.
+- `build-server.bat <docker-image-tag>` builds and pushes `jchristn77/xeno-server:<docker-image-tag>` and `jchristn77/xeno-server:latest` from `src/Xeno.Server/Dockerfile`.
+- `build-dashboard.bat <docker-image-tag>` builds and pushes `jchristn77/xeno-dashboard:<docker-image-tag>` and `jchristn77/xeno-dashboard:latest` from `dashboard/Dockerfile`.
+- `build-all.bat <docker-image-tag>` delegates only to `build-server.bat` and `build-dashboard.bat`, passing the requested tag to both subordinate scripts. The caller must be authenticated with Docker Hub before running the script.
 
 Docker files must use `.yaml`, not `.yml`. Compose may include `build:` contexts because the requested image names and tags are explicit.
 
