@@ -1,4 +1,8 @@
-# Xeno
+# Xeno v0.1.0 ALPHA
+
+![Xeno logo](assets/logo.png)
+
+Xeno v0.1.0 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, and client commands are subject to change before a stable release.
 
 Xeno is an AI control plane for routing OpenAI-compatible completions and embeddings to distributed computers running the `xeno` client.
 

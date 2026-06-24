@@ -54,7 +54,10 @@ const en = {
     connected: 'Connected',
     openapiLoaded: 'OpenAPI loaded',
     noData: 'No data',
-    serverUrl: 'Server URL'
+    serverUrl: 'Server URL',
+    defaultCredentials: 'Default alpha credentials',
+    defaultUsername: 'Username: admin@xeno',
+    defaultPassword: 'Password: xeno'
   }
 };
 

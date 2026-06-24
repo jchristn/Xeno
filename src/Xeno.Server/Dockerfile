@@ -3,6 +3,7 @@ WORKDIR /src
 COPY src/Xeno.Core/Xeno.Core.csproj Xeno.Core/
 COPY src/Xeno.Server/Xeno.Server.csproj Xeno.Server/
 RUN dotnet restore Xeno.Server/Xeno.Server.csproj
+COPY assets/ /assets/
 COPY src/Xeno.Core/ Xeno.Core/
 COPY src/Xeno.Server/ Xeno.Server/
 WORKDIR /src/Xeno.Server

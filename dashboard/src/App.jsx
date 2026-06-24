@@ -29,7 +29,10 @@ function Shell() {
         <nav>{links.map(([to, key]) => <NavLink key={to} to={to}>{t(key)}</NavLink>)}</nav>
       </aside>
       <main>
-        <header><LanguageSelector /></header>
+        <header>
+          <LanguageSelector />
+          <img className="header-logo" src="/logo.png" alt={t('appTitle')} />
+        </header>
         <Routes>
           <Route path="/dashboard/home" element={<HomeView />} />
           <Route path="/dashboard/requests" element={<RequestHistoryView />} />
@@ -52,9 +55,17 @@ function LoginView() {
   const { t } = useTranslation();
   return (
     <div className="login-view">
-      <h1>{t('appTitle')}</h1>
-      <button onClick={() => { window.location.href = '/dashboard/home'; }}><Shield size={16} />{t('login')}</button>
-      <LanguageSelector />
+      <div className="login-card">
+        <img className="login-logo" src="/logo.png" alt={t('appTitle')} />
+        <h1>{t('appTitle')}</h1>
+        <button onClick={() => { window.location.href = '/dashboard/home'; }}><Shield size={16} />{t('login')}</button>
+        <LanguageSelector />
+      </div>
+      <div className="default-credentials">
+        <span>{t('defaultCredentials')}</span>
+        <code>{t('defaultUsername')}</code>
+        <code>{t('defaultPassword')}</code>
+      </div>
     </div>
   );
 }

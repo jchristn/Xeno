@@ -19,6 +19,14 @@
     <Company>Joel Christner</Company>
     <Product>Xeno</Product>
     <Description>Watson 7 server for Xeno.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logo.png</PackageIcon>
+    <ApplicationIcon>..\..\assets\logo.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\logo.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>
