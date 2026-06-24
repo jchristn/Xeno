@@ -458,16 +458,20 @@ namespace Xeno.Client
                     {
                         ApplyServerAuthentication(socket, settings);
                         await socket.ConnectAsync(new Uri(settings.Server.Url), token).ConfigureAwait(false);
+                        ClientConnectionState.MarkConnected(settings);
                         await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventory() }, token).ConfigureAwait(false);
                         await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
+                        ClientConnectionState.MarkDisconnected(settings, "WebSocket closed.");
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
+                    ClientConnectionState.MarkDisconnected(settings, "Client stopped.");
                     return;
                 }
                 catch (Exception ex)
                 {
+                    ClientConnectionState.MarkDisconnected(settings, ex.Message);
                     WriteWarning("Disconnected from Xeno server: " + ex.Message);
                 }
 
@@ -489,12 +493,14 @@ namespace Xeno.Client
                         if (result.MessageType == WebSocketMessageType.Close) return;
 
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        ClientConnectionState.MarkServerMessage(settings);
                         PrintServerMessage(message);
                         await HandleServerMessageAsync(socket, settings, message, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!token.IsCancellationRequested)
                     {
                         await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow }, token).ConfigureAwait(false);
+                        ClientConnectionState.MarkHeartbeat(settings);
                     }
                 }
             }
@@ -816,6 +822,7 @@ namespace Xeno.Client
 
         private static void PrintStatus(ClientSettings settings)
         {
+            ClientConnectionState connection = ClientConnectionState.Load();
             if (_UseJson)
             {
                 WriteJson(new
@@ -828,7 +835,18 @@ namespace Xeno.Client
                     authenticated = HasWebSocketCredential(settings),
                     auth = DescribeAuth(settings),
                     providerCount = settings.Runners.Count,
-                    colors = settings.UseColors
+                    colors = settings.UseColors,
+                    connection = new
+                    {
+                        connected = connection.IsConnected,
+                        connectedUtc = FormatJsonUtc(connection.ConnectedUtc),
+                        disconnectedUtc = FormatJsonUtc(connection.DisconnectedUtc),
+                        lastHeartbeatUtc = FormatJsonUtc(connection.LastHeartbeatUtc),
+                        lastServerMessageUtc = FormatJsonUtc(connection.LastServerMessageUtc),
+                        lastUpdatedUtc = FormatJsonUtc(connection.LastUpdatedUtc),
+                        processId = connection.ProcessId ?? 0,
+                        reason = connection.LastDisconnectReason ?? String.Empty
+                    }
                 });
                 return;
             }
@@ -842,6 +860,16 @@ namespace Xeno.Client
             Console.WriteLine("  Auth:       " + DescribeAuth(settings));
             Console.WriteLine("  Providers:  " + settings.Runners.Count);
             Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
+            Console.WriteLine();
+            Console.WriteLine("Connection");
+            Console.WriteLine("  Connected:           " + FormatTrueFalse(connection.IsConnected));
+            Console.WriteLine("  Connected UTC:       " + FormatUtc(connection.ConnectedUtc));
+            Console.WriteLine("  Disconnected UTC:    " + FormatUtc(connection.DisconnectedUtc));
+            Console.WriteLine("  Last heartbeat UTC:  " + FormatUtc(connection.LastHeartbeatUtc));
+            Console.WriteLine("  Last server msg UTC: " + FormatUtc(connection.LastServerMessageUtc));
+            Console.WriteLine("  Last updated UTC:    " + FormatUtc(connection.LastUpdatedUtc));
+            Console.WriteLine("  Process ID:          " + (connection.ProcessId == null ? "(none)" : connection.ProcessId.Value.ToString()));
+            Console.WriteLine("  Last reason:         " + DisplayValue(connection.LastDisconnectReason, "(none)"));
         }
 
         private static void PrintProviders(ClientSettings settings)
@@ -950,6 +978,21 @@ namespace Xeno.Client
         private static string FormatBool(bool value)
         {
             return value ? "yes" : "no";
+        }
+
+        private static string FormatTrueFalse(bool value)
+        {
+            return value ? "true" : "false";
+        }
+
+        private static string FormatUtc(DateTime? value)
+        {
+            return value == null ? "(never)" : value.Value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+        }
+
+        private static string FormatJsonUtc(DateTime? value)
+        {
+            return value == null ? String.Empty : value.Value.ToUniversalTime().ToString("O");
         }
 
         private static string FormatBytes(long bytes)
