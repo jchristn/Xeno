@@ -8,9 +8,9 @@ Xeno is an AI control plane for routing OpenAI-compatible completions and embedd
 
 The first implementation includes:
 
-- multitenant server state with seeded tenant, user, credential, connected model runner endpoint, and models;
+- multitenant server state with seeded tenant, user, credential, connected clients, and advertised models;
 - OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
-- management routes for health, OpenAPI, model runners, settings, request history, and token bootstrap;
+- management routes for health, OpenAPI, clients, tenants, users, credentials, settings, request history, and token bootstrap;
 - a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client credentials or an administrator API key;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
 - a React/Vite dashboard under `dashboard/`;
@@ -40,7 +40,7 @@ dotnet run --project src/Xeno.Client -- status
 dotnet run --project src/Xeno.Client -- inventory
 ```
 
-The seeded development user is `admin@xeno` with password `xeno`. `xeno login -u ...` prompts for the password, exchanges it for a client access key and secret, and stores only that client credential in `~/.xeno/client.json`. The WebSocket connection does not accept user passwords or bearer session tokens.
+The seeded development user is `admin@xeno` with password `password`. The seeded development credential uses access key `default` and secret key `default`. `xeno login -u ...` prompts for the password, exchanges it for a client access key and secret, and stores only that client credential in `~/.xeno/client.json`. The WebSocket connection does not accept user passwords or bearer session tokens.
 
 ## Docker
 

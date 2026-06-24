@@ -141,8 +141,8 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "Health", Description = "Health check endpoints" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Authentication", Description = "Tenant-bound token endpoints" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Tenants", Description = "Tenant administration" });
-                openApi.Tags.Add(new OpenApiTag { Name = "Clients", Description = "Connected Xeno clients" });
-                openApi.Tags.Add(new OpenApiTag { Name = "Routing", Description = "Direct routing to connected Xeno model runners" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Clients", Description = "Connected Xeno clients and their advertised models" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Routing", Description = "Direct routing to connected Xeno clients" });
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
@@ -194,14 +194,10 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/audit", "List audit records", "Audit");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/clients", "List clients", "Clients");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/clients", "List clients", "Clients");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelrunnerendpoints", "List model runner endpoints", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-runner-endpoints", "List model runner endpoints", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modeldefinitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-configurations", "List model configurations", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelrunnerendpoints/load-model", "Load model through endpoint", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-runner-endpoints/load-model", "Load model through endpoint", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/openai/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.POST, "/v1/chat/completions", "Create chat completion", "OpenAI");
@@ -480,12 +476,6 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "GET" && IsPath(path, "/api/v1/modelrunnerendpoints", "/v1.0/api/model-runner-endpoints"))
-            {
-                await SendJsonAsync(context, RequirePlatform().Endpoints.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
             if (method == "GET" && IsPath(path, "/api/v1/modeldefinitions", "/v1.0/api/model-definitions"))
             {
                 await SendJsonAsync(context, RequirePlatform().ModelDefinitions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
@@ -498,20 +488,13 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "POST" && IsPath(path, "/api/v1/modelrunnerendpoints/load-model", "/v1.0/api/model-runner-endpoints/load-model"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                object result = LoadModelResult(requestContext, context);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
             if (method == "GET" && IsPath(path, "/v1/models", "/api/v1/openai/v1/models"))
             {
-                List<object> models = RequirePlatform().ModelDefinitions
+                List<object> models = RequirePlatform().Clients
                     .Where(item => item.TenantId == requestContext.TenantId)
-                    .Select(item => (object)new { id = item.Name, @object = "model", owned_by = "xeno" })
+                    .SelectMany(item => item.Models)
+                    .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => (object)new { id = group.Key, @object = "model", owned_by = "xeno" })
                     .ToList();
                 await SendJsonAsync(context, new { @object = "list", data = models }).ConfigureAwait(false);
                 return;
@@ -629,7 +612,7 @@ namespace Xeno.Server
 
             if (!decision.Success)
             {
-                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -645,7 +628,7 @@ namespace Xeno.Server
 
             if (!decision.Success)
             {
-                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -663,14 +646,14 @@ namespace Xeno.Server
             bool stream,
             CancellationToken token)
         {
-            ModelRunnerEndpoint? endpoint = RequirePlatform().Endpoints.FirstOrDefault(item => item.Id == decision.SelectedEndpointId && item.TenantId == requestContext.TenantId);
-            if (endpoint == null)
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && item.TenantId == requestContext.TenantId);
+            if (client == null)
             {
                 decision.Success = false;
                 decision.HttpStatusCode = 502;
-                decision.OutcomeCode = "EndpointMissing";
-                decision.Message = "The selected endpoint no longer exists.";
-                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                decision.OutcomeCode = "ClientMissing";
+                decision.Message = "The selected client no longer exists.";
+                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -682,7 +665,7 @@ namespace Xeno.Server
                 decision.HttpStatusCode = 503;
                 decision.OutcomeCode = "ClientNotConnected";
                 decision.Message = "The selected client is not connected.";
-                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -694,7 +677,8 @@ namespace Xeno.Server
                 _PendingClientResponses[requestId] = completion;
             }
 
-            endpoint.InFlightRequests++;
+            XenoClientModel? selectedModel = client.Models.FirstOrDefault(item => String.Equals(item.Name, decision.EffectiveModel, StringComparison.OrdinalIgnoreCase));
+            client.InFlightRequests++;
             try
             {
                 string relativePath = NormalizeOpenAiPath(path);
@@ -703,9 +687,10 @@ namespace Xeno.Server
                     type = "server.request",
                     requestId,
                     tenantId = requestContext.TenantId,
-                    endpointId = endpoint.Id,
-                    runnerName = endpoint.Name,
-                    provider = endpoint.Provider.ToString(),
+                    clientId = client.Id,
+                    clientName = client.Name,
+                    provider = selectedModel?.Provider.ToString(),
+                    source = selectedModel?.Source,
                     method = context.Request.Method.ToString().ToUpperInvariant(),
                     relativePath,
                     model = decision.EffectiveModel,
@@ -724,12 +709,12 @@ namespace Xeno.Server
                 decision.HttpStatusCode = 504;
                 decision.OutcomeCode = "ClientTimeout";
                 decision.Message = "The selected client did not respond before the timeout.";
-                await RecordAndSaveHistoryAsync(requestContext, path, decision, CancellationToken.None).ConfigureAwait(false);
+                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, CancellationToken.None).ConfigureAwait(false);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
             }
             finally
             {
-                endpoint.InFlightRequests = Math.Max(0, endpoint.InFlightRequests - 1);
+                client.InFlightRequests = Math.Max(0, client.InFlightRequests - 1);
                 lock (_PendingResponsesLock)
                 {
                     _PendingClientResponses.Remove(requestId);
@@ -764,7 +749,7 @@ namespace Xeno.Server
                 decision.HttpStatusCode = statusCode;
                 decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
                 decision.Message = success ? "Client completed the routed request." : TryGetString(root, "error") ?? "Client request failed.";
-                await RecordAndSaveHistoryAsync(requestContext, path, decision, token).ConfigureAwait(false);
+                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
 
                 context.Response.StatusCode = statusCode;
                 string contentType = TryGetString(root, "contentType") ?? "application/json";
@@ -953,56 +938,65 @@ namespace Xeno.Server
                 _ClientConnections[clientId] = new ClientConnection(clientId, tenantId, session);
             }
 
-            if (!root.TryGetProperty("inventory", out JsonElement inventory)) return clientId;
-            if (!inventory.TryGetProperty("runners", out JsonElement runners) || runners.ValueKind != JsonValueKind.Array) return clientId;
-
-            foreach (JsonElement runner in runners.EnumerateArray())
-            {
-                RegisterRunner(platform, client, runner);
-            }
+            if (root.TryGetProperty("inventory", out JsonElement inventory)) RegisterClientInventory(platform, client, inventory);
 
             return clientId;
         }
 
-        private static void RegisterRunner(XenoPlatform platform, XenoClientRecord client, JsonElement runner)
+        private static void RegisterClientInventory(XenoPlatform platform, XenoClientRecord client, JsonElement inventory)
         {
-            string runnerName = TryGetString(runner, "name") ?? "client-runner";
-            string endpointUrl = TryGetString(runner, "endpoint") ?? "http://127.0.0.1:11434";
-            string providerName = TryGetString(runner, "provider") ?? "Ollama";
-            ApiProviderTypeEnum provider = Enum.TryParse(providerName, true, out ApiProviderTypeEnum parsedProvider) ? parsedProvider : ApiProviderTypeEnum.OpenAICompatible;
+            client.ServiceState = ClientServiceStateEnum.Normal;
+            client.Models.Clear();
 
-            ModelRunnerEndpoint? endpoint = platform.Endpoints.FirstOrDefault(item =>
-                item.ClientId == client.Id &&
-                String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
-
-            if (endpoint == null)
+            if (inventory.TryGetProperty("models", out JsonElement directModels) && directModels.ValueKind == JsonValueKind.Array)
             {
-                endpoint = new ModelRunnerEndpoint
-                {
-                    TenantId = client.TenantId,
-                    ClientId = client.Id,
-                    Name = runnerName
-                };
-                platform.Endpoints.Add(endpoint);
+                RegisterClientModels(platform, client, "client", ApiProviderTypeEnum.OpenAICompatible, directModels);
             }
 
-            endpoint.TenantId = client.TenantId;
-            endpoint.ClientId = client.Id;
-            endpoint.Name = runnerName;
-            endpoint.EndpointUrl = endpointUrl;
-            endpoint.Provider = provider;
-            endpoint.Active = true;
-            endpoint.ServiceState = EndpointServiceStateEnum.Normal;
-            endpoint.Models.Clear();
+            if (inventory.TryGetProperty("providers", out JsonElement providers) && providers.ValueKind == JsonValueKind.Array)
+            {
+                RegisterClientSources(platform, client, providers);
+            }
 
-            if (!runner.TryGetProperty("models", out JsonElement models) || models.ValueKind != JsonValueKind.Array) return;
+            if (inventory.TryGetProperty("runners", out JsonElement runners) && runners.ValueKind == JsonValueKind.Array)
+            {
+                RegisterClientSources(platform, client, runners);
+            }
+        }
 
+        private static void RegisterClientSources(XenoPlatform platform, XenoClientRecord client, JsonElement sources)
+        {
+            foreach (JsonElement source in sources.EnumerateArray())
+            {
+                string sourceName = TryGetString(source, "name") ?? "local";
+                string providerName = TryGetString(source, "provider") ?? "Ollama";
+                ApiProviderTypeEnum provider = Enum.TryParse(providerName, true, out ApiProviderTypeEnum parsedProvider) ? parsedProvider : ApiProviderTypeEnum.OpenAICompatible;
+                if (source.TryGetProperty("models", out JsonElement sourceModels) && sourceModels.ValueKind == JsonValueKind.Array)
+                {
+                    RegisterClientModels(platform, client, sourceName, provider, sourceModels);
+                }
+            }
+        }
+
+        private static void RegisterClientModels(XenoPlatform platform, XenoClientRecord client, string sourceName, ApiProviderTypeEnum provider, JsonElement models)
+        {
             foreach (JsonElement model in models.EnumerateArray())
             {
                 string? modelName = TryGetString(model, "name");
                 if (String.IsNullOrWhiteSpace(modelName)) continue;
 
-                endpoint.Models.Add(modelName);
+                bool supportsCompletions = TryGetBoolean(model, "supportsCompletions", true);
+                bool supportsEmbeddings = TryGetBoolean(model, "supportsEmbeddings", false);
+                client.Models.Add(new XenoClientModel
+                {
+                    Name = modelName,
+                    Provider = provider,
+                    Source = sourceName,
+                    SupportsCompletions = supportsCompletions,
+                    SupportsEmbeddings = supportsEmbeddings,
+                    LastAdvertisedUtc = DateTime.UtcNow
+                });
+
                 ModelDefinition? definition = platform.ModelDefinitions.FirstOrDefault(item =>
                     item.TenantId == client.TenantId &&
                     String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
@@ -1017,8 +1011,8 @@ namespace Xeno.Server
                     platform.ModelDefinitions.Add(definition);
                 }
 
-                definition.SupportsCompletions = TryGetBoolean(model, "supportsCompletions", definition.SupportsCompletions);
-                definition.SupportsEmbeddings = TryGetBoolean(model, "supportsEmbeddings", definition.SupportsEmbeddings);
+                definition.SupportsCompletions = supportsCompletions;
+                definition.SupportsEmbeddings = supportsEmbeddings;
             }
         }
 
@@ -1073,11 +1067,11 @@ namespace Xeno.Server
             if (!disconnected) return;
             XenoPlatform platform = RequirePlatform();
             XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
-            if (client != null) client.Connected = false;
-            foreach (ModelRunnerEndpoint endpoint in platform.Endpoints.Where(item => item.ClientId == clientId))
+            if (client != null)
             {
-                endpoint.InFlightRequests = 0;
-                endpoint.ServiceState = EndpointServiceStateEnum.Quarantined;
+                client.Connected = false;
+                client.InFlightRequests = 0;
+                client.ServiceState = ClientServiceStateEnum.Quarantined;
             }
 
             await SavePlatformAsync(token).ConfigureAwait(false);
@@ -1089,18 +1083,14 @@ namespace Xeno.Server
             foreach (XenoClientRecord client in platform.Clients)
             {
                 client.Connected = false;
-            }
-
-            foreach (ModelRunnerEndpoint endpoint in platform.Endpoints)
-            {
-                endpoint.InFlightRequests = 0;
-                endpoint.ServiceState = EndpointServiceStateEnum.Quarantined;
+                client.InFlightRequests = 0;
+                client.ServiceState = ClientServiceStateEnum.Quarantined;
             }
         }
 
-        private async Task RecordAndSaveHistoryAsync(RequestContext requestContext, string path, RoutingDecision decision, CancellationToken token)
+        private async Task RecordAndSaveHistoryAsync(RequestContext requestContext, string method, string path, RoutingDecision decision, CancellationToken token)
         {
-            RequireRouting().RecordHistory(requestContext, path, decision);
+            RequireRouting().RecordHistory(requestContext, path, method, decision);
             await SavePlatformAsync(token).ConfigureAwait(false);
         }
 
@@ -1463,7 +1453,7 @@ namespace Xeno.Server
         {
             XenoPlatform platform = RequirePlatform();
             int connectedClients = platform.Clients.Count(item => item.Connected);
-            int activeEndpoints = platform.Endpoints.Count(item => item.Active);
+            int availableModels = platform.Clients.Where(item => item.Connected).SelectMany(item => item.Models).Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             int requests = platform.RequestHistory.Count;
             int failures = platform.RequestHistory.Count(item => item.StatusCode >= 400);
             context.Response.ContentType = "text/plain";
@@ -1471,9 +1461,9 @@ namespace Xeno.Server
                 "# HELP xeno_connected_clients Connected Xeno clients\n" +
                 "# TYPE xeno_connected_clients gauge\n" +
                 "xeno_connected_clients " + connectedClients + "\n" +
-                "# HELP xeno_active_endpoints Active model runner endpoints\n" +
-                "# TYPE xeno_active_endpoints gauge\n" +
-                "xeno_active_endpoints " + activeEndpoints + "\n" +
+                "# HELP xeno_available_models Models advertised by connected Xeno clients\n" +
+                "# TYPE xeno_available_models gauge\n" +
+                "xeno_available_models " + availableModels + "\n" +
                 "# HELP xeno_request_history_total Captured request history entries\n" +
                 "# TYPE xeno_request_history_total counter\n" +
                 "xeno_request_history_total " + requests + "\n" +
@@ -1481,41 +1471,6 @@ namespace Xeno.Server
                 "# TYPE xeno_request_failures_total counter\n" +
                 "xeno_request_failures_total " + failures + "\n";
             await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
-        }
-
-        private object LoadModelResult(RequestContext requestContext, HttpContextBase context)
-        {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string model = FirstNonEmpty(GetBodyString(body, "model"), GetBodyString(body, "Model"));
-            if (String.IsNullOrWhiteSpace(model)) throw new ArgumentException("Model is required.");
-
-            bool dryRun = GetBodyBoolean(body, "dryRun") || GetBodyBoolean(body, "DryRun");
-            if (dryRun)
-            {
-                return new { outcome = "DryRun", model, loaded = false };
-            }
-
-            ModelDefinition? definition = RequirePlatform().ModelDefinitions.FirstOrDefault(item =>
-                item.TenantId == requestContext.TenantId &&
-                String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase));
-            if (definition == null)
-            {
-                definition = new ModelDefinition
-                {
-                    TenantId = requestContext.TenantId,
-                    Name = model,
-                    SupportsCompletions = true,
-                    SupportsEmbeddings = false
-                };
-                RequirePlatform().ModelDefinitions.Add(definition);
-            }
-
-            foreach (ModelRunnerEndpoint endpoint in RequirePlatform().Endpoints.Where(item => item.TenantId == requestContext.TenantId))
-            {
-                if (!endpoint.Models.Contains(model, StringComparer.OrdinalIgnoreCase)) endpoint.Models.Add(model);
-            }
-
-            return new { outcome = "Loaded", model, loaded = true, modelDefinitionId = definition.Id };
         }
 
         private object AnalyticsOverview(RequestContext requestContext)
@@ -1528,10 +1483,10 @@ namespace Xeno.Server
                 .GroupBy(item => item.RoutingDecision!.EffectiveModel)
                 .Select(group => (object)new { model = group.Key, count = group.Count() })
                 .ToList();
-            List<object> byEndpoint = entries
-                .Where(item => item.RoutingDecision != null && !String.IsNullOrWhiteSpace(item.RoutingDecision.SelectedEndpointId))
-                .GroupBy(item => item.RoutingDecision!.SelectedEndpointId)
-                .Select(group => (object)new { endpointId = group.Key, count = group.Count() })
+            List<object> byClient = entries
+                .Where(item => !String.IsNullOrWhiteSpace(item.SelectedClientId))
+                .GroupBy(item => item.SelectedClientId)
+                .Select(group => (object)new { clientId = group.Key, count = group.Count() })
                 .ToList();
 
             return new
@@ -1541,7 +1496,7 @@ namespace Xeno.Server
                 success = total - failures,
                 failureRate = total == 0 ? 0 : (double)failures / total,
                 byModel,
-                byEndpoint
+                byClient
             };
         }
 
@@ -1678,9 +1633,7 @@ namespace Xeno.Server
                     ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true)),
                     ["/v1.0/api/effective-permissions"] = Path(Operation("get", "listEffectivePermissions", "Authorization", "Effective permissions", "Lists effective permissions.", "EffectivePermissionArray", true)),
                     ["/v1.0/api/audit"] = Path(Operation("get", "listAudit", "Audit", "List audit records", "Lists tenant audit records.", "AuditRecordArray", true)),
-                    ["/v1.0/api/clients"] = Path(Operation("get", "listClients", "Clients", "List clients", "Lists connected or registered Xeno clients.", "ClientArray", true)),
-                    ["/v1.0/api/model-runner-endpoints"] = Path(Operation("get", "listModelRunnerEndpoints", "Routing", "List model runner endpoints", "Lists model runner endpoints advertised by clients.", "EndpointArray", true)),
-                    ["/v1.0/api/model-runner-endpoints/load-model"] = Path(Operation("post", "loadEndpointModel", "Routing", "Load endpoint model", "Adds model availability to endpoint inventory.", "GenericObject", true)),
+                    ["/v1.0/api/clients"] = Path(Operation("get", "listClients", "Clients", "List clients", "Lists connected or registered Xeno clients and their advertised models.", "ClientArray", true)),
                     ["/v1.0/api/model-definitions"] = Path(Operation("get", "listModelDefinitions", "Routing", "List model definitions", "Lists model definitions available for routing.", "ModelDefinitionArray", true)),
                     ["/v1.0/api/model-configurations"] = Path(Operation("get", "listModelConfigurations", "Routing", "List model configurations", "Lists pinned model configurations.", "ModelConfigurationArray", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
@@ -1715,7 +1668,6 @@ namespace Xeno.Server
                         ["EffectivePermissionArray"] = ArraySchema("EffectivePermission"),
                         ["AuditRecordArray"] = ArraySchema("AuditRecord"),
                         ["ClientArray"] = ArraySchema("XenoClientRecord"),
-                        ["EndpointArray"] = ArraySchema("ModelRunnerEndpoint"),
                         ["ModelDefinitionArray"] = ArraySchema("ModelDefinition"),
                         ["ModelConfigurationArray"] = ArraySchema("ModelConfiguration"),
                         ["RequestHistoryArray"] = ArraySchema("RequestHistoryEntry"),
@@ -1733,8 +1685,7 @@ namespace Xeno.Server
                         ["Permission"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("resourceType", StringSchema())),
                         ["EffectivePermission"] = ObjectSchema(Property("resourceType", StringSchema()), Property("sourceRole", StringSchema())),
                         ["AuditRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("reasonCode", StringSchema())),
-                        ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["ModelRunnerEndpoint"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
+                        ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ModelDefinition"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelConfiguration"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["RequestHistoryEntry"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("path", StringSchema()), Property("statusCode", IntegerSchema()))

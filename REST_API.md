@@ -56,9 +56,7 @@ Login accepts `username`, `password`, and optional `tenantId`. It returns a gene
 
 `GET /v1.0/api/clients`
 
-`GET /v1.0/api/model-runner-endpoints`
-
-`POST /v1.0/api/model-runner-endpoints/load-model`
+The clients response includes connection state, capacity fields, and each client's advertised `models` inventory.
 
 `GET /v1.0/api/model-definitions`
 
@@ -74,7 +72,7 @@ Login accepts `username`, `password`, and optional `tenantId`. It returns a gene
 
 `POST /v1.0/api/restore`
 
-Legacy dashboard aliases under `/api/v1/...` are also registered for clients, model runner lists, token bootstrap, settings, and request history.
+Legacy dashboard aliases under `/api/v1/...` are also registered for clients, token bootstrap, settings, and request history.
 
 ## OpenAI-Compatible API
 

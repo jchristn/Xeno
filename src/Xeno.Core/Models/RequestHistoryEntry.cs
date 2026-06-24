@@ -26,9 +26,29 @@ namespace Xeno.Core.Models
         public string Path { get; set; } = String.Empty;
 
         /// <summary>
+        /// HTTP method.
+        /// </summary>
+        public string Method { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Effective model.
+        /// </summary>
+        public string? Model { get; set; } = null;
+
+        /// <summary>
+        /// Selected client ID.
+        /// </summary>
+        public string? SelectedClientId { get; set; } = null;
+
+        /// <summary>
         /// HTTP status code.
         /// </summary>
         public int StatusCode { get; set; } = 200;
+
+        /// <summary>
+        /// Request duration in milliseconds.
+        /// </summary>
+        public long DurationMs { get; set; } = 0;
 
         /// <summary>
         /// Created timestamp.

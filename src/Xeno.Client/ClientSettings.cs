@@ -3,6 +3,8 @@ namespace Xeno.Client
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Text.Json;
+    using System.Text.Json.Serialization;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -48,14 +50,35 @@ namespace Xeno.Client
         public string Name { get; set; } = Environment.MachineName;
 
         /// <summary>
+        /// Enable colored CLI output.
+        /// </summary>
+        public bool UseColors { get; set; } = true;
+
+        /// <summary>
         /// Server settings.
         /// </summary>
         public ClientServerSettings Server { get; set; } = new ClientServerSettings();
 
         /// <summary>
-        /// Runner settings.
+        /// Provider endpoint settings.
         /// </summary>
-        public List<ClientRunnerSettings> Runners { get; set; } = new List<ClientRunnerSettings>();
+        public List<ClientRunnerSettings> Providers { get; set; } = new List<ClientRunnerSettings>();
+
+        /// <summary>
+        /// Backward-compatible provider endpoint alias.
+        /// </summary>
+        [JsonIgnore]
+        public List<ClientRunnerSettings> Runners
+        {
+            get
+            {
+                return Providers;
+            }
+            set
+            {
+                Providers = value ?? new List<ClientRunnerSettings>();
+            }
+        }
 
         /// <summary>
         /// Load settings from disk.
@@ -65,14 +88,26 @@ namespace Xeno.Client
         {
             if (!File.Exists(SettingsFile))
             {
-                ClientSettings settings = new ClientSettings();
-                settings.Runners.Add(new ClientRunnerSettings());
-                settings.Save();
-                return settings;
+                ClientSettings created = new ClientSettings();
+                created.Runners.Add(new ClientRunnerSettings());
+                created.Save();
+                return created;
             }
 
             string json = File.ReadAllText(SettingsFile);
-            return JsonUtil.Deserialize<ClientSettings>(json) ?? new ClientSettings();
+            ClientSettings settings = JsonUtil.Deserialize<ClientSettings>(json) ?? new ClientSettings();
+            if (settings.Providers.Count == 0)
+            {
+                using (JsonDocument document = JsonDocument.Parse(json))
+                {
+                    if (document.RootElement.TryGetProperty("Runners", out JsonElement legacyRunners) && legacyRunners.ValueKind == JsonValueKind.Array)
+                    {
+                        settings.Providers = JsonSerializer.Deserialize<List<ClientRunnerSettings>>(legacyRunners.GetRawText(), JsonUtil.Options) ?? new List<ClientRunnerSettings>();
+                    }
+                }
+            }
+
+            return settings;
         }
 
         /// <summary>
@@ -98,7 +133,7 @@ namespace Xeno.Client
                 processorCount = Environment.ProcessorCount,
                 totalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
                 clientVersion = "0.1.0",
-                runners = Runners
+                providers = Runners
             };
         }
     }

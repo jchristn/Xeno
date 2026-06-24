@@ -2,22 +2,22 @@ namespace Xeno.Core.Enums
 {
 
     /// <summary>
-    /// Endpoint service state.
+    /// Client routing state.
     /// </summary>
-    public enum EndpointServiceStateEnum
+    public enum ClientServiceStateEnum
     {
         /// <summary>
-        /// Endpoint is eligible for new routing.
+        /// Client is eligible for new routing.
         /// </summary>
         Normal = 0,
 
         /// <summary>
-        /// Endpoint only serves existing sticky-session pins.
+        /// Client only serves existing work.
         /// </summary>
         Draining = 1,
 
         /// <summary>
-        /// Endpoint is excluded from all routing.
+        /// Client is excluded from routing.
         /// </summary>
         Quarantined = 2
     }

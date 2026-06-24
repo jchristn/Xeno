@@ -69,11 +69,11 @@ The detail/JSON surfaces now provide:
 
 These items are still not done and should be treated as real dashboard debt:
 
-- Add persisted create/edit form submissions for tenants, users, credentials, model runners, endpoints, and models.
+- Add persisted create/edit form submissions for tenants, users, credentials, clients, and models.
 - Add delete/archive flows where the backend supports them.
 - Add alert modal or toast provider for operation success/failure feedback.
 - Add loading/error state propagation from `useResource` instead of silent fallbacks.
-- Add health histogram/detail panels for connected clients and model runner endpoints.
+- Add health histogram/detail panels for connected clients and advertised models.
 - Add setup wizard and guided tour if Xeno is expected to match the onboarding depth of the references.
 - Add visual regression screenshots for desktop, tablet, and mobile.
 - Add interaction tests for table sorting/filtering/pagination/copy/modals.

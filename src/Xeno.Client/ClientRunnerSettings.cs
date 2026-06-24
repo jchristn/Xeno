@@ -6,12 +6,12 @@ namespace Xeno.Client
     using Xeno.Core.Serialization;
 
     /// <summary>
-    /// Client runner settings.
+    /// Provider endpoint settings.
     /// </summary>
     public class ClientRunnerSettings
     {
         /// <summary>
-        /// Runner name.
+        /// Provider endpoint name.
         /// </summary>
         public string Name { get; set; } = "local-ollama";
 

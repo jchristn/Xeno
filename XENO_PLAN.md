@@ -3,17 +3,17 @@
 Status date: 2026-06-24
 Version target: v0.1.0 alpha
 
-Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cross-platform `xeno` client, and Docker deployment assets. Connected clients are the model runners. Routing sends OpenAI-compatible completion and embedding requests directly to healthy connected model runner endpoints that advertise the requested model.
+Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cross-platform `xeno` client, and Docker deployment assets. Connected clients advertise hardware and available models. Routing sends OpenAI-compatible completion and embedding requests directly to a healthy connected client that advertises the requested model.
 
 ## Current Product Decisions
 
 - The backend is multitenant.
-- Tenants, users, credentials, roles, permissions, audit records, clients, model runner endpoints, model definitions, model configurations, request history, analytics, settings, backup, and restore are first-class server resources.
+- Tenants, users, credentials, roles, permissions, audit records, clients, model definitions, model configurations, request history, analytics, settings, backup, and restore are first-class server resources.
 - A user may run `xeno login -u {username}`. The client prompts for the password, exchanges it for an access key and secret, and stores only that client credential.
-- WebSocket model runner connections require `x-access-key` plus `x-secret-key`, or `x-admin-key`; user passwords and bearer tokens are rejected for WebSocket control-plane connections.
+- WebSocket client connections require `x-access-key` plus `x-secret-key`, or `x-admin-key`; user passwords and bearer tokens are rejected for WebSocket control-plane connections.
 - The dashboard is an operator console, not a marketing page.
-- Connected clients are model runners. There is no separate runner abstraction between clients and endpoints.
-- Request distribution is direct endpoint selection by healthy connection, model availability, capacity, and current in-flight count.
+- Connected clients are the execution units. There is no separate execution endpoint resource.
+- Request distribution is direct client selection by healthy connection, model availability, capacity, and current in-flight count.
 - Server settings are editable from the dashboard and persisted to the same JSON settings file used at server startup. Listener and database changes may require restart to fully apply.
 - Docker defaults to PostgreSQL with an initialization container for the expected role and database.
 
@@ -42,13 +42,13 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 | Server host | In progress | Watson 7 server, CORS, OpenAPI, Swagger, health, metrics, REST dispatcher, WebSocket gateway. | Split the large server class into route modules and typed DTO handlers. |
 | Multitenancy | In progress | Tenant-scoped platform state, seeded tenant, users, credentials, roles, permissions, audit records. | Add full CRUD for tenants, users, roles, and credentials with validation and audit evidence. |
 | Authentication | In progress | Admin key, credential auth, bearer token issuance, password login issuing client credentials, WebSocket credential gate. | Add credential rotation/revocation workflows and password reset/change flows. |
-| Model runners | In progress | Clients register over WebSocket and advertise runner endpoints and models. Heartbeats update connection state. | Add richer hardware inventory, GPU memory, model metadata, and endpoint health probes. |
-| Routing | In progress | Completion and embedding requests route directly to connected endpoint candidates by tenant, model, health, capacity, and in-flight count. | Add persistent request correlation and richer route evidence in request history. |
+| Clients | In progress | Clients register over WebSocket and advertise provider endpoints plus available models. Heartbeats update connection state. | Add richer hardware inventory, GPU memory, model metadata, and provider health probes. |
+| Routing | In progress | Completion and embedding requests route directly to connected client candidates by tenant, model, health, capacity, and in-flight count. | Add persistent request correlation and richer route evidence in request history. |
 | OpenAI API | In progress | `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/api/v1/openai/v1/...` aliases. | Improve streaming, token accounting, provider error normalization, and request redaction. |
 | Request history | In progress | Request history list, summary buckets, bulk clear, analytics overview, Prometheus-style metrics. | Add retention cleanup, advanced search filters, TTFT, token counts, and cost estimates. |
 | Settings | In progress | `GET/POST /api/v1/settings` and `/v1.0/api/settings` read and persist server JSON config. Dashboard has typed controls and raw JSON editor. | Add restart warnings per field and safe reload support for settings that can apply without restart. |
 | Dashboard shell | In progress | Logo, sidebar, GitHub/theme/logout controls, plain server URL with copy, Spanish language selector, reusable modals, copy components, tables, pagination, charts. | Add toast provider, loading/error states, and interaction tests. |
-| Dashboard pages | In progress | Home, request history, API Explorer, analytics, model runners, tenants, users, credentials, security, settings. | Add persisted create/edit forms for all editable resources and permission-aware disabled states. |
+| Dashboard pages | In progress | Home, request history, API Explorer, analytics, clients, tenants, users, credentials, security, settings. | Add persisted create/edit forms for all editable resources and permission-aware disabled states. |
 | API Explorer | In progress | Integrated request builders for chat completions, completions, embeddings, and models. | Add saved examples, response timing, auth header display, and streaming toggle. |
 | Docker | In progress | Server/dashboard Dockerfiles, PostgreSQL default compose, initialization container, factory reset scripts. | Add deployment docs for TLS, external databases, and production secrets. |
 | Client | In progress | Console client initializes settings, logs in, stores access key/secret, connects WebSocket, advertises inventory, and handles requests. | Add packaged tool publishing matrix and stronger provider configuration validation. |
@@ -66,7 +66,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
    - users;
    - credentials;
    - roles and permissions;
-   - clients and model runner endpoints;
+   - clients;
    - model definitions and configurations;
    - request history;
    - analytics;
@@ -91,16 +91,16 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 ## Routing Plan
 
 1. Parse requested model from OpenAI-compatible request payload.
-2. Resolve the effective model from tenant model definitions or endpoint-advertised model names.
-3. Filter endpoints by tenant.
-4. Require endpoint `Active == true`.
-5. Require endpoint service state `Normal`.
+2. Resolve the effective model from tenant model definitions or client-advertised model names.
+3. Filter clients by tenant.
+4. Require client `Active == true`.
+5. Require client service state `Normal`.
 6. Require a connected client with a fresh heartbeat.
-7. Require endpoint model list to contain the effective model.
-8. Require endpoint capacity when `MaxParallelRequests` is nonzero.
-9. Select the endpoint with the lowest `InFlightRequests`, then highest `Weight`, then stable name ordering.
+7. Require client model inventory to contain the effective model.
+8. Require client capacity when `MaxParallelRequests` is nonzero.
+9. Select the client with the lowest `InFlightRequests`, then highest `Weight`, then stable name ordering.
 10. Dispatch request to the selected client over WebSocket.
-11. Record request history with selected endpoint, selected client, effective model, status code, duration, and route timeline.
+11. Record request history with selected client, effective model, HTTP method, path, status code, duration, and route timeline.
 
 ## Dashboard Plan
 
@@ -128,7 +128,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 5. Open edit modals on table row click.
 6. Put pagination and refresh controls above all tables.
 7. Keep chart controls, axis labels, hover tooltips, and range selection visible.
-8. Stack model runner and security tables at full workspace width.
+8. Stack clients, advertised models, and security tables at full workspace width.
 9. Provide a first-class API Explorer rather than a wrapper around the OpenAPI document.
 10. Provide a full settings interface:
     - REST host, port, TLS, auth toggle;
@@ -158,10 +158,10 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
    - CPU;
    - GPU;
    - memory;
-   - configured runner endpoints;
+   - configured provider endpoints;
    - available models;
    - supported completions and embeddings.
-7. Supported runner providers:
+7. Supported provider types:
    - Ollama;
    - OpenAI;
    - Gemini;
@@ -211,7 +211,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 
 ## Remaining Work Before v0.1.0 Alpha Cut
 
-1. Finish typed CRUD routes for tenants, users, credentials, endpoints, and model definitions.
+1. Finish typed CRUD routes for tenants, users, credentials, clients, and model definitions.
 2. Add persisted save support behind dashboard edit modals.
 3. Add dashboard toast/alert provider and API error surfacing.
 4. Add provider emulator tests for OpenAI-compatible request relay.

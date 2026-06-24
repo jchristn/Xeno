@@ -31,8 +31,38 @@ namespace Xeno.Core.Models
         public bool Connected { get; set; } = true;
 
         /// <summary>
+        /// Whether the client is active.
+        /// </summary>
+        public bool Active { get; set; } = true;
+
+        /// <summary>
+        /// Client routing state.
+        /// </summary>
+        public ClientServiceStateEnum ServiceState { get; set; } = ClientServiceStateEnum.Normal;
+
+        /// <summary>
+        /// Maximum parallel requests.
+        /// </summary>
+        public int MaxParallelRequests { get; set; } = 4;
+
+        /// <summary>
+        /// Static routing weight.
+        /// </summary>
+        public int Weight { get; set; } = 100;
+
+        /// <summary>
+        /// Current in-flight request count.
+        /// </summary>
+        public int InFlightRequests { get; set; } = 0;
+
+        /// <summary>
         /// Last heartbeat timestamp.
         /// </summary>
         public DateTime LastHeartbeatUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Models advertised by this client.
+        /// </summary>
+        public List<XenoClientModel> Models { get; set; } = new List<XenoClientModel>();
     }
 }

@@ -53,11 +53,6 @@ namespace Xeno.Core.Models
         public List<XenoClientRecord> Clients { get; set; } = new List<XenoClientRecord>();
 
         /// <summary>
-        /// Model runner endpoints.
-        /// </summary>
-        public List<ModelRunnerEndpoint> Endpoints { get; set; } = new List<ModelRunnerEndpoint>();
-
-        /// <summary>
         /// Model definitions.
         /// </summary>
         public List<ModelDefinition> ModelDefinitions { get; set; } = new List<ModelDefinition>();

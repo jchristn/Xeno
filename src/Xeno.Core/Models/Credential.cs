@@ -28,12 +28,12 @@ namespace Xeno.Core.Models
         /// <summary>
         /// Access key.
         /// </summary>
-        public string AccessKey { get; set; } = "access_development";
+        public string AccessKey { get; set; } = "default";
 
         /// <summary>
         /// Secret key for development mode.
         /// </summary>
-        public string SecretKey { get; set; } = "secret_development";
+        public string SecretKey { get; set; } = "default";
 
         /// <summary>
         /// Whether the credential is active.

@@ -123,7 +123,7 @@ namespace Test.Shared
                             XenoPlatform platform = new XenoPlatform();
                             await platform.InitializeAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
-                            User? user = auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "xeno");
+                            User? user = auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "password");
                             if (user == null) throw new InvalidOperationException("Seeded user password did not validate.");
                             if (auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "wrong") != null) throw new InvalidOperationException("Invalid password validated.");
                         }),
@@ -230,7 +230,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "Routing",
                         "CompletionRoutes",
-                        "Completion requests route to a client endpoint",
+                        "Completion requests route to a connected client",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -239,7 +239,7 @@ namespace Test.Shared
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
-                            if (String.IsNullOrWhiteSpace(decision.SelectedEndpointId)) throw new InvalidOperationException("Endpoint not selected.");
+                            if (String.IsNullOrWhiteSpace(decision.SelectedClientId)) throw new InvalidOperationException("Client not selected.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
@@ -258,7 +258,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "Routing",
                         "UnknownModelDoesNotRoute",
-                        "Unknown model requests fail before endpoint selection",
+                        "Unknown model requests fail before client selection",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -272,7 +272,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "Routing",
                         "DisconnectedClientDoesNotRoute",
-                        "Disconnected client endpoint is excluded from routing",
+                        "Disconnected client is excluded from routing",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -281,36 +281,36 @@ namespace Test.Shared
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, UserId = platform.Users[0].Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Disconnected client unexpectedly routed.");
-                            if (decision.OutcomeCode != "NoEligibleEndpoints") throw new InvalidOperationException("Unexpected disconnected-client outcome.");
+                            if (decision.OutcomeCode != "NoEligibleClients") throw new InvalidOperationException("Unexpected disconnected-client outcome.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
                         "LeastInFlightSelectsLowerLoad",
-                        "Direct routing selects the lower-load endpoint",
+                        "Direct routing selects the lower-load client",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
                             await platform.InitializeAsync().ConfigureAwait(false);
                             platform.Clients[0].Connected = true;
-                            platform.Endpoints[0].InFlightRequests = 3;
-                            ModelRunnerEndpoint endpoint = new ModelRunnerEndpoint
+                            platform.Clients[0].InFlightRequests = 3;
+                            XenoClientRecord client = new XenoClientRecord
                             {
                                 TenantId = Constants.DefaultTenantId,
-                                ClientId = platform.Clients[0].Id,
                                 Name = "lower-load",
-                                Models = new List<string> { "llama3.2:latest" },
+                                Connected = true,
                                 InFlightRequests = 0
                             };
-                            platform.Endpoints.Add(endpoint);
+                            client.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
+                            platform.Clients.Add(client);
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
-                            if (decision.SelectedEndpointId != endpoint.Id) throw new InvalidOperationException("Least in-flight endpoint was not selected.");
+                            if (decision.SelectedClientId != client.Id) throw new InvalidOperationException("Least in-flight client was not selected.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
                         "StaleHeartbeatExcluded",
-                        "Stale client heartbeat excludes endpoint from routing",
+                        "Stale client heartbeat excludes client from routing",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -319,8 +319,8 @@ namespace Test.Shared
                             platform.Clients[0].LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-5);
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
-                            if (decision.Success) throw new InvalidOperationException("Stale heartbeat endpoint unexpectedly routed.");
-                            if (decision.OutcomeCode != "NoEligibleEndpoints") throw new InvalidOperationException("Unexpected stale heartbeat outcome.");
+                            if (decision.Success) throw new InvalidOperationException("Stale heartbeat client unexpectedly routed.");
+                            if (decision.OutcomeCode != "NoEligibleClients") throw new InvalidOperationException("Unexpected stale heartbeat outcome.");
                         })
                 });
         }
@@ -339,7 +339,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "TenantIsolation",
                         "CrossTenantRouteDenied",
-                        "Cross-tenant routing does not leak endpoints",
+                        "Cross-tenant routing does not leak clients",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -406,8 +406,8 @@ namespace Test.Shared
                 {
                     new TestCaseDescriptor(
                         "ManagementApi",
-                        "ManagementEndpointsSmoke",
-                        "Management routes expose settings, analytics, model loading, backup, and metrics",
+                        "ManagementRoutesSmoke",
+                        "Management routes expose settings, clients, analytics, backup, and metrics",
                         executeAsync: delegate { return RunManagementSmokeAsync(); })
                 });
         }
@@ -451,14 +451,11 @@ namespace Test.Shared
                             if (!saveSettingsResponse.IsSuccessStatusCode || !File.Exists(settingsFile)) throw new InvalidOperationException("Settings save failed: " + saveSettingsBody);
                         }
 
-                        using (HttpResponseMessage loadResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/model-runner-endpoints/load-model", "{\"model\":\"touchstone-model\"}").ConfigureAwait(false))
-                        {
-                            string loadBody = await loadResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            if (!loadResponse.IsSuccessStatusCode || !loadBody.Contains("Loaded", StringComparison.Ordinal)) throw new InvalidOperationException("Load model failed: " + loadBody);
-                        }
-
                         string backup = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/backup").ConfigureAwait(false);
-                        if (!backup.Contains("touchstone-model", StringComparison.Ordinal)) throw new InvalidOperationException("Backup did not include loaded model.");
+                        if (!backup.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Backup did not include advertised model.");
+
+                        string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
+                        if (!clients.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Clients response missing advertised model.");
 
                         string analytics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/analytics/overview").ConfigureAwait(false);
                         if (!analytics.Contains("failureRate", StringComparison.Ordinal)) throw new InvalidOperationException("Analytics overview missing failureRate.");
@@ -689,7 +686,7 @@ namespace Test.Shared
                 try
                 {
                     await WaitForHealthAsync(port).ConfigureAwait(false);
-                    string loginBody = "{\"username\":\"admin@xeno\",\"password\":\"xeno\",\"tenantId\":\"" + Constants.DefaultTenantId + "\"}";
+                    string loginBody = "{\"username\":\"admin@xeno\",\"password\":\"password\",\"tenantId\":\"" + Constants.DefaultTenantId + "\"}";
                     using (HttpClient httpClient = new HttpClient())
                     using (HttpResponseMessage loginResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/auth/login", loginBody).ConfigureAwait(false))
                     {
@@ -809,7 +806,7 @@ namespace Test.Shared
 
         private static void ApplySeedCredentialHeaders(ClientWebSocket socket)
         {
-            ApplyCredentialHeaders(socket, "access_development", "secret_development");
+            ApplyCredentialHeaders(socket, "default", "default");
         }
 
         private static void ApplyCredentialHeaders(ClientWebSocket socket, string accessKey, string secretKey)

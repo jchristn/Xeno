@@ -30,11 +30,6 @@ namespace Xeno.Core.Models
         public int HttpStatusCode { get; set; } = 200;
 
         /// <summary>
-        /// Selected endpoint ID.
-        /// </summary>
-        public string? SelectedEndpointId { get; set; } = null;
-
-        /// <summary>
         /// Selected client ID.
         /// </summary>
         public string? SelectedClientId { get; set; } = null;
@@ -45,9 +40,9 @@ namespace Xeno.Core.Models
         public string? EffectiveModel { get; set; } = null;
 
         /// <summary>
-        /// Candidate endpoint IDs.
+        /// Candidate client IDs.
         /// </summary>
-        public List<string> CandidateEndpointIds { get; set; } = new List<string>();
+        public List<string> CandidateClientIds { get; set; } = new List<string>();
 
         /// <summary>
         /// Timeline entries.

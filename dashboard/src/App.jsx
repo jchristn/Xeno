@@ -72,7 +72,7 @@ const navGroups = [
   {
     key: 'control',
     links: [
-      { to: '/dashboard/model-runners', key: 'modelRunners', icon: Network }
+      { to: '/dashboard/clients', key: 'clients', icon: Network }
     ]
   },
   {
@@ -95,8 +95,7 @@ const pageMeta = {
   '/dashboard/users': { title: 'users', description: 'usersDescription' },
   '/dashboard/credentials': { title: 'credentials', description: 'credentialsDescription' },
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
-  '/dashboard/model-runners': { title: 'modelRunners', description: 'modelRunnersDescription' },
-  '/dashboard/clients': { title: 'modelRunners', description: 'modelRunnersDescription' },
+  '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
@@ -184,8 +183,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <Route path="users" element={<UsersView />} />
             <Route path="credentials" element={<CredentialsView />} />
             <Route path="security" element={<SecurityView />} />
-            <Route path="clients" element={<ModelRunnersView />} />
-            <Route path="model-runners" element={<ModelRunnersView />} />
+            <Route path="clients" element={<ClientsView />} />
             <Route path="analytics" element={<AnalyticsView />} />
             <Route path="settings" element={<SettingsView />} />
             <Route path="*" element={<HomeView />} />
@@ -239,6 +237,7 @@ function LoginView({ onToggleTheme, theme }) {
             <span>{t('defaultCredentials')}</span>
             <code>{t('defaultUsername')}</code>
             <code>{t('defaultPassword')}</code>
+            <code>{t('defaultAccessKey')}</code>
           </div>
         </section>
       </div>
@@ -251,18 +250,15 @@ function HomeView() {
   const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
   const summary = useResource('/api/v1/requesthistory/summary', { buckets: [] });
   const clients = useResource('/api/v1/clients', []);
-  const endpoints = useResource('/api/v1/modelrunnerendpoints', []);
-  const models = useResource('/api/v1/modeldefinitions', []);
+  const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
-  const activeEndpoints = endpoints.data.filter((endpoint) => isHealthyState(value(endpoint, 'serviceState'))).length;
-  const completionModels = models.data.filter((model) => value(model, 'supportsCompletions') === true).length;
+  const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
+  const completionModels = clientModels.filter((model) => value(model, 'supportsCompletions') === true).length;
 
   function refreshAll() {
     analytics.refresh();
     summary.refresh();
     clients.refresh();
-    endpoints.refresh();
-    models.refresh();
   }
 
   return (
@@ -272,23 +268,31 @@ function HomeView() {
         <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analytics.data.success)} subtext={formatPercent(1 - Number(analytics.data.failureRate || 0))} tone="success" />
         <MetricCard icon={<Shield size={18} />} label={t('failed')} value={formatNumber(analytics.data.failures)} subtext={formatPercent(Number(analytics.data.failureRate || 0))} tone="danger" />
         <MetricCard icon={<Network size={18} />} label={t('connectedClients')} value={formatNumber(connected)} subtext={t('clients')} tone="info" />
-        <MetricCard icon={<Server size={18} />} label={t('activeEndpoints')} value={formatNumber(activeEndpoints)} subtext={t('endpoints')} tone="success" />
-        <MetricCard icon={<BrainCircuit size={18} />} label={t('activeModels')} value={formatNumber(completionModels)} subtext={t('models')} tone="neutral" />
+        <MetricCard icon={<BrainCircuit size={18} />} label={t('advertisedModels')} value={formatNumber(advertisedModelCount)} subtext={t('models')} tone="success" />
+        <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(completionModels)} subtext={t('models')} tone="neutral" />
       </div>
 
       <Panel
         actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        className="chart-panel-card"
         title={t('requestActivity')}
       >
         <ActivityChart summary={summary.data} />
       </Panel>
 
       <DataTable
-        columns={['name', 'provider', 'serviceState', 'inFlightRequests', 'maxParallelRequests']}
-        onRefresh={endpoints.refresh}
-        rows={endpoints.data}
-        subtitle={t('endpointSubtitle')}
-        title={t('endpoints')}
+        columns={['name', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        onRefresh={clients.refresh}
+        rows={clients.data}
+        subtitle={t('clientsTableSubtitle')}
+        title={t('connectedClients')}
+      />
+      <DataTable
+        columns={['clientName', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
+        onRefresh={clients.refresh}
+        rows={clientModels}
+        subtitle={t('clientModelsSubtitle')}
+        title={t('advertisedModels')}
       />
     </div>
   );
@@ -323,12 +327,13 @@ function RequestHistoryView() {
             <IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} icon={<Trash2 size={16} />} variant="danger" />
           </div>
         )}
+        className="chart-panel-card"
         title={t('requestActivity')}
       >
         <ActivityChart summary={summary.data} />
       </Panel>
       <DataTable
-        columns={['statusCode', 'method', 'path', 'model', 'durationMs', 'createdUtc']}
+        columns={['statusCode', 'method', 'path', 'model', 'selectedClientId', 'durationMs', 'createdUtc']}
         onRowClick={setSelected}
         onRefresh={() => { history.refresh(); summary.refresh(); }}
         rows={history.data}
@@ -548,23 +553,40 @@ function CredentialsView() {
   );
 }
 
-function ModelRunnersView() {
+function ClientsView() {
   const { t } = useTranslation();
   const clients = useResource('/api/v1/clients', []);
-  const endpoints = useResource('/api/v1/modelrunnerendpoints', []);
-  const models = useResource('/api/v1/modeldefinitions', []);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [selectedModel, setSelectedModel] = useState(null);
+  const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
+  const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
 
   return (
     <div className="view-stack">
       <div className="metric-grid compact">
         <MetricCard icon={<Network size={18} />} label={t('connectedClients')} value={`${connected} / ${clients.data.length}`} tone={connected ? 'success' : 'warning'} />
-        <MetricCard icon={<Server size={18} />} label={t('endpoints')} value={formatNumber(endpoints.data.length)} />
-        <MetricCard icon={<BrainCircuit size={18} />} label={t('models')} value={formatNumber(models.data.length)} />
+        <MetricCard icon={<BrainCircuit size={18} />} label={t('advertisedModels')} value={formatNumber(advertisedModelCount)} />
+        <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(clientModels.filter((model) => value(model, 'supportsCompletions') === true).length)} />
       </div>
-      <DataTable title={t('modelRunners')} rows={clients.data} columns={['name', 'connected', 'lastHeartbeatUtc']} onRefresh={clients.refresh} />
-      <DataTable title={t('endpoints')} rows={endpoints.data} columns={['name', 'provider', 'serviceState', 'maxParallelRequests']} onRefresh={endpoints.refresh} />
-      <DataTable title={t('models')} rows={models.data} columns={['name', 'supportsCompletions', 'supportsEmbeddings']} onRefresh={models.refresh} />
+      <DataTable
+        columns={['id', 'name', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        onRefresh={clients.refresh}
+        onRowClick={setSelectedClient}
+        rows={clients.data}
+        subtitle={t('clientsTableSubtitle')}
+        title={t('clients')}
+      />
+      <DataTable
+        columns={['clientName', 'clientId', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
+        onRefresh={clients.refresh}
+        onRowClick={setSelectedModel}
+        rows={clientModels}
+        subtitle={t('clientModelsSubtitle')}
+        title={t('advertisedModels')}
+      />
+      {selectedClient && <EditRecordModal title={t('editClient')} data={selectedClient} onClose={() => setSelectedClient(null)} />}
+      {selectedModel && <EditRecordModal title={t('editModel')} data={selectedModel} onClose={() => setSelectedModel(null)} />}
     </div>
   );
 }
@@ -889,9 +911,9 @@ function MetricCard({ icon, label, subtext, tone = 'neutral', value }) {
   );
 }
 
-function Panel({ actions, children, eyebrow, title }) {
+function Panel({ actions, children, className = '', eyebrow, title }) {
   return (
-    <section className="workspace-card">
+    <section className={`workspace-card ${className}`.trim()}>
       <div className="workspace-card-header">
         <div>
           {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
@@ -1238,9 +1260,23 @@ function groupByCount(rows, key) {
   return [...groups.values()].sort((left, right) => right.count - left.count);
 }
 
-function isHealthyState(state) {
-  const text = String(state || '').toLowerCase();
-  return ['active', 'available', 'healthy', 'normal', 'ready', 'running'].includes(text);
+function flattenClientModels(clients) {
+  return (Array.isArray(clients) ? clients : []).flatMap((client) => {
+    const clientId = value(client, 'id');
+    const clientName = value(client, 'name');
+    const models = value(client, 'models');
+    return (Array.isArray(models) ? models : []).map((model, index) => ({
+      id: `${clientId || clientName || 'client'}:${value(model, 'name') || index}`,
+      clientId,
+      clientName,
+      name: value(model, 'name'),
+      provider: value(model, 'provider'),
+      source: value(model, 'source'),
+      supportsCompletions: value(model, 'supportsCompletions'),
+      supportsEmbeddings: value(model, 'supportsEmbeddings'),
+      lastAdvertisedUtc: value(model, 'lastAdvertisedUtc')
+    }));
+  });
 }
 
 function isStatusColumn(key) {

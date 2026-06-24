@@ -16,6 +16,11 @@ namespace Xeno.Core.Models
         public string RequestId { get; set; } = IdGenerator.NewRequestHistoryId();
 
         /// <summary>
+        /// Request start timestamp.
+        /// </summary>
+        public DateTime StartedUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
         /// Tenant ID.
         /// </summary>
         public string TenantId { get; set; } = Constants.DefaultTenantId;

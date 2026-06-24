@@ -1,6 +1,7 @@
 namespace Xeno.Client
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.Net.Http;
     using System.Net.WebSockets;
@@ -15,6 +16,8 @@ namespace Xeno.Client
     /// </summary>
     public static class Program
     {
+        private static bool _UseColors = true;
+
         /// <summary>
         /// Run the Xeno client CLI.
         /// </summary>
@@ -22,51 +25,85 @@ namespace Xeno.Client
         /// <returns>Exit code.</returns>
         public static async Task<int> Main(string[] args)
         {
-            if (args.Length == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h")
+            try
             {
-                PrintHelp();
-                return 0;
-            }
+                ClientSettings settings = ClientSettings.Load();
+                args = ApplyGlobalOptions(args, settings);
 
-            ClientSettings settings = ClientSettings.Load();
-            string command = args[0].ToLowerInvariant();
-
-            switch (command)
-            {
-                case "version":
-                    Console.WriteLine("xeno 0.1.0");
-                    return 0;
-                case "init":
-                    settings.Save();
-                    Console.WriteLine("Created " + ClientSettings.SettingsFile);
-                    return 0;
-                case "config":
-                    return HandleConfig(args, settings);
-                case "server":
-                    return HandleServer(args, settings);
-                case "auth":
-                    return HandleAuth(args, settings);
-                case "login":
-                    return await HandleLoginAsync(args, settings).ConfigureAwait(false);
-                case "runner":
-                    return await HandleRunnerAsync(args, settings).ConfigureAwait(false);
-                case "model":
-                    return HandleModel(args, settings);
-                case "inventory":
-                    Console.WriteLine(JsonUtil.Serialize(settings.BuildInventory(), true));
-                    return 0;
-                case "status":
-                    Console.WriteLine("Client: " + settings.Name);
-                    Console.WriteLine("Server: " + settings.Server.Url);
-                    Console.WriteLine("Runners: " + settings.Runners.Count);
-                    return 0;
-                case "connect":
-                    await ConnectAsync(settings, CancellationToken.None).ConfigureAwait(false);
-                    return 0;
-                default:
-                    Console.WriteLine("Unknown command '" + args[0] + "'.");
+                if (args.Length == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h")
+                {
                     PrintHelp();
+                    return 0;
+                }
+
+                string command = args[0].ToLowerInvariant();
+
+                try
+                {
+                    switch (command)
+                    {
+                        case "version":
+                            WriteInfo("xeno 0.1.0");
+                            return 0;
+                        case "init":
+                            settings.Save();
+                            WriteSuccess("Created " + ClientSettings.SettingsFile);
+                            return 0;
+                        case "config":
+                            return HandleConfig(args, settings);
+                        case "server":
+                            return HandleServer(args, settings);
+                        case "auth":
+                            return HandleAuth(args, settings);
+                        case "set-auth":
+                            return HandleSetAuth(args, settings);
+                        case "login":
+                            return await HandleLoginAsync(args, settings).ConfigureAwait(false);
+                        case "provider":
+                        case "runner":
+                            return await HandleRunnerAsync(args, settings).ConfigureAwait(false);
+                        case "model":
+                            return HandleModel(args, settings);
+                        case "inventory":
+                            Console.WriteLine(JsonUtil.Serialize(settings.BuildInventory(), true));
+                            return 0;
+                        case "status":
+                            PrintStatus(settings);
+                            return 0;
+                        case "connect":
+                            await ConnectAsync(settings, CancellationToken.None).ConfigureAwait(false);
+                            return 0;
+                        default:
+                            WriteError("Unknown command '" + args[0] + "'.");
+                            PrintHelp();
+                            return 1;
+                    }
+                }
+                catch (HttpRequestException ex)
+                {
+                    WriteError("Could not reach the Xeno server: " + ex.Message);
                     return 1;
+                }
+                catch (JsonException ex)
+                {
+                    WriteError("Could not parse the server response: " + ex.Message);
+                    return 1;
+                }
+                catch (Exception ex)
+                {
+                    WriteError(ex.Message);
+                    return 1;
+                }
+            }
+            catch (JsonException ex)
+            {
+                WriteError("Could not read " + ClientSettings.SettingsFile + ": " + ex.Message);
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                WriteError(ex.Message);
+                return 1;
             }
         }
 
@@ -78,7 +115,28 @@ namespace Xeno.Client
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno config show");
+            if (args.Length >= 3 && args[1] == "colors")
+            {
+                if (String.Equals(args[2], "on", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.UseColors = true;
+                    _UseColors = true;
+                    settings.Save();
+                    WriteSuccess("Colored output enabled.");
+                    return 0;
+                }
+
+                if (String.Equals(args[2], "off", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.UseColors = false;
+                    _UseColors = false;
+                    settings.Save();
+                    WriteSuccess("Colored output disabled.");
+                    return 0;
+                }
+            }
+
+            WriteError("Usage: xeno config show | colors on|off");
             return 1;
         }
 
@@ -88,6 +146,7 @@ namespace Xeno.Client
             {
                 settings.Server.Url = args[2];
                 settings.Save();
+                WriteSuccess("WebSocket server URL saved: " + settings.Server.Url);
                 return 0;
             }
 
@@ -95,40 +154,117 @@ namespace Xeno.Client
             {
                 settings.Server.RestUrl = args[2];
                 settings.Save();
+                WriteSuccess("REST server URL saved: " + settings.Server.RestUrl);
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno server set-url <url> | set-rest-url <url>");
+            WriteError("Usage: xeno server set-url <url> | set-rest-url <url>");
             return 1;
         }
 
         private static int HandleAuth(string[] args, ClientSettings settings)
         {
+            if (args.Length >= 2 && (args[1] == "--help" || args[1] == "-h" || args[1] == "help"))
+            {
+                PrintAuthHelp();
+                return 0;
+            }
+
             if (args.Length >= 3 && args[1] == "set-token")
             {
                 settings.Server.Token = args[2];
                 settings.Save();
+                WriteWarning("Saved a REST token. WebSocket connections require xeno login, xeno set-auth --access-key/--secret-key, or xeno set-auth --api-key.");
                 return 0;
             }
 
             if (args.Length >= 4 && args[1] == "set-credential")
             {
-                settings.Server.AccessKey = args[2];
-                settings.Server.SecretKey = args[3];
-                settings.Server.Token = null;
-                settings.Save();
-                return 0;
+                return HandleSetAuth(new[] { "set-auth", "--access-key", args[2], "--secret-key", args[3] }, settings);
             }
 
             if (args.Length >= 3 && args[1] == "set-api-key")
             {
-                settings.Server.AdminApiKey = args[2];
+                return HandleSetAuth(new[] { "set-auth", "--api-key", args[2] }, settings);
+            }
+
+            PrintAuthHelp();
+            return 1;
+        }
+
+        private static int HandleSetAuth(string[] args, ClientSettings settings)
+        {
+            string? accessKey = null;
+            string? secretKey = null;
+            string? apiKey = null;
+            bool clear = false;
+
+            if (args.Length == 3 && !args[1].StartsWith("-", StringComparison.Ordinal) && !args[2].StartsWith("-", StringComparison.Ordinal))
+            {
+                accessKey = args[1];
+                secretKey = args[2];
+            }
+
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (args[i] == "--clear")
+                {
+                    clear = true;
+                    continue;
+                }
+
+                if (args[i] == "--access-key" && i + 1 < args.Length)
+                {
+                    accessKey = args[++i];
+                    continue;
+                }
+
+                if (args[i] == "--secret-key" && i + 1 < args.Length)
+                {
+                    secretKey = args[++i];
+                    continue;
+                }
+
+                if (args[i] == "--api-key" && i + 1 < args.Length)
+                {
+                    apiKey = args[++i];
+                }
+            }
+
+            if (clear)
+            {
+                settings.Server.AccessKey = null;
+                settings.Server.SecretKey = null;
+                settings.Server.AdminApiKey = null;
                 settings.Server.Token = null;
                 settings.Save();
+                WriteSuccess("Cleared stored server authentication.");
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno auth set-token <token> | set-credential <access-key> <secret-key> | set-api-key <api-key>");
+            if (!String.IsNullOrWhiteSpace(apiKey))
+            {
+                settings.Server.AdminApiKey = apiKey;
+                settings.Server.AccessKey = null;
+                settings.Server.SecretKey = null;
+                settings.Server.Token = null;
+                settings.Save();
+                WriteSuccess("Saved administrator API key for server authentication.");
+                return 0;
+            }
+
+            if (!String.IsNullOrWhiteSpace(accessKey) && !String.IsNullOrWhiteSpace(secretKey))
+            {
+                settings.Server.AccessKey = accessKey;
+                settings.Server.SecretKey = secretKey;
+                settings.Server.AdminApiKey = null;
+                settings.Server.Token = null;
+                settings.Save();
+                WriteSuccess("Saved access key and secret key for server authentication.");
+                return 0;
+            }
+
+            PrintAuthHelp();
             return 1;
         }
 
@@ -161,7 +297,7 @@ namespace Xeno.Client
 
             if (String.IsNullOrWhiteSpace(username))
             {
-                Console.WriteLine("Usage: xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
+                WriteError("Usage: xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
                 return 1;
             }
 
@@ -173,7 +309,7 @@ namespace Xeno.Client
             string password = ReadSecret("Password: ");
             if (String.IsNullOrWhiteSpace(password))
             {
-                Console.WriteLine("Password is required.");
+                WriteError("Password is required.");
                 return 1;
             }
 
@@ -197,7 +333,7 @@ namespace Xeno.Client
                     string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     if (!response.IsSuccessStatusCode)
                     {
-                        Console.WriteLine("Login failed: " + responseBody);
+                        WriteError("Login failed: " + FormatHttpError(response, responseBody));
                         return 1;
                     }
 
@@ -209,7 +345,7 @@ namespace Xeno.Client
                         string? returnedTenantId = TryGetString(root, "tenantId");
                         if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey))
                         {
-                            Console.WriteLine("Login response did not include a client credential.");
+                            WriteError("Login response did not include a client credential.");
                             return 1;
                         }
 
@@ -222,7 +358,7 @@ namespace Xeno.Client
                 }
             }
 
-            Console.WriteLine("Login succeeded. Stored a tenant-bound client credential in " + ClientSettings.SettingsFile + ".");
+            WriteSuccess("Login succeeded. Stored a tenant-bound client credential in " + ClientSettings.SettingsFile + ".");
             return 0;
         }
 
@@ -230,7 +366,7 @@ namespace Xeno.Client
         {
             if (args.Length >= 2 && args[1] == "list")
             {
-                Console.WriteLine(JsonUtil.Serialize(settings.Runners, true));
+                PrintProviders(settings);
                 return 0;
             }
 
@@ -245,12 +381,13 @@ namespace Xeno.Client
                 ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
                 if (runner == null)
                 {
-                    Console.WriteLine("Runner not found.");
+                    WriteError("Provider endpoint not found: " + runnerName);
                     return 1;
                 }
 
                 bool success = await TestRunnerAsync(runner, CancellationToken.None).ConfigureAwait(false);
-                Console.WriteLine(success ? "Runner reachable." : "Runner did not respond successfully.");
+                if (success) WriteSuccess("Provider endpoint reachable: " + runner.Name);
+                else WriteError("Provider endpoint did not respond successfully: " + runner.Name);
                 return success ? 0 : 2;
             }
 
@@ -264,12 +401,20 @@ namespace Xeno.Client
                     if (args[i] == "--endpoint") runner.Endpoint = args[i + 1];
                     if (args[i] == "--api-key") runner.ApiKey = args[i + 1];
                 }
+
+                if (String.IsNullOrWhiteSpace(runner.Name) || String.IsNullOrWhiteSpace(runner.Provider) || String.IsNullOrWhiteSpace(runner.Endpoint))
+                {
+                    WriteError("Provider endpoint name, provider, and endpoint URL are required.");
+                    return 1;
+                }
+
                 settings.Runners.Add(runner);
                 settings.Save();
+                WriteSuccess("Added provider endpoint '" + runner.Name + "'.");
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno runner list | test --name <name> | add --name <name> --provider <provider> --endpoint <url> [--api-key <key>]");
+            WriteError("Usage: xeno provider list | test --name <name> | add --name <name> --provider <provider> --endpoint <url> [--api-key <key>]");
             return 1;
         }
 
@@ -277,7 +422,7 @@ namespace Xeno.Client
         {
             if (args.Length >= 2 && args[1] == "list")
             {
-                Console.WriteLine(JsonUtil.Serialize(settings.Runners, true));
+                PrintModels(settings);
                 return 0;
             }
 
@@ -287,23 +432,30 @@ namespace Xeno.Client
                 string modelName = String.Empty;
                 for (int i = 2; i < args.Length - 1; i += 2)
                 {
-                    if (args[i] == "--runner") runnerName = args[i + 1];
+                    if (args[i] == "--runner" || args[i] == "--provider") runnerName = args[i + 1];
                     if (args[i] == "--name") modelName = args[i + 1];
+                }
+
+                if (String.IsNullOrWhiteSpace(runnerName) || String.IsNullOrWhiteSpace(modelName))
+                {
+                    WriteError("Provider endpoint name and model name are required.");
+                    return 1;
                 }
 
                 ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
                 if (runner == null)
                 {
-                    Console.WriteLine("Runner not found.");
+                    WriteError("Provider endpoint not found: " + runnerName);
                     return 1;
                 }
 
                 runner.Models.Add(new ClientModelSettings { Name = modelName });
                 settings.Save();
+                WriteSuccess("Added model '" + modelName + "' to provider endpoint '" + runner.Name + "'.");
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno model list | add --runner <name> --name <model>");
+            WriteError("Usage: xeno model list | add --provider <name> --name <model>");
             return 1;
         }
 
@@ -333,7 +485,7 @@ namespace Xeno.Client
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Disconnected from Xeno server: " + ex.Message);
+                    WriteWarning("Disconnected from Xeno server: " + ex.Message);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
@@ -379,14 +531,14 @@ namespace Xeno.Client
             {
                 JsonElement root = document.RootElement;
                 string requestId = TryGetString(root, "requestId") ?? Guid.NewGuid().ToString("N");
-                string? runnerName = TryGetString(root, "runnerName");
-                ClientRunnerSettings? runner = String.IsNullOrWhiteSpace(runnerName)
+                string? sourceName = TryGetString(root, "source") ?? TryGetString(root, "runnerName");
+                ClientRunnerSettings? runner = String.IsNullOrWhiteSpace(sourceName)
                     ? (settings.Runners.Count > 0 ? settings.Runners[0] : null)
-                    : settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                    : settings.Runners.Find(item => String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
 
                 if (runner == null)
                 {
-                    return new { type = "client.response", requestId, clientId = settings.ClientId, tenantId = settings.TenantId, success = false, error = "No configured runner is available." };
+                    return new { type = "client.response", requestId, clientId = settings.ClientId, tenantId = settings.TenantId, success = false, error = "No configured provider endpoint is available." };
                 }
 
                 string relativePath = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
@@ -553,26 +705,188 @@ namespace Xeno.Client
             return property.ToString();
         }
 
+        private static string[] ApplyGlobalOptions(string[] args, ClientSettings settings)
+        {
+            _UseColors = settings.UseColors;
+            List<string> normalized = new List<string>();
+            foreach (string arg in args)
+            {
+                if (String.Equals(arg, "--no-color", StringComparison.OrdinalIgnoreCase))
+                {
+                    _UseColors = false;
+                    continue;
+                }
+
+                if (String.Equals(arg, "--color", StringComparison.OrdinalIgnoreCase))
+                {
+                    _UseColors = true;
+                    continue;
+                }
+
+                normalized.Add(arg);
+            }
+
+            return normalized.ToArray();
+        }
+
+        private static void PrintStatus(ClientSettings settings)
+        {
+            WriteInfo("Xeno client status");
+            Console.WriteLine("  Name:       " + settings.Name);
+            Console.WriteLine("  Client ID:  " + (String.IsNullOrWhiteSpace(settings.ClientId) ? "(created on first connect)" : settings.ClientId));
+            Console.WriteLine("  Tenant:     " + settings.TenantId);
+            Console.WriteLine("  WebSocket:  " + settings.Server.Url);
+            Console.WriteLine("  REST:       " + settings.Server.RestUrl);
+            Console.WriteLine("  Auth:       " + DescribeAuth(settings));
+            Console.WriteLine("  Providers:  " + settings.Runners.Count);
+            Console.WriteLine("  Colors:     " + (settings.UseColors ? "on" : "off"));
+        }
+
+        private static void PrintProviders(ClientSettings settings)
+        {
+            if (settings.Runners.Count == 0)
+            {
+                WriteInfo("No provider endpoints are configured.");
+                return;
+            }
+
+            WriteInfo("Configured provider endpoints");
+            foreach (ClientRunnerSettings runner in settings.Runners)
+            {
+                Console.WriteLine("  - " + runner.Name + " [" + runner.Provider + "] " + runner.Endpoint + " (" + runner.Models.Count + " models)");
+            }
+        }
+
+        private static void PrintModels(ClientSettings settings)
+        {
+            bool any = false;
+            foreach (ClientRunnerSettings runner in settings.Runners)
+            {
+                foreach (ClientModelSettings model in runner.Models)
+                {
+                    if (!any) WriteInfo("Configured models");
+                    any = true;
+                    Console.WriteLine("  - " + model.Name + " via " + runner.Name + " [" + runner.Provider + "]");
+                }
+            }
+
+            if (!any) WriteInfo("No models are configured.");
+        }
+
+        private static string DescribeAuth(ClientSettings settings)
+        {
+            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey) && !String.IsNullOrWhiteSpace(settings.Server.SecretKey))
+            {
+                return "access key " + settings.Server.AccessKey;
+            }
+
+            if (!String.IsNullOrWhiteSpace(settings.Server.AdminApiKey)) return "administrator API key";
+            if (!String.IsNullOrWhiteSpace(settings.Server.Token)) return "REST token only";
+            return "not configured";
+        }
+
+        private static string FormatHttpError(HttpResponseMessage response, string responseBody)
+        {
+            string? message = TryGetErrorMessage(responseBody);
+            if (String.IsNullOrWhiteSpace(message)) message = responseBody.Trim();
+            if (String.IsNullOrWhiteSpace(message)) message = response.ReasonPhrase ?? "Request failed";
+            if (message.Length > 300) message = message.Substring(0, 300) + "...";
+            return ((int)response.StatusCode) + " " + response.ReasonPhrase + " - " + message;
+        }
+
+        private static string? TryGetErrorMessage(string responseBody)
+        {
+            if (String.IsNullOrWhiteSpace(responseBody)) return null;
+            try
+            {
+                using (JsonDocument document = JsonDocument.Parse(responseBody))
+                {
+                    JsonElement root = document.RootElement;
+                    return TryGetString(root, "message")
+                        ?? TryGetString(root, "error")
+                        ?? TryGetString(root, "title")
+                        ?? TryGetString(root, "detail");
+                }
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static void PrintAuthHelp()
+        {
+            WriteInfo("Authentication commands");
+            Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
+            Console.WriteLine("      Prompt for a password and store only the returned access key/secret.");
+            Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
+            Console.WriteLine("      Store an existing client credential for WebSocket and API use.");
+            Console.WriteLine("  xeno set-auth --api-key <key>");
+            Console.WriteLine("      Store an administrator API key.");
+            Console.WriteLine("  xeno set-auth --clear");
+            Console.WriteLine("      Remove stored authentication.");
+        }
+
+        private static void WriteSuccess(string message)
+        {
+            WriteColored(message, ConsoleColor.Green);
+        }
+
+        private static void WriteInfo(string message)
+        {
+            WriteColored(message, ConsoleColor.Cyan);
+        }
+
+        private static void WriteWarning(string message)
+        {
+            WriteColored(message, ConsoleColor.Yellow);
+        }
+
+        private static void WriteError(string message)
+        {
+            WriteColored("Error: " + message, ConsoleColor.Red);
+        }
+
+        private static void WriteColored(string message, ConsoleColor color)
+        {
+            if (!_UseColors || Console.IsOutputRedirected)
+            {
+                Console.WriteLine(message);
+                return;
+            }
+
+            ConsoleColor previous = Console.ForegroundColor;
+            Console.ForegroundColor = color;
+            Console.WriteLine(message);
+            Console.ForegroundColor = previous;
+        }
+
         private static void PrintHelp()
         {
-            Console.WriteLine("xeno 0.1.0");
+            WriteInfo("xeno 0.1.0");
             Console.WriteLine("Usage:");
             Console.WriteLine("  xeno init");
             Console.WriteLine("  xeno config show");
+            Console.WriteLine("  xeno config colors on|off");
             Console.WriteLine("  xeno server set-url <url>");
             Console.WriteLine("  xeno server set-rest-url <url>");
-            Console.WriteLine("  xeno login -u <username>");
-            Console.WriteLine("  xeno auth set-token <token>");
-            Console.WriteLine("  xeno auth set-credential <access-key> <secret-key>");
-            Console.WriteLine("  xeno auth set-api-key <api-key>");
-            Console.WriteLine("  xeno runner add --name <name> --provider <provider> --endpoint <url>");
-            Console.WriteLine("  xeno runner test --name <name>");
-            Console.WriteLine("  xeno runner list");
-            Console.WriteLine("  xeno model add --runner <name> --name <model>");
+            Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
+            Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
+            Console.WriteLine("  xeno set-auth --api-key <key>");
+            Console.WriteLine("  xeno provider add --name <name> --provider <provider> --endpoint <url> [--api-key <key>]");
+            Console.WriteLine("  xeno provider test --name <name>");
+            Console.WriteLine("  xeno provider list");
+            Console.WriteLine("  xeno model add --provider <name> --name <model>");
             Console.WriteLine("  xeno model list");
             Console.WriteLine("  xeno inventory");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno status");
+            Console.WriteLine();
+            Console.WriteLine("Global options:");
+            Console.WriteLine("  --no-color    Disable colored output for this command.");
+            Console.WriteLine("  --color       Enable colored output for this command.");
+            Console.WriteLine();
+            Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key/secret or administrator API key.");
         }
     }
 }

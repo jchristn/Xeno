@@ -5,11 +5,10 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
-    using Xeno.Core.Enums;
     using Xeno.Core.Models;
 
     /// <summary>
-    /// Routes inference requests directly to connected Xeno model runners.
+    /// Routes inference requests directly to connected Xeno clients.
     /// </summary>
     public class RoutingService
     {
@@ -25,7 +24,7 @@ namespace Xeno.Core.Services
         }
 
         /// <summary>
-        /// Route a request to an eligible model runner endpoint.
+        /// Route a request to an eligible connected client.
         /// </summary>
         /// <param name="context">Request context.</param>
         /// <param name="model">Requested model.</param>
@@ -55,36 +54,36 @@ namespace Xeno.Core.Services
             }
             decision.EffectiveModel = effectiveModel;
 
-            List<ModelRunnerEndpoint> candidates = _Platform.Endpoints
+            List<XenoClientRecord> candidates = _Platform.Clients
                 .Where(item => item.TenantId == context.TenantId)
                 .Where(item => item.Active)
-                .Where(item => item.ServiceState == EndpointServiceStateEnum.Normal)
-                .Where(item => item.Models.Contains(effectiveModel, StringComparer.OrdinalIgnoreCase))
+                .Where(item => item.ServiceState == Xeno.Core.Enums.ClientServiceStateEnum.Normal)
+                .Where(item => item.Connected)
+                .Where(item => item.LastHeartbeatUtc >= DateTime.UtcNow.AddSeconds(-60))
+                .Where(item => item.Models.Any(model => String.Equals(model.Name, effectiveModel, StringComparison.OrdinalIgnoreCase) && (isEmbedding ? model.SupportsEmbeddings : model.SupportsCompletions)))
                 .Where(item => item.MaxParallelRequests == 0 || item.InFlightRequests < item.MaxParallelRequests)
-                .Where(item => _Platform.Clients.Any(client => IsClientEligible(context, item, client)))
                 .OrderBy(item => item.InFlightRequests)
                 .ThenByDescending(item => item.Weight)
                 .ThenBy(item => item.Name)
                 .ToList();
-            decision.Timeline.Add("EndpointInventory");
+            decision.Timeline.Add("ClientInventory");
 
             if (candidates.Count < 1)
             {
                 decision.HttpStatusCode = 502;
-                decision.OutcomeCode = "NoEligibleEndpoints";
-                decision.Message = "No connected model runner can service the request.";
+                decision.OutcomeCode = "NoEligibleClients";
+                decision.Message = "No connected client can service the request.";
                 return Task.FromResult(decision);
             }
 
-            ModelRunnerEndpoint selected = candidates[0];
-            decision.CandidateEndpointIds = candidates.Select(item => item.Id).ToList();
+            XenoClientRecord selected = candidates[0];
+            decision.CandidateClientIds = candidates.Select(item => item.Id).ToList();
             decision.Success = true;
             decision.HttpStatusCode = 200;
             decision.OutcomeCode = "Routed";
-            decision.Message = "Request routed to model runner endpoint '" + selected.Name + "'.";
-            decision.SelectedEndpointId = selected.Id;
-            decision.SelectedClientId = selected.ClientId;
-            decision.Timeline.Add("EndpointSelection");
+            decision.Message = "Request routed to client '" + selected.Name + "'.";
+            decision.SelectedClientId = selected.Id;
+            decision.Timeline.Add("ClientSelection");
             return Task.FromResult(decision);
         }
 
@@ -93,9 +92,10 @@ namespace Xeno.Core.Services
         /// </summary>
         /// <param name="context">Request context.</param>
         /// <param name="path">Request path.</param>
+        /// <param name="method">HTTP method.</param>
         /// <param name="decision">Routing decision.</param>
         /// <returns>Request history entry.</returns>
-        public RequestHistoryEntry RecordHistory(RequestContext context, string path, RoutingDecision decision)
+        public RequestHistoryEntry RecordHistory(RequestContext context, string path, string method, RoutingDecision decision)
         {
             if (context == null) throw new ArgumentNullException(nameof(context));
             if (decision == null) throw new ArgumentNullException(nameof(decision));
@@ -104,7 +104,11 @@ namespace Xeno.Core.Services
             {
                 TenantId = context.TenantId,
                 Path = path,
+                Method = method,
+                Model = decision.EffectiveModel,
+                SelectedClientId = decision.SelectedClientId,
                 StatusCode = decision.HttpStatusCode,
+                DurationMs = Math.Max(0, (long)(DateTime.UtcNow - context.StartedUtc).TotalMilliseconds),
                 RoutingDecision = decision
             };
             _Platform.RequestHistory.Add(entry);
@@ -123,27 +127,20 @@ namespace Xeno.Core.Services
                 ModelDefinition? requested = definitions.FirstOrDefault(item => String.Equals(item.Name, requestedModel, StringComparison.OrdinalIgnoreCase));
                 if (requested != null) return requested.Name;
 
-                bool endpointAdvertisesRequestedModel = _Platform.Endpoints
+                bool clientAdvertisesRequestedModel = _Platform.Clients
                     .Where(item => item.TenantId == tenantId)
-                    .Any(item => item.Models.Contains(requestedModel, StringComparer.OrdinalIgnoreCase));
-                return endpointAdvertisesRequestedModel ? requestedModel : String.Empty;
+                    .Any(item => item.Models.Any(model => String.Equals(model.Name, requestedModel, StringComparison.OrdinalIgnoreCase)));
+                return clientAdvertisesRequestedModel ? requestedModel : String.Empty;
             }
 
             string? definedModel = definitions.FirstOrDefault()?.Name;
             if (!String.IsNullOrWhiteSpace(definedModel)) return definedModel;
 
-            return _Platform.Endpoints
+            return _Platform.Clients
                 .Where(item => item.TenantId == tenantId)
                 .SelectMany(item => item.Models)
+                .Select(item => item.Name)
                 .FirstOrDefault() ?? String.Empty;
-        }
-
-        private static bool IsClientEligible(RequestContext context, ModelRunnerEndpoint endpoint, XenoClientRecord client)
-        {
-            return client.TenantId == context.TenantId &&
-                   client.Id == endpoint.ClientId &&
-                   client.Connected &&
-                   client.LastHeartbeatUtc >= DateTime.UtcNow.AddSeconds(-60);
         }
     }
 }

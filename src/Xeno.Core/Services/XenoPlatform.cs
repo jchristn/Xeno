@@ -58,11 +58,6 @@ namespace Xeno.Core.Services
         public List<XenoClientRecord> Clients { get; } = new List<XenoClientRecord>();
 
         /// <summary>
-        /// Endpoints.
-        /// </summary>
-        public List<ModelRunnerEndpoint> Endpoints { get; } = new List<ModelRunnerEndpoint>();
-
-        /// <summary>
         /// Model definitions.
         /// </summary>
         public List<ModelDefinition> ModelDefinitions { get; } = new List<ModelDefinition>();
@@ -100,15 +95,15 @@ namespace Xeno.Core.Services
                 Active = true
             };
             AuthenticationService authentication = new AuthenticationService();
-            authentication.SetUserPassword(user, "xeno");
+            authentication.SetUserPassword(user, "password");
             Users.Add(user);
 
             Credential credential = new Credential
             {
                 TenantId = tenant.Id,
                 UserId = user.Id,
-                AccessKey = "access_development",
-                SecretKey = "secret_development",
+                AccessKey = "default",
+                SecretKey = "default",
                 Active = true
             };
             Credentials.Add(credential);
@@ -188,18 +183,28 @@ namespace Xeno.Core.Services
             {
                 TenantId = tenant.Id,
                 Name = "local-client",
-                Connected = false
+                Connected = false,
+                Models = new List<XenoClientModel>
+                {
+                    new XenoClientModel
+                    {
+                        Name = "llama3.2:latest",
+                        Provider = Xeno.Core.Enums.ApiProviderTypeEnum.Ollama,
+                        Source = "local-ollama",
+                        SupportsCompletions = true,
+                        SupportsEmbeddings = false
+                    },
+                    new XenoClientModel
+                    {
+                        Name = "text-embedding-3-small",
+                        Provider = Xeno.Core.Enums.ApiProviderTypeEnum.Ollama,
+                        Source = "local-ollama",
+                        SupportsCompletions = false,
+                        SupportsEmbeddings = true
+                    }
+                }
             };
             Clients.Add(client);
-
-            ModelRunnerEndpoint endpoint = new ModelRunnerEndpoint
-            {
-                TenantId = tenant.Id,
-                ClientId = client.Id,
-                Name = "local-ollama",
-                Active = true
-            };
-            Endpoints.Add(endpoint);
 
             ModelDefinition chatModel = new ModelDefinition
             {
@@ -249,7 +254,6 @@ namespace Xeno.Core.Services
                 RoleAssignments = RoleAssignments,
                 AuditRecords = AuditRecords,
                 Clients = Clients,
-                Endpoints = Endpoints,
                 ModelDefinitions = ModelDefinitions,
                 ModelConfigurations = ModelConfigurations,
                 RequestHistory = RequestHistory
@@ -290,9 +294,6 @@ namespace Xeno.Core.Services
 
             Clients.Clear();
             Clients.AddRange(state.Clients);
-
-            Endpoints.Clear();
-            Endpoints.AddRange(state.Endpoints);
 
             ModelDefinitions.Clear();
             ModelDefinitions.AddRange(state.ModelDefinitions);
