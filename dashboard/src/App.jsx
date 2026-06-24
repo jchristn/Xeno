@@ -11,12 +11,15 @@ import {
   Download,
   FileClock,
   Gauge,
+  Github,
   Globe2,
   History,
   KeyRound,
   Layers3,
   LockKeyhole,
   Network,
+  LogOut,
+  Moon,
   Play,
   RefreshCw,
   Route as RouteIcon,
@@ -25,6 +28,7 @@ import {
   Settings as SettingsIcon,
   Shield,
   ShieldCheck,
+  Sun,
   Trash2,
   Upload,
   Workflow,
@@ -58,6 +62,9 @@ const navGroups = [
   {
     key: 'administration',
     links: [
+      { to: '/dashboard/tenants', key: 'tenants', icon: Layers3 },
+      { to: '/dashboard/users', key: 'users', icon: ShieldCheck },
+      { to: '/dashboard/credentials', key: 'credentials', icon: KeyRound },
       { to: '/dashboard/security', key: 'security', icon: LockKeyhole },
       { to: '/dashboard/settings', key: 'settings', icon: SettingsIcon }
     ]
@@ -68,6 +75,9 @@ const pageMeta = {
   '/dashboard/home': { title: 'home', kicker: 'controlPlane', description: 'homeDescription' },
   '/dashboard/requests': { title: 'requests', kicker: 'observe', description: 'requestsDescription' },
   '/dashboard/explorer': { title: 'explorer', kicker: 'operate', description: 'explorerDescription' },
+  '/dashboard/tenants': { title: 'tenants', kicker: 'administration', description: 'tenantsDescription' },
+  '/dashboard/users': { title: 'users', kicker: 'administration', description: 'usersDescription' },
+  '/dashboard/credentials': { title: 'credentials', kicker: 'administration', description: 'credentialsDescription' },
   '/dashboard/security': { title: 'security', kicker: 'administration', description: 'securityDescription' },
   '/dashboard/clients': { title: 'clients', kicker: 'control', description: 'clientsDescription' },
   '/dashboard/vmrs': { title: 'vmrs', kicker: 'control', description: 'vmrsDescription' },
@@ -77,7 +87,7 @@ const pageMeta = {
   '/dashboard/settings': { title: 'settings', kicker: 'administration', description: 'settingsDescription' }
 };
 
-function Shell() {
+function Shell({ onLogout, onToggleTheme, theme }) {
   const { t } = useTranslation();
   const location = useLocation();
   const meta = pageMeta[location.pathname] || pageMeta['/dashboard/home'];
@@ -132,22 +142,41 @@ function Shell() {
               <span>{api.baseUrl}</span>
             </span>
             <LanguageSelector />
-            <img className="header-logo" src="/logo.png" alt={t('appTitle')} />
+            <a
+              aria-label={t('github')}
+              className="icon-button"
+              href="https://github.com/jchristn/Xeno"
+              rel="noreferrer"
+              target="_blank"
+              title={t('github')}
+            >
+              <Github size={17} />
+            </a>
+            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('toggleTheme')} type="button">
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <button aria-label={t('logout')} className="icon-button danger" onClick={onLogout} title={t('logout')} type="button">
+              <LogOut size={17} />
+            </button>
           </div>
         </header>
 
         <main className="workspace">
           <Routes>
-            <Route path="/dashboard/home" element={<HomeView />} />
-            <Route path="/dashboard/requests" element={<RequestHistoryView />} />
-            <Route path="/dashboard/explorer" element={<ApiExplorerView />} />
-            <Route path="/dashboard/security" element={<SecurityView />} />
-            <Route path="/dashboard/clients" element={<ClientsView />} />
-            <Route path="/dashboard/vmrs" element={<VmrsView />} />
-            <Route path="/dashboard/policies" element={<PoliciesView />} />
-            <Route path="/dashboard/reservations" element={<ReservationsView />} />
-            <Route path="/dashboard/analytics" element={<AnalyticsView />} />
-            <Route path="/dashboard/settings" element={<SettingsView />} />
+            <Route index element={<HomeView />} />
+            <Route path="home" element={<HomeView />} />
+            <Route path="requests" element={<RequestHistoryView />} />
+            <Route path="explorer" element={<ApiExplorerView />} />
+            <Route path="tenants" element={<TenantsView />} />
+            <Route path="users" element={<UsersView />} />
+            <Route path="credentials" element={<CredentialsView />} />
+            <Route path="security" element={<SecurityView />} />
+            <Route path="clients" element={<ClientsView />} />
+            <Route path="vmrs" element={<VmrsView />} />
+            <Route path="policies" element={<PoliciesView />} />
+            <Route path="reservations" element={<ReservationsView />} />
+            <Route path="analytics" element={<AnalyticsView />} />
+            <Route path="settings" element={<SettingsView />} />
             <Route path="*" element={<HomeView />} />
           </Routes>
         </main>
@@ -156,7 +185,7 @@ function Shell() {
   );
 }
 
-function LoginView() {
+function LoginView({ onToggleTheme, theme }) {
   const { t } = useTranslation();
 
   return (
@@ -175,6 +204,14 @@ function LoginView() {
         </section>
 
         <section className="login-card">
+          <div className="login-card-actions">
+            <a aria-label={t('github')} className="icon-button" href="https://github.com/jchristn/Xeno" rel="noreferrer" target="_blank" title={t('github')}>
+              <Github size={17} />
+            </a>
+            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('toggleTheme')} type="button">
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+          </div>
           <div className="login-card-header">
             <img className="login-logo" src="/logo.png" alt={t('appTitle')} />
             <div>
@@ -363,35 +400,19 @@ function ApiExplorerView() {
 
 function SecurityView() {
   const { t } = useTranslation();
-  const tenants = useResource('/api/v1/tenants', []);
-  const users = useResource('/api/v1/users', []);
-  const credentials = useResource('/api/v1/credentials', []);
   const roles = useResource('/api/v1/roles', []);
   const permissions = useResource('/api/v1/permissions', []);
   const effective = useResource('/api/v1/effective-permissions', []);
   const audit = useResource('/api/v1/audit', []);
 
-  async function createCredential() {
-    await api.post('/api/v1/credentials', {});
-    credentials.refresh();
-  }
-
   return (
     <div className="view-stack">
       <div className="metric-grid compact">
-        <MetricCard icon={<Layers3 size={18} />} label={t('tenants')} value={formatNumber(tenants.data.length)} />
-        <MetricCard icon={<ShieldCheck size={18} />} label={t('users')} value={formatNumber(users.data.length)} />
-        <MetricCard icon={<KeyRound size={18} />} label={t('credentials')} value={formatNumber(credentials.data.length)} tone="info" />
+        <MetricCard icon={<LockKeyhole size={18} />} label={t('roles')} value={formatNumber(roles.data.length)} />
+        <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
+        <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" />
       </div>
       <div className="workspace-grid">
-        <DataTable title={t('tenants')} rows={tenants.data} columns={['name', 'active']} />
-        <DataTable title={t('users')} rows={users.data} columns={['email', 'isTenantAdmin', 'active']} />
-        <DataTable
-          actions={<IconButton onClick={createCredential} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />}
-          columns={['accessKey', 'active']}
-          rows={credentials.data}
-          title={t('credentials')}
-        />
         <DataTable title={t('roles')} rows={roles.data} columns={['name', 'builtIn', 'active']} />
         <DataTable title={t('permissions')} rows={permissions.data} columns={['resourceType', 'operationType', 'permit']} />
         <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} />
@@ -402,6 +423,101 @@ function SecurityView() {
         subtitle={t('auditSubtitle')}
         title={t('audit')}
       />
+    </div>
+  );
+}
+
+function TenantsView() {
+  const { t } = useTranslation();
+  const tenants = useResource('/api/v1/tenants', []);
+  const [selected, setSelected] = useState(null);
+
+  return (
+    <div className="view-stack">
+      <Panel
+        actions={<IconButton onClick={tenants.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        eyebrow={t('administration')}
+        title={t('tenantManagement')}
+      >
+        <div className="status-list horizontal">
+          <StatusRow label={t('tenants')} value={formatNumber(tenants.data.length)} tone="neutral" />
+          <StatusRow label={t('tenantIsolation')} value={t('enabled')} tone="success" />
+        </div>
+      </Panel>
+      <DataTable
+        columns={['id', 'name', 'active', 'createdUtc', 'lastUpdateUtc']}
+        onRowClick={setSelected}
+        rows={tenants.data}
+        subtitle={t('tenantsTableSubtitle')}
+        title={t('tenants')}
+      />
+      {selected && <JsonPanel title={t('tenantDetails')} data={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function UsersView() {
+  const { t } = useTranslation();
+  const users = useResource('/api/v1/users', []);
+  const [selected, setSelected] = useState(null);
+
+  return (
+    <div className="view-stack">
+      <Panel
+        actions={<IconButton onClick={users.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        eyebrow={t('administration')}
+        title={t('userManagement')}
+      >
+        <div className="status-list horizontal">
+          <StatusRow label={t('users')} value={formatNumber(users.data.length)} tone="neutral" />
+          <StatusRow label={t('passwordLogin')} value={t('dashboardOnly')} tone="warning" />
+        </div>
+      </Panel>
+      <DataTable
+        columns={['id', 'tenantId', 'username', 'email', 'isAdmin', 'isTenantAdmin', 'active']}
+        onRowClick={setSelected}
+        rows={users.data}
+        subtitle={t('usersTableSubtitle')}
+        title={t('users')}
+      />
+      {selected && <JsonPanel title={t('userDetails')} data={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function CredentialsView() {
+  const { t } = useTranslation();
+  const credentials = useResource('/api/v1/credentials', []);
+  const [selected, setSelected] = useState(null);
+  const [created, setCreated] = useState(null);
+
+  async function createCredential() {
+    const result = await api.post('/api/v1/credentials', {});
+    setCreated(result);
+    credentials.refresh();
+  }
+
+  return (
+    <div className="view-stack">
+      <Panel
+        actions={<IconButton onClick={createCredential} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />}
+        eyebrow={t('administration')}
+        title={t('credentialManagement')}
+      >
+        <div className="status-list horizontal">
+          <StatusRow label={t('credentials')} value={formatNumber(credentials.data.length)} tone="neutral" />
+          <StatusRow label={t('websocketGateway')} value={t('credentialGated')} tone="success" />
+        </div>
+      </Panel>
+      {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
+      <DataTable
+        columns={['id', 'tenantId', 'userId', 'accessKey', 'secretKey', 'active']}
+        onRowClick={setSelected}
+        rows={credentials.data}
+        subtitle={t('credentialsTableSubtitle')}
+        title={t('credentials')}
+      />
+      {selected && <JsonPanel title={t('credentialDetails')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -822,13 +938,34 @@ function isReactNode(input) {
   return input && typeof input === 'object' && '$$typeof' in input;
 }
 
+function AppRoutes() {
+  const [theme, setTheme] = useState(() => window.localStorage.getItem('xeno.theme') || 'light');
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('xeno.theme', theme);
+  }, [theme]);
+
+  function toggleTheme() {
+    setTheme((current) => current === 'dark' ? 'light' : 'dark');
+  }
+
+  function logout() {
+    window.location.href = '/';
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<LoginView onToggleTheme={toggleTheme} theme={theme} />} />
+      <Route path="/dashboard/*" element={<Shell onLogout={logout} onToggleTheme={toggleTheme} theme={theme} />} />
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LoginView />} />
-        <Route path="/dashboard/*" element={<Shell />} />
-      </Routes>
+      <AppRoutes />
     </BrowserRouter>
   );
 }
