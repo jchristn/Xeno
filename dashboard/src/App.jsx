@@ -35,8 +35,11 @@ import {
   Zap
 } from 'lucide-react';
 import ApiClient from './utils/api.js';
+import CopyButton from './components/CopyButton.jsx';
+import CopyableValue from './components/CopyableValue.jsx';
 import LanguageSelector from './components/LanguageSelector.jsx';
 import ActivityChart from './components/ActivityChart.jsx';
+import Modal from './components/Modal.jsx';
 
 const api = new ApiClient();
 
@@ -140,6 +143,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <span className="server-badge" title={api.baseUrl}>
               <Server size={15} />
               <span>{api.baseUrl}</span>
+              <CopyButton label={t('copyServerUrl')} value={api.baseUrl} />
             </span>
             <LanguageSelector />
             <a
@@ -830,6 +834,7 @@ function CellValue({ columnKey, value: cell }) {
   const { t } = useTranslation();
   if (cell === undefined || cell === null || cell === '') return <span className="muted-cell">-</span>;
   if (isReactNode(cell)) return cell;
+  if (isIdentifierColumn(columnKey)) return <CopyableValue label={t('copyValue')} value={cell} />;
   if (typeof cell === 'boolean') return <StatusChip tone={cell ? 'success' : 'danger'} value={cell ? t('yes') : t('no')} />;
   if (isStatusColumn(columnKey)) return <StatusChip tone={toneForValue(cell)} value={String(cell)} />;
   if (Array.isArray(cell)) return <span className="array-cell">{cell.join(', ')}</span>;
@@ -853,32 +858,71 @@ function StatusChip({ tone = 'neutral', value }) {
 function JsonPanel({ title, data, onClose }) {
   const { t } = useTranslation();
   return (
-    <div className="modal">
-      <div className="modal-body">
-        <div className="workspace-card-header">
-          <div>
-            <span className="eyebrow">{t('details')}</span>
-            <h2>{title}</h2>
-          </div>
-          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
-        </div>
-        <JsonBlock data={data} />
-      </div>
-    </div>
+    <Modal
+      actions={<button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data)} />}
+      onClose={onClose}
+      open
+      subtitle={t('details')}
+      title={title}
+    >
+      <JsonBlock data={data} />
+    </Modal>
   );
 }
 
 function JsonPanelInline({ title, data }) {
   const { t } = useTranslation();
   return (
-    <Panel eyebrow={t('json')} title={title}>
+    <Panel actions={<CopyButton label={t('copyJson')} value={stringifyJson(data)} />} eyebrow={t('json')} title={title}>
       <JsonBlock data={data} />
     </Panel>
   );
 }
 
 function JsonBlock({ data }) {
-  return <pre className="json-block">{JSON.stringify(data, null, 2)}</pre>;
+  return (
+    <div className="json-viewer">
+      <JsonNode data={data} />
+    </div>
+  );
+}
+
+function JsonNode({ data, fieldKey = '' }) {
+  if (data === null || data === undefined) return <span className="json-null">null</span>;
+  if (Array.isArray(data)) {
+    return (
+      <div className="json-array">
+        {data.length === 0 ? <span className="json-null">[]</span> : data.map((item, index) => (
+          <div className="json-row" key={index}>
+            <span className="json-key">{index}</span>
+            <JsonNode data={item} fieldKey={fieldKey} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof data === 'object') {
+    const entries = Object.entries(data);
+    return (
+      <div className="json-object">
+        {entries.length === 0 ? <span className="json-null">{'{}'}</span> : entries.map(([key, value]) => (
+          <div className="json-row" key={key}>
+            <span className="json-key">{key}</span>
+            <JsonNode data={value} fieldKey={key} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (isIdentifierColumn(fieldKey)) return <CopyableValue value={data} />;
+  if (typeof data === 'boolean') return <StatusChip tone={data ? 'success' : 'danger'} value={String(data)} />;
+  if (typeof data === 'number') return <span className="json-number">{data}</span>;
+  return <span className="json-string">{String(data)}</span>;
+}
+
+function stringifyJson(data) {
+  return JSON.stringify(data ?? {}, null, 2);
 }
 
 function value(row, key) {
@@ -924,6 +968,16 @@ function isStatusColumn(key) {
     || lower.includes('status')
     || lower.includes('success')
     || lower.includes('supports');
+}
+
+function isIdentifierColumn(key) {
+  const lower = String(key || '').toLowerCase();
+  return lower === 'id'
+    || lower === 'guid'
+    || lower === 'identifier'
+    || lower.endsWith('id')
+    || lower.endsWith('guid')
+    || lower.endsWith('key');
 }
 
 function toneForValue(input) {

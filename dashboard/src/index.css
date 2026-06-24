@@ -280,6 +280,53 @@ textarea {
   color: var(--color-danger);
 }
 
+.copy-button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--color-muted);
+  padding: 0;
+}
+
+.copy-button:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.copy-button.copied {
+  border-color: rgba(22, 128, 61, 0.34);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.copyable-value {
+  max-width: min(460px, 100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-panel-soft);
+  padding: 2px 3px 2px 8px;
+  vertical-align: middle;
+}
+
+.copyable-value code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
 .primary-button,
 .action-button.primary {
   background: var(--color-accent);
@@ -480,6 +527,7 @@ html[data-theme='dark'] input,
 html[data-theme='dark'] select,
 html[data-theme='dark'] textarea,
 html[data-theme='dark'] .icon-button,
+html[data-theme='dark'] .copy-button,
 html[data-theme='dark'] .action-button.secondary,
 html[data-theme='dark'] .search-box {
   background: #202831;
@@ -534,6 +582,10 @@ html[data-theme='dark'] .search-box {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.server-badge .copy-button {
+  margin-right: -6px;
 }
 
 .header-logo {
@@ -1001,6 +1053,82 @@ html[data-theme='dark'] .search-box {
   line-height: 1.55;
 }
 
+.json-viewer {
+  width: 100%;
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #11181d;
+  color: #dbe7ef;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.json-object,
+.json-array {
+  display: grid;
+  gap: 6px;
+}
+
+.json-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 180px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding-bottom: 6px;
+}
+
+.json-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.json-key {
+  color: #8fb7c2;
+  overflow-wrap: anywhere;
+}
+
+.json-string {
+  color: #f2d38d;
+  overflow-wrap: anywhere;
+}
+
+.json-number {
+  color: #98c6ff;
+}
+
+.json-null {
+  color: #93a1aa;
+}
+
+.json-viewer .status-chip {
+  min-height: 24px;
+}
+
+.json-viewer .copyable-value {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.json-viewer .copyable-value code {
+  color: #ffffff;
+}
+
+.json-viewer .copy-button {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #dbe7ef;
+}
+
+.json-viewer .copy-button.copied {
+  background: rgba(22, 128, 61, 0.32);
+  color: #8af0aa;
+}
+
 .form-stack {
   display: grid;
   gap: 12px;
@@ -1051,6 +1179,76 @@ html[data-theme='dark'] .search-box {
   place-items: center;
   padding: 24px;
   background: rgba(18, 25, 31, 0.54);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(18, 25, 31, 0.58);
+}
+
+.modal-panel {
+  width: min(760px, 100%);
+  max-height: 90vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.modal-panel.large {
+  width: min(1040px, 100%);
+}
+
+.modal-panel:focus {
+  outline: none;
+}
+
+.modal-heading,
+.modal-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-heading p {
+  margin: 4px 0 0;
+  color: var(--color-muted);
+}
+
+.modal-heading-actions,
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-content {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 0;
 }
 
 .modal-body {
