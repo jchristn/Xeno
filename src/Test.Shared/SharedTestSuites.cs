@@ -82,17 +82,28 @@ namespace Test.Shared
                             foreach (string prefix in prefixes)
                             {
                                 string id = IdGenerator.NewId(prefix);
-                                if (id.Length > IdGenerator.MaxIdLength) throw new InvalidOperationException("ID exceeded max length: " + id);
+                                if (id.Length != IdGenerator.MaxIdLength) throw new InvalidOperationException("ID length mismatch: " + id);
                                 if (!id.StartsWith(prefix, StringComparison.Ordinal)) throw new InvalidOperationException("ID prefix mismatch: " + id);
+                                string[] parts = id.Substring(prefix.Length).Split('_');
+                                if (parts.Length != 2) throw new InvalidOperationException("ID did not include sortable and random parts: " + id);
+                                if (String.IsNullOrWhiteSpace(parts[0])) throw new InvalidOperationException("ID sortable part missing: " + id);
+                                if (String.IsNullOrWhiteSpace(parts[1])) throw new InvalidOperationException("ID random part missing: " + id);
                             }
 
                             List<string> ids = Enumerable.Range(0, 64).Select(_ => IdGenerator.NewId("req_")).ToList();
                             if (ids.Distinct(StringComparer.Ordinal).Count() != ids.Count) throw new InvalidOperationException("Generated IDs were not unique.");
-                            for (int i = 1; i < ids.Count; i++)
+                            bool sawNonHexRandomCharacter = false;
+                            string? previousSortable = null;
+                            foreach (string id in ids)
                             {
-                                if (String.CompareOrdinal(ids[i - 1], ids[i]) > 0) throw new InvalidOperationException("Generated IDs were not k-sortable.");
+                                string[] parts = id.Substring("req_".Length).Split('_');
+                                if (parts.Length != 2) throw new InvalidOperationException("ID did not include sortable and random parts: " + id);
+                                if (previousSortable != null && String.CompareOrdinal(previousSortable, parts[0]) > 0) throw new InvalidOperationException("Generated IDs were not k-sortable.");
+                                previousSortable = parts[0];
+                                if (parts[1].Any(character => !Uri.IsHexDigit(character))) sawNonHexRandomCharacter = true;
                             }
 
+                            if (!sawNonHexRandomCharacter) throw new InvalidOperationException("Generated random portions looked hexadecimal-only.");
                             return Task.CompletedTask;
                         })
                 });
@@ -432,7 +443,12 @@ namespace Test.Shared
                         "ManagementApi",
                         "ManagementRoutesSmoke",
                         "Management routes expose settings, clients, analytics, backup, and metrics",
-                        executeAsync: delegate { return RunManagementSmokeAsync(); })
+                        executeAsync: delegate { return RunManagementSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "ManagementDeleteRoutesSmoke",
+                        "Management delete routes remove records and update OpenAPI",
+                        executeAsync: delegate { return RunManagementDeleteSmokeAsync(); })
                 });
         }
 
@@ -503,6 +519,108 @@ namespace Test.Shared
                     server.Dispose();
                     await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
                     await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunManagementDeleteSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-management-delete-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
+                        if (!openApi.Contains("client-model", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("clientmodels", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing client model delete route.");
+                        if (!openApi.Contains("request-history", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("requesthistory", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing request history delete route.");
+
+                        using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}").ConfigureAwait(false))
+                        {
+                            _ = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        }
+                        string historyJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history").ConfigureAwait(false);
+                        using (JsonDocument historyDocument = JsonDocument.Parse(historyJson))
+                        {
+                            JsonElement history = historyDocument.RootElement.EnumerateArray().FirstOrDefault();
+                            string historyId = TryGetString(history, "id") ?? String.Empty;
+                            if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("No request history entry was created.");
+                            using (HttpResponseMessage deleteHistory = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/request-history/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
+                            {
+                                if (!deleteHistory.IsSuccessStatusCode) throw new InvalidOperationException("Request history delete failed: " + (int)deleteHistory.StatusCode);
+                            }
+                        }
+
+                        using (HttpResponseMessage credentialResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials", "{}").ConfigureAwait(false))
+                        {
+                            string credentialJson = await credentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!credentialResponse.IsSuccessStatusCode) throw new InvalidOperationException("Credential create failed: " + credentialJson);
+                            using (JsonDocument credentialDocument = JsonDocument.Parse(credentialJson))
+                            {
+                                string credentialId = TryGetString(credentialDocument.RootElement, "id") ?? String.Empty;
+                                if (String.IsNullOrWhiteSpace(credentialId)) throw new InvalidOperationException("Created credential did not include an ID.");
+                                using (HttpResponseMessage deleteCredential = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials/" + Uri.EscapeDataString(credentialId)).ConfigureAwait(false))
+                                {
+                                    if (!deleteCredential.IsSuccessStatusCode) throw new InvalidOperationException("Credential delete failed: " + (int)deleteCredential.StatusCode);
+                                }
+                            }
+                        }
+
+                        string clientsJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
+                        using (JsonDocument clientsDocument = JsonDocument.Parse(clientsJson))
+                        {
+                            JsonElement client = clientsDocument.RootElement.EnumerateArray().FirstOrDefault();
+                            string clientId = TryGetString(client, "id") ?? String.Empty;
+                            if (String.IsNullOrWhiteSpace(clientId)) throw new InvalidOperationException("Seed client not found.");
+
+                            JsonElement models = TryGetProperty(client, "models", out JsonElement modelsElement) ? modelsElement : default;
+                            JsonElement model = models.ValueKind == JsonValueKind.Array ? models.EnumerateArray().FirstOrDefault() : default;
+                            string modelName = TryGetString(model, "name") ?? String.Empty;
+                            string source = TryGetString(model, "source") ?? String.Empty;
+                            if (String.IsNullOrWhiteSpace(modelName)) throw new InvalidOperationException("Seed client model not found.");
+
+                            string deleteModelBody = JsonUtil.Serialize(new { clientId, name = modelName, source });
+                            using (HttpResponseMessage deleteModel = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models", deleteModelBody).ConfigureAwait(false))
+                            {
+                                string deleteModelJson = await deleteModel.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!deleteModel.IsSuccessStatusCode || !deleteModelJson.Contains("\"removed\": 1", StringComparison.Ordinal)) throw new InvalidOperationException("Client model delete failed: " + deleteModelJson);
+                            }
+
+                            using (HttpResponseMessage deleteClient = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(clientId)).ConfigureAwait(false))
+                            {
+                                if (!deleteClient.IsSuccessStatusCode) throw new InvalidOperationException("Client delete failed: " + (int)deleteClient.StatusCode);
+                            }
+
+                            string clientsAfterDelete = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
+                            if (clientsAfterDelete.Contains(clientId, StringComparison.Ordinal)) throw new InvalidOperationException("Deleted client was still returned.");
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
         }
@@ -838,6 +956,15 @@ namespace Test.Shared
             }
         }
 
+        private static async Task<HttpResponseMessage> DeleteJsonAsync(HttpClient httpClient, string url, string json = "{}")
+        {
+            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Delete, url))
+            {
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                return await httpClient.SendAsync(request).ConfigureAwait(false);
+            }
+        }
+
         private static async Task<string?> ReceiveWebSocketTextAsync(ClientWebSocket socket, CancellationToken token)
         {
             byte[] buffer = new byte[8192];
@@ -903,9 +1030,24 @@ namespace Test.Shared
 
         private static string? TryGetString(JsonElement element, string propertyName)
         {
-            if (!element.TryGetProperty(propertyName, out JsonElement property)) return null;
+            if (!TryGetProperty(element, propertyName, out JsonElement property)) return null;
             if (property.ValueKind == JsonValueKind.Null || property.ValueKind == JsonValueKind.Undefined) return null;
             return property.ToString();
+        }
+
+        private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
+        {
+            property = default;
+            if (element.ValueKind != JsonValueKind.Object) return false;
+            if (element.TryGetProperty(propertyName, out property)) return true;
+            foreach (JsonProperty candidate in element.EnumerateObject())
+            {
+                if (!String.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
+                property = candidate.Value;
+                return true;
+            }
+
+            return false;
         }
     }
 }

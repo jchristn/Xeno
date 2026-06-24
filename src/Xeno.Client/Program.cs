@@ -1028,6 +1028,7 @@ namespace Xeno.Client
             }
 
             WriteInfo("Configured provider endpoints");
+            Console.WriteLine();
             for (int i = 0; i < settings.Runners.Count; i++)
             {
                 if (i > 0) Console.WriteLine();

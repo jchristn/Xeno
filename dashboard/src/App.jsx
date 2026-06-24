@@ -12,6 +12,7 @@ import {
   CircleDot,
   Cpu,
   Download,
+  FileJson,
   Gauge,
   Github,
   Globe2,
@@ -282,6 +283,7 @@ function HomeView() {
 
       <DataTable
         columns={['name', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        onDelete={(row) => deleteRecord('/api/v1/clients', row)}
         onRefresh={clients.refresh}
         rows={clients.data}
         subtitle={t('clientsTableSubtitle')}
@@ -289,6 +291,7 @@ function HomeView() {
       />
       <DataTable
         columns={['clientName', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
+        onDelete={deleteClientModel}
         onRefresh={clients.refresh}
         rows={clientModels}
         subtitle={t('clientModelsSubtitle')}
@@ -334,13 +337,17 @@ function RequestHistoryView() {
       </Panel>
       <DataTable
         columns={['statusCode', 'method', 'path', 'model', 'selectedClientId', 'durationMs', 'createdUtc']}
+        onDelete={(row) => {
+          if (recordId(selected) === recordId(row)) setSelected(null);
+          return deleteRecord('/api/v1/requesthistory', row);
+        }}
         onRowClick={setSelected}
         onRefresh={() => { history.refresh(); summary.refresh(); }}
         rows={history.data}
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
       />
-      {selected && <EditRecordModal title={t('editRequest')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('requestDetails')} data={selected} onClose={() => setSelected(null)} />}
       <ConfirmModal
         confirmLabel={t('clear')}
         destructive
@@ -468,11 +475,12 @@ function SecurityView() {
         <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
         <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" />
       </div>
-      <DataTable title={t('roles')} rows={roles.data} columns={['name', 'builtIn', 'active']} onRefresh={roles.refresh} />
-      <DataTable title={t('permissions')} rows={permissions.data} columns={['resourceType', 'operationType', 'permit']} onRefresh={permissions.refresh} />
+      <DataTable title={t('roles')} rows={roles.data} columns={['name', 'builtIn', 'active']} onDelete={(row) => deleteRecord('/api/v1/roles', row)} onRefresh={roles.refresh} />
+      <DataTable title={t('permissions')} rows={permissions.data} columns={['resourceType', 'operationType', 'permit']} onDelete={(row) => deleteRecord('/api/v1/permissions', row)} onRefresh={permissions.refresh} />
       <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} onRefresh={effective.refresh} />
       <DataTable
         columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode']}
+        onDelete={(row) => deleteRecord('/api/v1/audit', row)}
         onRefresh={audit.refresh}
         rows={audit.data}
         subtitle={t('auditSubtitle')}
@@ -491,13 +499,17 @@ function TenantsView() {
     <div className="view-stack">
       <DataTable
         columns={['id', 'name', 'active', 'createdUtc', 'lastUpdateUtc']}
+        onDelete={(row) => {
+          if (recordId(selected) === recordId(row)) setSelected(null);
+          return deleteRecord('/api/v1/tenants', row);
+        }}
         onRowClick={setSelected}
         onRefresh={tenants.refresh}
         rows={tenants.data}
         subtitle={t('tenantsTableSubtitle')}
         title={t('tenants')}
       />
-      {selected && <EditRecordModal title={t('editTenant')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('tenantDetails')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -511,13 +523,17 @@ function UsersView() {
     <div className="view-stack">
       <DataTable
         columns={['id', 'tenantId', 'username', 'email', 'isAdmin', 'isTenantAdmin', 'active']}
+        onDelete={(row) => {
+          if (recordId(selected) === recordId(row)) setSelected(null);
+          return deleteRecord('/api/v1/users', row);
+        }}
         onRowClick={setSelected}
         onRefresh={users.refresh}
         rows={users.data}
         subtitle={t('usersTableSubtitle')}
         title={t('users')}
       />
-      {selected && <EditRecordModal title={t('editUser')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('userDetails')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -542,13 +558,17 @@ function CredentialsView() {
       {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
       <DataTable
         columns={['id', 'tenantId', 'userId', 'accessKey', 'secretKey', 'active']}
+        onDelete={(row) => {
+          if (recordId(selected) === recordId(row)) setSelected(null);
+          return deleteRecord('/api/v1/credentials', row);
+        }}
         onRowClick={setSelected}
         onRefresh={credentials.refresh}
         rows={credentials.data}
         subtitle={t('credentialsTableSubtitle')}
         title={t('credentials')}
       />
-      {selected && <EditRecordModal title={t('editCredential')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('credentialDetails')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -571,6 +591,10 @@ function ClientsView() {
       </div>
       <DataTable
         columns={['id', 'name', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        onDelete={(row) => {
+          if (recordId(selectedClient) === recordId(row)) setSelectedClient(null);
+          return deleteRecord('/api/v1/clients', row);
+        }}
         onRefresh={clients.refresh}
         onRowClick={setSelectedClient}
         rows={clients.data}
@@ -579,14 +603,18 @@ function ClientsView() {
       />
       <DataTable
         columns={['clientName', 'clientId', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
+        onDelete={(row) => {
+          if (recordId(selectedModel) === recordId(row)) setSelectedModel(null);
+          return deleteClientModel(row);
+        }}
         onRefresh={clients.refresh}
         onRowClick={setSelectedModel}
         rows={clientModels}
         subtitle={t('clientModelsSubtitle')}
         title={t('advertisedModels')}
       />
-      {selectedClient && <EditRecordModal title={t('editClient')} data={selectedClient} onClose={() => setSelectedClient(null)} />}
-      {selectedModel && <EditRecordModal title={t('editModel')} data={selectedModel} onClose={() => setSelectedModel(null)} />}
+      {selectedClient && <EditRecordModal title={t('clientDetails')} data={selectedClient} onClose={() => setSelectedClient(null)} />}
+      {selectedModel && <EditRecordModal title={t('modelDetails')} data={selectedModel} onClose={() => setSelectedModel(null)} />}
     </div>
   );
 }
@@ -600,6 +628,13 @@ function AnalyticsView() {
   const byModel = groupByCount(history.data, 'model');
   const byPath = groupByCount(history.data, 'path');
 
+  function refreshAnalytics() {
+    analytics.refresh();
+    summary.refresh();
+    history.refresh();
+    metrics.refresh();
+  }
+
   return (
     <div className="view-stack">
       <div className="metric-grid compact">
@@ -609,14 +644,14 @@ function AnalyticsView() {
         <MetricCard icon={<Gauge size={18} />} label={t('failureRate')} value={formatPercent(Number(analytics.data.failureRate || 0))} tone={Number(analytics.data.failureRate || 0) > 0 ? 'warning' : 'success'} />
       </div>
       <Panel
-        actions={<IconButton iconOnly onClick={() => { analytics.refresh(); summary.refresh(); history.refresh(); metrics.refresh(); }} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        actions={<IconButton iconOnly onClick={refreshAnalytics} label={t('refresh')} icon={<RefreshCw size={16} />} />}
         title={t('requestActivity')}
       >
         <ActivityChart summary={summary.data} />
       </Panel>
       <div className="workspace-grid">
-        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} onRefresh={history.refresh} />
-        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} onRefresh={history.refresh} />
+        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
+        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
       </div>
       <Panel
         actions={<IconButton iconOnly onClick={metrics.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
@@ -935,10 +970,13 @@ function IconButton({ icon, iconOnly = false, label, onClick, variant = 'seconda
   );
 }
 
-function DataTable({ actions, columns, onRefresh, onRowClick, rows, subtitle, title }) {
+function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, onDelete, onRefresh, onRowClick, rows, subtitle, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
+  const [deleteRow, setDeleteRow] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [jsonRow, setJsonRow] = useState(null);
   const [sort, setSort] = useState({ key: '', direction: 'asc' });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -1004,6 +1042,53 @@ function DataTable({ actions, columns, onRefresh, onRowClick, rows, subtitle, ti
     onRowClick(row);
   }
 
+  async function confirmDelete() {
+    if (!deleteRow || !onDelete || deleting) return;
+    setDeleting(true);
+    try {
+      await onDelete(deleteRow);
+      setDeleteRow(null);
+      onRefresh?.();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function rowActions(row) {
+    const deleteAllowed = Boolean(onDelete) && (canDelete ? canDelete(row) : true);
+    const items = [];
+    if (onRowClick) {
+      items.push({
+        icon: <Pencil size={14} />,
+        key: 'details',
+        label: t('viewDetails'),
+        onSelect: () => onRowClick(row)
+      });
+    }
+    items.push({
+      icon: <FileJson size={14} />,
+      key: 'view-json',
+      label: t('viewJson'),
+      onSelect: () => setJsonRow(row)
+    });
+    items.push({ divider: true, key: 'divider-delete' });
+    items.push({
+      destructive: true,
+      disabled: !deleteAllowed,
+      icon: <Trash2 size={14} />,
+      key: 'delete',
+      label: deleteAllowed ? t('delete') : t('deleteUnavailable'),
+      onSelect: () => setDeleteRow(row)
+    });
+    return items;
+  }
+
+  const deletePrompt = deleteRow
+    ? (typeof deleteMessage === 'function'
+      ? deleteMessage(deleteRow)
+      : deleteMessage || t('deleteRecordMessage', { record: describeRow(deleteRow) }))
+    : '';
+
   return (
     <section className="workspace-card data-panel">
       <div className="workspace-card-header">
@@ -1041,7 +1126,7 @@ function DataTable({ actions, columns, onRefresh, onRowClick, rows, subtitle, ti
                   </span>
                 </th>
               ))}
-              {onRowClick ? <th className="actions-cell">{t('actions')}</th> : null}
+              <th className="actions-cell">{t('actions')}</th>
             </tr>
             {hasColumnFilters ? (
               <tr className="table-filter-row">
@@ -1058,14 +1143,14 @@ function DataTable({ actions, columns, onRefresh, onRowClick, rows, subtitle, ti
                     )}
                   </th>
                 ))}
-                {onRowClick ? <th /> : null}
+                <th />
               </tr>
             ) : null}
           </thead>
           <tbody>
             {pagedRows.length === 0 && (
               <tr>
-                <td className="empty-cell" colSpan={normalizedColumns.length + (onRowClick ? 1 : 0)}>
+                <td className="empty-cell" colSpan={normalizedColumns.length + 1}>
                   <EmptyState message={t('emptyTableMessage')} title={t('noData')} />
                 </td>
               </tr>
@@ -1077,23 +1162,24 @@ function DataTable({ actions, columns, onRefresh, onRowClick, rows, subtitle, ti
                     <CellValue columnKey={column.key} value={column.render ? column.render(row) : value(row, column.key)} />
                   </td>
                 ))}
-                {onRowClick ? (
-                  <td className="actions-cell">
-                    <ActionMenu
-                      items={[{
-                        icon: <Pencil size={14} />,
-                        key: 'edit',
-                        label: t('edit'),
-                        onSelect: () => onRowClick(row)
-                      }]}
-                    />
-                  </td>
-                ) : null}
+                <td className="actions-cell">
+                  <ActionMenu items={rowActions(row)} />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {jsonRow ? <JsonRecordModal data={jsonRow} onClose={() => setJsonRow(null)} title={t('recordJson')} /> : null}
+      <ConfirmModal
+        confirmLabel={deleting ? t('deleting') : t('delete')}
+        destructive
+        message={deletePrompt}
+        onCancel={() => setDeleteRow(null)}
+        onConfirm={confirmDelete}
+        open={Boolean(deleteRow)}
+        title={deleteTitle || t('deleteRecordTitle')}
+      />
     </section>
   );
 }
@@ -1125,42 +1211,165 @@ function StatusChip({ tone = 'neutral', value }) {
 
 function EditRecordModal({ title, data, onClose }) {
   const { t } = useTranslation();
-  const [draft, setDraft] = useState(data || {});
-  const entries = Object.entries(draft || {});
-
-  function updateField(key, inputValue) {
-    setDraft((current) => ({ ...current, [key]: inputValue }));
-  }
+  const record = data || {};
+  const entries = Object.entries(record);
+  const scalarEntries = entries.filter(([, fieldValue]) => isScalarValue(fieldValue));
+  const complexEntries = entries.filter(([, fieldValue]) => !isScalarValue(fieldValue));
 
   return (
     <Modal
       actions={<button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>}
-      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(draft)} />}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(record)} />}
       onClose={onClose}
       open
-      subtitle={t('editRecordSubtitle')}
+      subtitle={t('recordDetailsSubtitle')}
       title={title}
     >
-      <div className="edit-record-grid">
-        {entries.map(([key, fieldValue]) => (
-          <label className="form-field" key={key}>
-            <span>{t(key, key)}</span>
-            {isIdentifierColumn(key) ? (
-              <CopyableValue label={t('copyValue')} value={fieldValue} />
-            ) : typeof fieldValue === 'boolean' ? (
-              <select value={String(fieldValue)} onChange={(event) => updateField(key, event.target.value === 'true')}>
-                <option value="true">{t('yes')}</option>
-                <option value="false">{t('no')}</option>
-              </select>
-            ) : fieldValue && typeof fieldValue === 'object' ? (
-              <JsonBlock data={fieldValue} />
-            ) : (
-              <input value={fieldValue ?? ''} onChange={(event) => updateField(key, event.target.value)} />
-            )}
-          </label>
+      <div className="record-detail-stack">
+        {scalarEntries.length ? (
+          <div className="record-detail-grid">
+            {scalarEntries.map(([key, fieldValue]) => (
+              <RecordField fieldKey={key} key={key} value={fieldValue} />
+            ))}
+          </div>
+        ) : null}
+        {complexEntries.map(([key, fieldValue]) => (
+          <RecordComplexSection fieldKey={key} key={key} value={fieldValue} />
         ))}
       </div>
     </Modal>
+  );
+}
+
+function JsonRecordModal({ data, onClose, title }) {
+  const { t } = useTranslation();
+  return (
+    <Modal
+      actions={<button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data)} />}
+      onClose={onClose}
+      open
+      subtitle={t('recordJsonSubtitle')}
+      title={title}
+    >
+      <JsonBlock data={data} />
+    </Modal>
+  );
+}
+
+function RecordField({ fieldKey, value: fieldValue }) {
+  const { t } = useTranslation();
+  return (
+    <div className="record-field">
+      <span className="record-field-label">{t(fieldKey, fieldKey)}</span>
+      <div className="record-field-value">
+        <CellValue columnKey={fieldKey} value={fieldValue} />
+      </div>
+    </div>
+  );
+}
+
+function RecordComplexSection({ fieldKey, value: fieldValue }) {
+  const { t } = useTranslation();
+  const title = t(fieldKey, fieldKey);
+
+  if (Array.isArray(fieldValue)) {
+    return (
+      <section className="record-section">
+        <div className="record-section-header">
+          <div>
+            <span className="eyebrow">{t('collection')}</span>
+            <h3>{title}</h3>
+          </div>
+          <span className="row-count">{fieldValue.length} {t('items')}</span>
+        </div>
+        {fieldValue.length === 0 ? (
+          <p className="muted-copy">{t('emptyCollection')}</p>
+        ) : fieldValue.every(isPlainRecord) ? (
+          <NestedRecordTable rows={fieldValue} />
+        ) : (
+          <div className="primitive-list">
+            {fieldValue.map((item, index) => (
+              <span className="primitive-list-item" key={`${fieldKey}-${index}`}>
+                <CellValue columnKey={fieldKey} value={item} />
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  if (isPlainRecord(fieldValue)) {
+    const entries = Object.entries(fieldValue);
+    const scalarEntries = entries.filter(([, itemValue]) => isScalarValue(itemValue));
+    const complexEntries = entries.filter(([, itemValue]) => !isScalarValue(itemValue));
+    return (
+      <section className="record-section">
+        <div className="record-section-header">
+          <div>
+            <span className="eyebrow">{t('object')}</span>
+            <h3>{title}</h3>
+          </div>
+        </div>
+        {scalarEntries.length ? (
+          <div className="record-detail-grid nested">
+            {scalarEntries.map(([key, itemValue]) => (
+              <RecordField fieldKey={key} key={key} value={itemValue} />
+            ))}
+          </div>
+        ) : null}
+        {complexEntries.map(([key, itemValue]) => (
+          <RecordComplexSection fieldKey={key} key={key} value={itemValue} />
+        ))}
+      </section>
+    );
+  }
+
+  return (
+    <section className="record-section">
+      <div className="record-section-header">
+        <div>
+          <span className="eyebrow">{t('value')}</span>
+          <h3>{title}</h3>
+        </div>
+      </div>
+      <CellValue columnKey={fieldKey} value={fieldValue} />
+    </section>
+  );
+}
+
+function NestedRecordTable({ rows }) {
+  const { t } = useTranslation();
+  const columns = nestedRecordColumns(rows);
+
+  if (columns.length === 0) {
+    return <JsonBlock data={rows} />;
+  }
+
+  return (
+    <div className="nested-table-scroll">
+      <table className="nested-record-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{t(column, column)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={value(row, 'id') || value(row, 'guid') || rowIndex}>
+              {columns.map((column) => (
+                <td key={column}>
+                  <CellValue columnKey={column} value={value(row, column)} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1216,6 +1425,40 @@ function JsonNode({ data, fieldKey = '' }) {
 
 function stringifyJson(data) {
   return JSON.stringify(data ?? {}, null, 2);
+}
+
+function recordId(row) {
+  return value(row, 'id') || value(row, 'guid');
+}
+
+function describeRow(row) {
+  return String(
+    value(row, 'name')
+    || value(row, 'username')
+    || value(row, 'email')
+    || value(row, 'accessKey')
+    || value(row, 'path')
+    || recordId(row)
+    || 'record'
+  );
+}
+
+async function deleteRecord(path, row) {
+  const id = recordId(row);
+  if (!id) throw new Error('Record id is required.');
+  await api.delete(`${path}/${encodeURIComponent(id)}`);
+}
+
+async function deleteClientModel(row) {
+  await api.delete('/api/v1/clientmodels', {
+    clientId: value(row, 'clientId'),
+    name: value(row, 'name'),
+    source: value(row, 'source')
+  });
+}
+
+async function deleteRequestHistoryGroup(filter) {
+  await api.post('/api/v1/requesthistory/bulk', filter);
 }
 
 function value(row, key) {
@@ -1276,6 +1519,37 @@ function flattenClientModels(clients) {
       supportsEmbeddings: value(model, 'supportsEmbeddings'),
       lastAdvertisedUtc: value(model, 'lastAdvertisedUtc')
     }));
+  });
+}
+
+function isScalarValue(input) {
+  return input === undefined
+    || input === null
+    || typeof input === 'string'
+    || typeof input === 'number'
+    || typeof input === 'boolean';
+}
+
+function isPlainRecord(input) {
+  return input !== null && typeof input === 'object' && !Array.isArray(input) && !isReactNode(input);
+}
+
+function nestedRecordColumns(rows) {
+  const preferred = ['id', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc', 'active'];
+  const keys = [];
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    Object.entries(row || {}).forEach(([key, itemValue]) => {
+      if (!isScalarValue(itemValue) || keys.includes(key)) return;
+      keys.push(key);
+    });
+  });
+  return keys.sort((left, right) => {
+    const leftIndex = preferred.indexOf(left);
+    const rightIndex = preferred.indexOf(right);
+    if (leftIndex === -1 && rightIndex === -1) return 0;
+    if (leftIndex === -1) return 1;
+    if (rightIndex === -1) return -1;
+    return leftIndex - rightIndex;
   });
 }
 

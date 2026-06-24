@@ -195,6 +195,8 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/audit", "List audit records", "Audit");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/clients", "List clients", "Clients");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/clients", "List clients", "Clients");
+            RegisterStaticRoute(HttpMethod.DELETE, "/api/v1/clientmodels", "Delete client-advertised model", "Clients");
+            RegisterStaticRoute(HttpMethod.DELETE, "/v1.0/api/client-models", "Delete client-advertised model", "Clients");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modeldefinitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
@@ -225,17 +227,39 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/backup", "Backup platform state", "Backup");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/restore", "Restore platform state", "Backup");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/restore", "Restore platform state", "Backup");
-            _Webserver.Routes.PreAuthentication.Parameter.Add(
-                HttpMethod.DELETE,
-                "/v1.0/api/request-history/{id}",
-                DefaultRouteAsync,
-                ExceptionRouteAsync,
-                openApiMetadata: OpenApiRouteMetadata.Create("Delete request history entry", "Request History"));
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/tenants/{id}", "Delete tenant", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/tenants/{id}", "Delete tenant", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/users/{id}", "Delete user", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/users/{id}", "Delete user", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/credentials/{id}", "Delete credential", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/credentials/{id}", "Delete credential", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/roles/{id}", "Delete role", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/roles/{id}", "Delete role", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/permissions/{id}", "Delete permission", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/permissions/{id}", "Delete permission", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/audit/{id}", "Delete audit record", "Audit");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/clients/{id}", "Delete client", "Clients");
+            RegisterParameterizedRoute(HttpMethod.GET, "/api/v1/requesthistory/{id}", "Get request history entry", "Request History");
+            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/request-history/{id}", "Get request history entry", "Request History");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/requesthistory/{id}", "Delete request history entry", "Request History");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/request-history/{id}", "Delete request history entry", "Request History");
         }
 
         private void RegisterStaticRoute(HttpMethod method, string path, string summary, string tag)
         {
             _Webserver.Routes.PreAuthentication.Static.Add(
+                method,
+                path,
+                DefaultRouteAsync,
+                ExceptionRouteAsync,
+                openApiMetadata: OpenApiRouteMetadata.Create(summary, tag));
+        }
+
+        private void RegisterParameterizedRoute(HttpMethod method, string path, string summary, string tag)
+        {
+            _Webserver.Routes.PreAuthentication.Parameter.Add(
                 method,
                 path,
                 DefaultRouteAsync,
@@ -409,10 +433,28 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string deleteTenantId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                int removed = DeleteTenant(deleteTenantId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
             {
                 await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Users.Where(item => item.TenantId == requestContext.TenantId || requestContext.TenantId == Constants.DefaultTenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/users/", "/v1.0/api/users/") is string deleteUserId)
+            {
+                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = DeleteUser(requestContext, deleteUserId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
 
@@ -442,6 +484,15 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/credentials/", "/v1.0/api/credentials/") is string deleteCredentialId)
+            {
+                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = DeleteCredential(requestContext, deleteCredentialId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
@@ -449,10 +500,28 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/roles/", "/v1.0/api/roles/") is string deleteRoleId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                int removed = DeleteRole(requestContext, deleteRoleId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Permissions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/permissions/", "/v1.0/api/permissions/") is string deletePermissionId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                int removed = DeletePermission(requestContext, deletePermissionId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
 
@@ -470,10 +539,37 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/audit/", "/v1.0/api/audit/") is string deleteAuditId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                int removed = RequirePlatform().AuditRecords.RemoveAll(item => item.Id == deleteAuditId && item.TenantId == requestContext.TenantId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/clients", "/v1.0/api/clients"))
             {
                 await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Clients.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/clients/", "/v1.0/api/clients/") is string deleteClientId)
+            {
+                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = DeleteClient(requestContext, deleteClientId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && IsPath(path, "/api/v1/clientmodels", "/v1.0/api/client-models"))
+            {
+                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = DeleteClientModel(requestContext, context);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
                 return;
             }
 
@@ -535,7 +631,7 @@ namespace Xeno.Server
             if (method == "POST" && IsPath(path, "/api/v1/requesthistory/bulk", "/v1.0/api/request-history/bulk"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = RequirePlatform().RequestHistory.RemoveAll(item => item.TenantId == requestContext.TenantId);
+                int removed = DeleteRequestHistory(requestContext, ReadJsonObject(context));
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
                 return;
@@ -577,27 +673,21 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "GET" && path.StartsWith("/v1.0/api/request-history/", StringComparison.OrdinalIgnoreCase) && !path.EndsWith("/summary", StringComparison.OrdinalIgnoreCase))
+            if (method == "GET" && TryGetPathId(path, "/api/v1/requesthistory/", "/v1.0/api/request-history/") is string requestHistoryId)
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string id = path.Substring("/v1.0/api/request-history/".Length);
-                RequestHistoryEntry? entry = RequirePlatform().RequestHistory.FirstOrDefault(item => item.Id == id && item.TenantId == requestContext.TenantId);
+                RequestHistoryEntry? entry = RequirePlatform().RequestHistory.FirstOrDefault(item => item.Id == requestHistoryId && item.TenantId == requestContext.TenantId);
                 if (entry == null) throw new KeyNotFoundException("Request history entry not found.");
                 await SendJsonAsync(context, entry).ConfigureAwait(false);
                 return;
             }
 
-            if (method == "DELETE" && path.StartsWith("/v1.0/api/request-history/", StringComparison.OrdinalIgnoreCase))
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/requesthistory/", "/v1.0/api/request-history/") is string deleteRequestHistoryId)
             {
-                string id = path.Substring("/v1.0/api/request-history/".Length);
-                RequestHistoryEntry? entry = RequirePlatform().RequestHistory.FirstOrDefault(item => item.Id == id && item.TenantId == requestContext.TenantId);
-                if (entry != null)
-                {
-                    RequirePlatform().RequestHistory.Remove(entry);
-                    await SavePlatformAsync(token).ConfigureAwait(false);
-                }
-                context.Response.StatusCode = 204;
-                await context.Response.Send(context.Token).ConfigureAwait(false);
+                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = RequirePlatform().RequestHistory.RemoveAll(item => item.Id == deleteRequestHistoryId && item.TenantId == requestContext.TenantId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
 
@@ -1260,6 +1350,133 @@ namespace Xeno.Server
             };
         }
 
+        private int DeleteTenant(string tenantId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            List<string> clientIds = platform.Clients.Where(item => item.TenantId == tenantId).Select(item => item.Id).ToList();
+            int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
+            if (removed == 0) return 0;
+
+            removed += platform.Users.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.Credentials.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.AuthSessions.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.Roles.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.Permissions.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.AuditRecords.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.Clients.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.ModelDefinitions.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.ModelConfigurations.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.RequestHistory.RemoveAll(item => item.TenantId == tenantId);
+
+            lock (_ClientConnectionsLock)
+            {
+                foreach (string clientId in clientIds) _ClientConnections.Remove(clientId);
+            }
+
+            return removed;
+        }
+
+        private int DeleteUser(RequestContext requestContext, string userId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            User? user = platform.Users.FirstOrDefault(item => item.Id == userId && IsTenantVisible(requestContext, item.TenantId));
+            if (user == null) return 0;
+
+            List<string> credentialIds = platform.Credentials
+                .Where(item => item.TenantId == user.TenantId && item.UserId == userId)
+                .Select(item => item.Id)
+                .ToList();
+
+            int removed = platform.Users.RemoveAll(item => item.Id == userId && item.TenantId == user.TenantId);
+            removed += platform.Credentials.RemoveAll(item => item.TenantId == user.TenantId && item.UserId == userId);
+            removed += platform.AuthSessions.RemoveAll(item => item.TenantId == user.TenantId && (item.UserId == userId || (item.CredentialId != null && credentialIds.Contains(item.CredentialId))));
+            removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == userId);
+            removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId));
+            return removed;
+        }
+
+        private int DeleteCredential(RequestContext requestContext, string credentialId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            Credential? credential = platform.Credentials.FirstOrDefault(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
+            if (credential == null) return 0;
+
+            int removed = platform.Credentials.RemoveAll(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
+            removed += platform.AuthSessions.RemoveAll(item => item.CredentialId == credentialId && item.TenantId == requestContext.TenantId);
+            removed += platform.RoleAssignments.RemoveAll(item => item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credentialId && item.TenantId == requestContext.TenantId);
+            return removed;
+        }
+
+        private int DeleteRole(RequestContext requestContext, string roleId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            int removed = platform.Roles.RemoveAll(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
+            removed += platform.RoleAssignments.RemoveAll(item => item.RoleId == roleId && item.TenantId == requestContext.TenantId);
+            return removed;
+        }
+
+        private int DeletePermission(RequestContext requestContext, string permissionId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            int removed = platform.Permissions.RemoveAll(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
+            foreach (Role role in platform.Roles.Where(item => item.TenantId == requestContext.TenantId))
+            {
+                role.PermissionIds.RemoveAll(item => String.Equals(item, permissionId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return removed;
+        }
+
+        private int DeleteClient(RequestContext requestContext, string clientId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            int removed = platform.Clients.RemoveAll(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
+            if (removed > 0)
+            {
+                lock (_ClientConnectionsLock)
+                {
+                    _ClientConnections.Remove(clientId);
+                }
+            }
+
+            return removed;
+        }
+
+        private int DeleteClientModel(RequestContext requestContext, HttpContextBase context)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string clientId = GetBodyString(body, "clientId") ?? String.Empty;
+            string modelName = GetBodyString(body, "name") ?? String.Empty;
+            string source = GetBodyString(body, "source") ?? String.Empty;
+            if (String.IsNullOrWhiteSpace(clientId)) throw new ArgumentException("Client ID is required.");
+            if (String.IsNullOrWhiteSpace(modelName)) throw new ArgumentException("Model name is required.");
+
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
+            if (client == null) return 0;
+
+            return client.Models.RemoveAll(item =>
+                String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase)
+                && (String.IsNullOrWhiteSpace(source) || String.Equals(item.Source, source, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private int DeleteRequestHistory(RequestContext requestContext, Dictionary<string, object?> body)
+        {
+            HashSet<string> ids = GetBodyStringSet(body, "ids");
+            string? singleId = GetBodyString(body, "id");
+            if (!String.IsNullOrWhiteSpace(singleId)) ids.Add(singleId);
+            string? model = GetBodyString(body, "model");
+            string? path = GetBodyString(body, "path");
+            string? selectedClientId = GetBodyString(body, "selectedClientId");
+
+            return RequirePlatform().RequestHistory.RemoveAll(item =>
+                item.TenantId == requestContext.TenantId
+                && (ids.Count == 0 || ids.Contains(item.Id))
+                && MatchesOptionalFilter(item.Model, model)
+                && MatchesOptionalFilter(item.Path, path)
+                && MatchesOptionalFilter(item.SelectedClientId, selectedClientId));
+        }
+
         private RequestContext CreateRequestContext(HttpContextBase context)
         {
             string tenantId = ResolveTenantId(context, null);
@@ -1378,6 +1595,49 @@ namespace Xeno.Server
         private static string? GetBodyString(Dictionary<string, object?> body, string key)
         {
             return body.TryGetValue(key, out object? value) ? value?.ToString() : null;
+        }
+
+        private static HashSet<string> GetBodyStringSet(Dictionary<string, object?> body, string key)
+        {
+            HashSet<string> values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!body.TryGetValue(key, out object? value) || value == null) return values;
+
+            if (value is JsonElement element)
+            {
+                if (element.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement item in element.EnumerateArray())
+                    {
+                        string? text = item.ToString();
+                        if (!String.IsNullOrWhiteSpace(text)) values.Add(text);
+                    }
+                    return values;
+                }
+
+                if (element.ValueKind == JsonValueKind.String)
+                {
+                    string? text = element.GetString();
+                    if (!String.IsNullOrWhiteSpace(text)) values.Add(text);
+                    return values;
+                }
+            }
+
+            string? single = value.ToString();
+            if (!String.IsNullOrWhiteSpace(single)) values.Add(single);
+            return values;
+        }
+
+        private static bool MatchesOptionalFilter(string? value, string? filter)
+        {
+            if (String.IsNullOrWhiteSpace(filter)) return true;
+            if (String.Equals(filter, "unknown", StringComparison.OrdinalIgnoreCase) && String.IsNullOrWhiteSpace(value)) return true;
+            return String.Equals(value, filter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsTenantVisible(RequestContext context, string tenantId)
+        {
+            return String.Equals(context.TenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase)
+                || String.Equals(context.TenantId, tenantId, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool GetBodyBoolean(Dictionary<string, object?> body, string key)
@@ -1518,6 +1778,12 @@ namespace Xeno.Server
             await SendJsonAsync(context, value).ConfigureAwait(false);
         }
 
+        private async Task SendNoContentAsync(HttpContextBase context)
+        {
+            context.Response.StatusCode = 204;
+            await context.Response.Send(context.Token).ConfigureAwait(false);
+        }
+
         private void ApplyCors(HttpResponseBase response)
         {
             if (!_Settings.Cors.Enabled) return;
@@ -1542,6 +1808,19 @@ namespace Xeno.Server
         private static bool IsPath(string path, params string[] candidates)
         {
             return candidates.Any(candidate => path.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string? TryGetPathId(string path, params string[] prefixes)
+        {
+            foreach (string prefix in prefixes)
+            {
+                if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                string id = path.Substring(prefix.Length);
+                if (String.IsNullOrWhiteSpace(id)) return null;
+                return Uri.UnescapeDataString(id);
+            }
+
+            return null;
         }
 
         private static string FirstNonEmpty(params string?[] values)
@@ -1587,16 +1866,25 @@ namespace Xeno.Server
                     ["/v1.0/api/auth/login"] = Path(Operation("post", "login", "Authentication", "Login", "Validates a user password and returns a one-time-visible client credential for WebSocket use.", "CredentialLoginResponse", false)),
                     ["/v1.0/api/auth/token"] = Path(Operation("post", "createToken", "Authentication", "Create token", "Creates a development session token.", "TokenResponse", false)),
                     ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true)),
+                    ["/v1.0/api/tenants/{id}"] = Path(Operation("delete", "deleteTenant", "Tenants", "Delete tenant", "Deletes a tenant and its scoped records.", "GenericObject", true)),
                     ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true)),
+                    ["/v1.0/api/users/{id}"] = Path(Operation("delete", "deleteUser", "Tenants", "Delete user", "Deletes a tenant user and related sessions or credentials.", "GenericObject", true)),
                     ["/v1.0/api/credentials"] = Path(Operation("get", "listCredentials", "Tenants", "List credentials", "Lists tenant credentials with redacted secrets.", "CredentialArray", true)),
+                    ["/v1.0/api/credentials/{id}"] = Path(Operation("delete", "deleteCredential", "Tenants", "Delete credential", "Deletes a credential and related sessions.", "GenericObject", true)),
                     ["/v1.0/api/roles"] = Path(Operation("get", "listRoles", "Authorization", "List roles", "Lists tenant roles.", "RoleArray", true)),
+                    ["/v1.0/api/roles/{id}"] = Path(Operation("delete", "deleteRole", "Authorization", "Delete role", "Deletes a tenant role and related assignments.", "GenericObject", true)),
                     ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true)),
+                    ["/v1.0/api/permissions/{id}"] = Path(Operation("delete", "deletePermission", "Authorization", "Delete permission", "Deletes a tenant permission and removes it from roles.", "GenericObject", true)),
                     ["/v1.0/api/effective-permissions"] = Path(Operation("get", "listEffectivePermissions", "Authorization", "Effective permissions", "Lists effective permissions.", "EffectivePermissionArray", true)),
                     ["/v1.0/api/audit"] = Path(Operation("get", "listAudit", "Audit", "List audit records", "Lists tenant audit records.", "AuditRecordArray", true)),
+                    ["/v1.0/api/audit/{id}"] = Path(Operation("delete", "deleteAuditRecord", "Audit", "Delete audit record", "Deletes one tenant audit record.", "GenericObject", true)),
                     ["/v1.0/api/clients"] = Path(Operation("get", "listClients", "Clients", "List clients", "Lists connected or registered Xeno clients and their advertised models.", "ClientArray", true)),
+                    ["/v1.0/api/clients/{id}"] = Path(Operation("delete", "deleteClient", "Clients", "Delete client", "Deletes a registered Xeno client.", "GenericObject", true)),
+                    ["/v1.0/api/client-models"] = Path(Operation("delete", "deleteClientModel", "Clients", "Delete client model", "Deletes one model advertised by a client.", "GenericObject", true)),
                     ["/v1.0/api/model-definitions"] = Path(Operation("get", "listModelDefinitions", "Routing", "List model definitions", "Lists model definitions available for routing.", "ModelDefinitionArray", true)),
                     ["/v1.0/api/model-configurations"] = Path(Operation("get", "listModelConfigurations", "Routing", "List model configurations", "Lists pinned model configurations.", "ModelConfigurationArray", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
+                    ["/v1.0/api/request-history/{id}"] = Path(Operation("get", "getRequestHistory", "Request History", "Get request history", "Returns a captured request history entry.", "RequestHistoryEntry", true), Operation("delete", "deleteRequestHistory", "Request History", "Delete request history", "Deletes one captured request history entry.", "GenericObject", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
                     ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
