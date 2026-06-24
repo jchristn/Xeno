@@ -3,6 +3,9 @@ import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   BrainCircuit,
   ChevronRight,
@@ -20,6 +23,7 @@ import {
   Network,
   LogOut,
   Moon,
+  Eye,
   Play,
   RefreshCw,
   Route as RouteIcon,
@@ -35,13 +39,28 @@ import {
   Zap
 } from 'lucide-react';
 import ApiClient from './utils/api.js';
+import ActionMenu from './components/ActionMenu.jsx';
+import ConfirmModal from './components/ConfirmModal.jsx';
 import CopyButton from './components/CopyButton.jsx';
 import CopyableValue from './components/CopyableValue.jsx';
+import EmptyState from './components/EmptyState.jsx';
 import LanguageSelector from './components/LanguageSelector.jsx';
 import ActivityChart from './components/ActivityChart.jsx';
 import Modal from './components/Modal.jsx';
+import Pagination from './components/Pagination.jsx';
 
 const api = new ApiClient();
+
+const interactiveRowClickSelector = [
+  'button',
+  'a',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  '[role="button"]',
+  '[data-row-click-ignore="true"]'
+].join(', ');
 
 const navGroups = [
   {
@@ -315,12 +334,14 @@ function RequestHistoryView() {
   const history = useResource('/api/v1/requesthistory', []);
   const summary = useResource('/api/v1/requesthistory/summary', { buckets: [] });
   const [selected, setSelected] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const bucketTotals = summarizeBuckets(summary.data.buckets || []);
 
   async function clearHistory() {
     await api.post('/api/v1/requesthistory/bulk', {});
     history.refresh();
     summary.refresh();
+    setConfirmClear(false);
   }
 
   return (
@@ -334,7 +355,7 @@ function RequestHistoryView() {
         actions={(
           <div className="button-row">
             <IconButton onClick={history.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />
-            <IconButton onClick={clearHistory} label={t('clear')} icon={<Trash2 size={16} />} variant="danger" />
+            <IconButton onClick={() => setConfirmClear(true)} label={t('clear')} icon={<Trash2 size={16} />} variant="danger" />
           </div>
         )}
         eyebrow={t('observe')}
@@ -350,6 +371,15 @@ function RequestHistoryView() {
         title={t('requests')}
       />
       {selected && <JsonPanel title={t('details')} data={selected} onClose={() => setSelected(null)} />}
+      <ConfirmModal
+        confirmLabel={t('clear')}
+        destructive
+        message={t('clearHistoryMessage')}
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={clearHistory}
+        open={confirmClear}
+        title={t('clearHistoryTitle')}
+      />
     </div>
   );
 }
@@ -775,16 +805,71 @@ function IconButton({ icon, label, onClick, variant = 'secondary' }) {
 function DataTable({ actions, columns, onRowClick, rows, subtitle, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
+  const [columnFilters, setColumnFilters] = useState({});
+  const [sort, setSort] = useState({ key: '', direction: 'asc' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const safeRows = Array.isArray(rows) ? rows : [];
   const normalizedColumns = columns.map((column) => (typeof column === 'string' ? { key: column } : column));
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return safeRows;
-    return safeRows.filter((row) => normalizedColumns.some((column) => {
-      const raw = column.searchValue ? column.searchValue(row) : value(row, column.key);
-      return String(raw ?? '').toLowerCase().includes(normalizedQuery);
-    }));
-  }, [normalizedColumns, query, safeRows]);
+    return safeRows.filter((row) => {
+      const matchesGlobal = !normalizedQuery || normalizedColumns.some((column) => {
+        const raw = column.searchValue ? column.searchValue(row) : value(row, column.key);
+        return String(raw ?? '').toLowerCase().includes(normalizedQuery);
+      });
+      if (!matchesGlobal) return false;
+
+      return normalizedColumns.every((column) => {
+        const filter = String(columnFilters[column.key] || '').trim().toLowerCase();
+        if (!filter) return true;
+        const raw = column.searchValue ? column.searchValue(row) : value(row, column.key);
+        return String(raw ?? '').toLowerCase().includes(filter);
+      });
+    });
+  }, [columnFilters, normalizedColumns, query, safeRows]);
+  const sortedRows = useMemo(() => {
+    if (!sort.key) return filteredRows;
+    const column = normalizedColumns.find((item) => item.key === sort.key);
+    return [...filteredRows].sort((left, right) => {
+      const leftValue = column?.sortValue ? column.sortValue(left) : value(left, sort.key);
+      const rightValue = column?.sortValue ? column.sortValue(right) : value(right, sort.key);
+      if (leftValue === undefined || leftValue === null) return 1;
+      if (rightValue === undefined || rightValue === null) return -1;
+      const comparison = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+      return sort.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [filteredRows, normalizedColumns, sort]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const displayPage = Math.min(currentPage, totalPages);
+  const pagedRows = sortedRows.slice((displayPage - 1) * pageSize, displayPage * pageSize);
+  const hasColumnFilters = normalizedColumns.some((column) => column.filterable !== false);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [columnFilters, pageSize, query]);
+
+  function handleSort(column) {
+    if (column.sortable === false) return;
+    setSort((current) => {
+      if (current.key !== column.key) return { key: column.key, direction: 'asc' };
+      if (current.direction === 'asc') return { key: column.key, direction: 'desc' };
+      return { key: '', direction: 'asc' };
+    });
+  }
+
+  function renderSortIcon(column) {
+    if (column.sortable === false) return null;
+    if (sort.key !== column.key) return <ArrowUpDown size={13} />;
+    return sort.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />;
+  }
+
+  function handleRowClick(event, row) {
+    if (!onRowClick) return;
+    const target = event.target instanceof Element ? event.target : event.currentTarget;
+    if (target.closest(interactiveRowClickSelector)) return;
+    onRowClick(row);
+  }
 
   return (
     <section className="workspace-card data-panel">
@@ -806,26 +891,75 @@ function DataTable({ actions, columns, onRowClick, rows, subtitle, title }) {
       <div className="table-scroll">
         <table className="data-table">
           <thead>
-            <tr>{normalizedColumns.map((column) => <th key={column.key}>{t(column.label || column.key, column.label || column.key)}</th>)}</tr>
+            <tr>
+              {normalizedColumns.map((column) => (
+                <th className={column.sortable === false ? '' : 'sortable'} key={column.key} onClick={() => handleSort(column)}>
+                  <span className="th-content">
+                    <span>{t(column.label || column.key, column.label || column.key)}</span>
+                    {renderSortIcon(column)}
+                  </span>
+                </th>
+              ))}
+              {onRowClick ? <th className="actions-cell">{t('actions')}</th> : null}
+            </tr>
+            {hasColumnFilters ? (
+              <tr className="table-filter-row">
+                {normalizedColumns.map((column) => (
+                  <th key={`${column.key}-filter`}>
+                    {column.filterable === false ? <span /> : (
+                      <input
+                        aria-label={t('filterColumn', { column: t(column.label || column.key, column.label || column.key) })}
+                        onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
+                        onClick={(event) => event.stopPropagation()}
+                        placeholder={t('filter')}
+                        value={columnFilters[column.key] || ''}
+                      />
+                    )}
+                  </th>
+                ))}
+                {onRowClick ? <th /> : null}
+              </tr>
+            ) : null}
           </thead>
           <tbody>
-            {filteredRows.length === 0 && (
+            {pagedRows.length === 0 && (
               <tr>
-                <td className="empty-cell" colSpan={normalizedColumns.length}>{t('noData')}</td>
+                <td className="empty-cell" colSpan={normalizedColumns.length + (onRowClick ? 1 : 0)}>
+                  <EmptyState message={t('emptyTableMessage')} title={t('noData')} />
+                </td>
               </tr>
             )}
-            {filteredRows.map((row, index) => (
-              <tr className={onRowClick ? 'clickable-row' : ''} key={value(row, 'id') || value(row, 'guid') || index} onClick={() => onRowClick?.(row)}>
+            {pagedRows.map((row, index) => (
+              <tr className={onRowClick ? 'clickable-row' : ''} key={value(row, 'id') || value(row, 'guid') || index} onClick={(event) => handleRowClick(event, row)}>
                 {normalizedColumns.map((column) => (
                   <td key={column.key}>
                     <CellValue columnKey={column.key} value={column.render ? column.render(row) : value(row, column.key)} />
                   </td>
                 ))}
+                {onRowClick ? (
+                  <td className="actions-cell">
+                    <ActionMenu
+                      items={[{
+                        icon: <Eye size={14} />,
+                        key: 'view',
+                        label: t('viewDetails'),
+                        onSelect: () => onRowClick(row)
+                      }]}
+                    />
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <Pagination
+        currentPage={displayPage}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={setPageSize}
+        pageSize={pageSize}
+        totalItems={sortedRows.length}
+      />
     </section>
   );
 }
