@@ -33,6 +33,8 @@ curl http://localhost:9000/v1/models
 
 ## Client
 
+See [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) for the full client setup flow.
+
 ```powershell
 dotnet run --project src/Xeno.Client -- init
 dotnet run --project src/Xeno.Client -- login -u admin@xeno
