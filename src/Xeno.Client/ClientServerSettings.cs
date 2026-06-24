@@ -35,9 +35,5 @@ namespace Xeno.Client
         /// </summary>
         public string? Token { get; set; } = null;
 
-        /// <summary>
-        /// Administrator API key.
-        /// </summary>
-        public string? AdminApiKey { get; set; } = null;
     }
 }

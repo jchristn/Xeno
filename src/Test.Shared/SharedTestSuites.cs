@@ -15,6 +15,7 @@ namespace Test.Shared
     using Xeno.Core;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
+    using Xeno.Core.Helpers;
     using Xeno.Core.Models;
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
@@ -69,6 +70,29 @@ namespace Test.Shared
                             if (settings.WebSocket == null) throw new InvalidOperationException("WebSocket settings missing.");
                             if (settings.Database == null) throw new InvalidOperationException("Database settings missing.");
                             if (settings.Logging == null) throw new InvalidOperationException("Logging settings missing.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "GeneratedIdsAreCompactAndSortable",
+                        displayName: "Generated IDs are compact and k-sortable",
+                        executeAsync: delegate
+                        {
+                            string[] prefixes = new[] { "aud_", "cred_", "mc_", "md_", "perm_", "req_", "rmap_", "role_", "sess_", "usr_", "xcl_", "xeno_" };
+                            foreach (string prefix in prefixes)
+                            {
+                                string id = IdGenerator.NewId(prefix);
+                                if (id.Length > IdGenerator.MaxIdLength) throw new InvalidOperationException("ID exceeded max length: " + id);
+                                if (!id.StartsWith(prefix, StringComparison.Ordinal)) throw new InvalidOperationException("ID prefix mismatch: " + id);
+                            }
+
+                            List<string> ids = Enumerable.Range(0, 64).Select(_ => IdGenerator.NewId("req_")).ToList();
+                            if (ids.Distinct(StringComparer.Ordinal).Count() != ids.Count) throw new InvalidOperationException("Generated IDs were not unique.");
+                            for (int i = 1; i < ids.Count; i++)
+                            {
+                                if (String.CompareOrdinal(ids[i - 1], ids[i]) > 0) throw new InvalidOperationException("Generated IDs were not k-sortable.");
+                            }
+
                             return Task.CompletedTask;
                         })
                 });
@@ -383,7 +407,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "Relay",
                         "WebSocketRequiresCredential",
-                        "WebSocket client connections require credential or API-key authentication",
+                        "WebSocket client connections require client credential authentication",
                         executeAsync: delegate { return RunWebSocketGateSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "Relay",
@@ -639,17 +663,6 @@ namespace Test.Shared
                         }
                     }
 
-                    using (ClientWebSocket apiKeySocket = new ClientWebSocket())
-                    {
-                        apiKeySocket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
-                        apiKeySocket.Options.SetRequestHeader("x-admin-key", settings.Auth.AdminApiKey);
-                        await apiKeySocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
-                        string? message = await ReceiveWebSocketTextAsync(apiKeySocket, clientTokenSource.Token).ConfigureAwait(false);
-                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.connected", StringComparison.OrdinalIgnoreCase))
-                        {
-                            throw new InvalidOperationException("API-key WebSocket was not accepted: " + message);
-                        }
-                    }
                 }
                 finally
                 {

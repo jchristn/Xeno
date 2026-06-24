@@ -26,9 +26,9 @@ namespace Xeno.Client
         public string Endpoint { get; set; } = "http://127.0.0.1:11434";
 
         /// <summary>
-        /// Optional upstream API key.
+        /// Optional upstream credential.
         /// </summary>
-        public string? ApiKey { get; set; } = null;
+        public string? Credential { get; set; } = null;
 
         /// <summary>
         /// Upstream request timeout in milliseconds.

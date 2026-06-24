@@ -10,7 +10,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 - The backend is multitenant.
 - Tenants, users, credentials, roles, permissions, audit records, clients, model definitions, model configurations, request history, analytics, settings, backup, and restore are first-class server resources.
 - A user may run `xeno login -u {username}`. The client prompts for the password, exchanges it for an access key and secret, and stores only that client credential.
-- WebSocket client connections require `x-access-key` plus `x-secret-key`, or `x-admin-key`; user passwords and bearer tokens are rejected for WebSocket control-plane connections.
+- WebSocket client connections require `x-access-key` plus `x-secret-key`; user passwords and bearer tokens are rejected for WebSocket control-plane connections.
 - The dashboard is an operator console, not a marketing page.
 - Connected clients are the execution units. There is no separate execution endpoint resource.
 - Request distribution is direct client selection by healthy connection, model availability, capacity, and current in-flight count.

@@ -17,9 +17,9 @@ namespace Xeno.Core.Enums
         SourceIP = 1,
 
         /// <summary>
-        /// Pin by API key or bearer token.
+        /// Pin by credential or bearer token.
         /// </summary>
-        ApiKey = 2,
+        Credential = 2,
 
         /// <summary>
         /// Pin by configured header.

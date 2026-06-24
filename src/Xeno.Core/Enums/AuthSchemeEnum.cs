@@ -22,11 +22,6 @@ namespace Xeno.Core.Enums
         Credential = 2,
 
         /// <summary>
-        /// System administrator API key.
-        /// </summary>
-        AdminApiKey = 3,
-
-        /// <summary>
         /// User password login bootstrap.
         /// </summary>
         Password = 4

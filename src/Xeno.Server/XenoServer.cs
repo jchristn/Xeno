@@ -17,6 +17,7 @@ namespace Xeno.Server
     using Xeno.Core;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
+    using Xeno.Core.Helpers;
     using Xeno.Core.Models;
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
@@ -909,7 +910,7 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Client tenant does not match authenticated tenant.");
             }
 
-            string clientId = TryGetString(root, "clientId") ?? "xcl_" + Guid.NewGuid().ToString("N");
+            string clientId = TryGetString(root, "clientId") ?? IdGenerator.NewId("xcl_");
             string name = TryGetString(root, "name") ?? clientId;
 
             XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
@@ -1140,25 +1141,8 @@ namespace Xeno.Server
             Dictionary<string, object?> body = ReadJsonObject(context);
             string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), context.Request.Headers.Get("x-access-key"));
             string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), context.Request.Headers.Get("x-secret-key"));
-            string adminApiKey = FirstNonEmpty(GetBodyString(body, "adminApiKey"), context.Request.Headers.Get("x-admin-key"));
 
             XenoPlatform platform = RequirePlatform();
-            if (!String.IsNullOrWhiteSpace(adminApiKey) && FixedTimeEquals(_Settings.Auth.AdminApiKey, adminApiKey))
-            {
-                User? adminUser = platform.Users.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
-                AuthTokenResult result = _Authentication.IssueToken(
-                    platform,
-                    _Settings.Auth,
-                    requestContext.TenantId,
-                    PrincipalTypeEnum.Administrator,
-                    adminUser?.Id,
-                    null,
-                    AuthSchemeEnum.AdminApiKey);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
             Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey, secretKey);
             if (credential == null)
             {
@@ -1213,7 +1197,7 @@ namespace Xeno.Server
             {
                 TenantId = tenantId,
                 UserId = user.Id,
-                AccessKey = "xeno_" + Guid.NewGuid().ToString("N"),
+                AccessKey = IdGenerator.NewId("xeno_"),
                 SecretKey = _Authentication.GenerateSecret(),
                 Active = true
             };
@@ -1264,7 +1248,7 @@ namespace Xeno.Server
                 userId = user?.Id ?? String.Empty;
             }
 
-            string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), "xeno_" + Guid.NewGuid().ToString("N"));
+            string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), IdGenerator.NewId("xeno_"));
             string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), _Authentication.GenerateSecret());
             return new Credential
             {
@@ -1291,7 +1275,6 @@ namespace Xeno.Server
             string sessionToken = FirstNonEmpty(bearerToken, tokenHeader);
             string accessKey = context.Request.Headers.Get("x-access-key") ?? String.Empty;
             string secretKey = context.Request.Headers.Get("x-secret-key") ?? String.Empty;
-            string adminApiKey = context.Request.Headers.Get("x-admin-key") ?? String.Empty;
 
             RequestContext requestContext = new RequestContext
             {
@@ -1325,17 +1308,6 @@ namespace Xeno.Server
                 return requestContext;
             }
 
-            if (!String.IsNullOrWhiteSpace(adminApiKey))
-            {
-                if (!FixedTimeEquals(_Settings.Auth.AdminApiKey, adminApiKey)) throw new UnauthorizedAccessException("Invalid administrator API key.");
-                User? adminUser = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
-                requestContext.IsAuthenticated = true;
-                requestContext.UserId = adminUser?.Id;
-                requestContext.PrincipalType = PrincipalTypeEnum.Administrator;
-                requestContext.AuthScheme = AuthSchemeEnum.AdminApiKey;
-                return requestContext;
-            }
-
             if (_Settings.Rest.RequireAuthentication)
             {
                 throw new UnauthorizedAccessException("Authentication is required.");
@@ -1356,12 +1328,11 @@ namespace Xeno.Server
             string tokenHeader = context.Request.Headers.Get("x-token") ?? String.Empty;
             if (!String.IsNullOrWhiteSpace(authorization) || !String.IsNullOrWhiteSpace(tokenHeader))
             {
-                throw new UnauthorizedAccessException("WebSocket clients must authenticate with x-access-key/x-secret-key or x-admin-key, not bearer tokens or user passwords.");
+                throw new UnauthorizedAccessException("WebSocket clients must authenticate with x-access-key/x-secret-key, not bearer tokens or user passwords.");
             }
 
             string accessKey = context.Request.Headers.Get("x-access-key") ?? String.Empty;
             string secretKey = context.Request.Headers.Get("x-secret-key") ?? String.Empty;
-            string adminApiKey = context.Request.Headers.Get("x-admin-key") ?? String.Empty;
             RequestContext requestContext = new RequestContext
             {
                 TenantId = tenantId,
@@ -1381,18 +1352,7 @@ namespace Xeno.Server
                 return requestContext;
             }
 
-            if (!String.IsNullOrWhiteSpace(adminApiKey))
-            {
-                if (!FixedTimeEquals(_Settings.Auth.AdminApiKey, adminApiKey)) throw new UnauthorizedAccessException("Invalid administrator API key.");
-                User? adminUser = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
-                requestContext.IsAuthenticated = true;
-                requestContext.UserId = adminUser?.Id;
-                requestContext.PrincipalType = PrincipalTypeEnum.Administrator;
-                requestContext.AuthScheme = AuthSchemeEnum.AdminApiKey;
-                return requestContext;
-            }
-
-            throw new UnauthorizedAccessException("WebSocket authentication requires a client access key/secret or administrator API key.");
+            throw new UnauthorizedAccessException("WebSocket authentication requires a client access key and secret key.");
         }
 
         private static string ResolveTenantId(HttpContextBase context, string? bodyTenantId)

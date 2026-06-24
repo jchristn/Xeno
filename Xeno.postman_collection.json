@@ -13,16 +13,20 @@
       "value": "ten_default"
     },
     {
-      "key": "adminApiKey",
-      "value": "xenoadmin"
-    },
-    {
       "key": "username",
       "value": "admin@xeno"
     },
     {
       "key": "password",
       "value": "password"
+    },
+    {
+      "key": "accessKey",
+      "value": "default"
+    },
+    {
+      "key": "secretKey",
+      "value": "default"
     }
   ],
   "item": [
@@ -184,7 +188,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\"adminApiKey\":\"{{adminApiKey}}\"}"
+          "raw": "{\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"{{secretKey}}\"}"
         },
         "url": "{{baseUrl}}/v1.0/api/auth/token"
       }

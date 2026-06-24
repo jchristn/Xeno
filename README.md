@@ -11,7 +11,7 @@ The first implementation includes:
 - multitenant server state with seeded tenant, user, credential, connected clients, and advertised models;
 - OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
 - management routes for health, OpenAPI, clients, tenants, users, credentials, settings, request history, and token bootstrap;
-- a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client credentials or an administrator API key;
+- a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client access-key/secret credentials;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
 - a React/Vite dashboard under `dashboard/`;
 - Touchstone shared tests with automated, xUnit, and NUnit runners.

@@ -9,6 +9,7 @@ namespace Xeno.Client
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Helpers;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -16,7 +17,9 @@ namespace Xeno.Client
     /// </summary>
     public static class Program
     {
+        private const string ClientVersion = "0.1.0";
         private static bool _UseColors = true;
+        private static bool _UseJson = false;
 
         /// <summary>
         /// Run the Xeno client CLI.
@@ -43,7 +46,8 @@ namespace Xeno.Client
                     switch (command)
                     {
                         case "version":
-                            WriteInfo("xeno 0.1.0");
+                            if (_UseJson) WriteJson(new { version = ClientVersion });
+                            else WriteInfo("xeno " + ClientVersion);
                             return 0;
                         case "init":
                             settings.Save();
@@ -65,7 +69,8 @@ namespace Xeno.Client
                         case "model":
                             return HandleModel(args, settings);
                         case "inventory":
-                            Console.WriteLine(JsonUtil.Serialize(settings.BuildInventory(), true));
+                            if (_UseJson) WriteJson(settings.BuildInventory());
+                            else PrintInventory(settings);
                             return 0;
                         case "status":
                             PrintStatus(settings);
@@ -111,7 +116,8 @@ namespace Xeno.Client
         {
             if (args.Length >= 2 && args[1] == "show")
             {
-                Console.WriteLine(JsonUtil.Serialize(settings, true));
+                if (_UseJson) WriteJson(settings);
+                else PrintConfig(settings);
                 return 0;
             }
 
@@ -174,18 +180,13 @@ namespace Xeno.Client
             {
                 settings.Server.Token = args[2];
                 settings.Save();
-                WriteWarning("Saved a REST token. WebSocket connections require xeno login, xeno set-auth --access-key/--secret-key, or xeno set-auth --api-key.");
+                WriteWarning("Saved a REST token. WebSocket connections require xeno login or xeno set-auth --access-key/--secret-key.");
                 return 0;
             }
 
             if (args.Length >= 4 && args[1] == "set-credential")
             {
                 return HandleSetAuth(new[] { "set-auth", "--access-key", args[2], "--secret-key", args[3] }, settings);
-            }
-
-            if (args.Length >= 3 && args[1] == "set-api-key")
-            {
-                return HandleSetAuth(new[] { "set-auth", "--api-key", args[2] }, settings);
             }
 
             PrintAuthHelp();
@@ -196,7 +197,6 @@ namespace Xeno.Client
         {
             string? accessKey = null;
             string? secretKey = null;
-            string? apiKey = null;
             bool clear = false;
 
             if (args.Length == 3 && !args[1].StartsWith("-", StringComparison.Ordinal) && !args[2].StartsWith("-", StringComparison.Ordinal))
@@ -225,31 +225,15 @@ namespace Xeno.Client
                     continue;
                 }
 
-                if (args[i] == "--api-key" && i + 1 < args.Length)
-                {
-                    apiKey = args[++i];
-                }
             }
 
             if (clear)
             {
                 settings.Server.AccessKey = null;
                 settings.Server.SecretKey = null;
-                settings.Server.AdminApiKey = null;
                 settings.Server.Token = null;
                 settings.Save();
                 WriteSuccess("Cleared stored server authentication.");
-                return 0;
-            }
-
-            if (!String.IsNullOrWhiteSpace(apiKey))
-            {
-                settings.Server.AdminApiKey = apiKey;
-                settings.Server.AccessKey = null;
-                settings.Server.SecretKey = null;
-                settings.Server.Token = null;
-                settings.Save();
-                WriteSuccess("Saved administrator API key for server authentication.");
                 return 0;
             }
 
@@ -257,7 +241,6 @@ namespace Xeno.Client
             {
                 settings.Server.AccessKey = accessKey;
                 settings.Server.SecretKey = secretKey;
-                settings.Server.AdminApiKey = null;
                 settings.Server.Token = null;
                 settings.Save();
                 WriteSuccess("Saved access key and secret key for server authentication.");
@@ -399,7 +382,7 @@ namespace Xeno.Client
                     if (args[i] == "--name") runner.Name = args[i + 1];
                     if (args[i] == "--provider") runner.Provider = args[i + 1];
                     if (args[i] == "--endpoint") runner.Endpoint = args[i + 1];
-                    if (args[i] == "--api-key") runner.ApiKey = args[i + 1];
+                    if (args[i] == "--credential") runner.Credential = args[i + 1];
                 }
 
                 if (String.IsNullOrWhiteSpace(runner.Name) || String.IsNullOrWhiteSpace(runner.Provider) || String.IsNullOrWhiteSpace(runner.Endpoint))
@@ -414,7 +397,7 @@ namespace Xeno.Client
                 return 0;
             }
 
-            WriteError("Usage: xeno provider list | test --name <name> | add --name <name> --provider <provider> --endpoint <url> [--api-key <key>]");
+            WriteError("Usage: xeno provider list | test --name <name> | add --name <name> --provider <provider> --endpoint <url> [--credential <value>]");
             return 1;
         }
 
@@ -464,7 +447,7 @@ namespace Xeno.Client
             EnsureClientId(settings);
             if (!HasWebSocketCredential(settings))
             {
-                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key/API key before connecting.");
+                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key and secret key before connecting.");
             }
 
             while (!token.IsCancellationRequested)
@@ -506,7 +489,7 @@ namespace Xeno.Client
                         if (result.MessageType == WebSocketMessageType.Close) return;
 
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        Console.WriteLine(message);
+                        PrintServerMessage(message);
                         await HandleServerMessageAsync(socket, settings, message, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!token.IsCancellationRequested)
@@ -554,9 +537,9 @@ namespace Xeno.Client
                 using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
                 {
                     httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
-                    if (!String.IsNullOrWhiteSpace(runner.ApiKey))
+                    if (!String.IsNullOrWhiteSpace(runner.Credential))
                     {
-                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.ApiKey);
+                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
                     }
 
                     if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
@@ -593,11 +576,6 @@ namespace Xeno.Client
                 socket.Options.SetRequestHeader("x-secret-key", settings.Server.SecretKey);
             }
 
-            if (!String.IsNullOrWhiteSpace(settings.Server.AdminApiKey))
-            {
-                socket.Options.SetRequestHeader("x-admin-key", settings.Server.AdminApiKey);
-            }
-
             socket.Options.SetRequestHeader("x-tenant-guid", settings.TenantId);
         }
 
@@ -605,15 +583,14 @@ namespace Xeno.Client
         {
             bool hasDirectCredential = !String.IsNullOrWhiteSpace(settings.Server.AccessKey) &&
                                        !String.IsNullOrWhiteSpace(settings.Server.SecretKey);
-            bool hasApiKey = !String.IsNullOrWhiteSpace(settings.Server.AdminApiKey);
-            return hasDirectCredential || hasApiKey;
+            return hasDirectCredential;
         }
 
         private static string EnsureClientId(ClientSettings settings)
         {
             if (String.IsNullOrWhiteSpace(settings.ClientId))
             {
-                settings.ClientId = "xcl_" + Guid.NewGuid().ToString("N");
+                settings.ClientId = IdGenerator.NewId("xcl_");
                 settings.Save();
             }
 
@@ -667,9 +644,9 @@ namespace Xeno.Client
             using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, endpoint))
             {
                 httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
-                if (!String.IsNullOrWhiteSpace(runner.ApiKey))
+                if (!String.IsNullOrWhiteSpace(runner.Credential))
                 {
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.ApiKey);
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
                 }
 
                 try
@@ -698,6 +675,11 @@ namespace Xeno.Client
             await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
         }
 
+        private static void WriteJson(object value)
+        {
+            Console.WriteLine(JsonUtil.Serialize(value, true));
+        }
+
         private static string? TryGetString(JsonElement element, string propertyName)
         {
             if (!element.TryGetProperty(propertyName, out JsonElement property)) return null;
@@ -708,6 +690,7 @@ namespace Xeno.Client
         private static string[] ApplyGlobalOptions(string[] args, ClientSettings settings)
         {
             _UseColors = settings.UseColors;
+            _UseJson = false;
             List<string> normalized = new List<string>();
             foreach (string arg in args)
             {
@@ -723,27 +706,165 @@ namespace Xeno.Client
                     continue;
                 }
 
+                if (String.Equals(arg, "--json", StringComparison.OrdinalIgnoreCase))
+                {
+                    _UseJson = true;
+                    continue;
+                }
+
                 normalized.Add(arg);
             }
 
             return normalized.ToArray();
         }
 
+        private static void PrintConfig(ClientSettings settings)
+        {
+            WriteInfo("Xeno client configuration");
+            Console.WriteLine("  File:       " + ClientSettings.SettingsFile);
+            Console.WriteLine("  Name:       " + settings.Name);
+            Console.WriteLine("  Client ID:  " + DisplayValue(settings.ClientId, "(created on first connect)"));
+            Console.WriteLine("  Tenant:     " + settings.TenantId);
+            Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
+            Console.WriteLine();
+            Console.WriteLine("Server");
+            Console.WriteLine("  WebSocket:  " + settings.Server.Url);
+            Console.WriteLine("  REST:       " + DisplayValue(settings.Server.RestUrl, "(derived from WebSocket URL)"));
+            Console.WriteLine("  Access key: " + DisplayValue(settings.Server.AccessKey, "(not set)"));
+            Console.WriteLine("  Secret key: " + MaskSecret(settings.Server.SecretKey));
+            Console.WriteLine("  REST token: " + MaskSecret(settings.Server.Token));
+            Console.WriteLine();
+            PrintProviders(settings);
+        }
+
+        private static void PrintInventory(ClientSettings settings)
+        {
+            WriteInfo("Advertised client inventory");
+            Console.WriteLine("  Machine:    " + Environment.MachineName);
+            Console.WriteLine("  OS:         " + Environment.OSVersion);
+            Console.WriteLine("  Arch:       " + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+            Console.WriteLine("  Processors: " + Environment.ProcessorCount);
+            Console.WriteLine("  Memory:     " + FormatBytes(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes));
+            Console.WriteLine("  Version:    " + ClientVersion);
+            Console.WriteLine();
+            PrintProviders(settings);
+            Console.WriteLine();
+            PrintModels(settings);
+        }
+
+        private static void PrintServerMessage(string message)
+        {
+            if (_UseJson)
+            {
+                Console.WriteLine(message);
+                return;
+            }
+
+            try
+            {
+                using (JsonDocument document = JsonDocument.Parse(message))
+                {
+                    JsonElement root = document.RootElement;
+                    string? type = TryGetString(root, "type");
+                    if (String.Equals(type, "server.heartbeat", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+
+                    if (String.Equals(type, "server.connected", StringComparison.OrdinalIgnoreCase))
+                    {
+                        WriteSuccess("Connected to Xeno server.");
+                        return;
+                    }
+
+                    if (String.Equals(type, "server.registered", StringComparison.OrdinalIgnoreCase))
+                    {
+                        WriteSuccess("Client registered with Xeno server.");
+                        return;
+                    }
+
+                    if (String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string requestId = TryGetString(root, "requestId") ?? "(no request ID)";
+                        string method = TryGetString(root, "method") ?? "POST";
+                        string path = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
+                        string source = TryGetString(root, "source") ?? TryGetString(root, "runnerName") ?? "(default provider)";
+                        WriteInfo("Received request " + requestId + ": " + method + " " + path + " via " + source + ".");
+                        return;
+                    }
+
+                    if (String.Equals(type, "server.error", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(type, "server.unauthorized", StringComparison.OrdinalIgnoreCase))
+                    {
+                        WriteError(TryGetString(root, "message") ?? "The Xeno server rejected the client message.");
+                        return;
+                    }
+
+                    if (!String.IsNullOrWhiteSpace(type))
+                    {
+                        WriteInfo("Server message: " + type + ".");
+                        return;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+            }
+
+            WriteInfo("Received a server message.");
+        }
+
         private static void PrintStatus(ClientSettings settings)
         {
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    name = settings.Name,
+                    clientId = settings.ClientId,
+                    tenantId = settings.TenantId,
+                    websocketUrl = settings.Server.Url,
+                    restUrl = settings.Server.RestUrl,
+                    authenticated = HasWebSocketCredential(settings),
+                    auth = DescribeAuth(settings),
+                    providerCount = settings.Runners.Count,
+                    colors = settings.UseColors
+                });
+                return;
+            }
+
             WriteInfo("Xeno client status");
             Console.WriteLine("  Name:       " + settings.Name);
             Console.WriteLine("  Client ID:  " + (String.IsNullOrWhiteSpace(settings.ClientId) ? "(created on first connect)" : settings.ClientId));
             Console.WriteLine("  Tenant:     " + settings.TenantId);
             Console.WriteLine("  WebSocket:  " + settings.Server.Url);
-            Console.WriteLine("  REST:       " + settings.Server.RestUrl);
+            Console.WriteLine("  REST:       " + DisplayValue(settings.Server.RestUrl, "(derived from WebSocket URL)"));
             Console.WriteLine("  Auth:       " + DescribeAuth(settings));
             Console.WriteLine("  Providers:  " + settings.Runners.Count);
-            Console.WriteLine("  Colors:     " + (settings.UseColors ? "on" : "off"));
+            Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
         }
 
         private static void PrintProviders(ClientSettings settings)
         {
+            if (_UseJson)
+            {
+                WriteJson(settings.Runners.ConvertAll(runner => new
+                {
+                    name = runner.Name,
+                    provider = runner.Provider,
+                    endpoint = runner.Endpoint,
+                    timeoutMs = runner.TimeoutMs,
+                    credentialConfigured = !String.IsNullOrWhiteSpace(runner.Credential),
+                    models = runner.Models.ConvertAll(model => new
+                    {
+                        name = model.Name,
+                        supportsCompletions = model.SupportsCompletions,
+                        supportsEmbeddings = model.SupportsEmbeddings
+                    })
+                }));
+                return;
+            }
+
             if (settings.Runners.Count == 0)
             {
                 WriteInfo("No provider endpoints are configured.");
@@ -753,12 +874,39 @@ namespace Xeno.Client
             WriteInfo("Configured provider endpoints");
             foreach (ClientRunnerSettings runner in settings.Runners)
             {
-                Console.WriteLine("  - " + runner.Name + " [" + runner.Provider + "] " + runner.Endpoint + " (" + runner.Models.Count + " models)");
+                Console.WriteLine("  - " + runner.Name);
+                Console.WriteLine("    Type:       " + runner.Provider);
+                Console.WriteLine("    Endpoint:   " + runner.Endpoint);
+                Console.WriteLine("    Timeout:    " + runner.TimeoutMs + " ms");
+                Console.WriteLine("    Credential: " + (String.IsNullOrWhiteSpace(runner.Credential) ? "not configured" : "configured"));
+                Console.WriteLine("    Models:     " + runner.Models.Count);
             }
         }
 
         private static void PrintModels(ClientSettings settings)
         {
+            if (_UseJson)
+            {
+                List<object> models = new List<object>();
+                foreach (ClientRunnerSettings runner in settings.Runners)
+                {
+                    foreach (ClientModelSettings model in runner.Models)
+                    {
+                        models.Add(new
+                        {
+                            name = model.Name,
+                            providerName = runner.Name,
+                            provider = runner.Provider,
+                            supportsCompletions = model.SupportsCompletions,
+                            supportsEmbeddings = model.SupportsEmbeddings
+                        });
+                    }
+                }
+
+                WriteJson(models);
+                return;
+            }
+
             bool any = false;
             foreach (ClientRunnerSettings runner in settings.Runners)
             {
@@ -766,7 +914,10 @@ namespace Xeno.Client
                 {
                     if (!any) WriteInfo("Configured models");
                     any = true;
-                    Console.WriteLine("  - " + model.Name + " via " + runner.Name + " [" + runner.Provider + "]");
+                    Console.WriteLine("  - " + model.Name);
+                    Console.WriteLine("    Provider:    " + runner.Name + " [" + runner.Provider + "]");
+                    Console.WriteLine("    Completions: " + FormatBool(model.SupportsCompletions));
+                    Console.WriteLine("    Embeddings:  " + FormatBool(model.SupportsEmbeddings));
                 }
             }
 
@@ -780,9 +931,40 @@ namespace Xeno.Client
                 return "access key " + settings.Server.AccessKey;
             }
 
-            if (!String.IsNullOrWhiteSpace(settings.Server.AdminApiKey)) return "administrator API key";
             if (!String.IsNullOrWhiteSpace(settings.Server.Token)) return "REST token only";
             return "not configured";
+        }
+
+        private static string DisplayValue(string? value, string emptyText)
+        {
+            return String.IsNullOrWhiteSpace(value) ? emptyText : value;
+        }
+
+        private static string MaskSecret(string? value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return "(not set)";
+            if (value.Length <= 4) return "configured";
+            return "configured (..." + value.Substring(value.Length - 4) + ")";
+        }
+
+        private static string FormatBool(bool value)
+        {
+            return value ? "yes" : "no";
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "unknown";
+            string[] units = { "B", "KB", "MB", "GB", "TB" };
+            double value = bytes;
+            int unit = 0;
+            while (value >= 1024 && unit < units.Length - 1)
+            {
+                value /= 1024;
+                unit++;
+            }
+
+            return value.ToString("0.##") + " " + units[unit];
         }
 
         private static string FormatHttpError(HttpResponseMessage response, string responseBody)
@@ -821,8 +1003,6 @@ namespace Xeno.Client
             Console.WriteLine("      Prompt for a password and store only the returned access key/secret.");
             Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
             Console.WriteLine("      Store an existing client credential for WebSocket and API use.");
-            Console.WriteLine("  xeno set-auth --api-key <key>");
-            Console.WriteLine("      Store an administrator API key.");
             Console.WriteLine("  xeno set-auth --clear");
             Console.WriteLine("      Remove stored authentication.");
         }
@@ -863,7 +1043,7 @@ namespace Xeno.Client
 
         private static void PrintHelp()
         {
-            WriteInfo("xeno 0.1.0");
+            WriteInfo("xeno " + ClientVersion);
             Console.WriteLine("Usage:");
             Console.WriteLine("  xeno init");
             Console.WriteLine("  xeno config show");
@@ -872,8 +1052,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno server set-rest-url <url>");
             Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
             Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
-            Console.WriteLine("  xeno set-auth --api-key <key>");
-            Console.WriteLine("  xeno provider add --name <name> --provider <provider> --endpoint <url> [--api-key <key>]");
+            Console.WriteLine("  xeno provider add --name <name> --provider <provider> --endpoint <url> [--credential <value>]");
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("  xeno provider list");
             Console.WriteLine("  xeno model add --provider <name> --name <model>");
@@ -885,8 +1064,9 @@ namespace Xeno.Client
             Console.WriteLine("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");
+            Console.WriteLine("  --json        Emit machine-readable JSON for supported commands.");
             Console.WriteLine();
-            Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key/secret or administrator API key.");
+            Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key/secret.");
         }
     }
 }

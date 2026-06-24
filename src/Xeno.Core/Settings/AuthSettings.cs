@@ -20,11 +20,6 @@ namespace Xeno.Core.Settings
         public string SigningKey { get; set; } = "development-only-change-me";
 
         /// <summary>
-        /// Admin API key.
-        /// </summary>
-        public string AdminApiKey { get; set; } = "xenoadmin";
-
-        /// <summary>
         /// Session lifetime in minutes.
         /// </summary>
         public int SessionMinutes { get; set; } = 60;
