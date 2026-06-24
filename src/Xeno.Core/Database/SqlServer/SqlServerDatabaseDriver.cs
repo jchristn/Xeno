@@ -40,6 +40,16 @@ namespace Xeno.Core.Database.SqlServer
                 using (SqlCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
+IF OBJECT_ID(N'dbo.schema_migrations', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.schema_migrations
+    (
+        id nvarchar(64) NOT NULL PRIMARY KEY,
+        name nvarchar(256) NOT NULL,
+        applied_utc datetime2 NOT NULL
+    );
+END;
+
 IF OBJECT_ID(N'dbo.xeno_platform_state', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.xeno_platform_state
@@ -50,6 +60,12 @@ BEGIN
         updated_utc datetime2 NOT NULL,
         active bit NOT NULL DEFAULT 1
     );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE id = N'0001')
+BEGIN
+    INSERT INTO dbo.schema_migrations (id, name, applied_utc)
+    VALUES (N'0001', N'initial_platform_state', SYSUTCDATETIME());
 END;
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);

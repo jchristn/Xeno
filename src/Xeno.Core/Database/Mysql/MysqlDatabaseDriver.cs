@@ -40,6 +40,13 @@ namespace Xeno.Core.Database.Mysql
                 using (MySqlCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
+CREATE TABLE IF NOT EXISTS schema_migrations
+(
+    id varchar(64) PRIMARY KEY,
+    name varchar(256) NOT NULL,
+    applied_utc datetime(6) NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS xeno_platform_state
 (
     id varchar(64) PRIMARY KEY,
@@ -48,6 +55,9 @@ CREATE TABLE IF NOT EXISTS xeno_platform_state
     updated_utc datetime(6) NOT NULL,
     active tinyint(1) NOT NULL DEFAULT 1
 );
+
+INSERT IGNORE INTO schema_migrations (id, name, applied_utc)
+VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }

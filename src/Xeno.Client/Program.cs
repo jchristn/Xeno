@@ -47,7 +47,7 @@ namespace Xeno.Client
                 case "auth":
                     return HandleAuth(args, settings);
                 case "runner":
-                    return HandleRunner(args, settings);
+                    return await HandleRunnerAsync(args, settings).ConfigureAwait(false);
                 case "model":
                     return HandleModel(args, settings);
                 case "inventory":
@@ -114,12 +114,32 @@ namespace Xeno.Client
             return 1;
         }
 
-        private static int HandleRunner(string[] args, ClientSettings settings)
+        private static async Task<int> HandleRunnerAsync(string[] args, ClientSettings settings)
         {
             if (args.Length >= 2 && args[1] == "list")
             {
                 Console.WriteLine(JsonUtil.Serialize(settings.Runners, true));
                 return 0;
+            }
+
+            if (args.Length >= 4 && args[1] == "test")
+            {
+                string runnerName = String.Empty;
+                for (int i = 2; i < args.Length - 1; i += 2)
+                {
+                    if (args[i] == "--name") runnerName = args[i + 1];
+                }
+
+                ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                if (runner == null)
+                {
+                    Console.WriteLine("Runner not found.");
+                    return 1;
+                }
+
+                bool success = await TestRunnerAsync(runner, CancellationToken.None).ConfigureAwait(false);
+                Console.WriteLine(success ? "Runner reachable." : "Runner did not respond successfully.");
+                return success ? 0 : 2;
             }
 
             if (args.Length >= 8 && args[1] == "add")
@@ -130,13 +150,14 @@ namespace Xeno.Client
                     if (args[i] == "--name") runner.Name = args[i + 1];
                     if (args[i] == "--provider") runner.Provider = args[i + 1];
                     if (args[i] == "--endpoint") runner.Endpoint = args[i + 1];
+                    if (args[i] == "--api-key") runner.ApiKey = args[i + 1];
                 }
                 settings.Runners.Add(runner);
                 settings.Save();
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno runner list | add --name <name> --provider <provider> --endpoint <url>");
+            Console.WriteLine("Usage: xeno runner list | test --name <name> | add --name <name> --provider <provider> --endpoint <url> [--api-key <key>]");
             return 1;
         }
 
@@ -188,6 +209,7 @@ namespace Xeno.Client
                 {
                     using (ClientWebSocket socket = new ClientWebSocket())
                     {
+                        ApplyServerAuthentication(socket, settings);
                         await socket.ConnectAsync(new Uri(settings.Server.Url), token).ConfigureAwait(false);
                         await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventory() }, token).ConfigureAwait(false);
                         await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
@@ -267,6 +289,12 @@ namespace Xeno.Client
                 using (HttpClient httpClient = new HttpClient())
                 using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
                 {
+                    httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
+                    if (!String.IsNullOrWhiteSpace(runner.ApiKey))
+                    {
+                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.ApiKey);
+                    }
+
                     if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
                     {
                         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -285,6 +313,58 @@ namespace Xeno.Client
                         contentType = result.Content.Headers.ContentType?.ToString(),
                         body = content
                     };
+                }
+            }
+        }
+
+        private static void ApplyServerAuthentication(ClientWebSocket socket, ClientSettings settings)
+        {
+            if (!String.IsNullOrWhiteSpace(settings.Server.Token))
+            {
+                socket.Options.SetRequestHeader("Authorization", "Bearer " + settings.Server.Token);
+            }
+
+            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey))
+            {
+                socket.Options.SetRequestHeader("x-access-key", settings.Server.AccessKey);
+            }
+
+            if (!String.IsNullOrWhiteSpace(settings.Server.SecretKey))
+            {
+                socket.Options.SetRequestHeader("x-secret-key", settings.Server.SecretKey);
+            }
+
+            socket.Options.SetRequestHeader("x-tenant-guid", settings.TenantId);
+        }
+
+        private static async Task<bool> TestRunnerAsync(ClientRunnerSettings runner, CancellationToken token)
+        {
+            string relativePath = String.Equals(runner.Provider, "Ollama", StringComparison.OrdinalIgnoreCase) ? "/api/tags" : "/v1/models";
+            string endpoint = runner.Endpoint.TrimEnd('/') + relativePath;
+            using (HttpClient httpClient = new HttpClient())
+            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, endpoint))
+            {
+                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
+                if (!String.IsNullOrWhiteSpace(runner.ApiKey))
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.ApiKey);
+                }
+
+                try
+                {
+                    HttpResponseMessage result = await httpClient.SendAsync(request, token).ConfigureAwait(false);
+                    using (result)
+                    {
+                        return result.IsSuccessStatusCode;
+                    }
+                }
+                catch (HttpRequestException)
+                {
+                    return false;
+                }
+                catch (TaskCanceledException)
+                {
+                    return false;
                 }
             }
         }
@@ -313,6 +393,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno auth set-token <token>");
             Console.WriteLine("  xeno auth set-credential <access-key> <secret-key>");
             Console.WriteLine("  xeno runner add --name <name> --provider <provider> --endpoint <url>");
+            Console.WriteLine("  xeno runner test --name <name>");
             Console.WriteLine("  xeno runner list");
             Console.WriteLine("  xeno model add --runner <name> --name <model>");
             Console.WriteLine("  xeno model list");

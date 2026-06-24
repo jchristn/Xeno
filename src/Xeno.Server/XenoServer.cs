@@ -4,6 +4,8 @@ namespace Xeno.Server
     using System.Collections.Generic;
     using System.Linq;
     using System.Net.WebSockets;
+    using System.Security.Cryptography;
+    using System.Text;
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
@@ -30,6 +32,7 @@ namespace Xeno.Server
         private readonly object _PendingResponsesLock = new object();
         private readonly Dictionary<string, ClientConnection> _ClientConnections = new Dictionary<string, ClientConnection>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, TaskCompletionSource<string>> _PendingClientResponses = new Dictionary<string, TaskCompletionSource<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly AuthenticationService _Authentication = new AuthenticationService();
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
         private bool _Disposed;
@@ -154,15 +157,32 @@ namespace Xeno.Server
         {
             RegisterStaticRoute(HttpMethod.GET, "/", "Health check", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/health", "Health check", "Health");
+            RegisterStaticRoute(HttpMethod.GET, "/metrics", "Prometheus-style metrics", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/health", "Health check", "Health");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token", "Create token", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/token", "Create token", "Authentication");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/token/details", "Token details", "Authentication");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/auth/token/details", "Token details", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token/refresh", "Refresh token", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/token/refresh", "Refresh token", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/logout", "Logout", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/logout", "Logout", "Authentication");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/tenants", "List tenants", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/tenants", "List tenants", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/users", "List users", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/users", "List users", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/credentials", "List credentials", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/credentials", "List credentials", "Tenants");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/credentials", "Create credential", "Tenants");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/credentials", "Create credential", "Tenants");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/roles", "List roles", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/roles", "List roles", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/permissions", "List permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/permissions", "List permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/effective-permissions", "List effective permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/effective-permissions", "List effective permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/audit", "List audit records", "Audit");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/audit", "List audit records", "Audit");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/clients", "List clients", "Clients");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/clients", "List clients", "Clients");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelrunnerendpoints", "List model runner endpoints", "Routing");
@@ -173,13 +193,30 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-configurations", "List model configurations", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/loadbalancingpolicies", "List load-balancing policies", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/load-balancing-policies", "List load-balancing policies", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/loadbalancingpolicies/metrics-catalog", "Load-balancing metrics catalog", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/load-balancing-policies/metrics-catalog", "Load-balancing metrics catalog", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/loadbalancingpolicies/validate", "Validate load-balancing policy", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/load-balancing-policies/validate", "Validate load-balancing policy", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelaccesspolicies", "List model access policies", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-access-policies", "List model access policies", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelaccesspolicies/evaluate", "Evaluate model access", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-access-policies/evaluate", "Evaluate model access", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelaccesspolicies/validate", "Validate model access policy", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-access-policies/validate", "Validate model access policy", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunners", "List virtual model runners", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runners", "List virtual model runners", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunners/effective", "Effective virtual model runner configuration", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runners/effective", "Effective virtual model runner configuration", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/virtualmodelrunners/load-model", "Load model through virtual model runner", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/virtual-model-runners/load-model", "Load model through virtual model runner", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunnerreservations", "List virtual model runner reservations", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runner-reservations", "List virtual model runner reservations", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunnerreservations/effective", "Effective reservation state", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runner-reservations/effective", "Effective reservation state", "Routing");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/virtual-model-runners/explain-routing", "Explain routing", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/virtualmodelrunners/explain-routing", "Explain routing", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelrunnerendpoints/load-model", "Load model through endpoint", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-runner-endpoints/load-model", "Load model through endpoint", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/openai/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.POST, "/v1/chat/completions", "Create chat completion", "OpenAI");
@@ -191,6 +228,17 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory", "List request history", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history", "List request history", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/summary", "Request history summary", "Request History");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory/summary", "Request history summary", "Request History");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/requesthistory/bulk", "Bulk delete request history", "Request History");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/request-history/bulk", "Bulk delete request history", "Request History");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory/analytics/overview", "Request analytics overview", "Request History");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/analytics/overview", "Request analytics overview", "Request History");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/analytics/overview", "Analytics overview", "Analytics");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/analytics/overview", "Analytics overview", "Analytics");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/backup", "Backup platform state", "Backup");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/backup", "Backup platform state", "Backup");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/restore", "Restore platform state", "Backup");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/restore", "Restore platform state", "Backup");
             _Webserver.Routes.PreAuthentication.Parameter.Add(
                 HttpMethod.DELETE,
                 "/v1.0/api/request-history/{id}",
@@ -289,6 +337,12 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && path.Equals("/metrics", StringComparison.OrdinalIgnoreCase))
+            {
+                await SendMetricsAsync(context).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && path.Equals("/swagger", StringComparison.OrdinalIgnoreCase))
             {
                 context.Response.ContentType = "text/html";
@@ -306,30 +360,127 @@ namespace Xeno.Server
 
             if (method == "POST" && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
             {
-                await SendJsonAsync(context, new { token = "dev-token", tokenType = "Bearer", tenantId = requestContext.TenantId, expiresUtc = DateTime.UtcNow.AddHours(1) }).ConfigureAwait(false);
+                await HandleCreateTokenAsync(context, requestContext, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/auth/token/details", "/v1.0/api/auth/token/details"))
+            {
+                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                AuthSession? session = String.IsNullOrWhiteSpace(requestContext.SessionId)
+                    ? null
+                    : RequirePlatform().AuthSessions.FirstOrDefault(item => item.Id == requestContext.SessionId && item.TenantId == requestContext.TenantId);
+                await SendJsonAsync(context, new
+                {
+                    requestContext.IsAuthenticated,
+                    requestContext.TenantId,
+                    requestContext.UserId,
+                    requestContext.CredentialId,
+                    requestContext.SessionId,
+                    requestContext.PrincipalType,
+                    requestContext.AuthScheme,
+                    expiresUtc = session?.ExpiresUtc
+                }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/auth/token/refresh", "/v1.0/api/auth/token/refresh"))
+            {
+                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                AuthTokenResult result = _Authentication.IssueToken(
+                    RequirePlatform(),
+                    _Settings.Auth,
+                    requestContext.TenantId,
+                    requestContext.PrincipalType == PrincipalTypeEnum.None ? PrincipalTypeEnum.User : requestContext.PrincipalType,
+                    requestContext.UserId,
+                    requestContext.CredentialId,
+                    AuthSchemeEnum.Bearer);
+                if (!String.IsNullOrWhiteSpace(requestContext.SessionId)) _Authentication.RevokeSession(RequirePlatform(), requestContext.SessionId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/auth/logout", "/v1.0/api/auth/logout"))
+            {
+                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                bool revoked = _Authentication.RevokeSession(RequirePlatform(), requestContext.SessionId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { revoked }).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
             {
+                await RequirePermissionAsync(requestContext, "Tenants", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Tenants).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
             {
+                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Users.Where(item => item.TenantId == requestContext.TenantId || requestContext.TenantId == Constants.DefaultTenantId).ToList()).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
             {
+                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Credentials.Where(item => item.TenantId == requestContext.TenantId).Select(RedactCredential).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
+            {
+                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                Credential credential = CreateCredential(requestContext, context);
+                RequirePlatform().Credentials.Add(credential);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new
+                {
+                    credential.Id,
+                    credential.TenantId,
+                    credential.UserId,
+                    credential.AccessKey,
+                    credential.SecretKey,
+                    credential.Active,
+                    warning = "SecretKey is shown once. Store it securely."
+                }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().Roles.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().Permissions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/effective-permissions", "/v1.0/api/effective-permissions"))
+            {
+                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, _Authentication.GetEffectivePermissions(RequirePlatform(), requestContext)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/audit", "/v1.0/api/audit"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().AuditRecords.Where(item => item.TenantId == requestContext.TenantId).OrderByDescending(item => item.CreatedUtc).ToList()).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/clients", "/v1.0/api/clients"))
             {
+                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Clients.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
                 return;
             }
@@ -358,9 +509,40 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/api/v1/loadbalancingpolicies/metrics-catalog", "/v1.0/api/load-balancing-policies/metrics-catalog"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, LoadBalancingMetricsCatalog()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/loadbalancingpolicies/validate", "/v1.0/api/load-balancing-policies/validate"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                Dictionary<string, object?> body = ReadJsonObject(context);
+                string metric = FirstNonEmpty(GetBodyString(body, "rankingMetric"), "inFlightRequests");
+                bool valid = LoadBalancingMetricsCatalog().Any(item => String.Equals(item, metric, StringComparison.OrdinalIgnoreCase));
+                await SendJsonAsync(context, new { valid, metric, message = valid ? "Policy is valid." : "Unsupported ranking metric." }).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/modelaccesspolicies", "/v1.0/api/model-access-policies"))
             {
                 await SendJsonAsync(context, RequirePlatform().ModelAccessPolicies.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/modelaccesspolicies/evaluate", "/v1.0/api/model-access-policies/evaluate"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, EvaluateModelAccessPolicy(requestContext, context)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/modelaccesspolicies/validate", "/v1.0/api/model-access-policies/validate"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { valid = true, message = "Policy shape is valid.", supportedModes = Enum.GetNames<ModelAccessModeEnum>() }).ConfigureAwait(false);
                 return;
             }
 
@@ -370,9 +552,32 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunners/effective", "/v1.0/api/virtual-model-runners/effective"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, EffectiveVirtualModelRunner(requestContext, context)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/virtualmodelrunners/load-model", "/v1.0/api/virtual-model-runners/load-model", "/api/v1/modelrunnerendpoints/load-model", "/v1.0/api/model-runner-endpoints/load-model"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                object result = LoadModelResult(requestContext, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunnerreservations", "/v1.0/api/virtual-model-runner-reservations"))
             {
                 await SendJsonAsync(context, RequirePlatform().VirtualModelRunnerReservations.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunnerreservations/effective", "/v1.0/api/virtual-model-runner-reservations/effective"))
+            {
+                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, EffectiveReservations(requestContext)).ConfigureAwait(false);
                 return;
             }
 
@@ -414,9 +619,53 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "GET" && path.Equals("/v1.0/api/request-history/summary", StringComparison.OrdinalIgnoreCase))
+            if (method == "GET" && IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
             {
                 await SendJsonAsync(context, SummarizeRequestHistory(requestContext, context)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/requesthistory/analytics/overview", "/v1.0/api/request-history/analytics/overview", "/api/v1/analytics/overview", "/v1.0/api/analytics/overview"))
+            {
+                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, AnalyticsOverview(requestContext)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/requesthistory/bulk", "/v1.0/api/request-history/bulk"))
+            {
+                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = RequirePlatform().RequestHistory.RemoveAll(item => item.TenantId == requestContext.TenantId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/backup", "/v1.0/api/backup"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().ToState()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/restore", "/v1.0/api/restore"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                PlatformState? state = JsonUtil.Deserialize<PlatformState>(context.Request.DataAsString ?? "{}");
+                if (state == null) throw new ArgumentException("Restore payload is invalid.");
+                RequirePlatform().LoadState(state);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { restored = true }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && path.StartsWith("/v1.0/api/request-history/", StringComparison.OrdinalIgnoreCase) && !path.EndsWith("/summary", StringComparison.OrdinalIgnoreCase))
+            {
+                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string id = path.Substring("/v1.0/api/request-history/".Length);
+                RequestHistoryEntry? entry = RequirePlatform().RequestHistory.FirstOrDefault(item => item.Id == id && item.TenantId == requestContext.TenantId);
+                if (entry == null) throw new KeyNotFoundException("Request history entry not found.");
+                await SendJsonAsync(context, entry).ConfigureAwait(false);
                 return;
             }
 
@@ -899,6 +1148,94 @@ namespace Xeno.Server
             return path;
         }
 
+        private async Task HandleCreateTokenAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), context.Request.Headers.Get("x-access-key"));
+            string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), context.Request.Headers.Get("x-secret-key"));
+            string adminApiKey = FirstNonEmpty(GetBodyString(body, "adminApiKey"), context.Request.Headers.Get("x-admin-key"));
+
+            XenoPlatform platform = RequirePlatform();
+            if (!String.IsNullOrWhiteSpace(adminApiKey) && FixedTimeEquals(_Settings.Auth.AdminApiKey, adminApiKey))
+            {
+                User? adminUser = platform.Users.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
+                AuthTokenResult result = _Authentication.IssueToken(
+                    platform,
+                    _Settings.Auth,
+                    requestContext.TenantId,
+                    PrincipalTypeEnum.Administrator,
+                    adminUser?.Id,
+                    null,
+                    AuthSchemeEnum.AdminApiKey);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey, secretKey);
+            if (credential == null)
+            {
+                _Authentication.AppendAudit(platform, requestContext, "Authentication", OperationTypeEnum.Read, false, "InvalidCredential", 401);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new UnauthorizedAccessException("Invalid credential.");
+            }
+
+            AuthTokenResult credentialResult = _Authentication.IssueToken(
+                platform,
+                _Settings.Auth,
+                requestContext.TenantId,
+                PrincipalTypeEnum.Credential,
+                credential.UserId,
+                credential.Id,
+                AuthSchemeEnum.Credential);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+            await SendJsonAsync(context, credentialResult).ConfigureAwait(false);
+        }
+
+        private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
+        {
+            if (!_Settings.Rest.RequireAuthentication && context.AuthScheme == AuthSchemeEnum.None)
+            {
+                return;
+            }
+
+            if (!context.IsAuthenticated)
+            {
+                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, false, "Unauthenticated", 401);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new UnauthorizedAccessException("Authentication is required.");
+            }
+
+            if (!_Authentication.IsAllowed(RequirePlatform(), context, resourceType, operationType))
+            {
+                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, false, "PermissionDenied", 403);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new UnauthorizedAccessException("Permission denied.");
+            }
+        }
+
+        private Credential CreateCredential(RequestContext requestContext, HttpContextBase context)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string userId = FirstNonEmpty(GetBodyString(body, "userId"), requestContext.UserId);
+            if (String.IsNullOrWhiteSpace(userId))
+            {
+                User? user = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active);
+                userId = user?.Id ?? String.Empty;
+            }
+
+            string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), "xeno_" + Guid.NewGuid().ToString("N"));
+            string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), _Authentication.GenerateSecret());
+            return new Credential
+            {
+                TenantId = requestContext.TenantId,
+                UserId = userId,
+                AccessKey = accessKey,
+                SecretKey = secretKey,
+                Active = true
+            };
+        }
+
         private RequestContext CreateRequestContext(HttpContextBase context)
         {
             string? tenantHeader = context.Request.Headers.Get("x-tenant-guid");
@@ -923,12 +1260,85 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Authorization bearer token and x-token do not match.");
             }
 
-            return new RequestContext
+            string sessionToken = FirstNonEmpty(bearerToken, tokenHeader);
+            string accessKey = context.Request.Headers.Get("x-access-key") ?? String.Empty;
+            string secretKey = context.Request.Headers.Get("x-secret-key") ?? String.Empty;
+            string adminApiKey = context.Request.Headers.Get("x-admin-key") ?? String.Empty;
+
+            RequestContext requestContext = new RequestContext
             {
                 TenantId = tenantId,
                 SourceIp = context.Request.Source.IpAddress,
-                IsAuthenticated = true
+                IsAuthenticated = false
             };
+
+            if (!String.IsNullOrWhiteSpace(sessionToken))
+            {
+                AuthSession? session = _Authentication.ValidateToken(RequirePlatform(), tenantId, sessionToken);
+                if (session == null) throw new UnauthorizedAccessException("Invalid or expired token.");
+                requestContext.IsAuthenticated = true;
+                requestContext.SessionId = session.Id;
+                requestContext.UserId = session.UserId;
+                requestContext.CredentialId = session.CredentialId;
+                requestContext.PrincipalType = session.PrincipalType;
+                requestContext.AuthScheme = AuthSchemeEnum.Bearer;
+                return requestContext;
+            }
+
+            if (!String.IsNullOrWhiteSpace(accessKey) || !String.IsNullOrWhiteSpace(secretKey))
+            {
+                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey, secretKey);
+                if (credential == null) throw new UnauthorizedAccessException("Invalid credential.");
+                requestContext.IsAuthenticated = true;
+                requestContext.CredentialId = credential.Id;
+                requestContext.UserId = credential.UserId;
+                requestContext.PrincipalType = PrincipalTypeEnum.Credential;
+                requestContext.AuthScheme = AuthSchemeEnum.Credential;
+                return requestContext;
+            }
+
+            if (!String.IsNullOrWhiteSpace(adminApiKey))
+            {
+                if (!FixedTimeEquals(_Settings.Auth.AdminApiKey, adminApiKey)) throw new UnauthorizedAccessException("Invalid administrator API key.");
+                User? adminUser = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
+                requestContext.IsAuthenticated = true;
+                requestContext.UserId = adminUser?.Id;
+                requestContext.PrincipalType = PrincipalTypeEnum.Administrator;
+                requestContext.AuthScheme = AuthSchemeEnum.AdminApiKey;
+                return requestContext;
+            }
+
+            if (_Settings.Rest.RequireAuthentication)
+            {
+                throw new UnauthorizedAccessException("Authentication is required.");
+            }
+
+            User? devUser = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
+            requestContext.IsAuthenticated = devUser != null;
+            requestContext.UserId = devUser?.Id;
+            requestContext.PrincipalType = devUser == null ? PrincipalTypeEnum.None : PrincipalTypeEnum.User;
+            requestContext.AuthScheme = AuthSchemeEnum.None;
+            return requestContext;
+        }
+
+        private static string? GetBodyString(Dictionary<string, object?> body, string key)
+        {
+            return body.TryGetValue(key, out object? value) ? value?.ToString() : null;
+        }
+
+        private static bool GetBodyBoolean(Dictionary<string, object?> body, string key)
+        {
+            if (!body.TryGetValue(key, out object? value)) return false;
+            if (value == null) return false;
+            return Boolean.TryParse(value.ToString(), out bool result) && result;
+        }
+
+        private static bool FixedTimeEquals(string left, string right)
+        {
+            byte[] leftBytes = Encoding.UTF8.GetBytes(left ?? String.Empty);
+            byte[] rightBytes = Encoding.UTF8.GetBytes(right ?? String.Empty);
+            if (leftBytes.Length != rightBytes.Length) return false;
+            return CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
         }
 
         private static object RedactCredential(Credential credential)
@@ -942,6 +1352,175 @@ namespace Xeno.Server
                 credential.AccessKey,
                 secretKey = "****" + suffix,
                 credential.Active
+            };
+        }
+
+        private async Task SendMetricsAsync(HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            int connectedClients = platform.Clients.Count(item => item.Connected);
+            int activeEndpoints = platform.Endpoints.Count(item => item.Active);
+            int requests = platform.RequestHistory.Count;
+            int failures = platform.RequestHistory.Count(item => item.StatusCode >= 400);
+            context.Response.ContentType = "text/plain";
+            string metrics =
+                "# HELP xeno_connected_clients Connected Xeno clients\n" +
+                "# TYPE xeno_connected_clients gauge\n" +
+                "xeno_connected_clients " + connectedClients + "\n" +
+                "# HELP xeno_active_endpoints Active model runner endpoints\n" +
+                "# TYPE xeno_active_endpoints gauge\n" +
+                "xeno_active_endpoints " + activeEndpoints + "\n" +
+                "# HELP xeno_request_history_total Captured request history entries\n" +
+                "# TYPE xeno_request_history_total counter\n" +
+                "xeno_request_history_total " + requests + "\n" +
+                "# HELP xeno_request_failures_total Captured failed request entries\n" +
+                "# TYPE xeno_request_failures_total counter\n" +
+                "xeno_request_failures_total " + failures + "\n";
+            await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
+        }
+
+        private static List<string> LoadBalancingMetricsCatalog()
+        {
+            return new List<string> { "inFlightRequests", "weight", "firstAvailable" };
+        }
+
+        private object EvaluateModelAccessPolicy(RequestContext requestContext, HttpContextBase context)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string model = FirstNonEmpty(GetBodyString(body, "model"), "llama3.2:latest");
+            string policyId = FirstNonEmpty(GetBodyString(body, "policyId"), String.Empty);
+            ModelAccessPolicy? policy = String.IsNullOrWhiteSpace(policyId)
+                ? RequirePlatform().ModelAccessPolicies.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active)
+                : RequirePlatform().ModelAccessPolicies.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Id == policyId && item.Active);
+            if (policy == null) throw new KeyNotFoundException("Model access policy not found.");
+
+            bool denied = policy.DeniedModels.Contains(model, StringComparer.OrdinalIgnoreCase);
+            bool allowListDenied = policy.AllowedModels.Count > 0 && !policy.AllowedModels.Contains(model, StringComparer.OrdinalIgnoreCase);
+            ModelAccessDecisionEnum decision = denied || allowListDenied || policy.DefaultDecision == ModelAccessDecisionEnum.Deny
+                ? ModelAccessDecisionEnum.Deny
+                : ModelAccessDecisionEnum.Permit;
+            bool enforced = decision == ModelAccessDecisionEnum.Deny && policy.Mode == ModelAccessModeEnum.Enforce;
+
+            return new
+            {
+                policyId = policy.Id,
+                model,
+                mode = policy.Mode,
+                decision,
+                enforced,
+                reasonCode = decision == ModelAccessDecisionEnum.Permit ? "ModelAccessPermit" : "ModelAccessDenied"
+            };
+        }
+
+        private object EffectiveVirtualModelRunner(RequestContext requestContext, HttpContextBase context)
+        {
+            string vmrId = context.Request.Query.Elements.Get("vmrId") ?? String.Empty;
+            VirtualModelRunner? vmr = String.IsNullOrWhiteSpace(vmrId)
+                ? RequirePlatform().VirtualModelRunners.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active)
+                : RequirePlatform().VirtualModelRunners.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Id == vmrId);
+            if (vmr == null) throw new KeyNotFoundException("Virtual model runner not found.");
+
+            List<ModelRunnerEndpoint> endpoints = RequirePlatform().Endpoints
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .Where(item => vmr.ModelRunnerEndpointIds.Contains(item.Id))
+                .ToList();
+            List<ModelDefinition> models = RequirePlatform().ModelDefinitions
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .Where(item => vmr.ModelDefinitionIds.Contains(item.Id))
+                .ToList();
+            LoadBalancingPolicy? loadBalancingPolicy = RequirePlatform().LoadBalancingPolicies.FirstOrDefault(item => item.Id == vmr.LoadBalancingPolicyId && item.TenantId == requestContext.TenantId);
+            ModelAccessPolicy? modelAccessPolicy = RequirePlatform().ModelAccessPolicies.FirstOrDefault(item => item.Id == vmr.ModelAccessPolicyId && item.TenantId == requestContext.TenantId);
+
+            return new
+            {
+                virtualModelRunner = vmr,
+                endpoints,
+                models,
+                loadBalancingPolicy,
+                modelAccessPolicy
+            };
+        }
+
+        private object EffectiveReservations(RequestContext requestContext)
+        {
+            DateTime now = DateTime.UtcNow;
+            List<VirtualModelRunnerReservation> reservations = RequirePlatform().VirtualModelRunnerReservations
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .Where(item => item.Active)
+                .Where(item => item.StartUtc <= now && item.EndUtc >= now)
+                .ToList();
+            return new
+            {
+                nowUtc = now,
+                activeReservations = reservations,
+                count = reservations.Count
+            };
+        }
+
+        private object LoadModelResult(RequestContext requestContext, HttpContextBase context)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string model = FirstNonEmpty(GetBodyString(body, "model"), GetBodyString(body, "Model"));
+            if (String.IsNullOrWhiteSpace(model)) throw new ArgumentException("Model is required.");
+
+            bool dryRun = GetBodyBoolean(body, "dryRun") || GetBodyBoolean(body, "DryRun");
+            if (dryRun)
+            {
+                return new { outcome = "DryRun", model, loaded = false };
+            }
+
+            ModelDefinition? definition = RequirePlatform().ModelDefinitions.FirstOrDefault(item =>
+                item.TenantId == requestContext.TenantId &&
+                String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase));
+            if (definition == null)
+            {
+                definition = new ModelDefinition
+                {
+                    TenantId = requestContext.TenantId,
+                    Name = model,
+                    SupportsCompletions = true,
+                    SupportsEmbeddings = false
+                };
+                RequirePlatform().ModelDefinitions.Add(definition);
+            }
+
+            foreach (VirtualModelRunner vmr in RequirePlatform().VirtualModelRunners.Where(item => item.TenantId == requestContext.TenantId))
+            {
+                if (!vmr.ModelDefinitionIds.Contains(definition.Id)) vmr.ModelDefinitionIds.Add(definition.Id);
+            }
+
+            foreach (ModelRunnerEndpoint endpoint in RequirePlatform().Endpoints.Where(item => item.TenantId == requestContext.TenantId))
+            {
+                if (!endpoint.Models.Contains(model, StringComparer.OrdinalIgnoreCase)) endpoint.Models.Add(model);
+            }
+
+            return new { outcome = "Loaded", model, loaded = true, modelDefinitionId = definition.Id };
+        }
+
+        private object AnalyticsOverview(RequestContext requestContext)
+        {
+            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext);
+            int total = entries.Count;
+            int failures = entries.Count(item => item.StatusCode >= 400);
+            List<object> byModel = entries
+                .Where(item => item.RoutingDecision != null && !String.IsNullOrWhiteSpace(item.RoutingDecision.EffectiveModel))
+                .GroupBy(item => item.RoutingDecision!.EffectiveModel)
+                .Select(group => (object)new { model = group.Key, count = group.Count() })
+                .ToList();
+            List<object> byEndpoint = entries
+                .Where(item => item.RoutingDecision != null && !String.IsNullOrWhiteSpace(item.RoutingDecision.SelectedEndpointId))
+                .GroupBy(item => item.RoutingDecision!.SelectedEndpointId)
+                .Select(group => (object)new { endpointId = group.Key, count = group.Count() })
+                .ToList();
+
+            return new
+            {
+                total,
+                failures,
+                success = total - failures,
+                failureRate = total == 0 ? 0 : (double)failures / total,
+                byModel,
+                byEndpoint
             };
         }
 
@@ -1073,17 +1652,34 @@ namespace Xeno.Server
                     ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true)),
                     ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true)),
                     ["/v1.0/api/credentials"] = Path(Operation("get", "listCredentials", "Tenants", "List credentials", "Lists tenant credentials with redacted secrets.", "CredentialArray", true)),
+                    ["/v1.0/api/roles"] = Path(Operation("get", "listRoles", "Authorization", "List roles", "Lists tenant roles.", "RoleArray", true)),
+                    ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true)),
+                    ["/v1.0/api/effective-permissions"] = Path(Operation("get", "listEffectivePermissions", "Authorization", "Effective permissions", "Lists effective permissions.", "EffectivePermissionArray", true)),
+                    ["/v1.0/api/audit"] = Path(Operation("get", "listAudit", "Audit", "List audit records", "Lists tenant audit records.", "AuditRecordArray", true)),
                     ["/v1.0/api/clients"] = Path(Operation("get", "listClients", "Clients", "List clients", "Lists connected or registered Xeno clients.", "ClientArray", true)),
                     ["/v1.0/api/model-runner-endpoints"] = Path(Operation("get", "listModelRunnerEndpoints", "Routing", "List model runner endpoints", "Lists model runner endpoints advertised by clients.", "EndpointArray", true)),
+                    ["/v1.0/api/model-runner-endpoints/load-model"] = Path(Operation("post", "loadEndpointModel", "Routing", "Load endpoint model", "Adds model availability to endpoint inventory.", "GenericObject", true)),
                     ["/v1.0/api/model-definitions"] = Path(Operation("get", "listModelDefinitions", "Routing", "List model definitions", "Lists model definitions available for routing.", "ModelDefinitionArray", true)),
                     ["/v1.0/api/model-configurations"] = Path(Operation("get", "listModelConfigurations", "Routing", "List model configurations", "Lists pinned model configurations.", "ModelConfigurationArray", true)),
                     ["/v1.0/api/load-balancing-policies"] = Path(Operation("get", "listLoadBalancingPolicies", "Routing", "List load-balancing policies", "Lists load-balancing policies.", "LoadBalancingPolicyArray", true)),
+                    ["/v1.0/api/load-balancing-policies/metrics-catalog"] = Path(Operation("get", "loadBalancingMetricsCatalog", "Routing", "Metrics catalog", "Lists supported load-balancing metrics.", "GenericObject", true)),
+                    ["/v1.0/api/load-balancing-policies/validate"] = Path(Operation("post", "validateLoadBalancingPolicy", "Routing", "Validate load-balancing policy", "Validates a load-balancing policy.", "GenericObject", true)),
                     ["/v1.0/api/model-access-policies"] = Path(Operation("get", "listModelAccessPolicies", "Routing", "List model access policies", "Lists model access policies.", "ModelAccessPolicyArray", true)),
+                    ["/v1.0/api/model-access-policies/evaluate"] = Path(Operation("post", "evaluateModelAccessPolicy", "Routing", "Evaluate model access", "Evaluates a model access policy.", "GenericObject", true)),
+                    ["/v1.0/api/model-access-policies/validate"] = Path(Operation("post", "validateModelAccessPolicy", "Routing", "Validate model access policy", "Validates a model access policy.", "GenericObject", true)),
                     ["/v1.0/api/virtual-model-runners"] = Path(Operation("get", "listVirtualModelRunners", "Routing", "List virtual model runners", "Lists virtual model runners.", "VirtualModelRunnerArray", true)),
+                    ["/v1.0/api/virtual-model-runners/effective"] = Path(Operation("get", "effectiveVirtualModelRunner", "Routing", "Effective VMR", "Returns effective virtual model runner configuration.", "GenericObject", true)),
+                    ["/v1.0/api/virtual-model-runners/load-model"] = Path(Operation("post", "loadVirtualModelRunnerModel", "Routing", "Load VMR model", "Adds model availability through a virtual model runner.", "GenericObject", true)),
                     ["/v1.0/api/virtual-model-runner-reservations"] = Path(Operation("get", "listVirtualModelRunnerReservations", "Routing", "List virtual model runner reservations", "Lists virtual model runner reservations.", "VirtualModelRunnerReservationArray", true)),
+                    ["/v1.0/api/virtual-model-runner-reservations/effective"] = Path(Operation("get", "effectiveReservations", "Routing", "Effective reservations", "Returns currently active reservations.", "GenericObject", true)),
                     ["/v1.0/api/virtual-model-runners/explain-routing"] = Path(Operation("post", "explainRouting", "Routing", "Explain routing", "Explains the routing decision for a model request.", "RoutingDecision", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
+                    ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
+                    ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
+                    ["/v1.0/api/analytics/overview"] = Path(Operation("get", "analyticsOverview", "Analytics", "Analytics overview", "Returns tenant analytics.", "GenericObject", true)),
+                    ["/v1.0/api/backup"] = Path(Operation("get", "backup", "Backup", "Backup", "Returns platform state backup.", "GenericObject", true)),
+                    ["/v1.0/api/restore"] = Path(Operation("post", "restore", "Backup", "Restore", "Restores platform state backup.", "GenericObject", true)),
                     ["/v1/models"] = Path(Operation("get", "listOpenAiModels", "OpenAI", "List models", "OpenAI-compatible model list.", "OpenAiModelList", true)),
                     ["/v1/chat/completions"] = Path(Operation("post", "createChatCompletion", "OpenAI", "Create chat completion", "OpenAI-compatible chat completion.", "OpenAiChatCompletion", true)),
                     ["/v1/completions"] = Path(Operation("post", "createCompletion", "OpenAI", "Create completion", "OpenAI-compatible completion.", "OpenAiChatCompletion", true)),
@@ -1102,6 +1698,10 @@ namespace Xeno.Server
                         ["TenantArray"] = ArraySchema("Tenant"),
                         ["UserArray"] = ArraySchema("User"),
                         ["CredentialArray"] = ArraySchema("Credential"),
+                        ["RoleArray"] = ArraySchema("Role"),
+                        ["PermissionArray"] = ArraySchema("Permission"),
+                        ["EffectivePermissionArray"] = ArraySchema("EffectivePermission"),
+                        ["AuditRecordArray"] = ArraySchema("AuditRecord"),
                         ["ClientArray"] = ArraySchema("XenoClientRecord"),
                         ["EndpointArray"] = ArraySchema("ModelRunnerEndpoint"),
                         ["ModelDefinitionArray"] = ArraySchema("ModelDefinition"),
@@ -1116,9 +1716,14 @@ namespace Xeno.Server
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["OpenAiChatCompletion"] = ObjectSchema(Property("id", StringSchema()), Property("object", StringSchema()), Property("model", StringSchema())),
                         ["OpenAiEmbeddingList"] = ObjectSchema(Property("object", StringSchema()), Property("model", StringSchema())),
+                        ["GenericObject"] = ObjectSchema(),
                         ["Tenant"] = ObjectSchema(Property("id", StringSchema()), Property("name", StringSchema())),
                         ["User"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("email", StringSchema())),
                         ["Credential"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("accessKey", StringSchema())),
+                        ["Role"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
+                        ["Permission"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("resourceType", StringSchema())),
+                        ["EffectivePermission"] = ObjectSchema(Property("resourceType", StringSchema()), Property("sourceRole", StringSchema())),
+                        ["AuditRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("reasonCode", StringSchema())),
                         ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelRunnerEndpoint"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelDefinition"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),

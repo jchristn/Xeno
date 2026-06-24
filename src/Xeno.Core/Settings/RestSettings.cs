@@ -23,5 +23,10 @@ namespace Xeno.Core.Settings
         /// Enable TLS.
         /// </summary>
         public bool Ssl { get; set; } = false;
+
+        /// <summary>
+        /// Require authentication for management and inference routes.
+        /// </summary>
+        public bool RequireAuthentication { get; set; } = false;
     }
 }

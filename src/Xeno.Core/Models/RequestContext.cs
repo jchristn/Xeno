@@ -31,6 +31,33 @@ namespace Xeno.Core.Models
         public string? CredentialId { get; set; } = null;
 
         /// <summary>
+        /// Session ID.
+        /// </summary>
+        public string? SessionId { get; set; } = null;
+
+        /// <summary>
+        /// Principal type.
+        /// </summary>
+        public PrincipalTypeEnum PrincipalType { get; set; } = PrincipalTypeEnum.None;
+
+        /// <summary>
+        /// Auth scheme.
+        /// </summary>
+        public AuthSchemeEnum AuthScheme { get; set; } = AuthSchemeEnum.None;
+
+        /// <summary>
+        /// Principal ID.
+        /// </summary>
+        public string? PrincipalId
+        {
+            get
+            {
+                if (PrincipalType == PrincipalTypeEnum.Credential) return CredentialId;
+                return UserId;
+            }
+        }
+
+        /// <summary>
         /// Source IP address.
         /// </summary>
         public string? SourceIp { get; set; } = null;

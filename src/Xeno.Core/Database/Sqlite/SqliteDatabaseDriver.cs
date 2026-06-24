@@ -47,6 +47,13 @@ namespace Xeno.Core.Database.Sqlite
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
+CREATE TABLE IF NOT EXISTS schema_migrations
+(
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_utc TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS xeno_platform_state
 (
     id TEXT PRIMARY KEY,
@@ -55,6 +62,9 @@ CREATE TABLE IF NOT EXISTS xeno_platform_state
     updated_utc TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1
 );
+
+INSERT OR IGNORE INTO schema_migrations (id, name, applied_utc)
+VALUES ('0001', 'initial_platform_state', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }

@@ -40,6 +40,13 @@ namespace Xeno.Core.Database.Postgresql
                 using (NpgsqlCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
+CREATE TABLE IF NOT EXISTS schema_migrations
+(
+    id varchar(64) PRIMARY KEY,
+    name varchar(256) NOT NULL,
+    applied_utc timestamptz NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS xeno_platform_state
 (
     id varchar(64) PRIMARY KEY,
@@ -48,6 +55,10 @@ CREATE TABLE IF NOT EXISTS xeno_platform_state
     updated_utc timestamptz NOT NULL,
     active boolean NOT NULL DEFAULT true
 );
+
+INSERT INTO schema_migrations (id, name, applied_utc)
+VALUES ('0001', 'initial_platform_state', now())
+ON CONFLICT (id) DO NOTHING;
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }

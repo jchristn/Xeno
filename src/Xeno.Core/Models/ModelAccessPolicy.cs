@@ -29,5 +29,25 @@ namespace Xeno.Core.Models
         /// Default decision.
         /// </summary>
         public ModelAccessDecisionEnum DefaultDecision { get; set; } = ModelAccessDecisionEnum.Permit;
+
+        /// <summary>
+        /// Enforcement mode.
+        /// </summary>
+        public ModelAccessModeEnum Mode { get; set; } = ModelAccessModeEnum.Monitor;
+
+        /// <summary>
+        /// Explicitly allowed model names. Empty means no allow-list is applied.
+        /// </summary>
+        public List<string> AllowedModels { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Explicitly denied model names.
+        /// </summary>
+        public List<string> DeniedModels { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Whether policy is active.
+        /// </summary>
+        public bool Active { get; set; } = true;
     }
 }

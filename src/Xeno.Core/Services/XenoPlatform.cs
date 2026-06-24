@@ -28,6 +28,31 @@ namespace Xeno.Core.Services
         public List<Credential> Credentials { get; } = new List<Credential>();
 
         /// <summary>
+        /// Auth sessions.
+        /// </summary>
+        public List<AuthSession> AuthSessions { get; } = new List<AuthSession>();
+
+        /// <summary>
+        /// Roles.
+        /// </summary>
+        public List<Role> Roles { get; } = new List<Role>();
+
+        /// <summary>
+        /// Permissions.
+        /// </summary>
+        public List<Permission> Permissions { get; } = new List<Permission>();
+
+        /// <summary>
+        /// Role assignments.
+        /// </summary>
+        public List<RoleAssignment> RoleAssignments { get; } = new List<RoleAssignment>();
+
+        /// <summary>
+        /// Audit records.
+        /// </summary>
+        public List<AuditRecord> AuditRecords { get; } = new List<AuditRecord>();
+
+        /// <summary>
         /// Clients.
         /// </summary>
         public List<XenoClientRecord> Clients { get; } = new List<XenoClientRecord>();
@@ -105,6 +130,77 @@ namespace Xeno.Core.Services
             };
             Credentials.Add(credential);
 
+            Permission readPermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "*",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Read,
+                Permit = true
+            };
+            Permissions.Add(readPermission);
+
+            Permission writePermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "*",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Write,
+                Permit = true
+            };
+            Permissions.Add(writePermission);
+
+            Permission deletePermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "*",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Delete,
+                Permit = true
+            };
+            Permissions.Add(deletePermission);
+
+            Permission adminPermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "Admin",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Admin,
+                Permit = true
+            };
+            Permissions.Add(adminPermission);
+
+            Role tenantAdmin = new Role
+            {
+                TenantId = tenant.Id,
+                Name = "TenantAdmin",
+                BuiltIn = true,
+                PermissionIds = new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, adminPermission.Id }
+            };
+            Roles.Add(tenantAdmin);
+
+            Role viewer = new Role
+            {
+                TenantId = tenant.Id,
+                Name = "Viewer",
+                BuiltIn = true,
+                PermissionIds = new List<string> { readPermission.Id }
+            };
+            Roles.Add(viewer);
+
+            Role tenantMember = new Role
+            {
+                TenantId = tenant.Id,
+                Name = "TenantMember",
+                BuiltIn = true,
+                PermissionIds = new List<string> { readPermission.Id }
+            };
+            Roles.Add(tenantMember);
+
+            RoleAssignments.Add(new RoleAssignment
+            {
+                TenantId = tenant.Id,
+                RoleId = tenantAdmin.Id,
+                PrincipalType = Xeno.Core.Enums.PrincipalTypeEnum.User,
+                PrincipalId = user.Id
+            });
+
             XenoClientRecord client = new XenoClientRecord
             {
                 TenantId = tenant.Id,
@@ -153,14 +249,17 @@ namespace Xeno.Core.Services
             LoadBalancingPolicy loadBalancingPolicy = new LoadBalancingPolicy
             {
                 TenantId = tenant.Id,
-                Name = "Default round robin"
+                Name = "Default least in-flight",
+                RankingMetric = "inFlightRequests",
+                PreferLower = true
             };
             LoadBalancingPolicies.Add(loadBalancingPolicy);
 
             ModelAccessPolicy modelAccessPolicy = new ModelAccessPolicy
             {
                 TenantId = tenant.Id,
-                Name = "Default permit"
+                Name = "Default permit",
+                Mode = Xeno.Core.Enums.ModelAccessModeEnum.Monitor
             };
             ModelAccessPolicies.Add(modelAccessPolicy);
 
@@ -169,7 +268,9 @@ namespace Xeno.Core.Services
                 TenantId = tenant.Id,
                 Name = "default",
                 ModelRunnerEndpointIds = new List<string> { endpoint.Id },
-                ModelDefinitionIds = new List<string> { chatModel.Id, embeddingModel.Id }
+                ModelDefinitionIds = new List<string> { chatModel.Id, embeddingModel.Id },
+                LoadBalancingPolicyId = loadBalancingPolicy.Id,
+                ModelAccessPolicyId = modelAccessPolicy.Id
             };
             VirtualModelRunners.Add(vmr);
 
@@ -195,6 +296,11 @@ namespace Xeno.Core.Services
                 Tenants = Tenants,
                 Users = Users,
                 Credentials = Credentials,
+                AuthSessions = AuthSessions,
+                Roles = Roles,
+                Permissions = Permissions,
+                RoleAssignments = RoleAssignments,
+                AuditRecords = AuditRecords,
                 Clients = Clients,
                 Endpoints = Endpoints,
                 ModelDefinitions = ModelDefinitions,
@@ -223,6 +329,21 @@ namespace Xeno.Core.Services
 
             Credentials.Clear();
             Credentials.AddRange(state.Credentials);
+
+            AuthSessions.Clear();
+            AuthSessions.AddRange(state.AuthSessions);
+
+            Roles.Clear();
+            Roles.AddRange(state.Roles);
+
+            Permissions.Clear();
+            Permissions.AddRange(state.Permissions);
+
+            RoleAssignments.Clear();
+            RoleAssignments.AddRange(state.RoleAssignments);
+
+            AuditRecords.Clear();
+            AuditRecords.AddRange(state.AuditRecords);
 
             Clients.Clear();
             Clients.AddRange(state.Clients);

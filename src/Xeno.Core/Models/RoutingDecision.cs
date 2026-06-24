@@ -46,6 +46,26 @@ namespace Xeno.Core.Models
         public string? EffectiveModel { get; set; } = null;
 
         /// <summary>
+        /// Candidate endpoint IDs.
+        /// </summary>
+        public List<string> CandidateEndpointIds { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Model access decision.
+        /// </summary>
+        public ModelAccessDecisionEnum ModelAccessDecision { get; set; } = ModelAccessDecisionEnum.Permit;
+
+        /// <summary>
+        /// Reservation decision.
+        /// </summary>
+        public ReservationDecisionEnum ReservationDecision { get; set; } = ReservationDecisionEnum.NoReservation;
+
+        /// <summary>
+        /// Reservation reason code.
+        /// </summary>
+        public string? ReservationReasonCode { get; set; } = null;
+
+        /// <summary>
         /// Timeline entries.
         /// </summary>
         public List<string> Timeline { get; set; } = new List<string>();

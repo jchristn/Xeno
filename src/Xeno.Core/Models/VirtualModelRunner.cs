@@ -46,6 +46,21 @@ namespace Xeno.Core.Models
         public LoadBalancingModeEnum LoadBalancingMode { get; set; } = LoadBalancingModeEnum.RoundRobin;
 
         /// <summary>
+        /// Load-balancing policy ID.
+        /// </summary>
+        public string? LoadBalancingPolicyId { get; set; } = null;
+
+        /// <summary>
+        /// Model access policy ID.
+        /// </summary>
+        public string? ModelAccessPolicyId { get; set; } = null;
+
+        /// <summary>
+        /// Session affinity mode.
+        /// </summary>
+        public SessionAffinityModeEnum SessionAffinityMode { get; set; } = SessionAffinityModeEnum.None;
+
+        /// <summary>
         /// Whether completions are allowed.
         /// </summary>
         public bool AllowCompletions { get; set; } = true;

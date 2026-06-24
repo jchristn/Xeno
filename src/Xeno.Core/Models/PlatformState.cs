@@ -23,6 +23,31 @@ namespace Xeno.Core.Models
         public List<Credential> Credentials { get; set; } = new List<Credential>();
 
         /// <summary>
+        /// Auth sessions.
+        /// </summary>
+        public List<AuthSession> AuthSessions { get; set; } = new List<AuthSession>();
+
+        /// <summary>
+        /// Roles.
+        /// </summary>
+        public List<Role> Roles { get; set; } = new List<Role>();
+
+        /// <summary>
+        /// Permissions.
+        /// </summary>
+        public List<Permission> Permissions { get; set; } = new List<Permission>();
+
+        /// <summary>
+        /// Role assignments.
+        /// </summary>
+        public List<RoleAssignment> RoleAssignments { get; set; } = new List<RoleAssignment>();
+
+        /// <summary>
+        /// Audit records.
+        /// </summary>
+        public List<AuditRecord> AuditRecords { get; set; } = new List<AuditRecord>();
+
+        /// <summary>
         /// Clients.
         /// </summary>
         public List<XenoClientRecord> Clients { get; set; } = new List<XenoClientRecord>();

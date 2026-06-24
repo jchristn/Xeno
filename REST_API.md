@@ -14,13 +14,21 @@ The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-s
 
 `GET /swagger`
 
+`GET /metrics`
+
 ## Authentication
 
 `POST /api/v1/auth/token`
 
 `POST /v1.0/api/auth/token`
 
-Returns a local development bearer-token payload bound to the resolved tenant.
+`GET /v1.0/api/auth/token/details`
+
+`POST /v1.0/api/auth/token/refresh`
+
+`POST /v1.0/api/auth/logout`
+
+Token issuance accepts an administrator API key or direct credential fields. Bearer and `x-token` values must match when both are supplied.
 
 ## Administration
 
@@ -30,9 +38,21 @@ Returns a local development bearer-token payload bound to the resolved tenant.
 
 `GET /v1.0/api/credentials`
 
+`POST /v1.0/api/credentials`
+
+`GET /v1.0/api/roles`
+
+`GET /v1.0/api/permissions`
+
+`GET /v1.0/api/effective-permissions`
+
+`GET /v1.0/api/audit`
+
 `GET /v1.0/api/clients`
 
 `GET /v1.0/api/model-runner-endpoints`
+
+`POST /v1.0/api/model-runner-endpoints/load-model`
 
 `GET /v1.0/api/model-definitions`
 
@@ -40,13 +60,33 @@ Returns a local development bearer-token payload bound to the resolved tenant.
 
 `GET /v1.0/api/load-balancing-policies`
 
+`GET /v1.0/api/load-balancing-policies/metrics-catalog`
+
+`POST /v1.0/api/load-balancing-policies/validate`
+
 `GET /v1.0/api/model-access-policies`
+
+`POST /v1.0/api/model-access-policies/evaluate`
+
+`POST /v1.0/api/model-access-policies/validate`
 
 `GET /v1.0/api/virtual-model-runners`
 
+`GET /v1.0/api/virtual-model-runners/effective`
+
 `GET /v1.0/api/virtual-model-runner-reservations`
 
+`GET /v1.0/api/virtual-model-runner-reservations/effective`
+
 `POST /v1.0/api/virtual-model-runners/explain-routing`
+
+`POST /v1.0/api/virtual-model-runners/load-model`
+
+`GET /v1.0/api/analytics/overview`
+
+`GET /v1.0/api/backup`
+
+`POST /v1.0/api/restore`
 
 Legacy dashboard aliases under `/api/v1/...` are also registered for clients, model/routing lists, token bootstrap, and request history.
 
@@ -68,7 +108,13 @@ OpenAI-compatible aliases are also available under `/api/v1/openai/v1/...`.
 
 `GET /v1.0/api/request-history/summary`
 
+`GET /v1.0/api/request-history/analytics/overview`
+
+`GET /v1.0/api/request-history/{id}`
+
 `DELETE /v1.0/api/request-history/{id}`
+
+`POST /v1.0/api/request-history/bulk`
 
 `GET /api/v1/requesthistory`
 

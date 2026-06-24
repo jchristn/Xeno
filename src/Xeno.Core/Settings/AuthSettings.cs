@@ -23,5 +23,10 @@ namespace Xeno.Core.Settings
         /// Admin API key.
         /// </summary>
         public string AdminApiKey { get; set; } = "xenoadmin";
+
+        /// <summary>
+        /// Session lifetime in minutes.
+        /// </summary>
+        public int SessionMinutes { get; set; } = 60;
     }
 }

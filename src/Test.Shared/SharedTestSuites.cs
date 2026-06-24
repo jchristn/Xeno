@@ -37,8 +37,10 @@ namespace Test.Shared
                 {
                     SettingsSuite(),
                     DatabaseProviderSuite(),
+                    AuthenticationSuite(),
                     RoutingSuite(),
                     TenantIsolationSuite(),
+                    ManagementApiSuite(),
                     RelaySuite()
                 };
             }
@@ -68,6 +70,81 @@ namespace Test.Shared
                             if (settings.Database == null) throw new InvalidOperationException("Database settings missing.");
                             if (settings.Logging == null) throw new InvalidOperationException("Logging settings missing.");
                             return Task.CompletedTask;
+                        })
+                });
+        }
+
+        /// <summary>
+        /// Authentication and authorization suite.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor AuthenticationSuite()
+        {
+            return new TestSuiteDescriptor(
+                "Authentication",
+                "Authentication and Authorization",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "Authentication",
+                        "SessionIssueValidateRevoke",
+                        "Session tokens issue, validate, and revoke",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            AuthenticationService auth = new AuthenticationService();
+                            User user = platform.Users[0];
+                            AuthTokenResult token = auth.IssueToken(platform, new AuthSettings(), user.TenantId, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Credential);
+                            AuthSession? session = auth.ValidateToken(platform, user.TenantId, token.Token);
+                            if (session == null) throw new InvalidOperationException("Token did not validate.");
+                            if (!auth.RevokeSession(platform, session.Id)) throw new InvalidOperationException("Session was not revoked.");
+                            if (auth.ValidateToken(platform, user.TenantId, token.Token) != null) throw new InvalidOperationException("Revoked token still validates.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Authentication",
+                        "CredentialValidation",
+                        "Direct credentials validate with constant-time secret comparison",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            AuthenticationService auth = new AuthenticationService();
+                            Credential credential = platform.Credentials[0];
+                            if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey, credential.SecretKey) == null) throw new InvalidOperationException("Credential did not validate.");
+                            if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey, "wrong") != null) throw new InvalidOperationException("Invalid credential validated.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Authentication",
+                        "EffectivePermissionResolution",
+                        "Tenant administrator effective permissions include admin",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            AuthenticationService auth = new AuthenticationService();
+                            RequestContext context = new RequestContext
+                            {
+                                TenantId = platform.Users[0].TenantId,
+                                UserId = platform.Users[0].Id,
+                                PrincipalType = PrincipalTypeEnum.User,
+                                IsAuthenticated = true
+                            };
+                            if (!auth.IsAllowed(platform, context, "Admin", OperationTypeEnum.Admin)) throw new InvalidOperationException("Tenant admin did not resolve admin permission.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Authentication",
+                        "AuditPersistsDenial",
+                        "Authorization denials create audit records",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            AuthenticationService auth = new AuthenticationService();
+                            RequestContext context = new RequestContext { TenantId = platform.GetDefaultTenant().Id, IsAuthenticated = false };
+                            auth.AppendAudit(platform, context, "Admin", OperationTypeEnum.Admin, false, "PermissionDenied", 403);
+                            if (platform.AuditRecords.Count != 1) throw new InvalidOperationException("Audit record was not persisted.");
+                            if (platform.AuditRecords[0].ReasonCode != "PermissionDenied") throw new InvalidOperationException("Audit reason mismatch.");
                         })
                 });
         }
@@ -164,6 +241,71 @@ namespace Test.Shared
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "text-embedding-3-small", true).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.EffectiveModel != "text-embedding-3-small") throw new InvalidOperationException("Effective model mismatch.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "ModelAccessPolicyDenies",
+                        "Enforced model access policy denies configured model",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.ModelAccessPolicies[0].Mode = ModelAccessModeEnum.Enforce;
+                            platform.ModelAccessPolicies[0].DeniedModels.Add("llama3.2:latest");
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (decision.Success) throw new InvalidOperationException("Denied model unexpectedly routed.");
+                            if (decision.OutcomeCode != "ModelAccessDenied") throw new InvalidOperationException("Unexpected outcome " + decision.OutcomeCode + ".");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "ReservationDeniesMissingSubject",
+                        "Active reservation denies principals outside the subject list",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.VirtualModelRunnerReservations.Add(new VirtualModelRunnerReservation
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                VirtualModelRunnerId = platform.VirtualModelRunners[0].Id,
+                                Name = "locked",
+                                StartUtc = DateTime.UtcNow.AddMinutes(-1),
+                                EndUtc = DateTime.UtcNow.AddMinutes(5),
+                                SubjectIds = new List<string> { "usr_other" },
+                                Active = true
+                            });
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, UserId = platform.Users[0].Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (decision.Success) throw new InvalidOperationException("Reservation-denied request unexpectedly routed.");
+                            if (decision.ReservationDecision != ReservationDecisionEnum.Denied) throw new InvalidOperationException("Reservation decision mismatch.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "LeastInFlightPolicySelectsLowerLoad",
+                        "Least in-flight policy selects the lower-load endpoint",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.Endpoints[0].InFlightRequests = 3;
+                            ModelRunnerEndpoint endpoint = new ModelRunnerEndpoint
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = platform.Clients[0].Id,
+                                Name = "lower-load",
+                                Models = new List<string> { "llama3.2:latest" },
+                                InFlightRequests = 0
+                            };
+                            platform.Endpoints.Add(endpoint);
+                            platform.VirtualModelRunners[0].ModelRunnerEndpointIds.Add(endpoint.Id);
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException(decision.Message);
+                            if (decision.SelectedEndpointId != endpoint.Id) throw new InvalidOperationException("Least in-flight endpoint was not selected.");
                         })
                 });
         }
@@ -224,6 +366,97 @@ namespace Test.Shared
                         "OpenAI-compatible completions relay through a connected Xeno client",
                         executeAsync: delegate { return RunRelaySmokeAsync(); })
                 });
+        }
+
+        /// <summary>
+        /// Management API suite.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor ManagementApiSuite()
+        {
+            return new TestSuiteDescriptor(
+                "ManagementApi",
+                "Management API",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "ManagementEndpointsSmoke",
+                        "Management routes expose policy, analytics, model loading, backup, and metrics",
+                        executeAsync: delegate { return RunManagementSmokeAsync(); })
+                });
+        }
+
+        private static async Task RunManagementSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-management-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string catalog = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/load-balancing-policies/metrics-catalog").ConfigureAwait(false);
+                        if (!catalog.Contains("inFlightRequests", StringComparison.Ordinal)) throw new InvalidOperationException("Metrics catalog missing inFlightRequests.");
+
+                        using (HttpResponseMessage loadResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/virtual-model-runners/load-model", "{\"model\":\"touchstone-model\"}").ConfigureAwait(false))
+                        {
+                            string loadBody = await loadResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!loadResponse.IsSuccessStatusCode || !loadBody.Contains("Loaded", StringComparison.Ordinal)) throw new InvalidOperationException("Load model failed: " + loadBody);
+                        }
+
+                        using (HttpResponseMessage evaluateResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/model-access-policies/evaluate", "{\"model\":\"touchstone-model\"}").ConfigureAwait(false))
+                        {
+                            string evaluateBody = await evaluateResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!evaluateResponse.IsSuccessStatusCode || !evaluateBody.Contains("ModelAccessPermit", StringComparison.Ordinal)) throw new InvalidOperationException("Model access evaluate failed: " + evaluateBody);
+                        }
+
+                        string backup = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/backup").ConfigureAwait(false);
+                        if (!backup.Contains("touchstone-model", StringComparison.Ordinal)) throw new InvalidOperationException("Backup did not include loaded model.");
+
+                        string analytics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/analytics/overview").ConfigureAwait(false);
+                        if (!analytics.Contains("failureRate", StringComparison.Ordinal)) throw new InvalidOperationException("Analytics overview missing failureRate.");
+
+                        string metrics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/metrics").ConfigureAwait(false);
+                        if (!metrics.Contains("xeno_connected_clients", StringComparison.Ordinal)) throw new InvalidOperationException("Metrics output missing connected clients.");
+                    }
+                }
+                finally
+                {
+                    serverTokenSource.Cancel();
+                    server.Stop();
+                    try
+                    {
+                        await serverTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+
+                    server.Dispose();
+                    await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                }
+            }
         }
 
         private static async Task RunRelaySmokeAsync()
@@ -405,6 +638,15 @@ namespace Test.Shared
         {
             byte[] bytes = Encoding.UTF8.GetBytes(JsonUtil.Serialize(value));
             await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
+        }
+
+        private static async Task<HttpResponseMessage> PostJsonAsync(HttpClient httpClient, string url, string json)
+        {
+            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, url))
+            {
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                return await httpClient.SendAsync(request).ConfigureAwait(false);
+            }
         }
 
         private static async Task<string?> ReceiveWebSocketTextAsync(ClientWebSocket socket, CancellationToken token)

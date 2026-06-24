@@ -3,12 +3,13 @@
   "Rest": {
     "Hostname": "0.0.0.0",
     "Port": 9000,
-    "Ssl": false
+    "Ssl": false,
+    "RequireAuthentication": false
   },
   "Cors": {
     "Enabled": true,
     "AllowedOrigins": ["http://localhost:9100"],
-    "AllowedHeaders": ["Authorization", "Content-Type", "x-token", "x-tenant-guid"],
+    "AllowedHeaders": ["Authorization", "Content-Type", "x-token", "x-tenant-guid", "x-tenant-id", "x-access-key", "x-secret-key", "x-admin-key", "x-signature"],
     "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   },
   "WebSocket": {
@@ -30,7 +31,8 @@
   "Auth": {
     "Issuer": "xeno",
     "SigningKey": "development-only-change-me",
-    "AdminApiKey": "xenoadmin"
+    "AdminApiKey": "xenoadmin",
+    "SessionMinutes": 60
   },
   "RequestHistory": {
     "Enabled": true,

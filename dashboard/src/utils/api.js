@@ -17,6 +17,11 @@ export default class ApiClient {
     return response.json();
   }
 
+  async text(path) {
+    const response = await fetch(`${this.baseUrl}${path}`, { headers: this.headers() });
+    return response.text();
+  }
+
   headers() {
     return {
       'Content-Type': 'application/json',

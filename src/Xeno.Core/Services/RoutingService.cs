@@ -83,7 +83,19 @@ namespace Xeno.Core.Services
             }
             decision.EffectiveModel = effectiveModel;
             decision.Timeline.Add("ModelResolution");
+
+            ModelAccessPolicy? modelAccessPolicy = ResolveModelAccessPolicy(vmr);
+            if (!EvaluateModelAccess(modelAccessPolicy, effectiveModel, decision))
+            {
+                return Task.FromResult(decision);
+            }
             decision.Timeline.Add("ModelAccess");
+
+            if (!EvaluateReservations(context, vmr, decision))
+            {
+                return Task.FromResult(decision);
+            }
+            decision.Timeline.Add("Reservations");
 
             List<ModelRunnerEndpoint> candidates = _Platform.Endpoints
                 .Where(item => item.TenantId == context.TenantId)
@@ -102,9 +114,11 @@ namespace Xeno.Core.Services
                 decision.Message = "No connected endpoint can service the request.";
                 return Task.FromResult(decision);
             }
+            decision.CandidateEndpointIds = candidates.Select(item => item.Id).ToList();
             decision.Timeline.Add("EndpointInventory");
 
-            ModelRunnerEndpoint selected = Select(candidates, vmr.LoadBalancingMode);
+            LoadBalancingPolicy? loadBalancingPolicy = ResolveLoadBalancingPolicy(vmr);
+            ModelRunnerEndpoint selected = Select(candidates, vmr.LoadBalancingMode, loadBalancingPolicy);
             decision.Success = true;
             decision.HttpStatusCode = 200;
             decision.OutcomeCode = "Routed";
@@ -156,10 +170,124 @@ namespace Xeno.Core.Services
             return definitions.FirstOrDefault()?.Name ?? String.Empty;
         }
 
-        private ModelRunnerEndpoint Select(List<ModelRunnerEndpoint> candidates, LoadBalancingModeEnum mode)
+        private ModelAccessPolicy? ResolveModelAccessPolicy(VirtualModelRunner vmr)
+        {
+            if (!String.IsNullOrWhiteSpace(vmr.ModelAccessPolicyId))
+            {
+                ModelAccessPolicy? byId = _Platform.ModelAccessPolicies.FirstOrDefault(item => item.Id == vmr.ModelAccessPolicyId && item.TenantId == vmr.TenantId && item.Active);
+                if (byId != null) return byId;
+            }
+
+            return _Platform.ModelAccessPolicies.FirstOrDefault(item => item.TenantId == vmr.TenantId && item.Active);
+        }
+
+        private LoadBalancingPolicy? ResolveLoadBalancingPolicy(VirtualModelRunner vmr)
+        {
+            if (!String.IsNullOrWhiteSpace(vmr.LoadBalancingPolicyId))
+            {
+                LoadBalancingPolicy? byId = _Platform.LoadBalancingPolicies.FirstOrDefault(item => item.Id == vmr.LoadBalancingPolicyId && item.TenantId == vmr.TenantId && item.Active);
+                if (byId != null) return byId;
+            }
+
+            return _Platform.LoadBalancingPolicies.FirstOrDefault(item => item.TenantId == vmr.TenantId && item.Active);
+        }
+
+        private bool EvaluateModelAccess(ModelAccessPolicy? policy, string effectiveModel, RoutingDecision decision)
+        {
+            if (policy == null)
+            {
+                decision.ModelAccessDecision = ModelAccessDecisionEnum.Permit;
+                return true;
+            }
+
+            bool denied = policy.DeniedModels.Contains(effectiveModel, StringComparer.OrdinalIgnoreCase);
+            bool allowListDenied = policy.AllowedModels.Count > 0 && !policy.AllowedModels.Contains(effectiveModel, StringComparer.OrdinalIgnoreCase);
+            if (denied || allowListDenied || policy.DefaultDecision == ModelAccessDecisionEnum.Deny)
+            {
+                decision.ModelAccessDecision = ModelAccessDecisionEnum.Deny;
+                if (policy.Mode == ModelAccessModeEnum.Enforce)
+                {
+                    decision.HttpStatusCode = 403;
+                    decision.OutcomeCode = "ModelAccessDenied";
+                    decision.Message = "Model access policy denied the request.";
+                    return false;
+                }
+
+                decision.Timeline.Add("ModelAccessMonitorDeny");
+            }
+            else
+            {
+                decision.ModelAccessDecision = ModelAccessDecisionEnum.Permit;
+            }
+
+            return true;
+        }
+
+        private bool EvaluateReservations(RequestContext context, VirtualModelRunner vmr, RoutingDecision decision)
+        {
+            DateTime now = DateTime.UtcNow;
+            List<VirtualModelRunnerReservation> activeReservations = _Platform.VirtualModelRunnerReservations
+                .Where(item => item.TenantId == context.TenantId)
+                .Where(item => item.VirtualModelRunnerId == vmr.Id)
+                .Where(item => item.Active)
+                .Where(item => item.StartUtc <= now && item.EndUtc >= now)
+                .ToList();
+
+            if (activeReservations.Count == 0)
+            {
+                decision.ReservationDecision = ReservationDecisionEnum.NoReservation;
+                return true;
+            }
+
+            if (activeReservations.Count > 1)
+            {
+                decision.ReservationDecision = ReservationDecisionEnum.Conflict;
+                decision.ReservationReasonCode = "ReservationConflict";
+                decision.HttpStatusCode = 409;
+                decision.OutcomeCode = "ReservationConflict";
+                decision.Message = "Multiple active reservations conflict.";
+                return false;
+            }
+
+            VirtualModelRunnerReservation reservation = activeReservations[0];
+            if (reservation.SubjectIds.Count == 0 || (!String.IsNullOrWhiteSpace(context.PrincipalId) && reservation.SubjectIds.Contains(context.PrincipalId, StringComparer.OrdinalIgnoreCase)))
+            {
+                decision.ReservationDecision = ReservationDecisionEnum.Allowed;
+                decision.ReservationReasonCode = "ReservationAllowed";
+                return true;
+            }
+
+            decision.ReservationDecision = ReservationDecisionEnum.Denied;
+            decision.ReservationReasonCode = "ReservationSubjectDenied";
+            decision.HttpStatusCode = 403;
+            decision.OutcomeCode = "ReservationDenied";
+            decision.Message = "The active reservation does not include this principal.";
+            return false;
+        }
+
+        private ModelRunnerEndpoint Select(List<ModelRunnerEndpoint> candidates, LoadBalancingModeEnum mode, LoadBalancingPolicy? policy)
         {
             if (mode == LoadBalancingModeEnum.FirstAvailable) return candidates[0];
             if (mode == LoadBalancingModeEnum.Random) return candidates[Random.Shared.Next(candidates.Count)];
+
+            if (policy != null && policy.Active)
+            {
+                if (String.Equals(policy.RankingMetric, "weight", StringComparison.OrdinalIgnoreCase))
+                {
+                    return policy.PreferLower
+                        ? candidates.OrderBy(item => item.Weight).ThenBy(item => item.InFlightRequests).First()
+                        : candidates.OrderByDescending(item => item.Weight).ThenBy(item => item.InFlightRequests).First();
+                }
+
+                if (String.Equals(policy.RankingMetric, "firstAvailable", StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidates[0];
+                }
+
+                return policy.PreferLower
+                    ? candidates.OrderBy(item => item.InFlightRequests).ThenByDescending(item => item.Weight).First()
+                    : candidates.OrderByDescending(item => item.InFlightRequests).ThenByDescending(item => item.Weight).First();
+            }
 
             lock (_Lock)
             {

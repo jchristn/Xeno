@@ -29,5 +29,20 @@ namespace Xeno.Core.Models
         /// Whether policy is active.
         /// </summary>
         public bool Active { get; set; } = true;
+
+        /// <summary>
+        /// Ranking metric. Supported values include weight, inFlightRequests, and firstAvailable.
+        /// </summary>
+        public string RankingMetric { get; set; } = "inFlightRequests";
+
+        /// <summary>
+        /// Prefer lower metric values.
+        /// </summary>
+        public bool PreferLower { get; set; } = true;
+
+        /// <summary>
+        /// Whether the policy should fail closed when no endpoint survives filtering.
+        /// </summary>
+        public bool FailClosed { get; set; } = true;
     }
 }

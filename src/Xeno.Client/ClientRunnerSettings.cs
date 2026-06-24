@@ -26,6 +26,16 @@ namespace Xeno.Client
         public string Endpoint { get; set; } = "http://127.0.0.1:11434";
 
         /// <summary>
+        /// Optional upstream API key.
+        /// </summary>
+        public string? ApiKey { get; set; } = null;
+
+        /// <summary>
+        /// Upstream request timeout in milliseconds.
+        /// </summary>
+        public int TimeoutMs { get; set; } = 300000;
+
+        /// <summary>
         /// Models.
         /// </summary>
         public List<ClientModelSettings> Models { get; set; } = new List<ClientModelSettings>

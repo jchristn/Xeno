@@ -11,6 +11,10 @@
     {
       "key": "tenantId",
       "value": "ten_default"
+    },
+    {
+      "key": "adminApiKey",
+      "value": "xenoadmin"
     }
   ],
   "item": [
@@ -146,6 +150,102 @@
           }
         ],
         "url": "{{baseUrl}}/v1.0/api/request-history/summary?bucketMinutes=60"
+      }
+    },
+    {
+      "name": "Create Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"adminApiKey\":\"{{adminApiKey}}\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/auth/token"
+      }
+    },
+    {
+      "name": "Metrics",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/metrics"
+      }
+    },
+    {
+      "name": "Load Model",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"llama3.2:latest\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/virtual-model-runners/load-model"
+      }
+    },
+    {
+      "name": "Evaluate Model Access",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"llama3.2:latest\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/model-access-policies/evaluate"
+      }
+    },
+    {
+      "name": "Analytics Overview",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/analytics/overview"
+      }
+    },
+    {
+      "name": "Backup",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/backup"
       }
     }
   ]

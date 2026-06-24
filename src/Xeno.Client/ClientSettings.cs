@@ -95,6 +95,9 @@ namespace Xeno.Client
                 os = Environment.OSVersion.ToString(),
                 architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
                 machineName = Environment.MachineName,
+                processorCount = Environment.ProcessorCount,
+                totalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
+                clientVersion = "0.1.0",
                 runners = Runners
             };
         }
