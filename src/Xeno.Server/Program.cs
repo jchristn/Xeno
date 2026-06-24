@@ -30,7 +30,7 @@ namespace Xeno.Server
                     tokenSource.Cancel();
                 };
 
-                XenoServer server = new XenoServer(settings);
+                XenoServer server = new XenoServer(settings, settingsFile);
                 await server.StartAsync(tokenSource.Token).ConfigureAwait(false);
             }
         }

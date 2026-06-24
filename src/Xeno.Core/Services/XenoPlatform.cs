@@ -73,26 +73,6 @@ namespace Xeno.Core.Services
         public List<ModelConfiguration> ModelConfigurations { get; } = new List<ModelConfiguration>();
 
         /// <summary>
-        /// Load-balancing policies.
-        /// </summary>
-        public List<LoadBalancingPolicy> LoadBalancingPolicies { get; } = new List<LoadBalancingPolicy>();
-
-        /// <summary>
-        /// Model access policies.
-        /// </summary>
-        public List<ModelAccessPolicy> ModelAccessPolicies { get; } = new List<ModelAccessPolicy>();
-
-        /// <summary>
-        /// Virtual model runners.
-        /// </summary>
-        public List<VirtualModelRunner> VirtualModelRunners { get; } = new List<VirtualModelRunner>();
-
-        /// <summary>
-        /// Virtual model runner reservations.
-        /// </summary>
-        public List<VirtualModelRunnerReservation> VirtualModelRunnerReservations { get; } = new List<VirtualModelRunnerReservation>();
-
-        /// <summary>
         /// Request history.
         /// </summary>
         public List<RequestHistoryEntry> RequestHistory { get; } = new List<RequestHistoryEntry>();
@@ -249,42 +229,6 @@ namespace Xeno.Core.Services
             };
             ModelConfigurations.Add(modelConfiguration);
 
-            LoadBalancingPolicy loadBalancingPolicy = new LoadBalancingPolicy
-            {
-                TenantId = tenant.Id,
-                Name = "Default least in-flight",
-                RankingMetric = "inFlightRequests",
-                PreferLower = true
-            };
-            LoadBalancingPolicies.Add(loadBalancingPolicy);
-
-            ModelAccessPolicy modelAccessPolicy = new ModelAccessPolicy
-            {
-                TenantId = tenant.Id,
-                Name = "Default permit",
-                Mode = Xeno.Core.Enums.ModelAccessModeEnum.Monitor
-            };
-            ModelAccessPolicies.Add(modelAccessPolicy);
-
-            VirtualModelRunner vmr = new VirtualModelRunner
-            {
-                TenantId = tenant.Id,
-                Name = "default",
-                ModelRunnerEndpointIds = new List<string> { endpoint.Id },
-                ModelDefinitionIds = new List<string> { chatModel.Id, embeddingModel.Id },
-                LoadBalancingPolicyId = loadBalancingPolicy.Id,
-                ModelAccessPolicyId = modelAccessPolicy.Id
-            };
-            VirtualModelRunners.Add(vmr);
-
-            VirtualModelRunnerReservations.Add(new VirtualModelRunnerReservation
-            {
-                TenantId = tenant.Id,
-                VirtualModelRunnerId = vmr.Id,
-                Name = "example-reservation",
-                Active = false
-            });
-
             return Task.CompletedTask;
         }
 
@@ -308,10 +252,6 @@ namespace Xeno.Core.Services
                 Endpoints = Endpoints,
                 ModelDefinitions = ModelDefinitions,
                 ModelConfigurations = ModelConfigurations,
-                LoadBalancingPolicies = LoadBalancingPolicies,
-                ModelAccessPolicies = ModelAccessPolicies,
-                VirtualModelRunners = VirtualModelRunners,
-                VirtualModelRunnerReservations = VirtualModelRunnerReservations,
                 RequestHistory = RequestHistory
             };
         }
@@ -359,18 +299,6 @@ namespace Xeno.Core.Services
 
             ModelConfigurations.Clear();
             ModelConfigurations.AddRange(state.ModelConfigurations);
-
-            LoadBalancingPolicies.Clear();
-            LoadBalancingPolicies.AddRange(state.LoadBalancingPolicies);
-
-            ModelAccessPolicies.Clear();
-            ModelAccessPolicies.AddRange(state.ModelAccessPolicies);
-
-            VirtualModelRunners.Clear();
-            VirtualModelRunners.AddRange(state.VirtualModelRunners);
-
-            VirtualModelRunnerReservations.Clear();
-            VirtualModelRunnerReservations.AddRange(state.VirtualModelRunnerReservations);
 
             RequestHistory.Clear();
             RequestHistory.AddRange(state.RequestHistory);

@@ -257,48 +257,36 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Routing",
-                        "ModelAccessPolicyDenies",
-                        "Enforced model access policy denies configured model",
+                        "UnknownModelDoesNotRoute",
+                        "Unknown model requests fail before endpoint selection",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
                             await platform.InitializeAsync().ConfigureAwait(false);
                             platform.Clients[0].Connected = true;
-                            platform.ModelAccessPolicies[0].Mode = ModelAccessModeEnum.Enforce;
-                            platform.ModelAccessPolicies[0].DeniedModels.Add("llama3.2:latest");
                             RoutingService routing = new RoutingService(platform);
-                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
-                            if (decision.Success) throw new InvalidOperationException("Denied model unexpectedly routed.");
-                            if (decision.OutcomeCode != "ModelAccessDenied") throw new InvalidOperationException("Unexpected outcome " + decision.OutcomeCode + ".");
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "missing-model", false).ConfigureAwait(false);
+                            if (decision.Success) throw new InvalidOperationException("Unknown model unexpectedly routed.");
+                            if (decision.OutcomeCode != "ModelNotFound") throw new InvalidOperationException("Unexpected outcome " + decision.OutcomeCode + ".");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
-                        "ReservationDeniesMissingSubject",
-                        "Active reservation denies principals outside the subject list",
+                        "DisconnectedClientDoesNotRoute",
+                        "Disconnected client endpoint is excluded from routing",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
                             await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.VirtualModelRunnerReservations.Add(new VirtualModelRunnerReservation
-                            {
-                                TenantId = Constants.DefaultTenantId,
-                                VirtualModelRunnerId = platform.VirtualModelRunners[0].Id,
-                                Name = "locked",
-                                StartUtc = DateTime.UtcNow.AddMinutes(-1),
-                                EndUtc = DateTime.UtcNow.AddMinutes(5),
-                                SubjectIds = new List<string> { "usr_other" },
-                                Active = true
-                            });
+                            platform.Clients[0].Connected = false;
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, UserId = platform.Users[0].Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
-                            if (decision.Success) throw new InvalidOperationException("Reservation-denied request unexpectedly routed.");
-                            if (decision.ReservationDecision != ReservationDecisionEnum.Denied) throw new InvalidOperationException("Reservation decision mismatch.");
+                            if (decision.Success) throw new InvalidOperationException("Disconnected client unexpectedly routed.");
+                            if (decision.OutcomeCode != "NoEligibleEndpoints") throw new InvalidOperationException("Unexpected disconnected-client outcome.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
-                        "LeastInFlightPolicySelectsLowerLoad",
-                        "Least in-flight policy selects the lower-load endpoint",
+                        "LeastInFlightSelectsLowerLoad",
+                        "Direct routing selects the lower-load endpoint",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -314,7 +302,6 @@ namespace Test.Shared
                                 InFlightRequests = 0
                             };
                             platform.Endpoints.Add(endpoint);
-                            platform.VirtualModelRunners[0].ModelRunnerEndpointIds.Add(endpoint.Id);
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
@@ -420,7 +407,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "ManagementApi",
                         "ManagementEndpointsSmoke",
-                        "Management routes expose policy, analytics, model loading, backup, and metrics",
+                        "Management routes expose settings, analytics, model loading, backup, and metrics",
                         executeAsync: delegate { return RunManagementSmokeAsync(); })
                 });
         }
@@ -429,6 +416,7 @@ namespace Test.Shared
         {
             int port = GetFreePort();
             string dbFile = Path.Combine(Path.GetTempPath(), "xeno-management-" + Guid.NewGuid().ToString("N") + ".db");
+            string settingsFile = Path.Combine(Path.GetTempPath(), "xeno-management-" + Guid.NewGuid().ToString("N") + ".json");
             XenoSettings settings = new XenoSettings
             {
                 Rest = new RestSettings
@@ -446,7 +434,7 @@ namespace Test.Shared
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
             {
-                XenoServer server = new XenoServer(settings);
+                XenoServer server = new XenoServer(settings, settingsFile);
                 Task serverTask = server.StartAsync(serverTokenSource.Token);
 
                 try
@@ -454,19 +442,19 @@ namespace Test.Shared
                     await WaitForHealthAsync(port).ConfigureAwait(false);
                     using (HttpClient httpClient = new HttpClient())
                     {
-                        string catalog = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/load-balancing-policies/metrics-catalog").ConfigureAwait(false);
-                        if (!catalog.Contains("inFlightRequests", StringComparison.Ordinal)) throw new InvalidOperationException("Metrics catalog missing inFlightRequests.");
+                        string settingsBody = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/settings").ConfigureAwait(false);
+                        if (!settingsBody.Contains("settingsFile", StringComparison.Ordinal)) throw new InvalidOperationException("Settings response missing settingsFile.");
 
-                        using (HttpResponseMessage loadResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/virtual-model-runners/load-model", "{\"model\":\"touchstone-model\"}").ConfigureAwait(false))
+                        using (HttpResponseMessage saveSettingsResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/settings", JsonUtil.Serialize(settings)).ConfigureAwait(false))
+                        {
+                            string saveSettingsBody = await saveSettingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!saveSettingsResponse.IsSuccessStatusCode || !File.Exists(settingsFile)) throw new InvalidOperationException("Settings save failed: " + saveSettingsBody);
+                        }
+
+                        using (HttpResponseMessage loadResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/model-runner-endpoints/load-model", "{\"model\":\"touchstone-model\"}").ConfigureAwait(false))
                         {
                             string loadBody = await loadResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!loadResponse.IsSuccessStatusCode || !loadBody.Contains("Loaded", StringComparison.Ordinal)) throw new InvalidOperationException("Load model failed: " + loadBody);
-                        }
-
-                        using (HttpResponseMessage evaluateResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/model-access-policies/evaluate", "{\"model\":\"touchstone-model\"}").ConfigureAwait(false))
-                        {
-                            string evaluateBody = await evaluateResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            if (!evaluateResponse.IsSuccessStatusCode || !evaluateBody.Contains("ModelAccessPermit", StringComparison.Ordinal)) throw new InvalidOperationException("Model access evaluate failed: " + evaluateBody);
                         }
 
                         string backup = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/backup").ConfigureAwait(false);
@@ -493,6 +481,7 @@ namespace Test.Shared
 
                     server.Dispose();
                     await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
                 }
             }
         }

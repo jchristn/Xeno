@@ -17,11 +17,11 @@ The reference dashboards consistently use these dashboard primitives:
 | Area | Reference evidence | Xeno status after pass |
 | --- | --- | --- |
 | App shell | Conductor, AssistantHub, Lattice, Verbex, and Pneuma all use a fixed sidebar plus topbar/header pattern. | Present: grouped sidebar, topbar context, logo in upper-left sidebar. |
-| Topbar actions | Conductor/AssistantHub/Verbex include server badges, theme, GitHub, logout/disconnect, copy server URL. | Present: server badge, copy server URL, GitHub, theme toggle, logout. |
+| Topbar actions | Conductor/AssistantHub/Verbex include server URL, theme, GitHub, logout/disconnect, copy server URL. | Present: plain server URL, copy server URL, GitHub, theme toggle, logout. |
 | Copyable IDs | Conductor, AssistantHub, Verbex, Lattice, Pneuma use fixed-width copyable ID/value components. | Present: `CopyButton`, `CopyableValue`, table/detail ID detection, HTTP fallback clipboard. |
 | Modal system | All references use reusable modal shells; several include confirm, alert, JSON/detail variants. | Present: `Modal`, `ConfirmModal`, JSON/detail modal composition. Alert/toast still future work. |
 | Tables | Conductor, AssistantHub, Verbex, Pneuma use sorting, filtering, pagination, row actions, empty/loading states. | Present: shared DataTable now has global search, per-column filters, sorting, pagination, row actions, empty state. |
-| Row actions | Conductor, AssistantHub, Verbex, Pneuma use row action menus to keep tables dense. | Present: `ActionMenu` with row "View details" action. |
+| Row actions | Conductor, AssistantHub, Verbex, Pneuma use row action menus to keep tables dense. | Present: `ActionMenu` with row Edit action and row-click edit modal. |
 | Pagination | AssistantHub, Verbex, Lattice, Pneuma have reusable pagination components and page-size controls. | Present: `Pagination` component. |
 | Empty/loading states | AssistantHub/Verbex/Pneuma use explicit empty panels instead of bare table rows. | Present: `EmptyState`. Loading states remain limited to current resource fallback behavior. |
 | Request charts | Conductor and Pneuma include request chart panels with ranges and hover detail. | Present: range controls, labeled axes, ticks, legend, hover/focus detail. |
@@ -69,7 +69,7 @@ The detail/JSON surfaces now provide:
 
 These items are still not done and should be treated as real dashboard debt:
 
-- Add entity create/edit form modals for tenants, users, credentials, clients, endpoints, models, VMRs, policies, and reservations.
+- Add persisted create/edit form submissions for tenants, users, credentials, model runners, endpoints, and models.
 - Add delete/archive flows where the backend supports them.
 - Add alert modal or toast provider for operation success/failure feedback.
 - Add loading/error state propagation from `useResource` instead of silent fallbacks.

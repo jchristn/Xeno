@@ -8,9 +8,9 @@ Xeno is an AI control plane for routing OpenAI-compatible completions and embedd
 
 The first implementation includes:
 
-- multitenant server state with seeded tenant, user, credential, client, endpoint, models, and virtual model runner;
+- multitenant server state with seeded tenant, user, credential, connected model runner endpoint, and models;
 - OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
-- management routes for health, OpenAPI, clients, VMRs, request history, and token bootstrap;
+- management routes for health, OpenAPI, model runners, settings, request history, and token bootstrap;
 - a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client credentials or an administrator API key;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
 - a React/Vite dashboard under `dashboard/`;

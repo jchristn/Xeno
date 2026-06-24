@@ -64,37 +64,17 @@ Login accepts `username`, `password`, and optional `tenantId`. It returns a gene
 
 `GET /v1.0/api/model-configurations`
 
-`GET /v1.0/api/load-balancing-policies`
-
-`GET /v1.0/api/load-balancing-policies/metrics-catalog`
-
-`POST /v1.0/api/load-balancing-policies/validate`
-
-`GET /v1.0/api/model-access-policies`
-
-`POST /v1.0/api/model-access-policies/evaluate`
-
-`POST /v1.0/api/model-access-policies/validate`
-
-`GET /v1.0/api/virtual-model-runners`
-
-`GET /v1.0/api/virtual-model-runners/effective`
-
-`GET /v1.0/api/virtual-model-runner-reservations`
-
-`GET /v1.0/api/virtual-model-runner-reservations/effective`
-
-`POST /v1.0/api/virtual-model-runners/explain-routing`
-
-`POST /v1.0/api/virtual-model-runners/load-model`
-
 `GET /v1.0/api/analytics/overview`
+
+`GET /v1.0/api/settings`
+
+`POST /v1.0/api/settings`
 
 `GET /v1.0/api/backup`
 
 `POST /v1.0/api/restore`
 
-Legacy dashboard aliases under `/api/v1/...` are also registered for clients, model/routing lists, token bootstrap, and request history.
+Legacy dashboard aliases under `/api/v1/...` are also registered for clients, model runner lists, token bootstrap, settings, and request history.
 
 ## OpenAI-Compatible API
 

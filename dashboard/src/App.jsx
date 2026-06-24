@@ -12,7 +12,6 @@ import {
   CircleDot,
   Cpu,
   Download,
-  FileClock,
   Gauge,
   Github,
   Globe2,
@@ -23,10 +22,9 @@ import {
   Network,
   LogOut,
   Moon,
-  Eye,
+  Pencil,
   Play,
   RefreshCw,
-  Route as RouteIcon,
   Search,
   Server,
   Settings as SettingsIcon,
@@ -35,7 +33,6 @@ import {
   Sun,
   Trash2,
   Upload,
-  Workflow,
   Zap
 } from 'lucide-react';
 import ApiClient from './utils/api.js';
@@ -75,10 +72,7 @@ const navGroups = [
   {
     key: 'control',
     links: [
-      { to: '/dashboard/clients', key: 'clients', icon: Network },
-      { to: '/dashboard/vmrs', key: 'vmrs', icon: BrainCircuit },
-      { to: '/dashboard/policies', key: 'policies', icon: RouteIcon },
-      { to: '/dashboard/reservations', key: 'reservations', icon: FileClock }
+      { to: '/dashboard/model-runners', key: 'modelRunners', icon: Network }
     ]
   },
   {
@@ -94,19 +88,17 @@ const navGroups = [
 ];
 
 const pageMeta = {
-  '/dashboard/home': { title: 'home', kicker: 'controlPlane', description: 'homeDescription' },
-  '/dashboard/requests': { title: 'requests', kicker: 'observe', description: 'requestsDescription' },
-  '/dashboard/explorer': { title: 'explorer', kicker: 'operate', description: 'explorerDescription' },
-  '/dashboard/tenants': { title: 'tenants', kicker: 'administration', description: 'tenantsDescription' },
-  '/dashboard/users': { title: 'users', kicker: 'administration', description: 'usersDescription' },
-  '/dashboard/credentials': { title: 'credentials', kicker: 'administration', description: 'credentialsDescription' },
-  '/dashboard/security': { title: 'security', kicker: 'administration', description: 'securityDescription' },
-  '/dashboard/clients': { title: 'clients', kicker: 'control', description: 'clientsDescription' },
-  '/dashboard/vmrs': { title: 'vmrs', kicker: 'control', description: 'vmrsDescription' },
-  '/dashboard/policies': { title: 'policies', kicker: 'control', description: 'policiesDescription' },
-  '/dashboard/reservations': { title: 'reservations', kicker: 'control', description: 'reservationsDescription' },
-  '/dashboard/analytics': { title: 'analytics', kicker: 'observe', description: 'analyticsDescription' },
-  '/dashboard/settings': { title: 'settings', kicker: 'administration', description: 'settingsDescription' }
+  '/dashboard/home': { title: 'home', description: 'homeDescription' },
+  '/dashboard/requests': { title: 'requests', description: 'requestsDescription' },
+  '/dashboard/explorer': { title: 'explorer', description: 'explorerDescription' },
+  '/dashboard/tenants': { title: 'tenants', description: 'tenantsDescription' },
+  '/dashboard/users': { title: 'users', description: 'usersDescription' },
+  '/dashboard/credentials': { title: 'credentials', description: 'credentialsDescription' },
+  '/dashboard/security': { title: 'security', description: 'securityDescription' },
+  '/dashboard/model-runners': { title: 'modelRunners', description: 'modelRunnersDescription' },
+  '/dashboard/clients': { title: 'modelRunners', description: 'modelRunnersDescription' },
+  '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
+  '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
 
 function Shell({ onLogout, onToggleTheme, theme }) {
@@ -121,7 +113,6 @@ function Shell({ onLogout, onToggleTheme, theme }) {
           <img className="sidebar-logo" src="/logo.png" alt={t('appTitle')} />
           <div>
             <strong>{t('appTitle')}</strong>
-            <span>{t('controlPlane')}</span>
           </div>
         </div>
         <div className="release-badge">
@@ -154,12 +145,11 @@ function Shell({ onLogout, onToggleTheme, theme }) {
       <div className="content-shell">
         <header className="topbar">
           <div className="topbar-title">
-            <span className="eyebrow">{t(meta.kicker)}</span>
             <h1>{t(meta.title)}</h1>
             <p>{t(meta.description)}</p>
           </div>
           <div className="topbar-actions">
-            <span className="server-badge" title={api.baseUrl}>
+            <span className="topbar-server-url" title={api.baseUrl}>
               <Server size={15} />
               <span>{api.baseUrl}</span>
               <CopyButton label={t('copyServerUrl')} value={api.baseUrl} />
@@ -194,10 +184,8 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <Route path="users" element={<UsersView />} />
             <Route path="credentials" element={<CredentialsView />} />
             <Route path="security" element={<SecurityView />} />
-            <Route path="clients" element={<ClientsView />} />
-            <Route path="vmrs" element={<VmrsView />} />
-            <Route path="policies" element={<PoliciesView />} />
-            <Route path="reservations" element={<ReservationsView />} />
+            <Route path="clients" element={<ModelRunnersView />} />
+            <Route path="model-runners" element={<ModelRunnersView />} />
             <Route path="analytics" element={<AnalyticsView />} />
             <Route path="settings" element={<SettingsView />} />
             <Route path="*" element={<HomeView />} />
@@ -279,19 +267,6 @@ function HomeView() {
 
   return (
     <div className="view-stack">
-      <section className="hero-band">
-        <div>
-          <span className="eyebrow">{t('systemStatus')}</span>
-          <h2>{t('homeHeroTitle')}</h2>
-          <p>{t('homeHeroText')}</p>
-        </div>
-        <div className="hero-status-grid">
-          <StatusRow label={t('serverHealth')} value={t('available')} tone="success" />
-          <StatusRow label={t('websocketGateway')} value={t('credentialGated')} tone="neutral" />
-          <StatusRow label={t('routingEngine')} value={t('conductorParity')} tone="success" />
-        </div>
-      </section>
-
       <div className="metric-grid">
         <MetricCard icon={<History size={18} />} label={t('requestVolume')} value={formatNumber(analytics.data.total)} subtext={t('total')} />
         <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analytics.data.success)} subtext={formatPercent(1 - Number(analytics.data.failureRate || 0))} tone="success" />
@@ -301,26 +276,16 @@ function HomeView() {
         <MetricCard icon={<BrainCircuit size={18} />} label={t('activeModels')} value={formatNumber(completionModels)} subtext={t('models')} tone="neutral" />
       </div>
 
-      <div className="workspace-grid wide-left">
-        <Panel
-          actions={<IconButton onClick={refreshAll} label={t('refresh')} icon={<RefreshCw size={16} />} />}
-          eyebrow={t('observe')}
-          title={t('requestActivity')}
-        >
-          <ActivityChart summary={summary.data} />
-        </Panel>
-        <Panel eyebrow={t('control')} title={t('routingSurface')}>
-          <div className="status-list">
-            <StatusRow label={t('clients')} value={formatNumber(clients.data.length)} tone={connected > 0 ? 'success' : 'warning'} />
-            <StatusRow label={t('endpoints')} value={`${activeEndpoints} / ${endpoints.data.length}`} tone={activeEndpoints > 0 ? 'success' : 'warning'} />
-            <StatusRow label={t('models')} value={formatNumber(models.data.length)} tone={models.data.length > 0 ? 'success' : 'neutral'} />
-            <StatusRow label={t('database')} value={t('configured')} tone="neutral" />
-          </div>
-        </Panel>
-      </div>
+      <Panel
+        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        title={t('requestActivity')}
+      >
+        <ActivityChart summary={summary.data} />
+      </Panel>
 
       <DataTable
         columns={['name', 'provider', 'serviceState', 'inFlightRequests', 'maxParallelRequests']}
+        onRefresh={endpoints.refresh}
         rows={endpoints.data}
         subtitle={t('endpointSubtitle')}
         title={t('endpoints')}
@@ -354,11 +319,10 @@ function RequestHistoryView() {
       <Panel
         actions={(
           <div className="button-row">
-            <IconButton onClick={history.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />
-            <IconButton onClick={() => setConfirmClear(true)} label={t('clear')} icon={<Trash2 size={16} />} variant="danger" />
+            <IconButton iconOnly onClick={() => { history.refresh(); summary.refresh(); }} label={t('refresh')} icon={<RefreshCw size={16} />} />
+            <IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} icon={<Trash2 size={16} />} variant="danger" />
           </div>
         )}
-        eyebrow={t('observe')}
         title={t('requestActivity')}
       >
         <ActivityChart summary={summary.data} />
@@ -366,11 +330,12 @@ function RequestHistoryView() {
       <DataTable
         columns={['statusCode', 'method', 'path', 'model', 'durationMs', 'createdUtc']}
         onRowClick={setSelected}
+        onRefresh={() => { history.refresh(); summary.refresh(); }}
         rows={history.data}
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
       />
-      {selected && <JsonPanel title={t('details')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('editRequest')} data={selected} onClose={() => setSelected(null)} />}
       <ConfirmModal
         confirmLabel={t('clear')}
         destructive
@@ -386,48 +351,100 @@ function RequestHistoryView() {
 
 function ApiExplorerView() {
   const { t } = useTranslation();
-  const spec = useResource('/openapi.json', null);
-  const [selectedPath, setSelectedPath] = useState('/v1/chat/completions');
+  const operations = [
+    { key: 'chatCompletions', method: 'POST', path: '/v1/chat/completions' },
+    { key: 'completions', method: 'POST', path: '/v1/completions' },
+    { key: 'embeddings', method: 'POST', path: '/v1/embeddings' },
+    { key: 'listModels', method: 'GET', path: '/v1/models' }
+  ];
+  const [operation, setOperation] = useState('chatCompletions');
+  const [model, setModel] = useState('llama3.2:latest');
+  const [prompt, setPrompt] = useState('hello');
+  const [input, setInput] = useState('hello');
+  const [maxTokens, setMaxTokens] = useState(128);
+  const [request, setRequest] = useState(null);
   const [response, setResponse] = useState(null);
-  const paths = Object.keys(spec.data?.paths || {});
-  const pathOptions = [selectedPath, ...paths.filter((path) => path !== selectedPath)];
+  const selected = operations.find((item) => item.key === operation) || operations[0];
+
+  function buildRequestBody() {
+    if (operation === 'chatCompletions') {
+      return { model, messages: [{ role: 'user', content: prompt }], stream: false, max_tokens: Number(maxTokens) || 128 };
+    }
+    if (operation === 'completions') {
+      return { model, prompt, stream: false, max_tokens: Number(maxTokens) || 128 };
+    }
+    if (operation === 'embeddings') {
+      return { model, input };
+    }
+    return null;
+  }
 
   async function execute() {
-    const data = selectedPath.includes('/embeddings')
-      ? await api.post('/v1/embeddings', { model: 'text-embedding-3-small', input: 'hello' })
-      : await api.post('/v1/chat/completions', { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'hello' }] });
+    const body = buildRequestBody();
+    setRequest({ method: selected.method, path: selected.path, body });
+    const data = selected.method === 'GET'
+      ? await api.get(selected.path)
+      : await api.post(selected.path, body);
     setResponse(data);
   }
 
   return (
     <div className="view-stack">
-      <div className="workspace-grid explorer-grid">
-        <Panel
-          actions={<IconButton onClick={execute} label={t('execute')} icon={<Play size={16} />} variant="primary" />}
-          eyebrow={t('openapiLoaded')}
-          title={t('requestBuilder')}
-        >
-          <div className="form-stack">
-            <label className="form-field">
-              <span>{t('path')}</span>
-              <select value={selectedPath} onChange={(event) => setSelectedPath(event.target.value)}>
-                {pathOptions.map((path) => <option key={path}>{path}</option>)}
-              </select>
-            </label>
-            <div className="route-preview">
-              <span className="status-chip neutral">POST</span>
-              <code>{selectedPath}</code>
+      <Panel
+        actions={<IconButton onClick={execute} label={t('execute')} icon={<Play size={16} />} variant="primary" />}
+        title={t('requestBuilder')}
+      >
+        <div className="form-stack">
+          <div className="segmented-control" role="tablist" aria-label={t('operation')}>
+            {operations.map((item) => (
+              <button
+                aria-selected={item.key === operation}
+                className={item.key === operation ? 'active' : ''}
+                key={item.key}
+                onClick={() => setOperation(item.key)}
+                role="tab"
+                type="button"
+              >
+                {t(item.key)}
+              </button>
+            ))}
+          </div>
+          <div className="route-preview">
+            <span className="status-chip neutral">{selected.method}</span>
+            <code>{selected.path}</code>
+            <span className="muted-copy">{api.baseUrl}</span>
+          </div>
+          {operation !== 'listModels' ? (
+            <div className="form-grid two">
+              <label className="form-field">
+                <span>{t('model')}</span>
+                <input value={model} onChange={(event) => setModel(event.target.value)} />
+              </label>
+              {operation !== 'embeddings' ? (
+                <label className="form-field">
+                  <span>{t('maxTokens')}</span>
+                  <input min="1" type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />
+                </label>
+              ) : null}
             </div>
-          </div>
-        </Panel>
-        <Panel eyebrow={t('details')} title={t('apiSurface')}>
-          <div className="status-list">
-            <StatusRow label={t('paths')} value={formatNumber(paths.length)} tone={paths.length ? 'success' : 'warning'} />
-            <StatusRow label={t('serverUrl')} value={api.baseUrl} tone="neutral" />
-          </div>
-        </Panel>
+          ) : null}
+          {operation === 'embeddings' ? (
+            <label className="form-field">
+              <span>{t('input')}</span>
+              <textarea rows={5} value={input} onChange={(event) => setInput(event.target.value)} />
+            </label>
+          ) : operation !== 'listModels' ? (
+            <label className="form-field">
+              <span>{t('prompt')}</span>
+              <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+            </label>
+          ) : null}
+        </div>
+      </Panel>
+      <div className="workspace-grid explorer-grid">
+        <JsonPanelInline title={t('request')} data={request || { method: selected.method, path: selected.path, body: buildRequestBody() }} />
+        <JsonPanelInline title={t('response')} data={response || { status: t('noData') }} />
       </div>
-      <JsonPanelInline title={response ? t('response') : t('openapiDocument')} data={response || spec.data || { status: t('noData') }} />
     </div>
   );
 }
@@ -446,13 +463,12 @@ function SecurityView() {
         <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
         <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" />
       </div>
-      <div className="workspace-grid">
-        <DataTable title={t('roles')} rows={roles.data} columns={['name', 'builtIn', 'active']} />
-        <DataTable title={t('permissions')} rows={permissions.data} columns={['resourceType', 'operationType', 'permit']} />
-        <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} />
-      </div>
+      <DataTable title={t('roles')} rows={roles.data} columns={['name', 'builtIn', 'active']} onRefresh={roles.refresh} />
+      <DataTable title={t('permissions')} rows={permissions.data} columns={['resourceType', 'operationType', 'permit']} onRefresh={permissions.refresh} />
+      <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} onRefresh={effective.refresh} />
       <DataTable
         columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode']}
+        onRefresh={audit.refresh}
         rows={audit.data}
         subtitle={t('auditSubtitle')}
         title={t('audit')}
@@ -468,24 +484,15 @@ function TenantsView() {
 
   return (
     <div className="view-stack">
-      <Panel
-        actions={<IconButton onClick={tenants.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
-        eyebrow={t('administration')}
-        title={t('tenantManagement')}
-      >
-        <div className="status-list horizontal">
-          <StatusRow label={t('tenants')} value={formatNumber(tenants.data.length)} tone="neutral" />
-          <StatusRow label={t('tenantIsolation')} value={t('enabled')} tone="success" />
-        </div>
-      </Panel>
       <DataTable
         columns={['id', 'name', 'active', 'createdUtc', 'lastUpdateUtc']}
         onRowClick={setSelected}
+        onRefresh={tenants.refresh}
         rows={tenants.data}
         subtitle={t('tenantsTableSubtitle')}
         title={t('tenants')}
       />
-      {selected && <JsonPanel title={t('tenantDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('editTenant')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -497,24 +504,15 @@ function UsersView() {
 
   return (
     <div className="view-stack">
-      <Panel
-        actions={<IconButton onClick={users.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
-        eyebrow={t('administration')}
-        title={t('userManagement')}
-      >
-        <div className="status-list horizontal">
-          <StatusRow label={t('users')} value={formatNumber(users.data.length)} tone="neutral" />
-          <StatusRow label={t('passwordLogin')} value={t('dashboardOnly')} tone="warning" />
-        </div>
-      </Panel>
       <DataTable
         columns={['id', 'tenantId', 'username', 'email', 'isAdmin', 'isTenantAdmin', 'active']}
         onRowClick={setSelected}
+        onRefresh={users.refresh}
         rows={users.data}
         subtitle={t('usersTableSubtitle')}
         title={t('users')}
       />
-      {selected && <JsonPanel title={t('userDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('editUser')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -533,30 +531,24 @@ function CredentialsView() {
 
   return (
     <div className="view-stack">
-      <Panel
-        actions={<IconButton onClick={createCredential} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />}
-        eyebrow={t('administration')}
-        title={t('credentialManagement')}
-      >
-        <div className="status-list horizontal">
-          <StatusRow label={t('credentials')} value={formatNumber(credentials.data.length)} tone="neutral" />
-          <StatusRow label={t('websocketGateway')} value={t('credentialGated')} tone="success" />
-        </div>
-      </Panel>
+      <div className="toolbar align-end">
+        <IconButton onClick={createCredential} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />
+      </div>
       {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
       <DataTable
         columns={['id', 'tenantId', 'userId', 'accessKey', 'secretKey', 'active']}
         onRowClick={setSelected}
+        onRefresh={credentials.refresh}
         rows={credentials.data}
         subtitle={t('credentialsTableSubtitle')}
         title={t('credentials')}
       />
-      {selected && <JsonPanel title={t('credentialDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <EditRecordModal title={t('editCredential')} data={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
 
-function ClientsView() {
+function ModelRunnersView() {
   const { t } = useTranslation();
   const clients = useResource('/api/v1/clients', []);
   const endpoints = useResource('/api/v1/modelrunnerendpoints', []);
@@ -570,112 +562,21 @@ function ClientsView() {
         <MetricCard icon={<Server size={18} />} label={t('endpoints')} value={formatNumber(endpoints.data.length)} />
         <MetricCard icon={<BrainCircuit size={18} />} label={t('models')} value={formatNumber(models.data.length)} />
       </div>
-      <div className="workspace-grid">
-        <DataTable title={t('clients')} rows={clients.data} columns={['name', 'connected', 'lastHeartbeatUtc']} />
-        <DataTable title={t('endpoints')} rows={endpoints.data} columns={['name', 'provider', 'serviceState', 'maxParallelRequests']} />
-        <DataTable title={t('models')} rows={models.data} columns={['name', 'supportsCompletions', 'supportsEmbeddings']} />
-      </div>
-    </div>
-  );
-}
-
-function VmrsView() {
-  const { t } = useTranslation();
-  const vmrs = useResource('/api/v1/virtualmodelrunners', []);
-  const effective = useResource('/api/v1/virtualmodelrunners/effective', null);
-  const [loadModel, setLoadModel] = useState('llama3.2:latest');
-  const [loadResult, setLoadResult] = useState(null);
-  const [routing, setRouting] = useState(null);
-
-  async function load() {
-    setLoadResult(await api.post('/api/v1/virtualmodelrunners/load-model', { model: loadModel }));
-    effective.refresh();
-  }
-
-  async function explain() {
-    setRouting(await api.post('/api/v1/virtualmodelrunners/explain-routing', { model: loadModel }));
-  }
-
-  return (
-    <div className="view-stack">
-      <Panel
-        actions={<IconButton onClick={explain} label={t('explainRouting')} icon={<Play size={16} />} variant="primary" />}
-        eyebrow={t('requestRouting')}
-        title={t('vmrWorkbench')}
-      >
-        <div className="toolbar">
-          <label className="form-field inline">
-            <span>{t('model')}</span>
-            <input value={loadModel} onChange={(event) => setLoadModel(event.target.value)} />
-          </label>
-          <IconButton onClick={load} label={t('loadModel')} icon={<Upload size={16} />} />
-        </div>
-      </Panel>
-      <DataTable title={t('vmrs')} rows={vmrs.data} columns={['name', 'loadBalancingMode', 'strictMode', 'active']} />
-      <div className="workspace-grid">
-        <JsonPanelInline title={t('effectiveConfig')} data={effective.data} />
-        <JsonPanelInline title={t('routingDecision')} data={routing || loadResult || {}} />
-      </div>
-    </div>
-  );
-}
-
-function PoliciesView() {
-  const { t } = useTranslation();
-  const loadPolicies = useResource('/api/v1/loadbalancingpolicies', []);
-  const accessPolicies = useResource('/api/v1/modelaccesspolicies', []);
-  const metrics = useResource('/api/v1/loadbalancingpolicies/metrics-catalog', []);
-  const [evaluation, setEvaluation] = useState(null);
-
-  async function evaluate() {
-    setEvaluation(await api.post('/api/v1/modelaccesspolicies/evaluate', { model: 'llama3.2:latest' }));
-  }
-
-  return (
-    <div className="view-stack">
-      <Panel
-        actions={<IconButton onClick={evaluate} label={t('evaluate')} icon={<Play size={16} />} variant="primary" />}
-        eyebrow={t('policyControls')}
-        title={t('policyWorkbench')}
-      >
-        <div className="status-list horizontal">
-          <StatusRow label={t('loadBalancingPolicies')} value={formatNumber(loadPolicies.data.length)} tone="neutral" />
-          <StatusRow label={t('modelAccessPolicies')} value={formatNumber(accessPolicies.data.length)} tone="neutral" />
-        </div>
-      </Panel>
-      <div className="workspace-grid">
-        <DataTable title={t('loadBalancingPolicies')} rows={loadPolicies.data} columns={['name', 'rankingMetric', 'preferLower', 'active']} />
-        <DataTable title={t('modelAccessPolicies')} rows={accessPolicies.data} columns={['name', 'mode', 'defaultDecision', 'active']} />
-        <JsonPanelInline title={t('metricsCatalog')} data={metrics.data} />
-        <JsonPanelInline title={t('evaluation')} data={evaluation || {}} />
-      </div>
-    </div>
-  );
-}
-
-function ReservationsView() {
-  const { t } = useTranslation();
-  const reservations = useResource('/api/v1/virtualmodelrunnerreservations', []);
-  const effective = useResource('/api/v1/virtualmodelrunnerreservations/effective', {});
-
-  return (
-    <div className="view-stack">
-      <div className="metric-grid compact">
-        <MetricCard icon={<FileClock size={18} />} label={t('reservationWindows')} value={formatNumber(reservations.data.length)} />
-        <MetricCard icon={<Workflow size={18} />} label={t('effectiveAccess')} value={effective.data ? t('available') : t('noData')} tone={effective.data ? 'success' : 'neutral'} />
-      </div>
-      <div className="workspace-grid">
-        <DataTable title={t('reservations')} rows={reservations.data} columns={['name', 'startUtc', 'endUtc', 'active']} />
-        <JsonPanelInline title={t('effectiveAccess')} data={effective.data} />
-      </div>
+      <DataTable title={t('modelRunners')} rows={clients.data} columns={['name', 'connected', 'lastHeartbeatUtc']} onRefresh={clients.refresh} />
+      <DataTable title={t('endpoints')} rows={endpoints.data} columns={['name', 'provider', 'serviceState', 'maxParallelRequests']} onRefresh={endpoints.refresh} />
+      <DataTable title={t('models')} rows={models.data} columns={['name', 'supportsCompletions', 'supportsEmbeddings']} onRefresh={models.refresh} />
     </div>
   );
 }
 
 function AnalyticsView() {
   const { t } = useTranslation();
-  const analytics = useResource('/api/v1/analytics/overview', {});
+  const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
+  const summary = useResource('/api/v1/requesthistory/summary', { buckets: [] });
+  const history = useResource('/api/v1/requesthistory', []);
   const metrics = useTextResource('/metrics', '');
+  const byModel = groupByCount(history.data, 'model');
+  const byPath = groupByCount(history.data, 'path');
 
   return (
     <div className="view-stack">
@@ -683,25 +584,74 @@ function AnalyticsView() {
         <MetricCard icon={<Activity size={18} />} label={t('total')} value={formatNumber(analytics.data.total)} />
         <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analytics.data.success)} tone="success" />
         <MetricCard icon={<Shield size={18} />} label={t('failed')} value={formatNumber(analytics.data.failures)} tone="danger" />
+        <MetricCard icon={<Gauge size={18} />} label={t('failureRate')} value={formatPercent(Number(analytics.data.failureRate || 0))} tone={Number(analytics.data.failureRate || 0) > 0 ? 'warning' : 'success'} />
       </div>
+      <Panel
+        actions={<IconButton iconOnly onClick={() => { analytics.refresh(); summary.refresh(); history.refresh(); metrics.refresh(); }} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        title={t('requestActivity')}
+      >
+        <ActivityChart summary={summary.data} />
+      </Panel>
       <div className="workspace-grid">
-        <JsonPanelInline title={t('overview')} data={analytics.data} />
-        <Panel
-          actions={<IconButton onClick={() => { analytics.refresh(); metrics.refresh(); }} label={t('refresh')} icon={<RefreshCw size={16} />} />}
-          eyebrow={t('observe')}
-          title={t('prometheusMetrics')}
-        >
-          <pre className="metrics-output">{metrics.data || t('noData')}</pre>
-        </Panel>
+        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} onRefresh={history.refresh} />
+        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} onRefresh={history.refresh} />
       </div>
+      <Panel
+        actions={<IconButton iconOnly onClick={metrics.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        title={t('prometheusMetrics')}
+      >
+        <pre className="metrics-output">{metrics.data || t('noData')}</pre>
+      </Panel>
     </div>
   );
 }
 
 function SettingsView() {
   const { t } = useTranslation();
+  const settings = useResource('/api/v1/settings', defaultServerSettings());
+  const [draft, setDraft] = useState(defaultServerSettings());
+  const [configText, setConfigText] = useState('');
   const [backup, setBackup] = useState('');
   const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    const normalized = normalizeSettings(unwrapSettings(settings.data));
+    setDraft(normalized);
+    setConfigText(JSON.stringify(normalized, null, 2));
+  }, [settings.data]);
+
+  function updateSetting(section, key, inputValue) {
+    setDraft((current) => ({
+      ...current,
+      [section]: {
+        ...current[section],
+        [key]: inputValue
+      }
+    }));
+  }
+
+  function updateListSetting(section, key, inputValue) {
+    updateSetting(section, key, inputValue.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean));
+  }
+
+  async function saveSettings() {
+    const result = await api.post('/api/v1/settings', draft);
+    const normalized = normalizeSettings(unwrapSettings(result));
+    setDraft(normalized);
+    setConfigText(JSON.stringify(normalized, null, 2));
+    settings.refresh();
+    setStatus(t('settingsSaved'));
+  }
+
+  async function saveJsonSettings() {
+    const parsed = JSON.parse(configText || '{}');
+    const result = await api.post('/api/v1/settings', parsed);
+    const normalized = normalizeSettings(unwrapSettings(result));
+    setDraft(normalized);
+    setConfigText(JSON.stringify(normalized, null, 2));
+    settings.refresh();
+    setStatus(t('settingsSaved'));
+  }
 
   async function downloadBackup() {
     setBackup(JSON.stringify(await api.get('/api/v1/backup'), null, 2));
@@ -715,22 +665,147 @@ function SettingsView() {
 
   return (
     <div className="view-stack">
+      <div className="toolbar align-end">
+        <LanguageSelector />
+        <IconButton iconOnly onClick={settings.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />
+        <IconButton onClick={saveSettings} label={t('saveSettings')} icon={<Upload size={16} />} variant="primary" />
+      </div>
+      {status ? <p className="muted-copy">{status}</p> : null}
       <div className="workspace-grid settings-grid">
-        <Panel eyebrow={t('configuration')} title={t('connection')}>
-          <div className="status-list">
-            <StatusRow label={t('serverUrl')} value={api.baseUrl} tone="neutral" />
-            <StatusRow label={t('language')} value={<LanguageSelector />} tone="neutral" />
+        <Panel title={t('restSettings')}>
+          <div className="form-grid two">
+            <label className="form-field">
+              <span>{t('hostname')}</span>
+              <input value={draft.Rest.Hostname} onChange={(event) => updateSetting('Rest', 'Hostname', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('port')}</span>
+              <input min="1" type="number" value={draft.Rest.Port} onChange={(event) => updateSetting('Rest', 'Port', Number(event.target.value))} />
+            </label>
+            <label className="toggle-field">
+              <input checked={draft.Rest.Ssl} onChange={(event) => updateSetting('Rest', 'Ssl', event.target.checked)} type="checkbox" />
+              <span>{t('ssl')}</span>
+            </label>
+            <label className="toggle-field">
+              <input checked={draft.Rest.RequireAuthentication} onChange={(event) => updateSetting('Rest', 'RequireAuthentication', event.target.checked)} type="checkbox" />
+              <span>{t('requireAuthentication')}</span>
+            </label>
           </div>
         </Panel>
-        <Panel eyebrow={t('administration')} title={t('backupRestore')}>
+        <Panel title={t('corsSettings')}>
+          <div className="form-stack">
+            <label className="toggle-field">
+              <input checked={draft.Cors.Enabled} onChange={(event) => updateSetting('Cors', 'Enabled', event.target.checked)} type="checkbox" />
+              <span>{t('enabled')}</span>
+            </label>
+            <label className="form-field">
+              <span>{t('allowedOrigins')}</span>
+              <textarea rows={4} value={listToText(draft.Cors.AllowedOrigins)} onChange={(event) => updateListSetting('Cors', 'AllowedOrigins', event.target.value)} />
+            </label>
+            <div className="form-grid two">
+              <label className="form-field">
+                <span>{t('allowedHeaders')}</span>
+                <textarea rows={4} value={listToText(draft.Cors.AllowedHeaders)} onChange={(event) => updateListSetting('Cors', 'AllowedHeaders', event.target.value)} />
+              </label>
+              <label className="form-field">
+                <span>{t('allowedMethods')}</span>
+                <textarea rows={4} value={listToText(draft.Cors.AllowedMethods)} onChange={(event) => updateListSetting('Cors', 'AllowedMethods', event.target.value)} />
+              </label>
+            </div>
+          </div>
+        </Panel>
+        <Panel title={t('webSocketSettings')}>
+          <div className="form-grid two">
+            <label className="toggle-field">
+              <input checked={draft.WebSocket.Enabled} onChange={(event) => updateSetting('WebSocket', 'Enabled', event.target.checked)} type="checkbox" />
+              <span>{t('enabled')}</span>
+            </label>
+            <label className="form-field">
+              <span>{t('path')}</span>
+              <input value={draft.WebSocket.Path} onChange={(event) => updateSetting('WebSocket', 'Path', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('heartbeatIntervalMs')}</span>
+              <input min="1000" type="number" value={draft.WebSocket.HeartbeatIntervalMs} onChange={(event) => updateSetting('WebSocket', 'HeartbeatIntervalMs', Number(event.target.value))} />
+            </label>
+            <label className="form-field">
+              <span>{t('requestTimeoutMs')}</span>
+              <input min="1000" type="number" value={draft.WebSocket.RequestTimeoutMs} onChange={(event) => updateSetting('WebSocket', 'RequestTimeoutMs', Number(event.target.value))} />
+            </label>
+          </div>
+        </Panel>
+        <Panel title={t('databaseSettings')}>
+          <div className="form-grid two">
+            <label className="form-field">
+              <span>{t('provider')}</span>
+              <select value={draft.Database.Type} onChange={(event) => updateSetting('Database', 'Type', event.target.value)}>
+                {['Sqlite', 'Postgresql', 'SqlServer', 'Mysql'].map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>{t('filename')}</span>
+              <input value={draft.Database.Filename} onChange={(event) => updateSetting('Database', 'Filename', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('server')}</span>
+              <input value={draft.Database.Server || ''} onChange={(event) => updateSetting('Database', 'Server', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('port')}</span>
+              <input min="0" type="number" value={draft.Database.Port} onChange={(event) => updateSetting('Database', 'Port', Number(event.target.value))} />
+            </label>
+            <label className="form-field">
+              <span>{t('databaseName')}</span>
+              <input value={draft.Database.DatabaseName || ''} onChange={(event) => updateSetting('Database', 'DatabaseName', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('username')}</span>
+              <input value={draft.Database.Username || ''} onChange={(event) => updateSetting('Database', 'Username', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('password')}</span>
+              <input type="password" value={draft.Database.Password || ''} onChange={(event) => updateSetting('Database', 'Password', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('connectionString')}</span>
+              <input value={draft.Database.ConnectionString || ''} onChange={(event) => updateSetting('Database', 'ConnectionString', event.target.value)} />
+            </label>
+          </div>
+        </Panel>
+        <Panel title={t('loggingSettings')}>
+          <div className="form-grid two">
+            <label className="toggle-field">
+              <input checked={draft.Logging.ConsoleLogging} onChange={(event) => updateSetting('Logging', 'ConsoleLogging', event.target.checked)} type="checkbox" />
+              <span>{t('consoleLogging')}</span>
+            </label>
+            <label className="toggle-field">
+              <input checked={draft.Logging.FileLogging} onChange={(event) => updateSetting('Logging', 'FileLogging', event.target.checked)} type="checkbox" />
+              <span>{t('fileLogging')}</span>
+            </label>
+            <label className="form-field">
+              <span>{t('logDirectory')}</span>
+              <input value={draft.Logging.LogDirectory} onChange={(event) => updateSetting('Logging', 'LogDirectory', event.target.value)} />
+            </label>
+            <label className="form-field">
+              <span>{t('logFilename')}</span>
+              <input value={draft.Logging.LogFilename} onChange={(event) => updateSetting('Logging', 'LogFilename', event.target.value)} />
+            </label>
+          </div>
+        </Panel>
+        <Panel title={t('backupRestore')}>
           <div className="button-row">
             <IconButton onClick={downloadBackup} label={t('backup')} icon={<Download size={16} />} />
             <IconButton onClick={restoreBackup} label={t('restore')} icon={<Upload size={16} />} variant="primary" />
           </div>
-          {status ? <p className="muted-copy">{status}</p> : null}
+          <textarea className="backup-editor" value={backup} onChange={(event) => setBackup(event.target.value)} aria-label={t('backup')} />
         </Panel>
       </div>
-      <textarea className="backup-editor" value={backup} onChange={(event) => setBackup(event.target.value)} aria-label={t('backup')} />
+      <Panel
+        actions={<IconButton onClick={saveJsonSettings} label={t('saveJson')} icon={<Upload size={16} />} variant="primary" />}
+        title={t('rawConfigJson')}
+      >
+        <textarea className="backup-editor config-editor" value={configText} onChange={(event) => setConfigText(event.target.value)} aria-label={t('rawConfigJson')} />
+      </Panel>
     </div>
   );
 }
@@ -765,6 +840,42 @@ function useTextResource(path, fallback) {
   return { data, refresh: () => setVersion((current) => current + 1) };
 }
 
+function defaultServerSettings() {
+  return {
+    Rest: { Hostname: '0.0.0.0', Port: 9000, Ssl: false, RequireAuthentication: false },
+    Cors: {
+      Enabled: true,
+      AllowedOrigins: ['http://localhost:9100'],
+      AllowedHeaders: ['Authorization', 'Content-Type', 'x-token', 'x-tenant-guid'],
+      AllowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    },
+    WebSocket: { Enabled: true, Path: '/ws/v1/clients', HeartbeatIntervalMs: 15000, RequestTimeoutMs: 120000 },
+    Database: { Type: 'Sqlite', Filename: 'data/xeno.db', Server: '', Port: 0, DatabaseName: '', Username: '', Password: '', ConnectionString: '' },
+    Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' }
+  };
+}
+
+function unwrapSettings(input) {
+  return input?.settings || input?.Settings || input || {};
+}
+
+function normalizeSettings(input) {
+  const defaults = defaultServerSettings();
+  const source = input || {};
+  return {
+    ...source,
+    Rest: { ...defaults.Rest, ...(source.Rest || source.rest || {}) },
+    Cors: { ...defaults.Cors, ...(source.Cors || source.cors || {}) },
+    WebSocket: { ...defaults.WebSocket, ...(source.WebSocket || source.webSocket || source.websocket || {}) },
+    Database: { ...defaults.Database, ...(source.Database || source.database || {}) },
+    Logging: { ...defaults.Logging, ...(source.Logging || source.logging || {}) }
+  };
+}
+
+function listToText(input) {
+  return Array.isArray(input) ? input.join('\n') : '';
+}
+
 function MetricCard({ icon, label, subtext, tone = 'neutral', value }) {
   return (
     <div className={`metric-card ${tone}`}>
@@ -793,16 +904,16 @@ function Panel({ actions, children, eyebrow, title }) {
   );
 }
 
-function IconButton({ icon, label, onClick, variant = 'secondary' }) {
+function IconButton({ icon, iconOnly = false, label, onClick, variant = 'secondary' }) {
   return (
-    <button className={`action-button ${variant}`} onClick={onClick} title={label} type="button">
+    <button className={`action-button ${variant} ${iconOnly ? 'icon-only' : ''}`} onClick={onClick} title={label} type="button">
       {icon}
-      <span>{label}</span>
+      <span className={iconOnly ? 'sr-only' : ''}>{label}</span>
     </button>
   );
 }
 
-function DataTable({ actions, columns, onRowClick, rows, subtitle, title }) {
+function DataTable({ actions, columns, onRefresh, onRowClick, rows, subtitle, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
@@ -888,6 +999,14 @@ function DataTable({ actions, columns, onRowClick, rows, subtitle, title }) {
           {actions}
         </div>
       </div>
+      <Pagination
+        currentPage={displayPage}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={setPageSize}
+        onRefresh={onRefresh}
+        pageSize={pageSize}
+        totalItems={sortedRows.length}
+      />
       <div className="table-scroll">
         <table className="data-table">
           <thead>
@@ -940,9 +1059,9 @@ function DataTable({ actions, columns, onRowClick, rows, subtitle, title }) {
                   <td className="actions-cell">
                     <ActionMenu
                       items={[{
-                        icon: <Eye size={14} />,
-                        key: 'view',
-                        label: t('viewDetails'),
+                        icon: <Pencil size={14} />,
+                        key: 'edit',
+                        label: t('edit'),
                         onSelect: () => onRowClick(row)
                       }]}
                     />
@@ -953,13 +1072,6 @@ function DataTable({ actions, columns, onRowClick, rows, subtitle, title }) {
           </tbody>
         </table>
       </div>
-      <Pagination
-        currentPage={displayPage}
-        onPageChange={setCurrentPage}
-        onPageSizeChange={setPageSize}
-        pageSize={pageSize}
-        totalItems={sortedRows.length}
-      />
     </section>
   );
 }
@@ -989,18 +1101,43 @@ function StatusChip({ tone = 'neutral', value }) {
   return <span className={`status-chip ${tone}`}>{value}</span>;
 }
 
-function JsonPanel({ title, data, onClose }) {
+function EditRecordModal({ title, data, onClose }) {
   const { t } = useTranslation();
+  const [draft, setDraft] = useState(data || {});
+  const entries = Object.entries(draft || {});
+
+  function updateField(key, inputValue) {
+    setDraft((current) => ({ ...current, [key]: inputValue }));
+  }
+
   return (
     <Modal
       actions={<button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>}
-      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data)} />}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(draft)} />}
       onClose={onClose}
       open
-      subtitle={t('details')}
+      subtitle={t('editRecordSubtitle')}
       title={title}
     >
-      <JsonBlock data={data} />
+      <div className="edit-record-grid">
+        {entries.map(([key, fieldValue]) => (
+          <label className="form-field" key={key}>
+            <span>{t(key, key)}</span>
+            {isIdentifierColumn(key) ? (
+              <CopyableValue label={t('copyValue')} value={fieldValue} />
+            ) : typeof fieldValue === 'boolean' ? (
+              <select value={String(fieldValue)} onChange={(event) => updateField(key, event.target.value === 'true')}>
+                <option value="true">{t('yes')}</option>
+                <option value="false">{t('no')}</option>
+              </select>
+            ) : fieldValue && typeof fieldValue === 'object' ? (
+              <JsonBlock data={fieldValue} />
+            ) : (
+              <input value={fieldValue ?? ''} onChange={(event) => updateField(key, event.target.value)} />
+            )}
+          </label>
+        ))}
+      </div>
     </Modal>
   );
 }
@@ -1085,6 +1222,20 @@ function summarizeBuckets(buckets) {
       total: summary.total + success + failed
     };
   }, { failed: 0, success: 0, total: 0 });
+}
+
+function groupByCount(rows, key) {
+  const groups = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const groupName = String(value(row, key) || 'unknown');
+    const statusCode = Number(value(row, 'statusCode') || 0);
+    const current = groups.get(groupName) || { name: groupName, count: 0, success: 0, failed: 0 };
+    current.count += 1;
+    if (statusCode >= 200 && statusCode < 400) current.success += 1;
+    else current.failed += 1;
+    groups.set(groupName, current);
+  });
+  return [...groups.values()].sort((left, right) => right.count - left.count);
 }
 
 function isHealthyState(state) {

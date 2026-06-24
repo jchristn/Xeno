@@ -17,7 +17,7 @@ export default function ActivityChart({ summary }) {
   const max = Math.max(1, ...buckets.map((bucket) => bucket.success + bucket.failed));
 
   const chart = {
-    height: 300,
+    height: 525,
     width: 760,
     left: 58,
     right: 28,

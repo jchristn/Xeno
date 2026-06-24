@@ -2,6 +2,7 @@ namespace Xeno.Server
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
     using System.Net.WebSockets;
     using System.Security.Cryptography;
@@ -27,6 +28,7 @@ namespace Xeno.Server
     public sealed class XenoServer : IDisposable
     {
         private readonly XenoSettings _Settings;
+        private readonly string _SettingsFile;
         private readonly Webserver _Webserver;
         private readonly object _ClientConnectionsLock = new object();
         private readonly object _PendingResponsesLock = new object();
@@ -41,10 +43,14 @@ namespace Xeno.Server
         /// Instantiate the server.
         /// </summary>
         /// <param name="settings">Server settings.</param>
+        /// <param name="settingsFile">Settings file path used for dashboard settings persistence.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is null.</exception>
-        public XenoServer(XenoSettings settings)
+        public XenoServer(XenoSettings settings, string? settingsFile = null)
         {
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _SettingsFile = String.IsNullOrWhiteSpace(settingsFile)
+                ? Environment.GetEnvironmentVariable("XENO_SETTINGS_FILE") ?? "xeno.json"
+                : settingsFile;
 
             WatsonWebserver.Core.WebserverSettings webserverSettings = new WatsonWebserver.Core.WebserverSettings(
                 _Settings.Rest.Hostname,
@@ -136,9 +142,10 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "Authentication", Description = "Tenant-bound token endpoints" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Tenants", Description = "Tenant administration" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Clients", Description = "Connected Xeno clients" });
-                openApi.Tags.Add(new OpenApiTag { Name = "Routing", Description = "Conductor-compatible routing controls" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Routing", Description = "Direct routing to connected Xeno model runners" });
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
             });
 
             _Webserver.Routes.Preflight = PreflightRouteAsync;
@@ -193,30 +200,6 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-configurations", "List model configurations", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/loadbalancingpolicies", "List load-balancing policies", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/load-balancing-policies", "List load-balancing policies", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/loadbalancingpolicies/metrics-catalog", "Load-balancing metrics catalog", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/load-balancing-policies/metrics-catalog", "Load-balancing metrics catalog", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/loadbalancingpolicies/validate", "Validate load-balancing policy", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/load-balancing-policies/validate", "Validate load-balancing policy", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelaccesspolicies", "List model access policies", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-access-policies", "List model access policies", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelaccesspolicies/evaluate", "Evaluate model access", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-access-policies/evaluate", "Evaluate model access", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelaccesspolicies/validate", "Validate model access policy", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-access-policies/validate", "Validate model access policy", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunners", "List virtual model runners", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runners", "List virtual model runners", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunners/effective", "Effective virtual model runner configuration", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runners/effective", "Effective virtual model runner configuration", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/virtualmodelrunners/load-model", "Load model through virtual model runner", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/virtual-model-runners/load-model", "Load model through virtual model runner", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunnerreservations", "List virtual model runner reservations", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runner-reservations", "List virtual model runner reservations", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/virtualmodelrunnerreservations/effective", "Effective reservation state", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/virtual-model-runner-reservations/effective", "Effective reservation state", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/virtual-model-runners/explain-routing", "Explain routing", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/virtualmodelrunners/explain-routing", "Explain routing", "Routing");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelrunnerendpoints/load-model", "Load model through endpoint", "Routing");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-runner-endpoints/load-model", "Load model through endpoint", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1/models", "List OpenAI models", "OpenAI");
@@ -237,6 +220,10 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/analytics/overview", "Request analytics overview", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/analytics/overview", "Analytics overview", "Analytics");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/analytics/overview", "Analytics overview", "Analytics");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/settings", "Get server settings", "Settings");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/settings", "Get server settings", "Settings");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/settings", "Update server settings", "Settings");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/settings", "Update server settings", "Settings");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/backup", "Backup platform state", "Backup");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/backup", "Backup platform state", "Backup");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/restore", "Restore platform state", "Backup");
@@ -511,91 +498,12 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "GET" && IsPath(path, "/api/v1/loadbalancingpolicies", "/v1.0/api/load-balancing-policies"))
-            {
-                await SendJsonAsync(context, RequirePlatform().LoadBalancingPolicies.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/loadbalancingpolicies/metrics-catalog", "/v1.0/api/load-balancing-policies/metrics-catalog"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, LoadBalancingMetricsCatalog()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/loadbalancingpolicies/validate", "/v1.0/api/load-balancing-policies/validate"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                Dictionary<string, object?> body = ReadJsonObject(context);
-                string metric = FirstNonEmpty(GetBodyString(body, "rankingMetric"), "inFlightRequests");
-                bool valid = LoadBalancingMetricsCatalog().Any(item => String.Equals(item, metric, StringComparison.OrdinalIgnoreCase));
-                await SendJsonAsync(context, new { valid, metric, message = valid ? "Policy is valid." : "Unsupported ranking metric." }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/modelaccesspolicies", "/v1.0/api/model-access-policies"))
-            {
-                await SendJsonAsync(context, RequirePlatform().ModelAccessPolicies.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/modelaccesspolicies/evaluate", "/v1.0/api/model-access-policies/evaluate"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, EvaluateModelAccessPolicy(requestContext, context)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/modelaccesspolicies/validate", "/v1.0/api/model-access-policies/validate"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { valid = true, message = "Policy shape is valid.", supportedModes = Enum.GetNames<ModelAccessModeEnum>() }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunners", "/v1.0/api/virtual-model-runners"))
-            {
-                await SendJsonAsync(context, RequirePlatform().VirtualModelRunners.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunners/effective", "/v1.0/api/virtual-model-runners/effective"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, EffectiveVirtualModelRunner(requestContext, context)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/virtualmodelrunners/load-model", "/v1.0/api/virtual-model-runners/load-model", "/api/v1/modelrunnerendpoints/load-model", "/v1.0/api/model-runner-endpoints/load-model"))
+            if (method == "POST" && IsPath(path, "/api/v1/modelrunnerendpoints/load-model", "/v1.0/api/model-runner-endpoints/load-model"))
             {
                 await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Write, token).ConfigureAwait(false);
                 object result = LoadModelResult(requestContext, context);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunnerreservations", "/v1.0/api/virtual-model-runner-reservations"))
-            {
-                await SendJsonAsync(context, RequirePlatform().VirtualModelRunnerReservations.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/virtualmodelrunnerreservations/effective", "/v1.0/api/virtual-model-runner-reservations/effective"))
-            {
-                await RequirePermissionAsync(requestContext, "Routing", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, EffectiveReservations(requestContext)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && path.EndsWith("/explain-routing", StringComparison.OrdinalIgnoreCase))
-            {
-                Dictionary<string, object?> body = ReadJsonObject(context);
-                string? model = body.TryGetValue("model", out object? modelValue) ? modelValue?.ToString() : null;
-                bool embeddings = body.TryGetValue("embeddings", out object? embeddingsValue) && String.Equals(embeddingsValue?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
-                RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, embeddings, token).ConfigureAwait(false);
-                await SendStatusJsonAsync(context, decision.HttpStatusCode, decision).ConfigureAwait(false);
                 return;
             }
 
@@ -646,6 +554,24 @@ namespace Xeno.Server
                 int removed = RequirePlatform().RequestHistory.RemoveAll(item => item.TenantId == requestContext.TenantId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { settings = _Settings, settingsFile = _SettingsFile }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                XenoSettings? incoming = JsonUtil.Deserialize<XenoSettings>(context.Request.DataAsString ?? "{}");
+                if (incoming == null) throw new ArgumentException("Settings payload is invalid.");
+                ApplySettings(incoming);
+                await SaveSettingsAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { settings = _Settings, settingsFile = _SettingsFile, restartRequired = true }).ConfigureAwait(false);
                 return;
             }
 
@@ -1093,12 +1019,6 @@ namespace Xeno.Server
 
                 definition.SupportsCompletions = TryGetBoolean(model, "supportsCompletions", definition.SupportsCompletions);
                 definition.SupportsEmbeddings = TryGetBoolean(model, "supportsEmbeddings", definition.SupportsEmbeddings);
-
-                foreach (VirtualModelRunner vmr in platform.VirtualModelRunners.Where(item => item.TenantId == client.TenantId))
-                {
-                    if (!vmr.ModelRunnerEndpointIds.Contains(endpoint.Id)) vmr.ModelRunnerEndpointIds.Add(endpoint.Id);
-                    if (!vmr.ModelDefinitionIds.Contains(definition.Id)) vmr.ModelDefinitionIds.Add(definition.Id);
-                }
             }
         }
 
@@ -1188,6 +1108,30 @@ namespace Xeno.Server
         {
             if (_Database == null) return;
             await _Database.SaveAsync(token).ConfigureAwait(false);
+        }
+
+        private async Task SaveSettingsAsync(CancellationToken token)
+        {
+            string fullPath = System.IO.Path.GetFullPath(_SettingsFile);
+            string? directory = System.IO.Path.GetDirectoryName(fullPath);
+            if (!String.IsNullOrWhiteSpace(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await File.WriteAllTextAsync(fullPath, JsonUtil.Serialize(_Settings, true), token).ConfigureAwait(false);
+        }
+
+        private void ApplySettings(XenoSettings incoming)
+        {
+            _Settings.Rest = incoming.Rest ?? new RestSettings();
+            _Settings.Cors = incoming.Cors ?? new CorsSettings();
+            _Settings.WebSocket = incoming.WebSocket ?? new WebSocketSettings();
+            _Settings.Database = incoming.Database ?? new DatabaseSettings();
+            _Settings.Logging = incoming.Logging ?? new LoggingSettings();
+            _Settings.Auth = incoming.Auth ?? new AuthSettings();
+            _Settings.RequestHistory = incoming.RequestHistory ?? new RequestHistorySettings();
+            _Settings.Routing = incoming.Routing ?? new RoutingSettings();
         }
 
         private static string NormalizeOpenAiPath(string path)
@@ -1539,84 +1483,6 @@ namespace Xeno.Server
             await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
         }
 
-        private static List<string> LoadBalancingMetricsCatalog()
-        {
-            return new List<string> { "inFlightRequests", "weight", "firstAvailable" };
-        }
-
-        private object EvaluateModelAccessPolicy(RequestContext requestContext, HttpContextBase context)
-        {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string model = FirstNonEmpty(GetBodyString(body, "model"), "llama3.2:latest");
-            string policyId = FirstNonEmpty(GetBodyString(body, "policyId"), String.Empty);
-            ModelAccessPolicy? policy = String.IsNullOrWhiteSpace(policyId)
-                ? RequirePlatform().ModelAccessPolicies.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active)
-                : RequirePlatform().ModelAccessPolicies.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Id == policyId && item.Active);
-            if (policy == null) throw new KeyNotFoundException("Model access policy not found.");
-
-            bool denied = policy.DeniedModels.Contains(model, StringComparer.OrdinalIgnoreCase);
-            bool allowListDenied = policy.AllowedModels.Count > 0 && !policy.AllowedModels.Contains(model, StringComparer.OrdinalIgnoreCase);
-            ModelAccessDecisionEnum decision = denied || allowListDenied || policy.DefaultDecision == ModelAccessDecisionEnum.Deny
-                ? ModelAccessDecisionEnum.Deny
-                : ModelAccessDecisionEnum.Permit;
-            bool enforced = decision == ModelAccessDecisionEnum.Deny && policy.Mode == ModelAccessModeEnum.Enforce;
-
-            return new
-            {
-                policyId = policy.Id,
-                model,
-                mode = policy.Mode,
-                decision,
-                enforced,
-                reasonCode = decision == ModelAccessDecisionEnum.Permit ? "ModelAccessPermit" : "ModelAccessDenied"
-            };
-        }
-
-        private object EffectiveVirtualModelRunner(RequestContext requestContext, HttpContextBase context)
-        {
-            string vmrId = context.Request.Query.Elements.Get("vmrId") ?? String.Empty;
-            VirtualModelRunner? vmr = String.IsNullOrWhiteSpace(vmrId)
-                ? RequirePlatform().VirtualModelRunners.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active)
-                : RequirePlatform().VirtualModelRunners.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Id == vmrId);
-            if (vmr == null) throw new KeyNotFoundException("Virtual model runner not found.");
-
-            List<ModelRunnerEndpoint> endpoints = RequirePlatform().Endpoints
-                .Where(item => item.TenantId == requestContext.TenantId)
-                .Where(item => vmr.ModelRunnerEndpointIds.Contains(item.Id))
-                .ToList();
-            List<ModelDefinition> models = RequirePlatform().ModelDefinitions
-                .Where(item => item.TenantId == requestContext.TenantId)
-                .Where(item => vmr.ModelDefinitionIds.Contains(item.Id))
-                .ToList();
-            LoadBalancingPolicy? loadBalancingPolicy = RequirePlatform().LoadBalancingPolicies.FirstOrDefault(item => item.Id == vmr.LoadBalancingPolicyId && item.TenantId == requestContext.TenantId);
-            ModelAccessPolicy? modelAccessPolicy = RequirePlatform().ModelAccessPolicies.FirstOrDefault(item => item.Id == vmr.ModelAccessPolicyId && item.TenantId == requestContext.TenantId);
-
-            return new
-            {
-                virtualModelRunner = vmr,
-                endpoints,
-                models,
-                loadBalancingPolicy,
-                modelAccessPolicy
-            };
-        }
-
-        private object EffectiveReservations(RequestContext requestContext)
-        {
-            DateTime now = DateTime.UtcNow;
-            List<VirtualModelRunnerReservation> reservations = RequirePlatform().VirtualModelRunnerReservations
-                .Where(item => item.TenantId == requestContext.TenantId)
-                .Where(item => item.Active)
-                .Where(item => item.StartUtc <= now && item.EndUtc >= now)
-                .ToList();
-            return new
-            {
-                nowUtc = now,
-                activeReservations = reservations,
-                count = reservations.Count
-            };
-        }
-
         private object LoadModelResult(RequestContext requestContext, HttpContextBase context)
         {
             Dictionary<string, object?> body = ReadJsonObject(context);
@@ -1642,11 +1508,6 @@ namespace Xeno.Server
                     SupportsEmbeddings = false
                 };
                 RequirePlatform().ModelDefinitions.Add(definition);
-            }
-
-            foreach (VirtualModelRunner vmr in RequirePlatform().VirtualModelRunners.Where(item => item.TenantId == requestContext.TenantId))
-            {
-                if (!vmr.ModelDefinitionIds.Contains(definition.Id)) vmr.ModelDefinitionIds.Add(definition.Id);
             }
 
             foreach (ModelRunnerEndpoint endpoint in RequirePlatform().Endpoints.Where(item => item.TenantId == requestContext.TenantId))
@@ -1822,23 +1683,12 @@ namespace Xeno.Server
                     ["/v1.0/api/model-runner-endpoints/load-model"] = Path(Operation("post", "loadEndpointModel", "Routing", "Load endpoint model", "Adds model availability to endpoint inventory.", "GenericObject", true)),
                     ["/v1.0/api/model-definitions"] = Path(Operation("get", "listModelDefinitions", "Routing", "List model definitions", "Lists model definitions available for routing.", "ModelDefinitionArray", true)),
                     ["/v1.0/api/model-configurations"] = Path(Operation("get", "listModelConfigurations", "Routing", "List model configurations", "Lists pinned model configurations.", "ModelConfigurationArray", true)),
-                    ["/v1.0/api/load-balancing-policies"] = Path(Operation("get", "listLoadBalancingPolicies", "Routing", "List load-balancing policies", "Lists load-balancing policies.", "LoadBalancingPolicyArray", true)),
-                    ["/v1.0/api/load-balancing-policies/metrics-catalog"] = Path(Operation("get", "loadBalancingMetricsCatalog", "Routing", "Metrics catalog", "Lists supported load-balancing metrics.", "GenericObject", true)),
-                    ["/v1.0/api/load-balancing-policies/validate"] = Path(Operation("post", "validateLoadBalancingPolicy", "Routing", "Validate load-balancing policy", "Validates a load-balancing policy.", "GenericObject", true)),
-                    ["/v1.0/api/model-access-policies"] = Path(Operation("get", "listModelAccessPolicies", "Routing", "List model access policies", "Lists model access policies.", "ModelAccessPolicyArray", true)),
-                    ["/v1.0/api/model-access-policies/evaluate"] = Path(Operation("post", "evaluateModelAccessPolicy", "Routing", "Evaluate model access", "Evaluates a model access policy.", "GenericObject", true)),
-                    ["/v1.0/api/model-access-policies/validate"] = Path(Operation("post", "validateModelAccessPolicy", "Routing", "Validate model access policy", "Validates a model access policy.", "GenericObject", true)),
-                    ["/v1.0/api/virtual-model-runners"] = Path(Operation("get", "listVirtualModelRunners", "Routing", "List virtual model runners", "Lists virtual model runners.", "VirtualModelRunnerArray", true)),
-                    ["/v1.0/api/virtual-model-runners/effective"] = Path(Operation("get", "effectiveVirtualModelRunner", "Routing", "Effective VMR", "Returns effective virtual model runner configuration.", "GenericObject", true)),
-                    ["/v1.0/api/virtual-model-runners/load-model"] = Path(Operation("post", "loadVirtualModelRunnerModel", "Routing", "Load VMR model", "Adds model availability through a virtual model runner.", "GenericObject", true)),
-                    ["/v1.0/api/virtual-model-runner-reservations"] = Path(Operation("get", "listVirtualModelRunnerReservations", "Routing", "List virtual model runner reservations", "Lists virtual model runner reservations.", "VirtualModelRunnerReservationArray", true)),
-                    ["/v1.0/api/virtual-model-runner-reservations/effective"] = Path(Operation("get", "effectiveReservations", "Routing", "Effective reservations", "Returns currently active reservations.", "GenericObject", true)),
-                    ["/v1.0/api/virtual-model-runners/explain-routing"] = Path(Operation("post", "explainRouting", "Routing", "Explain routing", "Explains the routing decision for a model request.", "RoutingDecision", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
                     ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
                     ["/v1.0/api/analytics/overview"] = Path(Operation("get", "analyticsOverview", "Analytics", "Analytics overview", "Returns tenant analytics.", "GenericObject", true)),
+                    ["/v1.0/api/settings"] = Path(Operation("get", "getSettings", "Settings", "Get server settings", "Returns running server settings and config file path.", "SettingsResponse", true), Operation("post", "updateSettings", "Settings", "Update server settings", "Persists server settings to the JSON config file.", "SettingsResponse", true)),
                     ["/v1.0/api/backup"] = Path(Operation("get", "backup", "Backup", "Backup", "Returns platform state backup.", "GenericObject", true)),
                     ["/v1.0/api/restore"] = Path(Operation("post", "restore", "Backup", "Restore", "Restores platform state backup.", "GenericObject", true)),
                     ["/v1/models"] = Path(Operation("get", "listOpenAiModels", "OpenAI", "List models", "OpenAI-compatible model list.", "OpenAiModelList", true)),
@@ -1868,16 +1718,13 @@ namespace Xeno.Server
                         ["EndpointArray"] = ArraySchema("ModelRunnerEndpoint"),
                         ["ModelDefinitionArray"] = ArraySchema("ModelDefinition"),
                         ["ModelConfigurationArray"] = ArraySchema("ModelConfiguration"),
-                        ["LoadBalancingPolicyArray"] = ArraySchema("LoadBalancingPolicy"),
-                        ["ModelAccessPolicyArray"] = ArraySchema("ModelAccessPolicy"),
-                        ["VirtualModelRunnerArray"] = ArraySchema("VirtualModelRunner"),
-                        ["VirtualModelRunnerReservationArray"] = ArraySchema("VirtualModelRunnerReservation"),
                         ["RequestHistoryArray"] = ArraySchema("RequestHistoryEntry"),
                         ["RequestHistorySummary"] = ObjectSchema(Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["RoutingDecision"] = ObjectSchema(Property("success", BooleanSchema()), Property("outcomeCode", StringSchema()), Property("message", StringSchema())),
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["OpenAiChatCompletion"] = ObjectSchema(Property("id", StringSchema()), Property("object", StringSchema()), Property("model", StringSchema())),
                         ["OpenAiEmbeddingList"] = ObjectSchema(Property("object", StringSchema()), Property("model", StringSchema())),
+                        ["SettingsResponse"] = ObjectSchema(Property("settings", ObjectSchema()), Property("settingsFile", StringSchema()), Property("restartRequired", BooleanSchema())),
                         ["GenericObject"] = ObjectSchema(),
                         ["Tenant"] = ObjectSchema(Property("id", StringSchema()), Property("name", StringSchema())),
                         ["User"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("email", StringSchema())),
@@ -1890,10 +1737,6 @@ namespace Xeno.Server
                         ["ModelRunnerEndpoint"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelDefinition"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelConfiguration"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["LoadBalancingPolicy"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["ModelAccessPolicy"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["VirtualModelRunner"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["VirtualModelRunnerReservation"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["RequestHistoryEntry"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("path", StringSchema()), Property("statusCode", IntegerSchema()))
                     }
                 }

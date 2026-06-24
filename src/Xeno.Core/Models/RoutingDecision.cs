@@ -2,7 +2,6 @@ namespace Xeno.Core.Models
 {
     using System;
     using System.Collections.Generic;
-    using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
 
     /// <summary>
@@ -49,21 +48,6 @@ namespace Xeno.Core.Models
         /// Candidate endpoint IDs.
         /// </summary>
         public List<string> CandidateEndpointIds { get; set; } = new List<string>();
-
-        /// <summary>
-        /// Model access decision.
-        /// </summary>
-        public ModelAccessDecisionEnum ModelAccessDecision { get; set; } = ModelAccessDecisionEnum.Permit;
-
-        /// <summary>
-        /// Reservation decision.
-        /// </summary>
-        public ReservationDecisionEnum ReservationDecision { get; set; } = ReservationDecisionEnum.NoReservation;
-
-        /// <summary>
-        /// Reservation reason code.
-        /// </summary>
-        public string? ReservationReasonCode { get; set; } = null;
 
         /// <summary>
         /// Timeline entries.

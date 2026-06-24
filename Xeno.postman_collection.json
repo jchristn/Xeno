@@ -67,7 +67,7 @@
       }
     },
     {
-      "name": "Virtual Model Runners",
+      "name": "Model Runner Endpoints",
       "request": {
         "method": "GET",
         "header": [
@@ -76,7 +76,7 @@
             "value": "{{tenantId}}"
           }
         ],
-        "url": "{{baseUrl}}/v1.0/api/virtual-model-runners"
+        "url": "{{baseUrl}}/v1.0/api/model-runner-endpoints"
       }
     },
     {
@@ -210,6 +210,40 @@
       }
     },
     {
+      "name": "Settings",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/settings"
+      }
+    },
+    {
+      "name": "Update Settings",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"Rest\":{\"Hostname\":\"0.0.0.0\",\"Port\":9000,\"Ssl\":false,\"RequireAuthentication\":false},\"Cors\":{\"Enabled\":true,\"AllowedOrigins\":[\"http://localhost:9100\"],\"AllowedHeaders\":[\"Authorization\",\"Content-Type\",\"x-token\",\"x-tenant-guid\"],\"AllowedMethods\":[\"GET\",\"POST\",\"PUT\",\"DELETE\",\"OPTIONS\"]},\"WebSocket\":{\"Enabled\":true,\"Path\":\"/ws/v1/clients\",\"HeartbeatIntervalMs\":15000,\"RequestTimeoutMs\":120000},\"Database\":{\"Type\":\"Sqlite\",\"Filename\":\"data/xeno.db\"},\"Logging\":{\"ConsoleLogging\":true,\"FileLogging\":true,\"LogDirectory\":\"logs\",\"LogFilename\":\"xeno.log\"}}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/settings"
+      }
+    },
+    {
       "name": "Load Model",
       "request": {
         "method": "POST",
@@ -227,28 +261,7 @@
           "mode": "raw",
           "raw": "{\"model\":\"llama3.2:latest\"}"
         },
-        "url": "{{baseUrl}}/v1.0/api/virtual-model-runners/load-model"
-      }
-    },
-    {
-      "name": "Evaluate Model Access",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"model\":\"llama3.2:latest\"}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/model-access-policies/evaluate"
+        "url": "{{baseUrl}}/v1.0/api/model-runner-endpoints/load-model"
       }
     },
     {
