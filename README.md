@@ -10,10 +10,10 @@ The first implementation includes:
 
 - multitenant server state with seeded tenant, user, credential, connected clients, and advertised models;
 - OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
-- management routes for health, OpenAPI, clients, tenants, users, credentials, settings, request history, and token bootstrap;
+- management routes for health, OpenAPI, clients, advertised models, tenants, users, credentials, roles, permissions, settings, request history, and token bootstrap;
 - a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client access-key/secret credentials;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
-- a React/Vite dashboard under `dashboard/`;
+- a React/Vite dashboard under `dashboard/` with create/edit workflows for tenants, users, credentials, roles, and permissions plus settings, clients, advertised models, analytics, request history, and integrated API explorer views;
 - Touchstone shared tests with automated, xUnit, and NUnit runners.
 
 ## Quick Start
@@ -30,6 +30,8 @@ Then call:
 curl http://localhost:9000/health
 curl http://localhost:9000/v1/models
 ```
+
+The OpenAPI contract is available at `/openapi.json` and Swagger UI is available at `/swagger`. No generated SDK packages are checked into v0.1.0; use `/openapi.json` as the SDK generation source of truth.
 
 ## Client
 

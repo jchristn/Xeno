@@ -17,6 +17,15 @@ export default class ApiClient {
     return response.json();
   }
 
+  async put(path, body) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'PUT',
+      headers: this.headers(),
+      body: JSON.stringify(body ?? {})
+    });
+    return response.json();
+  }
+
   async delete(path, body) {
     const options = {
       method: 'DELETE',

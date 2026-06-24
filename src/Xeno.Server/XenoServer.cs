@@ -179,16 +179,24 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/logout", "Logout", "Authentication");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/tenants", "List tenants", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/tenants", "List tenants", "Tenants");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/tenants", "Create tenant", "Tenants");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/tenants", "Create tenant", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/users", "List users", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/users", "List users", "Tenants");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/users", "Create user", "Tenants");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/users", "Create user", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/credentials", "List credentials", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/credentials", "List credentials", "Tenants");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/credentials", "Create credential", "Tenants");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/credentials", "Create credential", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/roles", "List roles", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/roles", "List roles", "Authorization");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/roles", "Create role", "Authorization");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/roles", "Create role", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/permissions", "List permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/permissions", "List permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/permissions", "Create permission", "Authorization");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/permissions", "Create permission", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/effective-permissions", "List effective permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/effective-permissions", "List effective permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/audit", "List audit records", "Audit");
@@ -229,14 +237,24 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/restore", "Restore platform state", "Backup");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/tenants/{id}", "Delete tenant", "Tenants");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/tenants/{id}", "Delete tenant", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/tenants/{id}", "Update tenant", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/tenants/{id}", "Update tenant", "Tenants");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/users/{id}", "Delete user", "Tenants");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/users/{id}", "Delete user", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/users/{id}", "Update user", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/users/{id}", "Update user", "Tenants");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/credentials/{id}", "Delete credential", "Tenants");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/credentials/{id}", "Delete credential", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/credentials/{id}", "Update credential", "Tenants");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/credentials/{id}", "Update credential", "Tenants");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/roles/{id}", "Delete role", "Authorization");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/roles/{id}", "Delete role", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/roles/{id}", "Update role", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/roles/{id}", "Update role", "Authorization");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/permissions/{id}", "Delete permission", "Authorization");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/permissions/{id}", "Delete permission", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/permissions/{id}", "Update permission", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/permissions/{id}", "Update permission", "Authorization");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
@@ -433,6 +451,25 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "POST" && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                Tenant tenant = CreateTenant(context);
+                RequirePlatform().Tenants.Add(tenant);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, tenant).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "PUT" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string updateTenantId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                Tenant tenant = UpdateTenant(updateTenantId, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, tenant).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string deleteTenantId)
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
@@ -445,7 +482,26 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
             {
                 await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Users.Where(item => item.TenantId == requestContext.TenantId || requestContext.TenantId == Constants.DefaultTenantId).ToList()).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().Users.Where(item => IsTenantVisible(requestContext, item.TenantId)).Select(RedactUser).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
+            {
+                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                User user = CreateUser(requestContext, context);
+                RequirePlatform().Users.Add(user);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "PUT" && TryGetPathId(path, "/api/v1/users/", "/v1.0/api/users/") is string updateUserId)
+            {
+                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                User user = UpdateUser(requestContext, updateUserId, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
                 return;
             }
 
@@ -484,6 +540,15 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "PUT" && TryGetPathId(path, "/api/v1/credentials/", "/v1.0/api/credentials/") is string updateCredentialId)
+            {
+                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                Credential credential = UpdateCredential(requestContext, updateCredentialId, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, RedactCredential(credential)).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/credentials/", "/v1.0/api/credentials/") is string deleteCredentialId)
             {
                 await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Delete, token).ConfigureAwait(false);
@@ -500,6 +565,25 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "POST" && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                Role role = CreateRole(requestContext, context);
+                RequirePlatform().Roles.Add(role);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, role).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "PUT" && TryGetPathId(path, "/api/v1/roles/", "/v1.0/api/roles/") is string updateRoleId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                Role role = UpdateRole(requestContext, updateRoleId, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, role).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/roles/", "/v1.0/api/roles/") is string deleteRoleId)
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
@@ -513,6 +597,25 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Permissions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                Permission permission = CreatePermission(requestContext, context);
+                RequirePlatform().Permissions.Add(permission);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, permission).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "PUT" && TryGetPathId(path, "/api/v1/permissions/", "/v1.0/api/permissions/") is string updatePermissionId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                Permission permission = UpdatePermission(requestContext, updatePermissionId, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, permission).ConfigureAwait(false);
                 return;
             }
 
@@ -1029,7 +1132,7 @@ namespace Xeno.Server
                 _ClientConnections[clientId] = new ClientConnection(clientId, tenantId, session);
             }
 
-            if (root.TryGetProperty("inventory", out JsonElement inventory)) RegisterClientInventory(platform, client, inventory);
+            if (TryGetProperty(root, "inventory", out JsonElement inventory)) RegisterClientInventory(platform, client, inventory);
 
             return clientId;
         }
@@ -1039,17 +1142,17 @@ namespace Xeno.Server
             client.ServiceState = ClientServiceStateEnum.Normal;
             client.Models.Clear();
 
-            if (inventory.TryGetProperty("models", out JsonElement directModels) && directModels.ValueKind == JsonValueKind.Array)
+            if (TryGetProperty(inventory, "models", out JsonElement directModels) && directModels.ValueKind == JsonValueKind.Array)
             {
                 RegisterClientModels(platform, client, "client", ApiProviderTypeEnum.OpenAICompatible, directModels);
             }
 
-            if (inventory.TryGetProperty("providers", out JsonElement providers) && providers.ValueKind == JsonValueKind.Array)
+            if (TryGetProperty(inventory, "providers", out JsonElement providers) && providers.ValueKind == JsonValueKind.Array)
             {
                 RegisterClientSources(platform, client, providers);
             }
 
-            if (inventory.TryGetProperty("runners", out JsonElement runners) && runners.ValueKind == JsonValueKind.Array)
+            if (TryGetProperty(inventory, "runners", out JsonElement runners) && runners.ValueKind == JsonValueKind.Array)
             {
                 RegisterClientSources(platform, client, runners);
             }
@@ -1062,7 +1165,7 @@ namespace Xeno.Server
                 string sourceName = TryGetString(source, "name") ?? "local";
                 string providerName = TryGetString(source, "provider") ?? "Ollama";
                 ApiProviderTypeEnum provider = Enum.TryParse(providerName, true, out ApiProviderTypeEnum parsedProvider) ? parsedProvider : ApiProviderTypeEnum.OpenAICompatible;
-                if (source.TryGetProperty("models", out JsonElement sourceModels) && sourceModels.ValueKind == JsonValueKind.Array)
+                if (TryGetProperty(source, "models", out JsonElement sourceModels) && sourceModels.ValueKind == JsonValueKind.Array)
                 {
                     RegisterClientModels(platform, client, sourceName, provider, sourceModels);
                 }
@@ -1328,26 +1431,134 @@ namespace Xeno.Server
             }
         }
 
+        private Tenant CreateTenant(HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string id = FirstNonEmpty(GetBodyString(body, "id"), IdGenerator.NewId("ten_"));
+            string name = FirstNonEmpty(GetBodyString(body, "name"));
+            if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Tenant name is required.");
+            if (platform.Tenants.Any(item => String.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Tenant ID already exists.");
+
+            Tenant tenant = new Tenant
+            {
+                Id = id.Trim(),
+                Name = name.Trim(),
+                Active = true,
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+            if (TryGetBodyBoolean(body, "active", out bool active)) tenant.Active = active;
+            return tenant;
+        }
+
+        private User CreateUser(RequestContext requestContext, HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string tenantId = FirstNonEmpty(GetBodyString(body, "tenantId"), requestContext.TenantId);
+            if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
+            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
+
+            string username = FirstNonEmpty(GetBodyString(body, "username"), GetBodyString(body, "email"));
+            if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
+            if (platform.Users.Any(item => item.TenantId == tenantId && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Username already exists in the tenant.");
+
+            string password = FirstNonEmpty(GetBodyString(body, "password"));
+            if (String.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password is required.");
+
+            User user = new User
+            {
+                TenantId = tenantId,
+                Username = username.Trim(),
+                Email = FirstNonEmpty(GetBodyString(body, "email"), username).Trim(),
+                IsAdmin = false,
+                IsTenantAdmin = false,
+                Active = true
+            };
+            if (TryGetBodyBoolean(body, "isAdmin", out bool isAdmin)) user.IsAdmin = isAdmin;
+            if (TryGetBodyBoolean(body, "isTenantAdmin", out bool isTenantAdmin)) user.IsTenantAdmin = isTenantAdmin;
+            if (TryGetBodyBoolean(body, "active", out bool active)) user.Active = active;
+            _Authentication.SetUserPassword(user, password);
+            return user;
+        }
+
         private Credential CreateCredential(RequestContext requestContext, HttpContextBase context)
         {
+            XenoPlatform platform = RequirePlatform();
             Dictionary<string, object?> body = ReadJsonObject(context);
+            string tenantId = FirstNonEmpty(GetBodyString(body, "tenantId"), requestContext.TenantId);
+            if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
             string userId = FirstNonEmpty(GetBodyString(body, "userId"), requestContext.UserId);
             if (String.IsNullOrWhiteSpace(userId))
             {
-                User? user = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == requestContext.TenantId && item.Active);
+                User? user = platform.Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active);
                 userId = user?.Id ?? String.Empty;
             }
 
+            if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.");
+            if (!platform.Users.Any(item => item.Id == userId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("Credential user does not exist or is inactive.");
+
             string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), IdGenerator.NewId("xeno_"));
+            if (platform.Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
             string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), _Authentication.GenerateSecret());
-            return new Credential
+            Credential credential = new Credential
             {
-                TenantId = requestContext.TenantId,
+                TenantId = tenantId,
                 UserId = userId,
                 AccessKey = accessKey,
                 SecretKey = secretKey,
                 Active = true
             };
+            if (TryGetBodyBoolean(body, "active", out bool active)) credential.Active = active;
+            return credential;
+        }
+
+        private Role CreateRole(RequestContext requestContext, HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string name = FirstNonEmpty(GetBodyString(body, "name"));
+            if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Role name is required.");
+            if (platform.Roles.Any(item => item.TenantId == requestContext.TenantId && String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Role name already exists in the tenant.");
+
+            Role role = new Role
+            {
+                TenantId = requestContext.TenantId,
+                Name = name.Trim(),
+                BuiltIn = false,
+                PermissionIds = GetBodyStringSet(body, "permissionIds").Where(permissionId => platform.Permissions.Any(permission => permission.Id == permissionId && permission.TenantId == requestContext.TenantId)).ToList(),
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow,
+                Active = true
+            };
+            if (TryGetBodyBoolean(body, "active", out bool active)) role.Active = active;
+            return role;
+        }
+
+        private Permission CreatePermission(RequestContext requestContext, HttpContextBase context)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string resourceType = FirstNonEmpty(GetBodyString(body, "resourceType"));
+            if (String.IsNullOrWhiteSpace(resourceType)) throw new ArgumentException("Resource type is required.");
+
+            OperationTypeEnum operationType = OperationTypeEnum.Read;
+            string? operationTypeText = GetBodyString(body, "operationType");
+            if (!String.IsNullOrWhiteSpace(operationTypeText) && !Enum.TryParse(operationTypeText, true, out operationType)) throw new ArgumentException("Operation type is invalid.");
+
+            Permission permission = new Permission
+            {
+                TenantId = requestContext.TenantId,
+                ResourceType = resourceType.Trim(),
+                OperationType = operationType,
+                Permit = true,
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow,
+                Active = true
+            };
+            if (TryGetBodyBoolean(body, "permit", out bool permit)) permission.Permit = permit;
+            if (TryGetBodyBoolean(body, "active", out bool active)) permission.Active = active;
+            return permission;
         }
 
         private int DeleteTenant(string tenantId)
@@ -1377,6 +1588,24 @@ namespace Xeno.Server
             return removed;
         }
 
+        private Tenant UpdateTenant(string tenantId, HttpContextBase context)
+        {
+            Tenant? tenant = RequirePlatform().Tenants.FirstOrDefault(item => item.Id == tenantId);
+            if (tenant == null) throw new KeyNotFoundException("Tenant not found.");
+
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string? name = GetBodyString(body, "name");
+            if (name != null)
+            {
+                if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Tenant name is required.");
+                tenant.Name = name.Trim();
+            }
+
+            if (TryGetBodyBoolean(body, "active", out bool active)) tenant.Active = active;
+            tenant.LastUpdateUtc = DateTime.UtcNow;
+            return tenant;
+        }
+
         private int DeleteUser(RequestContext requestContext, string userId)
         {
             XenoPlatform platform = RequirePlatform();
@@ -1396,6 +1625,55 @@ namespace Xeno.Server
             return removed;
         }
 
+        private User UpdateUser(RequestContext requestContext, string userId, HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            User? user = platform.Users.FirstOrDefault(item => item.Id == userId && IsTenantVisible(requestContext, item.TenantId));
+            if (user == null) throw new KeyNotFoundException("User not found.");
+
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string? username = GetBodyString(body, "username");
+            if (username != null)
+            {
+                if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
+                user.Username = username.Trim();
+            }
+
+            string? email = GetBodyString(body, "email");
+            if (email != null) user.Email = email.Trim();
+
+            if (TryGetBodyBoolean(body, "isAdmin", out bool isAdmin)) user.IsAdmin = isAdmin;
+            if (TryGetBodyBoolean(body, "isTenantAdmin", out bool isTenantAdmin)) user.IsTenantAdmin = isTenantAdmin;
+            if (TryGetBodyBoolean(body, "active", out bool active)) user.Active = active;
+
+            string? password = GetBodyString(body, "password");
+            if (!String.IsNullOrWhiteSpace(password)) _Authentication.SetUserPassword(user, password);
+
+            return user;
+        }
+
+        private Credential UpdateCredential(RequestContext requestContext, string credentialId, HttpContextBase context)
+        {
+            Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
+            if (credential == null) throw new KeyNotFoundException("Credential not found.");
+
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string? userId = GetBodyString(body, "userId");
+            if (userId != null) credential.UserId = userId.Trim();
+
+            string? accessKey = GetBodyString(body, "accessKey");
+            if (accessKey != null)
+            {
+                if (String.IsNullOrWhiteSpace(accessKey)) throw new ArgumentException("Access key is required.");
+                credential.AccessKey = accessKey.Trim();
+            }
+
+            string? secretKey = GetBodyString(body, "secretKey");
+            if (!String.IsNullOrWhiteSpace(secretKey)) credential.SecretKey = secretKey;
+            if (TryGetBodyBoolean(body, "active", out bool active)) credential.Active = active;
+            return credential;
+        }
+
         private int DeleteCredential(RequestContext requestContext, string credentialId)
         {
             XenoPlatform platform = RequirePlatform();
@@ -1408,12 +1686,57 @@ namespace Xeno.Server
             return removed;
         }
 
+        private Role UpdateRole(RequestContext requestContext, string roleId, HttpContextBase context)
+        {
+            Role? role = RequirePlatform().Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
+            if (role == null) throw new KeyNotFoundException("Role not found.");
+
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string? name = GetBodyString(body, "name");
+            if (name != null)
+            {
+                if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Role name is required.");
+                role.Name = name.Trim();
+            }
+
+            if (body.ContainsKey("permissionIds")) role.PermissionIds = GetBodyStringSet(body, "permissionIds").ToList();
+            if (TryGetBodyBoolean(body, "active", out bool active)) role.Active = active;
+            role.LastUpdateUtc = DateTime.UtcNow;
+            return role;
+        }
+
         private int DeleteRole(RequestContext requestContext, string roleId)
         {
             XenoPlatform platform = RequirePlatform();
             int removed = platform.Roles.RemoveAll(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
             removed += platform.RoleAssignments.RemoveAll(item => item.RoleId == roleId && item.TenantId == requestContext.TenantId);
             return removed;
+        }
+
+        private Permission UpdatePermission(RequestContext requestContext, string permissionId, HttpContextBase context)
+        {
+            Permission? permission = RequirePlatform().Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
+            if (permission == null) throw new KeyNotFoundException("Permission not found.");
+
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string? resourceType = GetBodyString(body, "resourceType");
+            if (resourceType != null)
+            {
+                if (String.IsNullOrWhiteSpace(resourceType)) throw new ArgumentException("Resource type is required.");
+                permission.ResourceType = resourceType.Trim();
+            }
+
+            string? operationType = GetBodyString(body, "operationType");
+            if (!String.IsNullOrWhiteSpace(operationType))
+            {
+                if (!Enum.TryParse(operationType, true, out OperationTypeEnum parsedOperation)) throw new ArgumentException("Operation type is invalid.");
+                permission.OperationType = parsedOperation;
+            }
+
+            if (TryGetBodyBoolean(body, "permit", out bool permit)) permission.Permit = permit;
+            if (TryGetBodyBoolean(body, "active", out bool active)) permission.Active = active;
+            permission.LastUpdateUtc = DateTime.UtcNow;
+            return permission;
         }
 
         private int DeletePermission(RequestContext requestContext, string permissionId)
@@ -1597,6 +1920,28 @@ namespace Xeno.Server
             return body.TryGetValue(key, out object? value) ? value?.ToString() : null;
         }
 
+        private static bool TryGetBodyBoolean(Dictionary<string, object?> body, string key, out bool result)
+        {
+            result = false;
+            if (!body.TryGetValue(key, out object? value) || value == null) return false;
+            if (value is JsonElement element)
+            {
+                if (element.ValueKind == JsonValueKind.True)
+                {
+                    result = true;
+                    return true;
+                }
+
+                if (element.ValueKind == JsonValueKind.False)
+                {
+                    result = false;
+                    return true;
+                }
+            }
+
+            return Boolean.TryParse(value.ToString(), out result);
+        }
+
         private static HashSet<string> GetBodyStringSet(Dictionary<string, object?> body, string key)
         {
             HashSet<string> values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1666,6 +2011,20 @@ namespace Xeno.Server
                 credential.AccessKey,
                 secretKey = "****" + suffix,
                 credential.Active
+            };
+        }
+
+        private static object RedactUser(User user)
+        {
+            return new
+            {
+                user.Id,
+                user.TenantId,
+                user.Username,
+                user.Email,
+                user.IsAdmin,
+                user.IsTenantAdmin,
+                user.Active
             };
         }
 
@@ -1763,7 +2122,9 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(json)) return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
             Dictionary<string, object?>? values = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonUtil.Options);
-            return values ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            return values == null
+                ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, object?>(values, StringComparer.OrdinalIgnoreCase);
         }
 
         private async Task SendJsonAsync(HttpContextBase context, object value)
@@ -1840,18 +2201,33 @@ namespace Xeno.Server
 
         private static string? TryGetString(JsonElement element, string propertyName)
         {
-            if (!element.TryGetProperty(propertyName, out JsonElement property)) return null;
+            if (!TryGetProperty(element, propertyName, out JsonElement property)) return null;
             if (property.ValueKind == JsonValueKind.Null || property.ValueKind == JsonValueKind.Undefined) return null;
             return property.ToString();
         }
 
         private static bool TryGetBoolean(JsonElement element, string propertyName, bool defaultValue)
         {
-            if (!element.TryGetProperty(propertyName, out JsonElement property)) return defaultValue;
+            if (!TryGetProperty(element, propertyName, out JsonElement property)) return defaultValue;
             if (property.ValueKind == JsonValueKind.True) return true;
             if (property.ValueKind == JsonValueKind.False) return false;
             if (Boolean.TryParse(property.ToString(), out bool parsed)) return parsed;
             return defaultValue;
+        }
+
+        private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
+        {
+            property = default;
+            if (element.ValueKind != JsonValueKind.Object) return false;
+            if (element.TryGetProperty(propertyName, out property)) return true;
+            foreach (JsonProperty candidate in element.EnumerateObject())
+            {
+                if (!String.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
+                property = candidate.Value;
+                return true;
+            }
+
+            return false;
         }
 
         private object BuildOpenApi()
@@ -1865,16 +2241,16 @@ namespace Xeno.Server
                     ["/health"] = Path(Operation("get", "health", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
                     ["/v1.0/api/auth/login"] = Path(Operation("post", "login", "Authentication", "Login", "Validates a user password and returns a one-time-visible client credential for WebSocket use.", "CredentialLoginResponse", false)),
                     ["/v1.0/api/auth/token"] = Path(Operation("post", "createToken", "Authentication", "Create token", "Creates a development session token.", "TokenResponse", false)),
-                    ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true)),
-                    ["/v1.0/api/tenants/{id}"] = Path(Operation("delete", "deleteTenant", "Tenants", "Delete tenant", "Deletes a tenant and its scoped records.", "GenericObject", true)),
-                    ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true)),
-                    ["/v1.0/api/users/{id}"] = Path(Operation("delete", "deleteUser", "Tenants", "Delete user", "Deletes a tenant user and related sessions or credentials.", "GenericObject", true)),
-                    ["/v1.0/api/credentials"] = Path(Operation("get", "listCredentials", "Tenants", "List credentials", "Lists tenant credentials with redacted secrets.", "CredentialArray", true)),
-                    ["/v1.0/api/credentials/{id}"] = Path(Operation("delete", "deleteCredential", "Tenants", "Delete credential", "Deletes a credential and related sessions.", "GenericObject", true)),
-                    ["/v1.0/api/roles"] = Path(Operation("get", "listRoles", "Authorization", "List roles", "Lists tenant roles.", "RoleArray", true)),
-                    ["/v1.0/api/roles/{id}"] = Path(Operation("delete", "deleteRole", "Authorization", "Delete role", "Deletes a tenant role and related assignments.", "GenericObject", true)),
-                    ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true)),
-                    ["/v1.0/api/permissions/{id}"] = Path(Operation("delete", "deletePermission", "Authorization", "Delete permission", "Deletes a tenant permission and removes it from roles.", "GenericObject", true)),
+                    ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true), Operation("post", "createTenant", "Tenants", "Create tenant", "Creates a tenant.", "Tenant", true)),
+                    ["/v1.0/api/tenants/{id}"] = Path(Operation("put", "updateTenant", "Tenants", "Update tenant", "Updates tenant name and active state.", "Tenant", true), Operation("delete", "deleteTenant", "Tenants", "Delete tenant", "Deletes a tenant and its scoped records.", "GenericObject", true)),
+                    ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true), Operation("post", "createUser", "Tenants", "Create user", "Creates a tenant user with a required password.", "User", true)),
+                    ["/v1.0/api/users/{id}"] = Path(Operation("put", "updateUser", "Tenants", "Update user", "Updates tenant user profile, admin flags, active state, and optional password.", "User", true), Operation("delete", "deleteUser", "Tenants", "Delete user", "Deletes a tenant user and related sessions or credentials.", "GenericObject", true)),
+                    ["/v1.0/api/credentials"] = Path(Operation("get", "listCredentials", "Tenants", "List credentials", "Lists tenant credentials with redacted secrets.", "CredentialArray", true), Operation("post", "createCredential", "Tenants", "Create credential", "Creates a tenant credential and returns the secret once.", "Credential", true)),
+                    ["/v1.0/api/credentials/{id}"] = Path(Operation("put", "updateCredential", "Tenants", "Update credential", "Updates credential user, access key, optional secret key, and active state.", "Credential", true), Operation("delete", "deleteCredential", "Tenants", "Delete credential", "Deletes a credential and related sessions.", "GenericObject", true)),
+                    ["/v1.0/api/roles"] = Path(Operation("get", "listRoles", "Authorization", "List roles", "Lists tenant roles.", "RoleArray", true), Operation("post", "createRole", "Authorization", "Create role", "Creates a tenant role.", "Role", true)),
+                    ["/v1.0/api/roles/{id}"] = Path(Operation("put", "updateRole", "Authorization", "Update role", "Updates role name, permission assignments, and active state.", "Role", true), Operation("delete", "deleteRole", "Authorization", "Delete role", "Deletes a tenant role and related assignments.", "GenericObject", true)),
+                    ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true), Operation("post", "createPermission", "Authorization", "Create permission", "Creates a tenant permission.", "Permission", true)),
+                    ["/v1.0/api/permissions/{id}"] = Path(Operation("put", "updatePermission", "Authorization", "Update permission", "Updates permission resource, operation, permit decision, and active state.", "Permission", true), Operation("delete", "deletePermission", "Authorization", "Delete permission", "Deletes a tenant permission and removes it from roles.", "GenericObject", true)),
                     ["/v1.0/api/effective-permissions"] = Path(Operation("get", "listEffectivePermissions", "Authorization", "Effective permissions", "Lists effective permissions.", "EffectivePermissionArray", true)),
                     ["/v1.0/api/audit"] = Path(Operation("get", "listAudit", "Audit", "List audit records", "Lists tenant audit records.", "AuditRecordArray", true)),
                     ["/v1.0/api/audit/{id}"] = Path(Operation("delete", "deleteAuditRecord", "Audit", "Delete audit record", "Deletes one tenant audit record.", "GenericObject", true)),

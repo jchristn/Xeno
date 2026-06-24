@@ -27,6 +27,22 @@
     {
       "key": "secretKey",
       "value": "default"
+    },
+    {
+      "key": "userId",
+      "value": "usr_..."
+    },
+    {
+      "key": "credentialId",
+      "value": "cred_..."
+    },
+    {
+      "key": "roleId",
+      "value": "role_..."
+    },
+    {
+      "key": "permissionId",
+      "value": "perm_..."
     }
   ],
   "item": [
@@ -55,6 +71,268 @@
           }
         ],
         "url": "{{baseUrl}}/v1.0/api/tenants"
+      }
+    },
+    {
+      "name": "Update Tenant",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"Default\",\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/tenants/{{tenantId}}"
+      }
+    },
+    {
+      "name": "Create Tenant",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"New Tenant\",\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/tenants"
+      }
+    },
+    {
+      "name": "Users",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/users"
+      }
+    },
+    {
+      "name": "Create User",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tenantId\":\"{{tenantId}}\",\"username\":\"new-user@xeno\",\"email\":\"new-user@xeno\",\"isAdmin\":false,\"isTenantAdmin\":false,\"active\":true,\"password\":\"password\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/users"
+      }
+    },
+    {
+      "name": "Update User",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\":\"{{username}}\",\"email\":\"admin@xeno\",\"isAdmin\":true,\"isTenantAdmin\":true,\"active\":true,\"password\":\"\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/users/{{userId}}"
+      }
+    },
+    {
+      "name": "Credentials",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/credentials"
+      }
+    },
+    {
+      "name": "Create Credential",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"{{userId}}\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/credentials"
+      }
+    },
+    {
+      "name": "Update Credential",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"{{userId}}\",\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"\",\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}"
+      }
+    },
+    {
+      "name": "Roles",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/roles"
+      }
+    },
+    {
+      "name": "Create Role",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"New Role\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/roles"
+      }
+    },
+    {
+      "name": "Update Role",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"Administrator\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/roles/{{roleId}}"
+      }
+    },
+    {
+      "name": "Permissions",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/permissions"
+      }
+    },
+    {
+      "name": "Create Permission",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"resourceType\":\"Clients\",\"operationType\":\"Read\",\"permit\":true,\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/permissions"
+      }
+    },
+    {
+      "name": "Update Permission",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"resourceType\":\"Clients\",\"operationType\":\"Read\",\"permit\":true,\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/permissions/{{permissionId}}"
       }
     },
     {

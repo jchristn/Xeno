@@ -40,7 +40,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 | Area | Status | Current state | Remaining work |
 | --- | --- | --- | --- |
 | Server host | In progress | Watson 7 server, CORS, OpenAPI, Swagger, health, metrics, REST dispatcher, WebSocket gateway. | Split the large server class into route modules and typed DTO handlers. |
-| Multitenancy | In progress | Tenant-scoped platform state, seeded tenant, users, credentials, roles, permissions, audit records. | Add full CRUD for tenants, users, roles, and credentials with validation and audit evidence. |
+| Multitenancy | In progress | Tenant-scoped platform state, seeded tenant, users, credentials, roles, permissions, audit records; create/update/delete routes for core administration records. | Add typed DTO route modules and richer audit evidence for administrative writes. |
 | Authentication | In progress | Admin key, credential auth, bearer token issuance, password login issuing client credentials, WebSocket credential gate. | Add credential rotation/revocation workflows and password reset/change flows. |
 | Clients | In progress | Clients register over WebSocket and advertise provider endpoints plus available models. Heartbeats update connection state. | Add richer hardware inventory, GPU memory, model metadata, and provider health probes. |
 | Routing | In progress | Completion and embedding requests route directly to connected client candidates by tenant, model, health, capacity, and in-flight count. | Add persistent request correlation and richer route evidence in request history. |
@@ -48,11 +48,11 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 | Request history | In progress | Request history list, summary buckets, bulk clear, analytics overview, Prometheus-style metrics. | Add retention cleanup, advanced search filters, TTFT, token counts, and cost estimates. |
 | Settings | In progress | `GET/POST /api/v1/settings` and `/v1.0/api/settings` read and persist server JSON config. Dashboard has typed controls and raw JSON editor. | Add restart warnings per field and safe reload support for settings that can apply without restart. |
 | Dashboard shell | In progress | Logo, sidebar, GitHub/theme/logout controls, plain server URL with copy, Spanish language selector, reusable modals, copy components, tables, pagination, charts. | Add toast provider, loading/error states, and interaction tests. |
-| Dashboard pages | In progress | Home, request history, API Explorer, analytics, clients, tenants, users, credentials, security, settings. | Add persisted create/edit forms for all editable resources and permission-aware disabled states. |
+| Dashboard pages | In progress | Home, request history, API Explorer, analytics, clients, advertised models, tenants, users, credentials, security, and settings. Tenants, users, credentials, roles, and permissions have persisted create/edit modals. | Add create forms for clients/model definitions if product requirements call for manual creation, plus permission-aware disabled states. |
 | API Explorer | In progress | Integrated request builders for chat completions, completions, embeddings, and models. | Add saved examples, response timing, auth header display, and streaming toggle. |
 | Docker | In progress | Server/dashboard Dockerfiles, PostgreSQL default compose, initialization container, factory reset scripts. | Add deployment docs for TLS, external databases, and production secrets. |
 | Client | In progress | Console client initializes settings, logs in, stores access key/secret, connects WebSocket, advertises inventory, and handles requests. | Add packaged tool publishing matrix and stronger provider configuration validation. |
-| Testing | In progress | Touchstone shared suites run through automated, xUnit, and NUnit projects. Routing, database, auth, WebSocket, and management smoke coverage exists. | Add dashboard interaction tests and provider emulator coverage for OpenAI-compatible endpoints. |
+| Testing | In progress | Touchstone shared suites run through automated, xUnit, and NUnit projects. Routing, database, auth, WebSocket, management delete, management update, and inventory smoke coverage exists. | Add dashboard interaction tests and provider emulator coverage for OpenAI-compatible endpoints. |
 | Documentation | In progress | README, REST_API, Postman, dashboard audit, and this plan updated for v0.1.0 alpha. | Add complete endpoint examples and troubleshooting guides. |
 
 ## Server Plan
@@ -211,13 +211,13 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 
 ## Remaining Work Before v0.1.0 Alpha Cut
 
-1. Finish typed CRUD routes for tenants, users, credentials, clients, and model definitions.
-2. Add persisted save support behind dashboard edit modals.
-3. Add dashboard toast/alert provider and API error surfacing.
+1. Add create flows for clients and model definitions only if product requirements call for manual creation.
+2. Add typed DTOs for administrative update/create routes and move handlers out of the monolithic server class.
+3. Add dashboard toast/alert provider and richer API error surfacing.
 4. Add provider emulator tests for OpenAI-compatible request relay.
 5. Add settings restart-warning UI per changed field.
 6. Add Docker compose smoke test.
-7. Run all Touchstone suites.
+7. Add dashboard interaction tests for edit modals, action menus, charts, and copy controls.
 8. Run dashboard i18n check and production build.
 9. Build Docker images with `build-all.bat v0.1.0`.
 10. Push commits and image tags.

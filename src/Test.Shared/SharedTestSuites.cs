@@ -448,7 +448,17 @@ namespace Test.Shared
                         "ManagementApi",
                         "ManagementDeleteRoutesSmoke",
                         "Management delete routes remove records and update OpenAPI",
-                        executeAsync: delegate { return RunManagementDeleteSmokeAsync(); })
+                        executeAsync: delegate { return RunManagementDeleteSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "ManagementUpdateRoutesSmoke",
+                        "Management update routes persist editable administration records",
+                        executeAsync: delegate { return RunManagementUpdateSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "PascalCaseClientInventoryModelsAreRegistered",
+                        "PascalCase client inventory registers advertised models",
+                        executeAsync: delegate { return RunPascalCaseClientInventorySmokeAsync(); })
                 });
         }
 
@@ -616,6 +626,271 @@ namespace Test.Shared
                             string clientsAfterDelete = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
                             if (clientsAfterDelete.Contains(clientId, StringComparison.Ordinal)) throw new InvalidOperationException("Deleted client was still returned.");
                         }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunManagementUpdateSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-management-update-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
+                        foreach (string route in new[] { "/v1.0/api/tenants/{id}", "/v1.0/api/users/{id}", "/v1.0/api/credentials/{id}", "/v1.0/api/roles/{id}", "/v1.0/api/permissions/{id}" })
+                        {
+                            if (!OpenApiHasMethod(openApi, route, "put")) throw new InvalidOperationException("OpenAPI missing PUT " + route + ".");
+                        }
+
+                        foreach (string route in new[] { "/v1.0/api/tenants", "/v1.0/api/users", "/v1.0/api/credentials", "/v1.0/api/roles", "/v1.0/api/permissions" })
+                        {
+                            if (!OpenApiHasMethod(openApi, route, "post")) throw new InvalidOperationException("OpenAPI missing POST " + route + ".");
+                        }
+
+                        using (HttpResponseMessage createTenantResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/tenants", JsonUtil.Serialize(new { name = "Touchstone Created Tenant", active = true })).ConfigureAwait(false))
+                        {
+                            string createTenantJson = await createTenantResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createTenantResponse.IsSuccessStatusCode || !createTenantJson.Contains("Touchstone Created Tenant", StringComparison.Ordinal)) throw new InvalidOperationException("Tenant create failed: " + createTenantJson);
+                        }
+
+                        using (HttpResponseMessage createUserResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/users", JsonUtil.Serialize(new
+                        {
+                            tenantId = Constants.DefaultTenantId,
+                            username = "touchstone-create@xeno",
+                            email = "touchstone-create@xeno",
+                            isAdmin = false,
+                            isTenantAdmin = false,
+                            active = true,
+                            password = "create-password"
+                        })).ConfigureAwait(false))
+                        {
+                            string createUserJson = await createUserResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createUserResponse.IsSuccessStatusCode || !createUserJson.Contains("touchstone-create@xeno", StringComparison.Ordinal)) throw new InvalidOperationException("User create failed: " + createUserJson);
+                            if (createUserJson.Contains("PasswordHash", StringComparison.OrdinalIgnoreCase) || createUserJson.Contains("PasswordSalt", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("User create response exposed password material.");
+                        }
+
+                        using (HttpResponseMessage createCredentialResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials", JsonUtil.Serialize(new
+                        {
+                            accessKey = "touchstone-create-access",
+                            secretKey = "touchstone-create-secret",
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string createCredentialJson = await createCredentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createCredentialResponse.IsSuccessStatusCode || !createCredentialJson.Contains("touchstone-create-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Credential create failed or did not return one-time secret: " + createCredentialJson);
+                        }
+
+                        using (HttpResponseMessage createPermissionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/permissions", JsonUtil.Serialize(new
+                        {
+                            resourceType = "TouchstoneCreate",
+                            operationType = "Read",
+                            permit = true,
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string createPermissionJson = await createPermissionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createPermissionResponse.IsSuccessStatusCode || !createPermissionJson.Contains("TouchstoneCreate", StringComparison.Ordinal)) throw new InvalidOperationException("Permission create failed: " + createPermissionJson);
+                        }
+
+                        using (HttpResponseMessage createRoleResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/roles", JsonUtil.Serialize(new
+                        {
+                            name = "Touchstone Created Role",
+                            permissionIds = Array.Empty<string>(),
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string createRoleJson = await createRoleResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createRoleResponse.IsSuccessStatusCode || !createRoleJson.Contains("Touchstone Created Role", StringComparison.Ordinal)) throw new InvalidOperationException("Role create failed: " + createRoleJson);
+                        }
+
+                        string tenantId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/tenants").ConfigureAwait(false);
+                        using (HttpResponseMessage tenantResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/tenants/" + Uri.EscapeDataString(tenantId), JsonUtil.Serialize(new { name = "Touchstone Tenant", active = true })).ConfigureAwait(false))
+                        {
+                            string tenantJson = await tenantResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tenantResponse.IsSuccessStatusCode || !tenantJson.Contains("Touchstone Tenant", StringComparison.Ordinal)) throw new InvalidOperationException("Tenant update failed: " + tenantJson);
+                        }
+
+                        string usersJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/users").ConfigureAwait(false);
+                        if (usersJson.Contains("PasswordHash", StringComparison.OrdinalIgnoreCase) || usersJson.Contains("PasswordSalt", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Users response exposed password material.");
+                        string userId = FirstRecordId(usersJson);
+                        using (HttpResponseMessage userResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(userId), JsonUtil.Serialize(new
+                        {
+                            username = "touchstone-admin@xeno",
+                            email = "touchstone-admin@xeno",
+                            isAdmin = true,
+                            isTenantAdmin = true,
+                            active = true,
+                            password = "new-password"
+                        })).ConfigureAwait(false))
+                        {
+                            string userJson = await userResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!userResponse.IsSuccessStatusCode || !userJson.Contains("touchstone-admin@xeno", StringComparison.Ordinal)) throw new InvalidOperationException("User update failed: " + userJson);
+                            if (userJson.Contains("PasswordHash", StringComparison.OrdinalIgnoreCase) || userJson.Contains("PasswordSalt", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("User update response exposed password material.");
+                        }
+
+                        using (HttpResponseMessage loginResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/login", JsonUtil.Serialize(new
+                        {
+                            username = "touchstone-admin@xeno",
+                            password = "new-password",
+                            tenantId = Constants.DefaultTenantId
+                        })).ConfigureAwait(false))
+                        {
+                            string loginJson = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!loginResponse.IsSuccessStatusCode || !loginJson.Contains("secretKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Updated user password did not validate: " + loginJson);
+                        }
+
+                        string credentialId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/credentials").ConfigureAwait(false);
+                        using (HttpResponseMessage credentialResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials/" + Uri.EscapeDataString(credentialId), JsonUtil.Serialize(new
+                        {
+                            userId,
+                            accessKey = "touchstone-access",
+                            secretKey = "touchstone-secret",
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string credentialJson = await credentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!credentialResponse.IsSuccessStatusCode || !credentialJson.Contains("touchstone-access", StringComparison.Ordinal)) throw new InvalidOperationException("Credential update failed: " + credentialJson);
+                            if (credentialJson.Contains("touchstone-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Credential update response exposed raw secret key.");
+                        }
+
+                        using (HttpResponseMessage tokenResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"touchstone-access\",\"secretKey\":\"touchstone-secret\"}").ConfigureAwait(false))
+                        {
+                            string tokenJson = await tokenResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tokenResponse.IsSuccessStatusCode || !tokenJson.Contains("token", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Updated credential did not validate: " + tokenJson);
+                        }
+
+                        string roleId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/roles").ConfigureAwait(false);
+                        string permissionId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/permissions").ConfigureAwait(false);
+                        using (HttpResponseMessage roleResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/roles/" + Uri.EscapeDataString(roleId), JsonUtil.Serialize(new
+                        {
+                            name = "Touchstone Role",
+                            active = true,
+                            permissionIds = new[] { permissionId }
+                        })).ConfigureAwait(false))
+                        {
+                            string roleJson = await roleResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!roleResponse.IsSuccessStatusCode || !roleJson.Contains("Touchstone Role", StringComparison.Ordinal)) throw new InvalidOperationException("Role update failed: " + roleJson);
+                            if (!roleJson.Contains(permissionId, StringComparison.Ordinal)) throw new InvalidOperationException("Role update response did not include assigned permission.");
+                        }
+
+                        using (HttpResponseMessage permissionResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/permissions/" + Uri.EscapeDataString(permissionId), JsonUtil.Serialize(new
+                        {
+                            resourceType = "Touchstone",
+                            operationType = "Write",
+                            permit = false,
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string permissionJson = await permissionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!permissionResponse.IsSuccessStatusCode || !permissionJson.Contains("Touchstone", StringComparison.Ordinal) || !permissionJson.Contains("Write", StringComparison.Ordinal)) throw new InvalidOperationException("Permission update failed: " + permissionJson);
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunPascalCaseClientInventorySmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-pascal-inventory-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (ClientWebSocket socket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(socket);
+                        await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? connected = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Authenticated WebSocket did not connect: " + connected);
+
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_pascal_inventory",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "pascal-inventory-client",
+                            inventory = new
+                            {
+                                Providers = new[]
+                                {
+                                    new
+                                    {
+                                        Name = "pascal-provider",
+                                        Provider = "Ollama",
+                                        Models = new[]
+                                        {
+                                            new { Name = "touchstone-pascal-model", SupportsCompletions = true, SupportsEmbeddings = true }
+                                        }
+                                    }
+                                }
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+
+                        string? registered = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(registered) || !registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client did not register: " + registered);
+                    }
+
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
+                        if (!clients.Contains("touchstone-pascal-model", StringComparison.Ordinal)) throw new InvalidOperationException("Registered client models did not include PascalCase inventory model: " + clients);
+
+                        string models = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1/models").ConfigureAwait(false);
+                        if (!models.Contains("touchstone-pascal-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include PascalCase inventory model: " + models);
                     }
                 }
                 finally
@@ -956,12 +1231,49 @@ namespace Test.Shared
             }
         }
 
+        private static async Task<HttpResponseMessage> PutJsonAsync(HttpClient httpClient, string url, string json)
+        {
+            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Put, url))
+            {
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                return await httpClient.SendAsync(request).ConfigureAwait(false);
+            }
+        }
+
         private static async Task<HttpResponseMessage> DeleteJsonAsync(HttpClient httpClient, string url, string json = "{}")
         {
             using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Delete, url))
             {
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
                 return await httpClient.SendAsync(request).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task<string> FirstRecordIdAsync(HttpClient httpClient, string url)
+        {
+            string json = await httpClient.GetStringAsync(url).ConfigureAwait(false);
+            return FirstRecordId(json);
+        }
+
+        private static string FirstRecordId(string json)
+        {
+            using (JsonDocument document = JsonDocument.Parse(json))
+            {
+                if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("Expected an array response.");
+                JsonElement record = document.RootElement.EnumerateArray().FirstOrDefault();
+                string id = TryGetString(record, "id") ?? String.Empty;
+                if (String.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("Response did not include a record ID.");
+                return id;
+            }
+        }
+
+        private static bool OpenApiHasMethod(string json, string path, string method)
+        {
+            using (JsonDocument document = JsonDocument.Parse(json))
+            {
+                if (!TryGetProperty(document.RootElement, "paths", out JsonElement paths)) return false;
+                if (!TryGetProperty(paths, path, out JsonElement pathItem)) return false;
+                return TryGetProperty(pathItem, method, out _);
             }
         }
 

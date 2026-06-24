@@ -16,6 +16,10 @@ The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-s
 
 `GET /metrics`
 
+## SDK Generation
+
+No generated SDK packages are checked into the v0.1.0 alpha repository. Generate SDKs from the live OpenAPI document at `GET /openapi.json`.
+
 ## Authentication
 
 `POST /api/v1/auth/token`
@@ -40,23 +44,57 @@ Login accepts `username`, `password`, and optional `tenantId`. It returns a gene
 
 `GET /v1.0/api/tenants`
 
+`POST /v1.0/api/tenants`
+
+`PUT /v1.0/api/tenants/{id}`
+
+`DELETE /v1.0/api/tenants/{id}`
+
 `GET /v1.0/api/users`
+
+`POST /v1.0/api/users`
+
+`PUT /v1.0/api/users/{id}`
+
+`DELETE /v1.0/api/users/{id}`
 
 `GET /v1.0/api/credentials`
 
 `POST /v1.0/api/credentials`
 
+`PUT /v1.0/api/credentials/{id}`
+
+`DELETE /v1.0/api/credentials/{id}`
+
 `GET /v1.0/api/roles`
 
+`POST /v1.0/api/roles`
+
+`PUT /v1.0/api/roles/{id}`
+
+`DELETE /v1.0/api/roles/{id}`
+
 `GET /v1.0/api/permissions`
+
+`POST /v1.0/api/permissions`
+
+`PUT /v1.0/api/permissions/{id}`
+
+`DELETE /v1.0/api/permissions/{id}`
 
 `GET /v1.0/api/effective-permissions`
 
 `GET /v1.0/api/audit`
 
+`DELETE /v1.0/api/audit/{id}`
+
 `GET /v1.0/api/clients`
 
 The clients response includes connection state, capacity fields, and each client's advertised `models` inventory.
+
+`DELETE /v1.0/api/clients/{id}`
+
+`DELETE /v1.0/api/client-models`
 
 `GET /v1.0/api/model-definitions`
 
@@ -72,7 +110,15 @@ The clients response includes connection state, capacity fields, and each client
 
 `POST /v1.0/api/restore`
 
-Legacy dashboard aliases under `/api/v1/...` are also registered for clients, token bootstrap, settings, and request history.
+Create and update request bodies:
+
+- Tenant create/update: `name`, `active`. Create may also include `id`; if omitted, the server generates a compact PrettyId with `ten_` prefix.
+- User create/update: `username`, `email`, `isAdmin`, `isTenantAdmin`, `active`, and `password`. Password is required on create and optional on update. User responses are redacted and do not expose password material.
+- Credential create/update: `userId`, `accessKey`, `secretKey`, and `active`. Create generates access/secret keys when omitted and returns the secret once. List/update responses redact the secret key.
+- Role create/update: `name`, `permissionIds`, and `active`.
+- Permission create/update: `resourceType`, `operationType` (`Read`, `Write`, `Delete`, `Admin`), `permit`, and `active`.
+
+Legacy dashboard aliases under `/api/v1/...` are also registered for administration, clients, token bootstrap, settings, request history, and OpenAI-compatible routes.
 
 ## OpenAI-Compatible API
 

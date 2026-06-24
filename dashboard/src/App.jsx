@@ -25,6 +25,7 @@ import {
   Moon,
   Pencil,
   Play,
+  Plus,
   RefreshCw,
   Search,
   Server,
@@ -41,6 +42,7 @@ import ActionMenu from './components/ActionMenu.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
 import CopyButton from './components/CopyButton.jsx';
 import CopyableValue from './components/CopyableValue.jsx';
+import ConnectedClientsChart from './components/ConnectedClientsChart.jsx';
 import EmptyState from './components/EmptyState.jsx';
 import LanguageSelector from './components/LanguageSelector.jsx';
 import ActivityChart from './components/ActivityChart.jsx';
@@ -73,7 +75,8 @@ const navGroups = [
   {
     key: 'control',
     links: [
-      { to: '/dashboard/clients', key: 'clients', icon: Network }
+      { to: '/dashboard/clients', key: 'clients', icon: Network },
+      { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit, nested: true }
     ]
   },
   {
@@ -97,6 +100,7 @@ const pageMeta = {
   '/dashboard/credentials': { title: 'credentials', description: 'credentialsDescription' },
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
+  '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
@@ -126,7 +130,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
               {group.links.map((link) => {
                 const Icon = link.icon;
                 return (
-                  <NavLink className="sidebar-link" key={link.to} to={link.to}>
+                  <NavLink className={`sidebar-link ${link.nested ? 'nested' : ''}`.trim()} end key={link.to} to={link.to}>
                     <Icon size={17} />
                     <span>{t(link.key)}</span>
                     <ChevronRight className="sidebar-link-arrow" size={14} />
@@ -185,6 +189,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <Route path="credentials" element={<CredentialsView />} />
             <Route path="security" element={<SecurityView />} />
             <Route path="clients" element={<ClientsView />} />
+            <Route path="clients/advertised-models" element={<AdvertisedModelsView />} />
             <Route path="analytics" element={<AnalyticsView />} />
             <Route path="settings" element={<SettingsView />} />
             <Route path="*" element={<HomeView />} />
@@ -281,22 +286,18 @@ function HomeView() {
         <ActivityChart summary={summary.data} />
       </Panel>
 
-      <DataTable
-        columns={['name', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
-        onDelete={(row) => deleteRecord('/api/v1/clients', row)}
-        onRefresh={clients.refresh}
-        rows={clients.data}
-        subtitle={t('clientsTableSubtitle')}
+      <Panel
+        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        className="chart-panel-card"
         title={t('connectedClients')}
-      />
-      <DataTable
-        columns={['clientName', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
-        onDelete={deleteClientModel}
-        onRefresh={clients.refresh}
-        rows={clientModels}
-        subtitle={t('clientModelsSubtitle')}
-        title={t('advertisedModels')}
-      />
+      >
+        <ConnectedClientsChart
+          connected={connected}
+          onRefresh={refreshAll}
+          sampleVersion={clients.updatedAt}
+          total={clients.data.length}
+        />
+      </Panel>
     </div>
   );
 }
@@ -467,6 +468,32 @@ function SecurityView() {
   const permissions = useResource('/api/v1/permissions', []);
   const effective = useResource('/api/v1/effective-permissions', []);
   const audit = useResource('/api/v1/audit', []);
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [selectedPermission, setSelectedPermission] = useState(null);
+  const [creatingRole, setCreatingRole] = useState(false);
+  const [creatingPermission, setCreatingPermission] = useState(false);
+
+  async function saveRole(roleId, payload) {
+    const result = roleId
+      ? await api.put(`/api/v1/roles/${encodeURIComponent(roleId)}`, payload)
+      : await api.post('/api/v1/roles', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setSelectedRole(result);
+    setCreatingRole(false);
+    roles.refresh();
+    effective.refresh();
+  }
+
+  async function savePermission(permissionId, payload) {
+    const result = permissionId
+      ? await api.put(`/api/v1/permissions/${encodeURIComponent(permissionId)}`, payload)
+      : await api.post('/api/v1/permissions', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setSelectedPermission(result);
+    setCreatingPermission(false);
+    permissions.refresh();
+    effective.refresh();
+  }
 
   return (
     <div className="view-stack">
@@ -475,8 +502,32 @@ function SecurityView() {
         <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
         <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" />
       </div>
-      <DataTable title={t('roles')} rows={roles.data} columns={['name', 'builtIn', 'active']} onDelete={(row) => deleteRecord('/api/v1/roles', row)} onRefresh={roles.refresh} />
-      <DataTable title={t('permissions')} rows={permissions.data} columns={['resourceType', 'operationType', 'permit']} onDelete={(row) => deleteRecord('/api/v1/permissions', row)} onRefresh={permissions.refresh} />
+      <DataTable
+        title={t('roles')}
+        rows={roles.data}
+        columns={['id', 'tenantId', 'name', 'builtIn', 'active']}
+        onDelete={(row) => {
+          if (recordId(selectedRole) === recordId(row)) setSelectedRole(null);
+          return deleteRecord('/api/v1/roles', row);
+        }}
+        onRefresh={roles.refresh}
+        onRowClick={setSelectedRole}
+        rowActionLabel={t('edit')}
+        actions={<IconButton onClick={() => setCreatingRole(true)} label={t('createRole')} icon={<Plus size={16} />} variant="primary" />}
+      />
+      <DataTable
+        title={t('permissions')}
+        rows={permissions.data}
+        columns={['id', 'tenantId', 'resourceType', 'operationType', 'permit', 'active']}
+        onDelete={(row) => {
+          if (recordId(selectedPermission) === recordId(row)) setSelectedPermission(null);
+          return deleteRecord('/api/v1/permissions', row);
+        }}
+        onRefresh={permissions.refresh}
+        onRowClick={setSelectedPermission}
+        rowActionLabel={t('edit')}
+        actions={<IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} icon={<Plus size={16} />} variant="primary" />}
+      />
       <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} onRefresh={effective.refresh} />
       <DataTable
         columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode']}
@@ -486,6 +537,10 @@ function SecurityView() {
         subtitle={t('auditSubtitle')}
         title={t('audit')}
       />
+      {creatingRole && <RoleEditModal data={null} mode="create" onClose={() => setCreatingRole(false)} onSave={saveRole} permissions={permissions.data} />}
+      {selectedRole && <RoleEditModal data={selectedRole} onClose={() => setSelectedRole(null)} onSave={saveRole} permissions={permissions.data} />}
+      {creatingPermission && <PermissionEditModal data={null} mode="create" onClose={() => setCreatingPermission(false)} onSave={savePermission} />}
+      {selectedPermission && <PermissionEditModal data={selectedPermission} onClose={() => setSelectedPermission(null)} onSave={savePermission} />}
     </div>
   );
 }
@@ -494,6 +549,17 @@ function TenantsView() {
   const { t } = useTranslation();
   const tenants = useResource('/api/v1/tenants', []);
   const [selected, setSelected] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  async function saveTenant(tenantId, payload) {
+    const result = tenantId
+      ? await api.put(`/api/v1/tenants/${encodeURIComponent(tenantId)}`, payload)
+      : await api.post('/api/v1/tenants', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setSelected(result);
+    setCreating(false);
+    tenants.refresh();
+  }
 
   return (
     <div className="view-stack">
@@ -506,10 +572,13 @@ function TenantsView() {
         onRowClick={setSelected}
         onRefresh={tenants.refresh}
         rows={tenants.data}
+        rowActionLabel={t('edit')}
         subtitle={t('tenantsTableSubtitle')}
         title={t('tenants')}
+        actions={<IconButton onClick={() => setCreating(true)} label={t('createTenant')} icon={<Plus size={16} />} variant="primary" />}
       />
-      {selected && <EditRecordModal title={t('tenantDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {creating && <TenantEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveTenant} />}
+      {selected && <TenantEditModal data={selected} onClose={() => setSelected(null)} onSave={saveTenant} />}
     </div>
   );
 }
@@ -518,6 +587,17 @@ function UsersView() {
   const { t } = useTranslation();
   const users = useResource('/api/v1/users', []);
   const [selected, setSelected] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  async function saveUser(userId, payload) {
+    const result = userId
+      ? await api.put(`/api/v1/users/${encodeURIComponent(userId)}`, payload)
+      : await api.post('/api/v1/users', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setSelected(result);
+    setCreating(false);
+    users.refresh();
+  }
 
   return (
     <div className="view-stack">
@@ -530,10 +610,13 @@ function UsersView() {
         onRowClick={setSelected}
         onRefresh={users.refresh}
         rows={users.data}
+        rowActionLabel={t('edit')}
         subtitle={t('usersTableSubtitle')}
         title={t('users')}
+        actions={<IconButton onClick={() => setCreating(true)} label={t('createUser')} icon={<Plus size={16} />} variant="primary" />}
       />
-      {selected && <EditRecordModal title={t('userDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {creating && <UserEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveUser} />}
+      {selected && <UserEditModal data={selected} onClose={() => setSelected(null)} onSave={saveUser} />}
     </div>
   );
 }
@@ -542,18 +625,27 @@ function CredentialsView() {
   const { t } = useTranslation();
   const credentials = useResource('/api/v1/credentials', []);
   const [selected, setSelected] = useState(null);
+  const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState(null);
 
-  async function createCredential() {
-    const result = await api.post('/api/v1/credentials', {});
-    setCreated(result);
+  async function saveCredential(credentialId, payload) {
+    const result = credentialId
+      ? await api.put(`/api/v1/credentials/${encodeURIComponent(credentialId)}`, payload)
+      : await api.post('/api/v1/credentials', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    if (credentialId) setSelected(result);
+    else {
+      setCreated(result);
+      setSelected(null);
+      setCreating(false);
+    }
     credentials.refresh();
   }
 
   return (
     <div className="view-stack">
       <div className="toolbar align-end">
-        <IconButton onClick={createCredential} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />
+        <IconButton onClick={() => setCreating(true)} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />
       </div>
       {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
       <DataTable
@@ -565,10 +657,12 @@ function CredentialsView() {
         onRowClick={setSelected}
         onRefresh={credentials.refresh}
         rows={credentials.data}
+        rowActionLabel={t('edit')}
         subtitle={t('credentialsTableSubtitle')}
         title={t('credentials')}
       />
-      {selected && <EditRecordModal title={t('credentialDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {creating && <CredentialEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveCredential} />}
+      {selected && <CredentialEditModal data={selected} onClose={() => setSelected(null)} onSave={saveCredential} />}
     </div>
   );
 }
@@ -577,7 +671,6 @@ function ClientsView() {
   const { t } = useTranslation();
   const clients = useResource('/api/v1/clients', []);
   const [selectedClient, setSelectedClient] = useState(null);
-  const [selectedModel, setSelectedModel] = useState(null);
   const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
   const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
@@ -601,6 +694,52 @@ function ClientsView() {
         subtitle={t('clientsTableSubtitle')}
         title={t('clients')}
       />
+      {selectedClient && <EditRecordModal title={t('clientDetails')} data={selectedClient} onClose={() => setSelectedClient(null)} />}
+    </div>
+  );
+}
+
+function AdvertisedModelsView() {
+  const { t } = useTranslation();
+  const clients = useResource('/api/v1/clients', []);
+  const [selectedClientId, setSelectedClientId] = useState('all');
+  const [selectedModel, setSelectedModel] = useState(null);
+  const clientModels = flattenClientModels(clients.data);
+  const filteredModels = selectedClientId === 'all'
+    ? clientModels
+    : clientModels.filter((model) => String(value(model, 'clientId') || '') === selectedClientId);
+  const completionModelCount = filteredModels.filter((model) => value(model, 'supportsCompletions') === true).length;
+  const embeddingModelCount = filteredModels.filter((model) => value(model, 'supportsEmbeddings') === true).length;
+
+  useEffect(() => {
+    if (selectedClientId === 'all') return;
+    const exists = clients.data.some((client) => String(value(client, 'id') || '') === selectedClientId);
+    if (!exists) setSelectedClientId('all');
+  }, [clients.data, selectedClientId]);
+
+  return (
+    <div className="view-stack">
+      <div className="metric-grid compact">
+        <MetricCard icon={<BrainCircuit size={18} />} label={t('advertisedModels')} value={formatNumber(filteredModels.length)} />
+        <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(completionModelCount)} />
+        <MetricCard icon={<Cpu size={18} />} label={t('embeddingModels')} value={formatNumber(embeddingModelCount)} tone="info" />
+      </div>
+      <div className="toolbar table-controls">
+        <label className="form-field inline compact-field">
+          <span>{t('clientFilter')}</span>
+          <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)}>
+            <option value="all">{t('allClients')}</option>
+            {clients.data.map((client) => {
+              const clientId = String(value(client, 'id') || '');
+              return (
+                <option key={clientId || value(client, 'name')} value={clientId}>
+                  {value(client, 'name') || clientId}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      </div>
       <DataTable
         columns={['clientName', 'clientId', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
         onDelete={(row) => {
@@ -609,11 +748,10 @@ function ClientsView() {
         }}
         onRefresh={clients.refresh}
         onRowClick={setSelectedModel}
-        rows={clientModels}
-        subtitle={t('clientModelsSubtitle')}
+        rows={filteredModels}
+        subtitle={t('advertisedModelsTableSubtitle')}
         title={t('advertisedModels')}
       />
-      {selectedClient && <EditRecordModal title={t('clientDetails')} data={selectedClient} onClose={() => setSelectedClient(null)} />}
       {selectedModel && <EditRecordModal title={t('modelDetails')} data={selectedModel} onClose={() => setSelectedModel(null)} />}
     </div>
   );
@@ -697,7 +835,7 @@ function SettingsView() {
     setDraft(normalized);
     setConfigText(JSON.stringify(normalized, null, 2));
     settings.refresh();
-    setStatus(t('settingsSaved'));
+    setStatus(settingSaveRequiresRestart(result) ? t('settingsSavedRestartRequired') : t('settingsSaved'));
   }
 
   async function saveJsonSettings() {
@@ -707,7 +845,7 @@ function SettingsView() {
     setDraft(normalized);
     setConfigText(JSON.stringify(normalized, null, 2));
     settings.refresh();
-    setStatus(t('settingsSaved'));
+    setStatus(settingSaveRequiresRestart(result) ? t('settingsSavedRestartRequired') : t('settingsSaved'));
   }
 
   async function downloadBackup() {
@@ -728,124 +866,157 @@ function SettingsView() {
         <IconButton onClick={saveSettings} label={t('saveSettings')} icon={<Upload size={16} />} variant="primary" />
       </div>
       {status ? <p className="muted-copy">{status}</p> : null}
+      <div className="settings-restart-banner">
+        <StatusChip tone="warning" value={t('restartRequired')} />
+        <span>{t('settingsRestartSummary')}</span>
+      </div>
       <div className="workspace-grid settings-grid">
-        <Panel title={t('restSettings')}>
+        <Panel actions={<SettingImpactBadge type="mixed" />} title={t('restSettings')}>
+          <SettingImpactNote live={t('restLiveNote')} restart={t('restRestartNote')} />
           <div className="form-grid two">
             <label className="form-field">
               <span>{t('hostname')}</span>
               <input value={draft.Rest.Hostname} onChange={(event) => updateSetting('Rest', 'Hostname', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('port')}</span>
               <input min="1" type="number" value={draft.Rest.Port} onChange={(event) => updateSetting('Rest', 'Port', Number(event.target.value))} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="toggle-field">
               <input checked={draft.Rest.Ssl} onChange={(event) => updateSetting('Rest', 'Ssl', event.target.checked)} type="checkbox" />
               <span>{t('ssl')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
             <label className="toggle-field">
               <input checked={draft.Rest.RequireAuthentication} onChange={(event) => updateSetting('Rest', 'RequireAuthentication', event.target.checked)} type="checkbox" />
               <span>{t('requireAuthentication')}</span>
+              <small className="setting-impact live inline">{t('appliesImmediately')}</small>
             </label>
           </div>
         </Panel>
-        <Panel title={t('corsSettings')}>
+        <Panel actions={<SettingImpactBadge type="live" />} title={t('corsSettings')}>
+          <SettingImpactNote live={t('corsLiveNote')} />
           <div className="form-stack">
             <label className="toggle-field">
               <input checked={draft.Cors.Enabled} onChange={(event) => updateSetting('Cors', 'Enabled', event.target.checked)} type="checkbox" />
               <span>{t('enabled')}</span>
+              <small className="setting-impact live inline">{t('appliesImmediately')}</small>
             </label>
             <label className="form-field">
               <span>{t('allowedOrigins')}</span>
-              <textarea rows={4} value={listToText(draft.Cors.AllowedOrigins)} onChange={(event) => updateListSetting('Cors', 'AllowedOrigins', event.target.value)} />
+              <textarea rows={2} value={listToText(draft.Cors.AllowedOrigins)} onChange={(event) => updateListSetting('Cors', 'AllowedOrigins', event.target.value)} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
             </label>
             <div className="form-grid two">
               <label className="form-field">
                 <span>{t('allowedHeaders')}</span>
-                <textarea rows={4} value={listToText(draft.Cors.AllowedHeaders)} onChange={(event) => updateListSetting('Cors', 'AllowedHeaders', event.target.value)} />
+                <textarea rows={2} value={listToText(draft.Cors.AllowedHeaders)} onChange={(event) => updateListSetting('Cors', 'AllowedHeaders', event.target.value)} />
+                <small className="setting-impact live">{t('appliesImmediately')}</small>
               </label>
               <label className="form-field">
                 <span>{t('allowedMethods')}</span>
-                <textarea rows={4} value={listToText(draft.Cors.AllowedMethods)} onChange={(event) => updateListSetting('Cors', 'AllowedMethods', event.target.value)} />
+                <textarea rows={2} value={listToText(draft.Cors.AllowedMethods)} onChange={(event) => updateListSetting('Cors', 'AllowedMethods', event.target.value)} />
+                <small className="setting-impact live">{t('appliesImmediately')}</small>
               </label>
             </div>
           </div>
         </Panel>
-        <Panel title={t('webSocketSettings')}>
+        <Panel actions={<SettingImpactBadge type="mixed" />} title={t('webSocketSettings')}>
+          <SettingImpactNote live={t('webSocketLiveNote')} restart={t('webSocketRestartNote')} />
           <div className="form-grid two">
             <label className="toggle-field">
               <input checked={draft.WebSocket.Enabled} onChange={(event) => updateSetting('WebSocket', 'Enabled', event.target.checked)} type="checkbox" />
               <span>{t('enabled')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('path')}</span>
               <input value={draft.WebSocket.Path} onChange={(event) => updateSetting('WebSocket', 'Path', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('heartbeatIntervalMs')}</span>
               <input min="1000" type="number" value={draft.WebSocket.HeartbeatIntervalMs} onChange={(event) => updateSetting('WebSocket', 'HeartbeatIntervalMs', Number(event.target.value))} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
             </label>
             <label className="form-field">
               <span>{t('requestTimeoutMs')}</span>
               <input min="1000" type="number" value={draft.WebSocket.RequestTimeoutMs} onChange={(event) => updateSetting('WebSocket', 'RequestTimeoutMs', Number(event.target.value))} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
             </label>
           </div>
         </Panel>
-        <Panel title={t('databaseSettings')}>
+        <Panel actions={<SettingImpactBadge type="restart" />} title={t('databaseSettings')}>
+          <SettingImpactNote restart={t('databaseRestartNote')} />
           <div className="form-grid two">
             <label className="form-field">
               <span>{t('provider')}</span>
               <select value={draft.Database.Type} onChange={(event) => updateSetting('Database', 'Type', event.target.value)}>
                 {['Sqlite', 'Postgresql', 'SqlServer', 'Mysql'].map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('filename')}</span>
               <input value={draft.Database.Filename} onChange={(event) => updateSetting('Database', 'Filename', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('server')}</span>
               <input value={draft.Database.Server || ''} onChange={(event) => updateSetting('Database', 'Server', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('port')}</span>
               <input min="0" type="number" value={draft.Database.Port} onChange={(event) => updateSetting('Database', 'Port', Number(event.target.value))} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('databaseName')}</span>
               <input value={draft.Database.DatabaseName || ''} onChange={(event) => updateSetting('Database', 'DatabaseName', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('username')}</span>
               <input value={draft.Database.Username || ''} onChange={(event) => updateSetting('Database', 'Username', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('password')}</span>
               <input type="password" value={draft.Database.Password || ''} onChange={(event) => updateSetting('Database', 'Password', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('connectionString')}</span>
               <input value={draft.Database.ConnectionString || ''} onChange={(event) => updateSetting('Database', 'ConnectionString', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
           </div>
         </Panel>
-        <Panel title={t('loggingSettings')}>
+        <Panel actions={<SettingImpactBadge type="restart" />} title={t('loggingSettings')}>
+          <SettingImpactNote restart={t('loggingRestartNote')} />
           <div className="form-grid two">
             <label className="toggle-field">
               <input checked={draft.Logging.ConsoleLogging} onChange={(event) => updateSetting('Logging', 'ConsoleLogging', event.target.checked)} type="checkbox" />
               <span>{t('consoleLogging')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
             <label className="toggle-field">
               <input checked={draft.Logging.FileLogging} onChange={(event) => updateSetting('Logging', 'FileLogging', event.target.checked)} type="checkbox" />
               <span>{t('fileLogging')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('logDirectory')}</span>
               <input value={draft.Logging.LogDirectory} onChange={(event) => updateSetting('Logging', 'LogDirectory', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
             <label className="form-field">
               <span>{t('logFilename')}</span>
               <input value={draft.Logging.LogFilename} onChange={(event) => updateSetting('Logging', 'LogFilename', event.target.value)} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
           </div>
         </Panel>
@@ -861,25 +1032,63 @@ function SettingsView() {
         actions={<IconButton onClick={saveJsonSettings} label={t('saveJson')} icon={<Upload size={16} />} variant="primary" />}
         title={t('rawConfigJson')}
       >
+        <SettingImpactNote live={t('rawJsonLiveNote')} restart={t('rawJsonRestartNote')} />
         <textarea className="backup-editor config-editor" value={configText} onChange={(event) => setConfigText(event.target.value)} aria-label={t('rawConfigJson')} />
       </Panel>
     </div>
   );
 }
 
+function SettingImpactBadge({ type }) {
+  const { t } = useTranslation();
+  const tone = type === 'live' ? 'success' : 'warning';
+  const label = type === 'live' ? t('appliesImmediately') : type === 'mixed' ? t('mixedRestartImpact') : t('restartRequired');
+  return <StatusChip tone={tone} value={label} />;
+}
+
+function SettingImpactNote({ live, restart }) {
+  const { t } = useTranslation();
+  if (!live && !restart) return null;
+  return (
+    <div className="settings-impact-note">
+      {restart ? (
+        <div className="setting-impact-line">
+          <StatusChip tone="warning" value={t('restart')} />
+          <span>{restart}</span>
+        </div>
+      ) : null}
+      {live ? (
+        <div className="setting-impact-line">
+          <StatusChip tone="success" value={t('live')} />
+          <span>{live}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function useResource(path, fallback) {
   const [data, setData] = useState(fallback);
+  const [updatedAt, setUpdatedAt] = useState(0);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let alive = true;
     api.get(path)
-      .then((result) => { if (alive) setData(result); })
-      .catch(() => { if (alive) setData(fallback); });
+      .then((result) => {
+        if (!alive) return;
+        setData(result);
+        setUpdatedAt(Date.now());
+      })
+      .catch(() => {
+        if (!alive) return;
+        setData(fallback);
+        setUpdatedAt(Date.now());
+      });
     return () => { alive = false; };
   }, [path, version]);
 
-  return { data, refresh: () => setVersion((current) => current + 1) };
+  return { data, refresh: () => setVersion((current) => current + 1), updatedAt };
 }
 
 function useTextResource(path, fallback) {
@@ -914,6 +1123,10 @@ function defaultServerSettings() {
 
 function unwrapSettings(input) {
   return input?.settings || input?.Settings || input || {};
+}
+
+function settingSaveRequiresRestart(input) {
+  return input?.restartRequired === true || input?.RestartRequired === true;
 }
 
 function normalizeSettings(input) {
@@ -970,7 +1183,7 @@ function IconButton({ icon, iconOnly = false, label, onClick, variant = 'seconda
   );
 }
 
-function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, onDelete, onRefresh, onRowClick, rows, subtitle, title }) {
+function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
@@ -1061,7 +1274,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
       items.push({
         icon: <Pencil size={14} />,
         key: 'details',
-        label: t('viewDetails'),
+        label: rowActionLabel || t('viewDetails'),
         onSelect: () => onRowClick(row)
       });
     }
@@ -1093,7 +1306,6 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
     <section className="workspace-card data-panel">
       <div className="workspace-card-header">
         <div>
-          <span className="eyebrow">{t('dataSet')}</span>
           <h2>{title}</h2>
           {subtitle ? <p>{subtitle}</p> : null}
         </div>
@@ -1227,15 +1439,461 @@ function EditRecordModal({ title, data, onClose }) {
     >
       <div className="record-detail-stack">
         {scalarEntries.length ? (
-          <div className="record-detail-grid">
-            {scalarEntries.map(([key, fieldValue]) => (
-              <RecordField fieldKey={key} key={key} value={fieldValue} />
-            ))}
-          </div>
+          <RecordSummaryTable entries={scalarEntries} />
         ) : null}
         {complexEntries.map(([key, fieldValue]) => (
           <RecordComplexSection fieldKey={key} key={key} value={fieldValue} />
         ))}
+      </div>
+    </Modal>
+  );
+}
+
+function UserEditModal({ data, mode = 'edit', onClose, onSave }) {
+  const { t } = useTranslation();
+  const userId = recordId(data);
+  const isCreate = mode === 'create';
+  const [draft, setDraft] = useState(() => ({
+    username: value(data, 'username') || '',
+    email: value(data, 'email') || '',
+    isAdmin: value(data, 'isAdmin') === true,
+    isTenantAdmin: value(data, 'isTenantAdmin') === true,
+    active: value(data, 'active') !== false,
+    password: ''
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if ((!isCreate && !userId) || saving) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      const payload = {
+        username: draft.username,
+        email: draft.email,
+        isAdmin: draft.isAdmin,
+        isTenantAdmin: draft.isTenantAdmin,
+        active: draft.active
+      };
+      if (draft.password.trim()) payload.password = draft.password;
+      await onSave(isCreate ? null : userId, payload);
+      setDraft((current) => ({ ...current, password: '' }));
+      setStatusTone('success');
+      setStatus(t('userSaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.username.trim() || (isCreate && !draft.password.trim())} onClick={save} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data || {})} />}
+      onClose={onClose}
+      open
+      subtitle={isCreate ? t('createUserSubtitle') : t('editUserSubtitle')}
+      title={isCreate ? t('createUser') : t('editUser')}
+    >
+      <div className="form-stack">
+        {!isCreate ? <RecordSummaryTable entries={[['id', userId], ['tenantId', value(data, 'tenantId')]]} /> : null}
+        <div className="form-grid two">
+          <label className="form-field">
+            <span>{t('username')}</span>
+            <input value={draft.username} onChange={(event) => updateField('username', event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>{t('email')}</span>
+            <input value={draft.email} onChange={(event) => updateField('email', event.target.value)} />
+          </label>
+        </div>
+        <div className="form-grid two">
+          <label className="toggle-field">
+            <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+            <span>{t('active')}</span>
+          </label>
+          <label className="toggle-field">
+            <input checked={draft.isTenantAdmin} onChange={(event) => updateField('isTenantAdmin', event.target.checked)} type="checkbox" />
+            <span>{t('isTenantAdmin')}</span>
+          </label>
+          <label className="toggle-field">
+            <input checked={draft.isAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
+            <span>{t('isAdmin')}</span>
+          </label>
+        </div>
+        <label className="form-field">
+          <span>{t('newPassword')}</span>
+          <input
+            autoComplete="new-password"
+            placeholder={isCreate ? t('passwordRequired') : t('passwordOptional')}
+            type="password"
+            value={draft.password}
+            onChange={(event) => updateField('password', event.target.value)}
+          />
+        </label>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function TenantEditModal({ data, mode = 'edit', onClose, onSave }) {
+  const { t } = useTranslation();
+  const tenantId = recordId(data);
+  const isCreate = mode === 'create';
+  const [draft, setDraft] = useState(() => ({
+    name: value(data, 'name') || '',
+    active: value(data, 'active') !== false
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if ((!isCreate && !tenantId) || saving) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      await onSave(isCreate ? null : tenantId, { name: draft.name, active: draft.active });
+      setStatusTone('success');
+      setStatus(t('tenantSaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data || {})} />}
+      onClose={onClose}
+      open
+      subtitle={isCreate ? t('createTenantSubtitle') : t('editTenantSubtitle')}
+      title={isCreate ? t('createTenant') : t('editTenant')}
+    >
+      <div className="form-stack">
+        {!isCreate ? <RecordSummaryTable entries={[['id', tenantId]]} /> : null}
+        <label className="form-field">
+          <span>{t('name')}</span>
+          <input value={draft.name} onChange={(event) => updateField('name', event.target.value)} />
+        </label>
+        <label className="toggle-field">
+          <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+          <span>{t('active')}</span>
+        </label>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
+  const { t } = useTranslation();
+  const credentialId = recordId(data);
+  const isCreate = mode === 'create';
+  const [draft, setDraft] = useState(() => ({
+    userId: value(data, 'userId') || '',
+    accessKey: value(data, 'accessKey') || '',
+    secretKey: '',
+    active: value(data, 'active') !== false
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if ((!isCreate && !credentialId) || saving) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      const payload = {
+        userId: draft.userId,
+        accessKey: draft.accessKey,
+        active: draft.active
+      };
+      if (draft.secretKey.trim()) payload.secretKey = draft.secretKey;
+      await onSave(isCreate ? null : credentialId, payload);
+      setDraft((current) => ({ ...current, secretKey: '' }));
+      setStatusTone('success');
+      setStatus(t('credentialSaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || (!isCreate && !draft.accessKey.trim())} onClick={save} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data || {})} />}
+      onClose={onClose}
+      open
+      subtitle={isCreate ? t('createCredentialSubtitle') : t('editCredentialSubtitle')}
+      title={isCreate ? t('createCredential') : t('editCredential')}
+    >
+      <div className="form-stack">
+        {!isCreate ? <RecordSummaryTable entries={[['id', credentialId], ['tenantId', value(data, 'tenantId')]]} /> : null}
+        <div className="form-grid two">
+          <label className="form-field">
+            <span>{t('userId')}</span>
+            <input value={draft.userId} onChange={(event) => updateField('userId', event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>{t('accessKey')}</span>
+            <input value={draft.accessKey} onChange={(event) => updateField('accessKey', event.target.value)} />
+          </label>
+        </div>
+        <label className="form-field">
+          <span>{t('secretKey')}</span>
+          <input
+            autoComplete="new-password"
+            placeholder={isCreate ? t('secretKeyGeneratedOptional') : t('secretKeyOptional')}
+            type="password"
+            value={draft.secretKey}
+            onChange={(event) => updateField('secretKey', event.target.value)}
+          />
+        </label>
+        <label className="toggle-field">
+          <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+          <span>{t('active')}</span>
+        </label>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function RoleEditModal({ data, mode = 'edit', onClose, onSave, permissions }) {
+  const { t } = useTranslation();
+  const roleId = recordId(data);
+  const isCreate = mode === 'create';
+  const permissionRows = Array.isArray(permissions) ? permissions : [];
+  const [draft, setDraft] = useState(() => ({
+    name: value(data, 'name') || '',
+    active: value(data, 'active') !== false,
+    permissionIds: new Set(Array.isArray(value(data, 'permissionIds')) ? value(data, 'permissionIds') : [])
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  function togglePermission(permissionId) {
+    setDraft((current) => {
+      const next = new Set(current.permissionIds);
+      if (next.has(permissionId)) next.delete(permissionId);
+      else next.add(permissionId);
+      return { ...current, permissionIds: next };
+    });
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if ((!isCreate && !roleId) || saving) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      await onSave(isCreate ? null : roleId, {
+        name: draft.name,
+        active: draft.active,
+        permissionIds: [...draft.permissionIds]
+      });
+      setStatusTone('success');
+      setStatus(t('roleSaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data || {})} />}
+      onClose={onClose}
+      open
+      subtitle={isCreate ? t('createRoleSubtitle') : t('editRoleSubtitle')}
+      title={isCreate ? t('createRole') : t('editRole')}
+    >
+      <div className="form-stack">
+        {!isCreate ? <RecordSummaryTable entries={[['id', roleId], ['tenantId', value(data, 'tenantId')], ['builtIn', value(data, 'builtIn') === true]]} /> : null}
+        <label className="form-field">
+          <span>{t('name')}</span>
+          <input value={draft.name} onChange={(event) => updateField('name', event.target.value)} />
+        </label>
+        <label className="toggle-field">
+          <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+          <span>{t('active')}</span>
+        </label>
+        <div className="form-field">
+          <span>{t('rolePermissions')}</span>
+          <div className="permission-picker">
+            {permissionRows.length === 0 ? <p className="empty-inline">{t('noPermissions')}</p> : permissionRows.map((permission) => {
+              const permissionId = recordId(permission);
+              return (
+                <label className="permission-option" key={permissionId || describePermission(permission)}>
+                  <input
+                    checked={permissionId ? draft.permissionIds.has(permissionId) : false}
+                    disabled={!permissionId}
+                    onChange={() => togglePermission(permissionId)}
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>{describePermission(permission)}</strong>
+                    <CopyableValue label={t('copyValue')} value={permissionId} />
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function PermissionEditModal({ data, mode = 'edit', onClose, onSave }) {
+  const { t } = useTranslation();
+  const permissionId = recordId(data);
+  const isCreate = mode === 'create';
+  const [draft, setDraft] = useState(() => ({
+    resourceType: value(data, 'resourceType') || '',
+    operationType: value(data, 'operationType') || 'Read',
+    permit: value(data, 'permit') !== false,
+    active: value(data, 'active') !== false
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+  const operationTypes = ['Read', 'Write', 'Delete', 'Admin'];
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if ((!isCreate && !permissionId) || saving) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      await onSave(isCreate ? null : permissionId, draft);
+      setStatusTone('success');
+      setStatus(t('permissionSaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.resourceType.trim()} onClick={save} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data || {})} />}
+      onClose={onClose}
+      open
+      subtitle={isCreate ? t('createPermissionSubtitle') : t('editPermissionSubtitle')}
+      title={isCreate ? t('createPermission') : t('editPermission')}
+    >
+      <div className="form-stack">
+        {!isCreate ? <RecordSummaryTable entries={[['id', permissionId], ['tenantId', value(data, 'tenantId')]]} /> : null}
+        <div className="form-grid two">
+          <label className="form-field">
+            <span>{t('resourceType')}</span>
+            <input value={draft.resourceType} onChange={(event) => updateField('resourceType', event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>{t('operationType')}</span>
+            <select value={draft.operationType} onChange={(event) => updateField('operationType', event.target.value)}>
+              {operationTypes.map((operationType) => <option key={operationType} value={operationType}>{operationType}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="form-grid two">
+          <label className="toggle-field">
+            <input checked={draft.permit} onChange={(event) => updateField('permit', event.target.checked)} type="checkbox" />
+            <span>{t('permit')}</span>
+          </label>
+          <label className="toggle-field">
+            <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+            <span>{t('active')}</span>
+          </label>
+        </div>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
       </div>
     </Modal>
   );
@@ -1254,6 +1912,27 @@ function JsonRecordModal({ data, onClose, title }) {
     >
       <JsonBlock data={data} />
     </Modal>
+  );
+}
+
+function RecordSummaryTable({ entries }) {
+  const { t } = useTranslation();
+  const safeEntries = (Array.isArray(entries) ? entries : []).filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null && fieldValue !== '');
+  if (safeEntries.length === 0) return null;
+
+  return (
+    <div className="record-summary-table-wrap">
+      <table className="record-summary-table">
+        <tbody>
+          {safeEntries.map(([key, fieldValue]) => (
+            <tr key={key}>
+              <th>{t(key, key)}</th>
+              <td><CellValue columnKey={key} value={fieldValue} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1313,11 +1992,7 @@ function RecordComplexSection({ fieldKey, value: fieldValue }) {
           </div>
         </div>
         {scalarEntries.length ? (
-          <div className="record-detail-grid nested">
-            {scalarEntries.map(([key, itemValue]) => (
-              <RecordField fieldKey={key} key={key} value={itemValue} />
-            ))}
-          </div>
+          <RecordSummaryTable entries={scalarEntries} />
         ) : null}
         {complexEntries.map(([key, itemValue]) => (
           <RecordComplexSection fieldKey={key} key={key} value={itemValue} />
@@ -1441,6 +2116,13 @@ function describeRow(row) {
     || recordId(row)
     || 'record'
   );
+}
+
+function describePermission(permission) {
+  const resource = value(permission, 'resourceType') || 'Resource';
+  const operation = value(permission, 'operationType') || 'Operation';
+  const permit = value(permission, 'permit') === false ? 'Deny' : 'Allow';
+  return `${resource} / ${operation} / ${permit}`;
 }
 
 async function deleteRecord(path, row) {

@@ -1,13 +1,29 @@
 import { ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const pageSizes = [10, 25, 50, 100];
+const refreshIntervals = [0, 15, 30, 60, 180, 300];
 
 export default function Pagination({ currentPage, onPageChange, onPageSizeChange, onRefresh, pageSize, totalItems }) {
   const { t } = useTranslation();
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
+  const refreshRef = useRef(onRefresh);
   const totalPages = Math.max(1, Math.ceil(Math.max(totalItems, 0) / pageSize));
   const start = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, totalItems);
+
+  useEffect(() => {
+    refreshRef.current = onRefresh;
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (!autoRefreshSeconds || !refreshRef.current) return undefined;
+    const interval = window.setInterval(() => {
+      refreshRef.current?.();
+    }, autoRefreshSeconds * 1000);
+    return () => window.clearInterval(interval);
+  }, [autoRefreshSeconds]);
 
   function goTo(page) {
     onPageChange(Math.min(Math.max(1, page), totalPages));
@@ -25,6 +41,20 @@ export default function Pagination({ currentPage, onPageChange, onPageSizeChange
         </label>
       </div>
       <div className="pagination-controls">
+        <label className="pagination-refresh">
+          <span>{t('autoRefresh')}</span>
+          <select
+            disabled={!onRefresh}
+            value={autoRefreshSeconds}
+            onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
+          >
+            {refreshIntervals.map((seconds) => (
+              <option key={seconds} value={seconds}>
+                {seconds === 0 ? t('none') : `${seconds}s`}
+              </option>
+            ))}
+          </select>
+        </label>
         {onRefresh ? (
           <button className="pagination-button" onClick={onRefresh} title={t('refresh')} type="button">
             <RefreshCw size={14} />

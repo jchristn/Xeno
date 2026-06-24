@@ -133,13 +133,18 @@ namespace Xeno.Client
                 processorCount = Environment.ProcessorCount,
                 totalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
                 clientVersion = "0.1.0",
-                providers = Runners.ConvertAll(provider => new
+                providers = Runners.ConvertAll(runner => new
                 {
-                    provider.Name,
-                    provider.Provider,
-                    provider.Endpoint,
-                    provider.TimeoutMs,
-                    provider.Models
+                    name = runner.Name,
+                    provider = runner.Provider,
+                    endpoint = runner.Endpoint,
+                    timeoutMs = runner.TimeoutMs,
+                    models = runner.Models.ConvertAll(model => new
+                    {
+                        name = model.Name,
+                        supportsCompletions = model.SupportsCompletions,
+                        supportsEmbeddings = model.SupportsEmbeddings
+                    })
                 })
             };
         }

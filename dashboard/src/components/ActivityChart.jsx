@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const ranges = [
@@ -10,15 +10,31 @@ const ranges = [
 
 export default function ActivityChart({ summary }) {
   const { t } = useTranslation();
+  const canvasRef = useRef(null);
+  const [chartWidth, setChartWidth] = useState(760);
   const [range, setRange] = useState('lastDay');
   const [hovered, setHovered] = useState(null);
   const selectedRange = ranges.find((item) => item.key === range) || ranges[1];
   const buckets = useMemo(() => buildBuckets(summary?.buckets, selectedRange), [summary?.buckets, selectedRange]);
   const max = Math.max(1, ...buckets.map((bucket) => bucket.success + bucket.failed));
 
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) return undefined;
+
+    function updateWidth() {
+      setChartWidth(Math.max(360, Math.round(element.clientWidth || 760)));
+    }
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   const chart = {
     height: 525,
-    width: 760,
+    width: chartWidth,
     left: 58,
     right: 28,
     top: 28,
@@ -45,7 +61,7 @@ export default function ActivityChart({ summary }) {
           </button>
         ))}
       </div>
-      <div className="chart-canvas">
+      <div className="chart-canvas" ref={canvasRef}>
         <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={t('requests')}>
           <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.baseY} stroke="var(--color-border)" />
           <line x1={chart.left} y1={chart.baseY} x2={chart.left + chart.plotWidth} y2={chart.baseY} stroke="var(--color-border)" />
