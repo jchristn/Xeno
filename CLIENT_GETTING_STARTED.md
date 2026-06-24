@@ -38,6 +38,22 @@ src/Xeno.Client/bin/Debug/net10.0/xeno.exe
 
 On macOS and Linux, the executable name is `xeno`.
 
+## Install the Global Tool
+
+On Windows, install `xeno` as a .NET global tool from the repository root:
+
+```powershell
+install-tool.bat
+```
+
+The install script removes any existing `xeno` global tool installation, rebuilds the client from source, packs the tool, and installs it globally.
+
+Remove the global tool when needed:
+
+```powershell
+remove-tool.bat
+```
+
 ## Initialize Settings
 
 Create the default client settings file:

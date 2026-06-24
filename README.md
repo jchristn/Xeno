@@ -35,6 +35,8 @@ curl http://localhost:9000/v1/models
 
 See [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) for the full client setup flow.
 
+On Windows, `install-tool.bat` rebuilds the client and installs `xeno` as a .NET global tool. `remove-tool.bat` uninstalls it.
+
 ```powershell
 dotnet run --project src/Xeno.Client -- init
 dotnet run --project src/Xeno.Client -- login -u admin@xeno
