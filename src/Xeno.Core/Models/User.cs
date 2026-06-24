@@ -21,9 +21,24 @@ namespace Xeno.Core.Models
         public string TenantId { get; set; } = Constants.DefaultTenantId;
 
         /// <summary>
+        /// Username.
+        /// </summary>
+        public string Username { get; set; } = "admin";
+
+        /// <summary>
         /// Email address.
         /// </summary>
         public string Email { get; set; } = "admin@xeno";
+
+        /// <summary>
+        /// Per-user password salt.
+        /// </summary>
+        public string PasswordSalt { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Salted password hash.
+        /// </summary>
+        public string PasswordHash { get; set; } = String.Empty;
 
         /// <summary>
         /// Whether user is a global admin.

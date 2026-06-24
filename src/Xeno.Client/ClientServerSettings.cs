@@ -16,6 +16,11 @@ namespace Xeno.Client
         public string Url { get; set; } = "ws://localhost:9000/ws/v1/clients";
 
         /// <summary>
+        /// REST API base URL.
+        /// </summary>
+        public string? RestUrl { get; set; } = null;
+
+        /// <summary>
         /// Access key.
         /// </summary>
         public string? AccessKey { get; set; } = null;
@@ -29,5 +34,10 @@ namespace Xeno.Client
         /// Bearer token.
         /// </summary>
         public string? Token { get; set; } = null;
+
+        /// <summary>
+        /// Administrator API key.
+        /// </summary>
+        public string? AdminApiKey { get; set; } = null;
     }
 }

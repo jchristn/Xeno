@@ -15,6 +15,14 @@
     {
       "key": "adminApiKey",
       "value": "xenoadmin"
+    },
+    {
+      "key": "username",
+      "value": "admin@xeno"
+    },
+    {
+      "key": "password",
+      "value": "xeno"
     }
   ],
   "item": [
@@ -150,6 +158,27 @@
           }
         ],
         "url": "{{baseUrl}}/v1.0/api/request-history/summary?bucketMinutes=60"
+      }
+    },
+    {
+      "name": "Login for Client Credential",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\":\"{{username}}\",\"password\":\"{{password}}\",\"tenantId\":\"{{tenantId}}\"}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/auth/login"
       }
     },
     {

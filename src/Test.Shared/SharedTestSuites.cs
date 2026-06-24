@@ -116,6 +116,19 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
+                        "UserPasswordValidation",
+                        "Seeded user password validates only for login bootstrap",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            AuthenticationService auth = new AuthenticationService();
+                            User? user = auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "xeno");
+                            if (user == null) throw new InvalidOperationException("Seeded user password did not validate.");
+                            if (auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "wrong") != null) throw new InvalidOperationException("Invalid password validated.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Authentication",
                         "EffectivePermissionResolution",
                         "Tenant administrator effective permissions include admin",
                         executeAsync: async delegate
@@ -379,7 +392,17 @@ namespace Test.Shared
                         "Relay",
                         "OpenAiCompletionRelaysThroughClient",
                         "OpenAI-compatible completions relay through a connected Xeno client",
-                        executeAsync: delegate { return RunRelaySmokeAsync(); })
+                        executeAsync: delegate { return RunRelaySmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "WebSocketRequiresCredential",
+                        "WebSocket client connections require credential or API-key authentication",
+                        executeAsync: delegate { return RunWebSocketGateSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "LoginCredentialConnects",
+                        "Password login issues a client credential that can connect to WebSocket",
+                        executeAsync: delegate { return RunLoginCredentialConnectSmokeAsync(); })
                 });
         }
 
@@ -506,6 +529,7 @@ namespace Test.Shared
 
                     using (ClientWebSocket socket = new ClientWebSocket())
                     {
+                        ApplySeedCredentialHeaders(socket);
                         await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
                         Task clientTask = FakeClientLoopAsync(socket, clientTokenSource.Token);
 
@@ -575,6 +599,145 @@ namespace Test.Shared
 
                     server.Dispose();
                     await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunWebSocketGateSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-ws-gate-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (ClientWebSocket socket = new ClientWebSocket())
+                    {
+                        await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? message = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("Unauthenticated WebSocket was not rejected: " + message);
+                        }
+                    }
+
+                    using (ClientWebSocket bearerSocket = new ClientWebSocket())
+                    {
+                        bearerSocket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
+                        bearerSocket.Options.SetRequestHeader("Authorization", "Bearer not-accepted-for-clients");
+                        await bearerSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? message = await ReceiveWebSocketTextAsync(bearerSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("Bearer-authenticated WebSocket was not rejected: " + message);
+                        }
+                    }
+
+                    using (ClientWebSocket apiKeySocket = new ClientWebSocket())
+                    {
+                        apiKeySocket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
+                        apiKeySocket.Options.SetRequestHeader("x-admin-key", settings.Auth.AdminApiKey);
+                        await apiKeySocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? message = await ReceiveWebSocketTextAsync(apiKeySocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.connected", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("API-key WebSocket was not accepted: " + message);
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunLoginCredentialConnectSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-login-ws-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string loginBody = "{\"username\":\"admin@xeno\",\"password\":\"xeno\",\"tenantId\":\"" + Constants.DefaultTenantId + "\"}";
+                    using (HttpClient httpClient = new HttpClient())
+                    using (HttpResponseMessage loginResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/auth/login", loginBody).ConfigureAwait(false))
+                    {
+                        string responseBody = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        if (!loginResponse.IsSuccessStatusCode) throw new InvalidOperationException("Login failed: " + responseBody);
+
+                        using (JsonDocument document = JsonDocument.Parse(responseBody))
+                        using (ClientWebSocket socket = new ClientWebSocket())
+                        {
+                            string accessKey = TryGetString(document.RootElement, "accessKey") ?? String.Empty;
+                            string secretKey = TryGetString(document.RootElement, "secretKey") ?? String.Empty;
+                            if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey)) throw new InvalidOperationException("Login did not return a credential.");
+
+                            ApplyCredentialHeaders(socket, accessKey, secretKey);
+                            await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                            string? connected = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                            if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Authenticated WebSocket did not connect: " + connected);
+
+                            await SendWebSocketJsonAsync(socket, new
+                            {
+                                type = "client.register",
+                                clientId = "xcl_login_touchstone",
+                                tenantId = Constants.DefaultTenantId,
+                                name = "login-touchstone-client",
+                                inventory = new
+                                {
+                                    runners = Array.Empty<object>()
+                                }
+                            }, clientTokenSource.Token).ConfigureAwait(false);
+                            string? registered = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                            if (String.IsNullOrWhiteSpace(registered) || !registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Authenticated client did not register: " + registered);
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
         }
@@ -655,6 +818,18 @@ namespace Test.Shared
             await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
         }
 
+        private static void ApplySeedCredentialHeaders(ClientWebSocket socket)
+        {
+            ApplyCredentialHeaders(socket, "access_development", "secret_development");
+        }
+
+        private static void ApplyCredentialHeaders(ClientWebSocket socket, string accessKey, string secretKey)
+        {
+            socket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
+            socket.Options.SetRequestHeader("x-access-key", accessKey);
+            socket.Options.SetRequestHeader("x-secret-key", secretKey);
+        }
+
         private static async Task<HttpResponseMessage> PostJsonAsync(HttpClient httpClient, string url, string json)
         {
             using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, url))
@@ -679,6 +854,22 @@ namespace Test.Shared
 
                 return Encoding.UTF8.GetString(stream.ToArray());
             }
+        }
+
+        private static async Task StopServerAsync(XenoServer server, Task serverTask, CancellationTokenSource serverTokenSource, string dbFile)
+        {
+            serverTokenSource.Cancel();
+            server.Stop();
+            try
+            {
+                await serverTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            server.Dispose();
+            await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
         }
 
         private static int GetFreePort()

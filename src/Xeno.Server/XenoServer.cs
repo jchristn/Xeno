@@ -159,6 +159,8 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/health", "Health check", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/metrics", "Prometheus-style metrics", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/health", "Health check", "Health");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/login", "Login and create client credential", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token", "Create token", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/token", "Create token", "Authentication");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/token/details", "Token details", "Authentication");
@@ -353,6 +355,12 @@ namespace Xeno.Server
             if (method == "GET" && path.Equals("/openapi.json", StringComparison.OrdinalIgnoreCase))
             {
                 await SendJsonAsync(context, BuildOpenApi()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/auth/login", "/v1.0/api/auth/login"))
+            {
+                await HandleLoginAsync(context, token).ConfigureAwait(false);
                 return;
             }
 
@@ -868,10 +876,37 @@ namespace Xeno.Server
         private async Task WebSocketRouteAsync(HttpContextBase context, WebSocketSession session)
         {
             string? registeredClientId = null;
+            RequestContext requestContext;
+            try
+            {
+                requestContext = CreateWebSocketRequestContext(context);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                await session.SendTextAsync(JsonUtil.Serialize(new
+                {
+                    type = "server.unauthorized",
+                    message = ex.Message
+                }), context.Token).ConfigureAwait(false);
+                await session.CloseAsync(WebSocketCloseStatus.PolicyViolation, "unauthorized", context.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (ArgumentException ex)
+            {
+                await session.SendTextAsync(JsonUtil.Serialize(new
+                {
+                    type = "server.invalid-auth",
+                    message = ex.Message
+                }), context.Token).ConfigureAwait(false);
+                await session.CloseAsync(WebSocketCloseStatus.PolicyViolation, "invalid authentication", context.Token).ConfigureAwait(false);
+                return;
+            }
+
             await session.SendTextAsync(JsonUtil.Serialize(new
             {
                 type = "server.connected",
                 sessionId = session.Id.ToString(),
+                tenantId = requestContext.TenantId,
                 heartbeatIntervalMs = _Settings.WebSocket.HeartbeatIntervalMs
             }), context.Token).ConfigureAwait(false);
 
@@ -886,11 +921,19 @@ namespace Xeno.Server
                     string? responseType;
                     try
                     {
-                        responseType = await HandleClientMessageAsync(session, text, delegate(string clientId) { registeredClientId = clientId; }, context.Token).ConfigureAwait(false);
+                        responseType = await HandleClientMessageAsync(session, text, requestContext, delegate(string clientId) { registeredClientId = clientId; }, context.Token).ConfigureAwait(false);
                     }
                     catch (JsonException)
                     {
                         responseType = "server.invalid-json";
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        responseType = "server.unauthorized";
+                    }
+                    catch (ArgumentException)
+                    {
+                        responseType = "server.invalid-message";
                     }
 
                     if (String.IsNullOrWhiteSpace(responseType)) continue;
@@ -913,7 +956,7 @@ namespace Xeno.Server
             await session.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", context.Token).ConfigureAwait(false);
         }
 
-        private async Task<string?> HandleClientMessageAsync(WebSocketSession session, string json, Action<string> registeredClientCallback, CancellationToken token)
+        private async Task<string?> HandleClientMessageAsync(WebSocketSession session, string json, RequestContext requestContext, Action<string> registeredClientCallback, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(json)) return "server.empty";
 
@@ -923,7 +966,7 @@ namespace Xeno.Server
                 string type = TryGetString(root, "type") ?? String.Empty;
                 if (String.Equals(type, "client.register", StringComparison.OrdinalIgnoreCase))
                 {
-                    string clientId = RegisterClient(root, session);
+                    string clientId = RegisterClient(root, session, requestContext);
                     registeredClientCallback(clientId);
                     await SavePlatformAsync(token).ConfigureAwait(false);
                     return "server.registered";
@@ -931,7 +974,7 @@ namespace Xeno.Server
 
                 if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
                 {
-                    UpdateClientHeartbeat(TryGetString(root, "clientId"));
+                    UpdateClientHeartbeat(TryGetString(root, "clientId"), requestContext);
                     await SavePlatformAsync(token).ConfigureAwait(false);
                     return "server.heartbeat";
                 }
@@ -946,14 +989,24 @@ namespace Xeno.Server
             return "server.ack";
         }
 
-        private string RegisterClient(JsonElement root, WebSocketSession session)
+        private string RegisterClient(JsonElement root, WebSocketSession session, RequestContext requestContext)
         {
             XenoPlatform platform = RequirePlatform();
-            string tenantId = TryGetString(root, "tenantId") ?? Constants.DefaultTenantId;
+            string tenantId = TryGetString(root, "tenantId") ?? requestContext.TenantId;
+            if (!String.Equals(tenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException("Client tenant does not match authenticated tenant.");
+            }
+
             string clientId = TryGetString(root, "clientId") ?? "xcl_" + Guid.NewGuid().ToString("N");
             string name = TryGetString(root, "name") ?? clientId;
 
             XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
+            if (client != null && !String.Equals(client.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException("Client ID belongs to a different tenant.");
+            }
+
             if (client == null)
             {
                 client = new XenoClientRecord
@@ -1049,10 +1102,10 @@ namespace Xeno.Server
             }
         }
 
-        private void UpdateClientHeartbeat(string? clientId)
+        private void UpdateClientHeartbeat(string? clientId, RequestContext requestContext)
         {
             if (String.IsNullOrWhiteSpace(clientId)) return;
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId);
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
             if (client == null) return;
             client.Connected = true;
             client.LastHeartbeatUtc = DateTime.UtcNow;
@@ -1192,6 +1245,59 @@ namespace Xeno.Server
             await SendJsonAsync(context, credentialResult).ConfigureAwait(false);
         }
 
+        private async Task HandleLoginAsync(HttpContextBase context, CancellationToken token)
+        {
+            Dictionary<string, object?> body = ReadJsonObject(context);
+            string tenantId = ResolveTenantId(context, GetBodyString(body, "tenantId"));
+            string username = FirstNonEmpty(GetBodyString(body, "username"), GetBodyString(body, "email"));
+            string password = FirstNonEmpty(GetBodyString(body, "password"));
+            if (String.IsNullOrWhiteSpace(username) || String.IsNullOrWhiteSpace(password))
+            {
+                throw new ArgumentException("Username and password are required.");
+            }
+
+            XenoPlatform platform = RequirePlatform();
+            User? user = _Authentication.ValidateUserPassword(platform, tenantId, username, password);
+            RequestContext loginContext = new RequestContext
+            {
+                TenantId = tenantId,
+                SourceIp = context.Request.Source.IpAddress,
+                PrincipalType = PrincipalTypeEnum.User,
+                UserId = user?.Id,
+                IsAuthenticated = user != null,
+                AuthScheme = AuthSchemeEnum.Password
+            };
+
+            if (user == null)
+            {
+                _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Read, false, "InvalidUserPassword", 401);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new UnauthorizedAccessException("Invalid username or password.");
+            }
+
+            Credential credential = new Credential
+            {
+                TenantId = tenantId,
+                UserId = user.Id,
+                AccessKey = "xeno_" + Guid.NewGuid().ToString("N"),
+                SecretKey = _Authentication.GenerateSecret(),
+                Active = true
+            };
+            platform.Credentials.Add(credential);
+            _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Write, true, "ClientCredentialIssued", 200);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+            await SendJsonAsync(context, new
+            {
+                id = credential.Id,
+                tenantId = credential.TenantId,
+                userId = credential.UserId,
+                accessKey = credential.AccessKey,
+                secretKey = credential.SecretKey,
+                authScheme = "Credential",
+                warning = "SecretKey is shown once. The Xeno client stores this credential; it does not store the user's password."
+            }).ConfigureAwait(false);
+        }
+
         private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
         {
             if (!_Settings.Rest.RequireAuthentication && context.AuthScheme == AuthSchemeEnum.None)
@@ -1238,19 +1344,7 @@ namespace Xeno.Server
 
         private RequestContext CreateRequestContext(HttpContextBase context)
         {
-            string? tenantHeader = context.Request.Headers.Get("x-tenant-guid");
-            string? tenantHeaderAlternate = context.Request.Headers.Get("x-tenant-id");
-            string? tenantQuery = context.Request.Query.Elements.Get("tenantId");
-            string tenantId = FirstNonEmpty(tenantHeader, tenantHeaderAlternate, tenantQuery, Constants.DefaultTenantId);
-
-            List<string> hints = new List<string>();
-            AddNonEmpty(hints, tenantHeader);
-            AddNonEmpty(hints, tenantHeaderAlternate);
-            AddNonEmpty(hints, tenantQuery);
-            if (hints.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
-            {
-                throw new ArgumentException("Conflicting tenant identifiers were supplied.");
-            }
+            string tenantId = ResolveTenantId(context, null);
 
             string authorization = context.Request.Headers.Get("Authorization") ?? String.Empty;
             string tokenHeader = context.Request.Headers.Get("x-token") ?? String.Empty;
@@ -1319,6 +1413,72 @@ namespace Xeno.Server
             requestContext.PrincipalType = devUser == null ? PrincipalTypeEnum.None : PrincipalTypeEnum.User;
             requestContext.AuthScheme = AuthSchemeEnum.None;
             return requestContext;
+        }
+
+        private RequestContext CreateWebSocketRequestContext(HttpContextBase context)
+        {
+            string tenantId = ResolveTenantId(context, null);
+            string authorization = context.Request.Headers.Get("Authorization") ?? String.Empty;
+            string tokenHeader = context.Request.Headers.Get("x-token") ?? String.Empty;
+            if (!String.IsNullOrWhiteSpace(authorization) || !String.IsNullOrWhiteSpace(tokenHeader))
+            {
+                throw new UnauthorizedAccessException("WebSocket clients must authenticate with x-access-key/x-secret-key or x-admin-key, not bearer tokens or user passwords.");
+            }
+
+            string accessKey = context.Request.Headers.Get("x-access-key") ?? String.Empty;
+            string secretKey = context.Request.Headers.Get("x-secret-key") ?? String.Empty;
+            string adminApiKey = context.Request.Headers.Get("x-admin-key") ?? String.Empty;
+            RequestContext requestContext = new RequestContext
+            {
+                TenantId = tenantId,
+                SourceIp = context.Request.Source.IpAddress,
+                IsAuthenticated = false
+            };
+
+            if (!String.IsNullOrWhiteSpace(accessKey) || !String.IsNullOrWhiteSpace(secretKey))
+            {
+                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey, secretKey);
+                if (credential == null) throw new UnauthorizedAccessException("Invalid WebSocket credential.");
+                requestContext.IsAuthenticated = true;
+                requestContext.CredentialId = credential.Id;
+                requestContext.UserId = credential.UserId;
+                requestContext.PrincipalType = PrincipalTypeEnum.Credential;
+                requestContext.AuthScheme = AuthSchemeEnum.Credential;
+                return requestContext;
+            }
+
+            if (!String.IsNullOrWhiteSpace(adminApiKey))
+            {
+                if (!FixedTimeEquals(_Settings.Auth.AdminApiKey, adminApiKey)) throw new UnauthorizedAccessException("Invalid administrator API key.");
+                User? adminUser = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
+                requestContext.IsAuthenticated = true;
+                requestContext.UserId = adminUser?.Id;
+                requestContext.PrincipalType = PrincipalTypeEnum.Administrator;
+                requestContext.AuthScheme = AuthSchemeEnum.AdminApiKey;
+                return requestContext;
+            }
+
+            throw new UnauthorizedAccessException("WebSocket authentication requires a client access key/secret or administrator API key.");
+        }
+
+        private static string ResolveTenantId(HttpContextBase context, string? bodyTenantId)
+        {
+            string? tenantHeader = context.Request.Headers.Get("x-tenant-guid");
+            string? tenantHeaderAlternate = context.Request.Headers.Get("x-tenant-id");
+            string? tenantQuery = context.Request.Query.Elements.Get("tenantId");
+            string tenantId = FirstNonEmpty(tenantHeader, tenantHeaderAlternate, tenantQuery, bodyTenantId, Constants.DefaultTenantId);
+
+            List<string> hints = new List<string>();
+            AddNonEmpty(hints, tenantHeader);
+            AddNonEmpty(hints, tenantHeaderAlternate);
+            AddNonEmpty(hints, tenantQuery);
+            AddNonEmpty(hints, bodyTenantId);
+            if (hints.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            {
+                throw new ArgumentException("Conflicting tenant identifiers were supplied.");
+            }
+
+            return tenantId;
         }
 
         private static string? GetBodyString(Dictionary<string, object?> body, string key)
@@ -1648,6 +1808,7 @@ namespace Xeno.Server
                 paths = new Dictionary<string, object>
                 {
                     ["/health"] = Path(Operation("get", "health", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
+                    ["/v1.0/api/auth/login"] = Path(Operation("post", "login", "Authentication", "Login", "Validates a user password and returns a one-time-visible client credential for WebSocket use.", "CredentialLoginResponse", false)),
                     ["/v1.0/api/auth/token"] = Path(Operation("post", "createToken", "Authentication", "Create token", "Creates a development session token.", "TokenResponse", false)),
                     ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true)),
                     ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true)),
@@ -1694,6 +1855,7 @@ namespace Xeno.Server
                     schemas = new Dictionary<string, object>
                     {
                         ["HealthResponse"] = ObjectSchema(Property("status", StringSchema()), Property("product", StringSchema()), Property("version", StringSchema())),
+                        ["CredentialLoginResponse"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("userId", StringSchema()), Property("accessKey", StringSchema()), Property("secretKey", StringSchema()), Property("authScheme", StringSchema())),
                         ["TokenResponse"] = ObjectSchema(Property("token", StringSchema()), Property("tokenType", StringSchema()), Property("tenantId", StringSchema()), Property("expiresUtc", StringSchema("date-time"))),
                         ["TenantArray"] = ArraySchema("Tenant"),
                         ["UserArray"] = ArraySchema("User"),

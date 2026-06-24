@@ -19,14 +19,14 @@ The tracker below is the current source of truth for implementation progress. Wh
 | 1. Repository and project scaffolding | Complete | Root files, solution, server/client/core/test projects, dashboard, Docker assets, scripts, MIT license, Postman collection. | Keep docs and Postman synchronized with new routes. |
 | 2. Core models, settings, serialization, and IDs | In progress | Core settings/models, enum serialization, PrettyId helpers, one-class-per-file structure. | Add full security, authorization, protocol envelope, analytics, and validation DTO coverage. |
 | 3. Database providers and migrations | In progress | Provider-specific drivers for SQLite, PostgreSQL, MySQL, and SQL Server initialize durable state storage, record `schema_migrations` version `0001`, and SQLite persistence is tested. | Replace compact platform-state persistence with normalized per-entity tables, provider query classes/method interfaces, and provider integration tests against live PostgreSQL/MySQL/SQL Server. |
-| 4. Authentication, RBAC, sessions, audit | In progress | Session tokens, direct credential auth, admin API key auth, built-in roles/permissions, effective permissions, credential creation, audit records, and Touchstone coverage exist. | Add signed request replay protection, immutable built-in role write guards, fuller permission assignment APIs, route-level denial tests, and encrypted/hashed credential secret storage. |
+| 4. Authentication, RBAC, sessions, audit | In progress | Session tokens, direct credential auth, admin API key auth, salted seeded user-password validation, password-to-client-credential login bootstrap, built-in roles/permissions, effective permissions, credential creation, audit records, and Touchstone coverage exist. | Add signed request replay protection, immutable built-in role write guards, fuller permission assignment APIs, route-level denial tests, and encrypted/hashed credential secret storage. |
 | 5. Watson REST host and OpenAPI | In progress | Watson 7 host, CORS preflight/post-routing, Swagger/OpenAPI, health, authentication, authorization, audit, management lists/actions, policy evaluation, backup/restore, metrics, and OpenAI routes are available. | Split route registrars, expand typed DTOs, complete every CRUD/action route, and attach full request context metadata through Watson metadata. |
-| 6. WebSocket gateway and client protocol | In progress | Clients register/heartbeat, advertise inventory, receive jobs, respond, disconnect cleanup; routed OpenAI completion relay and stale-heartbeat route exclusion are tested. | Add typed envelopes, handshake auth enforcement, streaming chunks, cancellation, protocol versioning, and tenant-conflict rejection tests. |
-| 7. Xeno client CLI and provider adapters | In progress | `xeno` tool packaging, config editing, persistent reconnect loop, local HTTP forwarding to configured runners, basic OS/CPU/memory inventory, WebSocket auth headers, upstream bearer forwarding, and runner connectivity tests exist. | Add GPU/model hardware probes, streaming relay, job cancellation handling, OS-protected secret storage, and service install/uninstall. |
+| 6. WebSocket gateway and client protocol | In progress | Clients register/heartbeat, advertise inventory, receive jobs, respond, disconnect cleanup; routed OpenAI completion relay, stale-heartbeat route exclusion, credential/API-key handshake gate, and login-issued credential connection are tested. | Add typed envelopes, streaming chunks, cancellation, protocol versioning, and tenant-conflict rejection tests. |
+| 7. Xeno client CLI and provider adapters | In progress | `xeno` tool packaging, config editing, `xeno login -u` password prompt that stores only a client credential, persistent reconnect loop, local HTTP forwarding to configured runners, basic OS/CPU/memory inventory, WebSocket credential/API-key headers, upstream bearer forwarding, and runner connectivity tests exist. | Add GPU/model hardware probes, streaming relay, job cancellation handling, OS-protected secret storage, and service install/uninstall. |
 | 8. Conductor-compatible routing controls | In progress | VMRs, endpoints, model definitions/configurations, route explanation, connected-client eligibility, least-in-flight policy selection, model access enforcement, active reservation gates, effective VMR views, policy validation/evaluation, and model-load metadata updates have Touchstone coverage. | Add full metric catalog expressions, session affinity persistence, model mutation/config mappings, real provider load-model dispatch, and richer explain-routing evidence. |
 | 9. Request history, analytics, metrics, backup/restore | In progress | Routed request history, summary buckets, request-history detail/bulk routes, analytics overview, Prometheus-style metrics, and platform backup/restore exist. | Add redaction/truncation details, retention cleanup service, advanced search/pagination filters, TTFT/token/cost analytics, and restore validation for tenant references/reservation overlaps. |
 | 10. Dashboard | In progress | React/Vite dashboard now includes i18n runtime, Home, Request History with details/bulk clear, API Explorer, Security, Clients, VMRs with load/explain controls, Policies, Reservations, Analytics, Settings backup/restore, Docker/nginx packaging, and i18n key parity test. | Add create/edit forms for every entity, permission-aware disabled states, interaction tests, and responsive visual QA screenshots. |
-| 11. Test matrix and release hardening | In progress | `dotnet build` passes with 0 warnings/errors; Touchstone console/xUnit/NUnit suites pass at 20 tests; dashboard audit/test/build pass; Docker compose config plus MySQL/SQL Server profiles pass; server/dashboard Docker images build; no vulnerable NuGet packages; Postman/settings JSON validate. | Add provider live integration tests, full Docker compose runtime smoke, streaming/cancel/disconnect tests, and visual responsive QA. |
+| 11. Test matrix and release hardening | In progress | `dotnet build` passes with 0 warnings/errors; Touchstone console/xUnit/NUnit suites pass at 23 tests; dashboard audit/test/build pass; Docker compose config plus MySQL/SQL Server profiles pass; server/dashboard Docker images build; no vulnerable NuGet packages; Postman/settings JSON validate. | Add provider live integration tests, full Docker compose runtime smoke, streaming/cancel/disconnect tests, and visual responsive QA. |
 
 ## Non-Blocking Assumptions
 
@@ -455,7 +455,7 @@ The alias routes must use the same request context, authentication, routing, req
 
 Use a dedicated server component backed by Watson-compatible WebSocket tooling. The REST server remains Watson 7; the WebSocket listener may use `WatsonWebsocket` if Watson 7 does not host the upgrade path directly.
 
-The WebSocket endpoint is `/ws/v1/clients`. Clients authenticate during handshake with a tenant-bound credential or bootstrap token. The server rejects connections where the client ID, credential tenant, and requested tenant conflict.
+The WebSocket endpoint is `/ws/v1/clients`. Clients authenticate during handshake with a tenant-bound access key/secret pair or administrator API key. User passwords and bearer session tokens are rejected on the WebSocket control plane. Passwords are accepted only by the REST login bootstrap, which returns a generated client credential for storage by `xeno login`.
 
 Message envelope:
 
@@ -512,9 +512,11 @@ Client settings shape:
   "Name": "workstation-01",
   "Server": {
     "Url": "wss://xeno.example.com/ws/v1/clients",
+    "RestUrl": "https://xeno.example.com",
     "AccessKey": null,
     "SecretKey": null,
     "Token": null,
+    "AdminApiKey": null,
     "ReconnectInitialMs": 1000,
     "ReconnectMaxMs": 30000,
     "HeartbeatIntervalMs": 15000
@@ -559,8 +561,11 @@ CLI commands:
 - `xeno config show`
 - `xeno config set <path> <value>`
 - `xeno server set-url <url>`
+- `xeno server set-rest-url <url>`
+- `xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]`
 - `xeno auth set-token <token>`
 - `xeno auth set-credential <access-key> <secret-key>`
+- `xeno auth set-api-key <api-key>`
 - `xeno runner add --name <name> --provider <ollama|openai|gemini|openai-compatible|vllm> --endpoint <url>`
 - `xeno runner list`
 - `xeno runner remove <name>`
@@ -574,7 +579,7 @@ CLI commands:
 - `xeno service install`
 - `xeno service uninstall`
 
-`xeno connect` maintains a persistent WebSocket with exponential backoff and jitter. It re-registers after reconnect, re-sends inventory, and does not accept jobs until registration is acknowledged.
+`xeno login -u <username>` prompts for a password, calls the REST login endpoint, receives a generated access key and secret, and stores only that client credential. `xeno connect` maintains a persistent WebSocket with exponential backoff and jitter using the stored client credential or configured administrator API key. It re-registers after reconnect, re-sends inventory, and does not accept jobs until registration is acknowledged.
 
 Provider adapters:
 
@@ -1084,6 +1089,7 @@ Shared suites:
 - Tenant CRUD, user CRUD, credential CRUD.
 - Tenant-scoped enumeration and cross-tenant denial.
 - Auth session issuance, refresh, validation, revocation.
+- User-password login bootstrap that issues client credentials without storing or reusing the password.
 - Credential direct and signed request auth, replay protection, constant-time comparison behavior.
 - RBAC resolution, explicit deny, implicit deny, admin bypass, credential owner ceiling.
 - Audit denials and security event persistence.
@@ -1094,7 +1100,7 @@ Shared suites:
 - Load-balancing policy filtering, ranking, telemetry freshness, fallback, fail-closed.
 - Model access policy monitor and enforce modes.
 - Reservation validation, overlap detection, drain window, conflict handling.
-- WebSocket job success, streaming success, cancellation, timeout, client disconnect.
+- WebSocket credential/API-key handshake gate, job success, streaming success, cancellation, timeout, client disconnect.
 - Request history redaction/truncation/search/summary/detail/bulk delete.
 - Analytics filters and aggregation.
 - Model loading target selection and provider outcomes.

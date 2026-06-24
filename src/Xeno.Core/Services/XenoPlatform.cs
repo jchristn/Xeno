@@ -113,11 +113,14 @@ namespace Xeno.Core.Services
             User user = new User
             {
                 TenantId = tenant.Id,
+                Username = "admin",
                 Email = "admin@xeno",
                 IsAdmin = true,
                 IsTenantAdmin = true,
                 Active = true
             };
+            AuthenticationService authentication = new AuthenticationService();
+            authentication.SetUserPassword(user, "xeno");
             Users.Add(user);
 
             Credential credential = new Credential

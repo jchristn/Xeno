@@ -120,6 +120,47 @@ namespace Xeno.Core.Services
         }
 
         /// <summary>
+        /// Set a user's password.
+        /// </summary>
+        /// <param name="user">User.</param>
+        /// <param name="password">Plaintext password supplied by the user.</param>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="user"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="password"/> is empty.</exception>
+        public void SetUserPassword(User user, string password)
+        {
+            if (user == null) throw new ArgumentNullException(nameof(user));
+            if (String.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password is required.", nameof(password));
+
+            user.PasswordSalt = GenerateToken();
+            user.PasswordHash = HashPassword(user.PasswordSalt, password);
+        }
+
+        /// <summary>
+        /// Validate a user's username/password pair.
+        /// </summary>
+        /// <param name="platform">Platform state.</param>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="username">Username or email address.</param>
+        /// <param name="password">Plaintext password supplied by the user.</param>
+        /// <returns>User when valid.</returns>
+        public User? ValidateUserPassword(XenoPlatform platform, string tenantId, string username, string password)
+        {
+            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (String.IsNullOrWhiteSpace(username) || String.IsNullOrWhiteSpace(password)) return null;
+
+            User? user = platform.Users.FirstOrDefault(item =>
+                item.TenantId == tenantId &&
+                item.Active &&
+                (String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase) ||
+                 String.Equals(item.Email, username, StringComparison.OrdinalIgnoreCase)));
+            if (user == null) return null;
+            if (String.IsNullOrWhiteSpace(user.PasswordSalt) || String.IsNullOrWhiteSpace(user.PasswordHash)) return null;
+
+            string candidateHash = HashPassword(user.PasswordSalt, password);
+            return FixedTimeEquals(user.PasswordHash, candidateHash) ? user : null;
+        }
+
+        /// <summary>
         /// Revoke an auth session.
         /// </summary>
         /// <param name="platform">Platform state.</param>
@@ -279,6 +320,13 @@ namespace Xeno.Core.Services
             byte[] bytes = Encoding.UTF8.GetBytes(token);
             byte[] hash = SHA256.HashData(bytes);
             return Convert.ToBase64String(hash);
+        }
+
+        private string HashPassword(string salt, string password)
+        {
+            if (String.IsNullOrWhiteSpace(salt)) throw new ArgumentException("Salt is required.", nameof(salt));
+            if (password == null) throw new ArgumentNullException(nameof(password));
+            return HashToken(salt + ":" + password);
         }
 
         private static bool Matches(string candidate, string resourceType)

@@ -46,6 +46,8 @@ namespace Xeno.Client
                     return HandleServer(args, settings);
                 case "auth":
                     return HandleAuth(args, settings);
+                case "login":
+                    return await HandleLoginAsync(args, settings).ConfigureAwait(false);
                 case "runner":
                     return await HandleRunnerAsync(args, settings).ConfigureAwait(false);
                 case "model":
@@ -89,7 +91,14 @@ namespace Xeno.Client
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno server set-url <url>");
+            if (args.Length >= 3 && args[1] == "set-rest-url")
+            {
+                settings.Server.RestUrl = args[2];
+                settings.Save();
+                return 0;
+            }
+
+            Console.WriteLine("Usage: xeno server set-url <url> | set-rest-url <url>");
             return 1;
         }
 
@@ -106,12 +115,115 @@ namespace Xeno.Client
             {
                 settings.Server.AccessKey = args[2];
                 settings.Server.SecretKey = args[3];
+                settings.Server.Token = null;
                 settings.Save();
                 return 0;
             }
 
-            Console.WriteLine("Usage: xeno auth set-token <token> | set-credential <access-key> <secret-key>");
+            if (args.Length >= 3 && args[1] == "set-api-key")
+            {
+                settings.Server.AdminApiKey = args[2];
+                settings.Server.Token = null;
+                settings.Save();
+                return 0;
+            }
+
+            Console.WriteLine("Usage: xeno auth set-token <token> | set-credential <access-key> <secret-key> | set-api-key <api-key>");
             return 1;
+        }
+
+        private static async Task<int> HandleLoginAsync(string[] args, ClientSettings settings)
+        {
+            string username = String.Empty;
+            string tenantId = settings.TenantId;
+            string? serverUrl = null;
+
+            for (int i = 1; i < args.Length; i++)
+            {
+                if ((args[i] == "-u" || args[i] == "--username") && i + 1 < args.Length)
+                {
+                    username = args[++i];
+                    continue;
+                }
+
+                if (args[i] == "--tenant" && i + 1 < args.Length)
+                {
+                    tenantId = args[++i];
+                    continue;
+                }
+
+                if (args[i] == "--server" && i + 1 < args.Length)
+                {
+                    serverUrl = args[++i];
+                    continue;
+                }
+            }
+
+            if (String.IsNullOrWhiteSpace(username))
+            {
+                Console.WriteLine("Usage: xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
+                return 1;
+            }
+
+            if (!String.IsNullOrWhiteSpace(serverUrl))
+            {
+                settings.Server.RestUrl = serverUrl;
+            }
+
+            string password = ReadSecret("Password: ");
+            if (String.IsNullOrWhiteSpace(password))
+            {
+                Console.WriteLine("Password is required.");
+                return 1;
+            }
+
+            string clientId = EnsureClientId(settings);
+            Uri endpoint = BuildRestUri(settings, "/v1.0/api/auth/login");
+            using (HttpClient httpClient = new HttpClient())
+            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, endpoint))
+            {
+                request.Headers.Add("x-tenant-guid", tenantId);
+                request.Content = new StringContent(JsonUtil.Serialize(new
+                {
+                    username,
+                    password,
+                    tenantId,
+                    clientId,
+                    label = settings.Name
+                }), Encoding.UTF8, "application/json");
+
+                using (HttpResponseMessage response = await httpClient.SendAsync(request).ConfigureAwait(false))
+                {
+                    string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Console.WriteLine("Login failed: " + responseBody);
+                        return 1;
+                    }
+
+                    using (JsonDocument document = JsonDocument.Parse(responseBody))
+                    {
+                        JsonElement root = document.RootElement;
+                        string? accessKey = TryGetString(root, "accessKey");
+                        string? secretKey = TryGetString(root, "secretKey");
+                        string? returnedTenantId = TryGetString(root, "tenantId");
+                        if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey))
+                        {
+                            Console.WriteLine("Login response did not include a client credential.");
+                            return 1;
+                        }
+
+                        settings.TenantId = String.IsNullOrWhiteSpace(returnedTenantId) ? tenantId : returnedTenantId;
+                        settings.Server.AccessKey = accessKey;
+                        settings.Server.SecretKey = secretKey;
+                        settings.Server.Token = null;
+                        settings.Save();
+                    }
+                }
+            }
+
+            Console.WriteLine("Login succeeded. Stored a tenant-bound client credential in " + ClientSettings.SettingsFile + ".");
+            return 0;
         }
 
         private static async Task<int> HandleRunnerAsync(string[] args, ClientSettings settings)
@@ -197,10 +309,10 @@ namespace Xeno.Client
 
         private static async Task ConnectAsync(ClientSettings settings, CancellationToken token)
         {
-            if (String.IsNullOrWhiteSpace(settings.ClientId))
+            EnsureClientId(settings);
+            if (!HasWebSocketCredential(settings))
             {
-                settings.ClientId = "xcl_" + Guid.NewGuid().ToString("N");
-                settings.Save();
+                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key/API key before connecting.");
             }
 
             while (!token.IsCancellationRequested)
@@ -319,11 +431,6 @@ namespace Xeno.Client
 
         private static void ApplyServerAuthentication(ClientWebSocket socket, ClientSettings settings)
         {
-            if (!String.IsNullOrWhiteSpace(settings.Server.Token))
-            {
-                socket.Options.SetRequestHeader("Authorization", "Bearer " + settings.Server.Token);
-            }
-
             if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey))
             {
                 socket.Options.SetRequestHeader("x-access-key", settings.Server.AccessKey);
@@ -334,7 +441,70 @@ namespace Xeno.Client
                 socket.Options.SetRequestHeader("x-secret-key", settings.Server.SecretKey);
             }
 
+            if (!String.IsNullOrWhiteSpace(settings.Server.AdminApiKey))
+            {
+                socket.Options.SetRequestHeader("x-admin-key", settings.Server.AdminApiKey);
+            }
+
             socket.Options.SetRequestHeader("x-tenant-guid", settings.TenantId);
+        }
+
+        private static bool HasWebSocketCredential(ClientSettings settings)
+        {
+            bool hasDirectCredential = !String.IsNullOrWhiteSpace(settings.Server.AccessKey) &&
+                                       !String.IsNullOrWhiteSpace(settings.Server.SecretKey);
+            bool hasApiKey = !String.IsNullOrWhiteSpace(settings.Server.AdminApiKey);
+            return hasDirectCredential || hasApiKey;
+        }
+
+        private static string EnsureClientId(ClientSettings settings)
+        {
+            if (String.IsNullOrWhiteSpace(settings.ClientId))
+            {
+                settings.ClientId = "xcl_" + Guid.NewGuid().ToString("N");
+                settings.Save();
+            }
+
+            return settings.ClientId;
+        }
+
+        private static Uri BuildRestUri(ClientSettings settings, string path)
+        {
+            string source = String.IsNullOrWhiteSpace(settings.Server.RestUrl) ? settings.Server.Url : settings.Server.RestUrl;
+            UriBuilder builder = new UriBuilder(source);
+            if (String.Equals(builder.Scheme, "ws", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "http";
+            if (String.Equals(builder.Scheme, "wss", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "https";
+            builder.Path = path.TrimStart('/');
+            builder.Query = String.Empty;
+            return builder.Uri;
+        }
+
+        private static string ReadSecret(string prompt)
+        {
+            Console.Write(prompt);
+            StringBuilder builder = new StringBuilder();
+            while (true)
+            {
+                ConsoleKeyInfo key = Console.ReadKey(true);
+                if (key.Key == ConsoleKey.Enter)
+                {
+                    Console.WriteLine();
+                    break;
+                }
+
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (builder.Length > 0) builder.Length -= 1;
+                    continue;
+                }
+
+                if (!Char.IsControl(key.KeyChar))
+                {
+                    builder.Append(key.KeyChar);
+                }
+            }
+
+            return builder.ToString();
         }
 
         private static async Task<bool> TestRunnerAsync(ClientRunnerSettings runner, CancellationToken token)
@@ -390,8 +560,11 @@ namespace Xeno.Client
             Console.WriteLine("  xeno init");
             Console.WriteLine("  xeno config show");
             Console.WriteLine("  xeno server set-url <url>");
+            Console.WriteLine("  xeno server set-rest-url <url>");
+            Console.WriteLine("  xeno login -u <username>");
             Console.WriteLine("  xeno auth set-token <token>");
             Console.WriteLine("  xeno auth set-credential <access-key> <secret-key>");
+            Console.WriteLine("  xeno auth set-api-key <api-key>");
             Console.WriteLine("  xeno runner add --name <name> --provider <provider> --endpoint <url>");
             Console.WriteLine("  xeno runner test --name <name>");
             Console.WriteLine("  xeno runner list");

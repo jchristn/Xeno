@@ -22,6 +22,10 @@ The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-s
 
 `POST /v1.0/api/auth/token`
 
+`POST /api/v1/auth/login`
+
+`POST /v1.0/api/auth/login`
+
 `GET /v1.0/api/auth/token/details`
 
 `POST /v1.0/api/auth/token/refresh`
@@ -29,6 +33,8 @@ The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-s
 `POST /v1.0/api/auth/logout`
 
 Token issuance accepts an administrator API key or direct credential fields. Bearer and `x-token` values must match when both are supplied.
+
+Login accepts `username`, `password`, and optional `tenantId`. It returns a generated `accessKey` and `secretKey` for client use. The user password is only accepted by the login endpoint and is never accepted on the WebSocket control plane.
 
 ## Administration
 
@@ -124,3 +130,4 @@ OpenAI-compatible aliases are also available under `/api/v1/openai/v1/...`.
 
 Upgrades to WebSocket. Clients send `client.register` and periodic `client.heartbeat` envelopes. Server-dispatched inference requests use `server.request`; clients respond with `client.response`.
 The server waits `WebSocket.RequestTimeoutMs` for each routed inference response before returning a `504 ClientTimeout`.
+The WebSocket handshake requires `x-access-key` plus `x-secret-key`, or `x-admin-key`, with `x-tenant-guid`. Bearer session tokens and user passwords are rejected for client control-plane connections.

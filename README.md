@@ -7,7 +7,7 @@ The first implementation includes:
 - multitenant server state with seeded tenant, user, credential, client, endpoint, models, and virtual model runner;
 - OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
 - management routes for health, OpenAPI, clients, VMRs, request history, and token bootstrap;
-- a WebSocket registration endpoint at `/ws/v1/clients`;
+- a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client credentials or an administrator API key;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
 - a React/Vite dashboard under `dashboard/`;
 - Touchstone shared tests with automated, xUnit, and NUnit runners.
@@ -31,11 +31,12 @@ curl http://localhost:9000/v1/models
 
 ```powershell
 dotnet run --project src/Xeno.Client -- init
+dotnet run --project src/Xeno.Client -- login -u admin@xeno
 dotnet run --project src/Xeno.Client -- status
 dotnet run --project src/Xeno.Client -- inventory
 ```
 
-The client stores settings at `~/.xeno/client.json`.
+The seeded development user is `admin@xeno` with password `xeno`. `xeno login -u ...` prompts for the password, exchanges it for a client access key and secret, and stores only that client credential in `~/.xeno/client.json`. The WebSocket connection does not accept user passwords or bearer session tokens.
 
 ## Docker
 
