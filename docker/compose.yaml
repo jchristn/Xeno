@@ -1,20 +1,35 @@
+name: xeno
+
 services:
   xeno-postgres:
     image: postgres:16-alpine
     container_name: xeno-postgres
     environment:
-      POSTGRES_DB: xeno
-      POSTGRES_USER: xeno
-      POSTGRES_PASSWORD: xeno
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     volumes:
       - xeno-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xeno -d xeno"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  xeno-postgres-init:
+    image: postgres:16-alpine
+    container_name: xeno-postgres-init
+    depends_on:
+      xeno-postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./postgres/init.sql:/init.sql:ro
+    command: >
+      sh -c "psql -h xeno-postgres -U postgres -d postgres -v ON_ERROR_STOP=1 -f /init.sql
+      && PGPASSWORD=xeno psql -h xeno-postgres -U xeno -d xeno -v ON_ERROR_STOP=1 -c 'SELECT 1;'"
+    restart: "no"
 
   xeno-mysql:
     image: mysql:9
@@ -68,6 +83,8 @@ services:
     depends_on:
       xeno-postgres:
         condition: service_healthy
+      xeno-postgres-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 5s

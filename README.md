@@ -51,6 +51,8 @@ build-all.bat v0.1.0
 docker compose -f docker/compose.yaml up
 ```
 
+The default compose stack uses PostgreSQL. `xeno-postgres-init` runs before `xeno-server` and creates the `xeno` role/database expected by `docker/xeno.json`. MySQL and SQL Server remain optional compose profiles.
+
 Images:
 
 - `jchristn77/xeno-server:v0.1.0`
