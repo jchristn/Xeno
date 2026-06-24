@@ -41,8 +41,9 @@ The seeded development user is `admin@xeno` with password `xeno`. `xeno login -u
 ## Docker
 
 ```powershell
-build-server.bat
-build-dashboard.bat
+build-server.bat v0.1.0
+build-dashboard.bat v0.1.0
+build-all.bat v0.1.0
 docker compose -f docker/compose.yaml up
 ```
 
