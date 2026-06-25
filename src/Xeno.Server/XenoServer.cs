@@ -128,7 +128,7 @@ namespace Xeno.Server
             _Webserver.UseOpenApi(openApi =>
             {
                 openApi.EnableOpenApi = true;
-                openApi.EnableSwaggerUi = true;
+                openApi.EnableSwaggerUi = false;
                 openApi.Info.Title = "Xeno API";
                 openApi.Info.Version = Constants.Version;
                 openApi.Info.Description = "Xeno AI control plane REST and OpenAI-compatible API.";
@@ -150,6 +150,7 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
+                AddXenoOpenApiSecuritySchemes(openApi.SecuritySchemes);
             });
 
             _Webserver.Routes.Preflight = PreflightRouteAsync;
@@ -162,6 +163,52 @@ namespace Xeno.Server
             {
                 _Webserver.WebSocket(_Settings.WebSocket.Path, WebSocketRouteAsync, false);
             }
+        }
+
+        private static void AddXenoOpenApiSecuritySchemes(IDictionary<string, OpenApiSecurityScheme> schemes)
+        {
+            schemes["bearerAuth"] = new OpenApiSecurityScheme
+            {
+                Type = "http",
+                Scheme = "bearer",
+                BearerFormat = "Xeno token",
+                Description = "Bearer token returned by /v1.0/api/auth/token."
+            };
+            schemes["xTokenAuth"] = new OpenApiSecurityScheme
+            {
+                Type = "apiKey",
+                In = "header",
+                Name = "x-token",
+                Description = "Xeno bearer token supplied as an x-token header."
+            };
+            schemes["accessKeyAuth"] = new OpenApiSecurityScheme
+            {
+                Type = "apiKey",
+                In = "header",
+                Name = "x-access-key",
+                Description = "Tenant-bound Xeno credential access key."
+            };
+            schemes["secretKeyAuth"] = new OpenApiSecurityScheme
+            {
+                Type = "apiKey",
+                In = "header",
+                Name = "x-secret-key",
+                Description = "Tenant-bound Xeno credential secret key."
+            };
+            schemes["tenantHeader"] = new OpenApiSecurityScheme
+            {
+                Type = "apiKey",
+                In = "header",
+                Name = "x-tenant-guid",
+                Description = "Optional tenant identifier. Defaults to ten_default when omitted."
+            };
+            schemes["tenantIdHeader"] = new OpenApiSecurityScheme
+            {
+                Type = "apiKey",
+                In = "header",
+                Name = "x-tenant-id",
+                Description = "Alternate optional tenant identifier header."
+            };
         }
 
         private void RegisterRestRoutes()
@@ -2394,7 +2441,12 @@ namespace Xeno.Server
                 {
                     securitySchemes = new Dictionary<string, object>
                     {
-                        ["bearerAuth"] = new { type = "http", scheme = "bearer", bearerFormat = "Xeno token" }
+                        ["bearerAuth"] = new { type = "http", scheme = "bearer", bearerFormat = "Xeno token", description = "Bearer token returned by /v1.0/api/auth/token." },
+                        ["xTokenAuth"] = new { type = "apiKey", @in = "header", name = "x-token", description = "Xeno bearer token supplied as an x-token header." },
+                        ["accessKeyAuth"] = new { type = "apiKey", @in = "header", name = "x-access-key", description = "Tenant-bound Xeno credential access key." },
+                        ["secretKeyAuth"] = new { type = "apiKey", @in = "header", name = "x-secret-key", description = "Tenant-bound Xeno credential secret key." },
+                        ["tenantHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-guid", description = "Optional tenant identifier. Defaults to ten_default when omitted." },
+                        ["tenantIdHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-id", description = "Alternate optional tenant identifier header." }
                     },
                     schemas = new Dictionary<string, object>
                     {
@@ -2443,19 +2495,145 @@ namespace Xeno.Server
 <head>
   <title>Xeno Swagger</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #f7f8fb; color: #1f2937; font-family: Inter, Arial, sans-serif; }
+    .xeno-auth-panel { display: grid; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #d9dee8; background: #ffffff; }
+    .xeno-auth-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .xeno-auth-header h1 { margin: 0; font-size: 17px; }
+    .xeno-auth-header p { margin: 0; color: #5f6b7a; font-size: 13px; }
+    .xeno-auth-grid { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 10px; }
+    .xeno-auth-grid label { display: grid; gap: 5px; color: #374151; font-size: 12px; font-weight: 700; }
+    .xeno-auth-grid input { min-width: 0; height: 34px; border: 1px solid #cfd6e2; border-radius: 6px; padding: 0 9px; font: inherit; }
+    .xeno-auth-actions { display: flex; align-items: center; gap: 8px; }
+    .xeno-auth-actions button { height: 34px; border: 1px solid #cfd6e2; border-radius: 6px; background: #ffffff; color: #111827; padding: 0 12px; font-weight: 700; cursor: pointer; }
+    .xeno-auth-actions button.primary { border-color: #2f6fec; background: #2f6fec; color: #ffffff; }
+    #xeno-auth-status { color: #147a3d; font-size: 12px; font-weight: 700; }
+    @media (max-width: 1100px) { .xeno-auth-grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); } }
+    @media (max-width: 640px) { .xeno-auth-grid { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
+  <section class="xeno-auth-panel">
+    <div class="xeno-auth-header">
+      <div>
+        <h1>Xeno authentication</h1>
+        <p>Values saved here are loaded into Swagger requests as Xeno auth headers.</p>
+      </div>
+      <span id="xeno-auth-status"></span>
+    </div>
+    <div class="xeno-auth-grid">
+      <label>Tenant ID<input id="xeno-tenant-id" placeholder="ten_default" autocomplete="off"></label>
+      <label>Bearer token<input id="xeno-bearer-token" placeholder="Bearer token or raw token" autocomplete="off"></label>
+      <label>x-token<input id="xeno-token" placeholder="Optional x-token header" autocomplete="off"></label>
+      <label>Access key<input id="xeno-access-key" placeholder="default" autocomplete="off"></label>
+      <label>Secret key<input id="xeno-secret-key" placeholder="default" autocomplete="off" type="password"></label>
+    </div>
+    <div class="xeno-auth-actions">
+      <button class="primary" id="xeno-auth-save" type="button">Save authentication</button>
+      <button id="xeno-auth-clear" type="button">Clear</button>
+    </div>
+  </section>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    window.onload = () => SwaggerUIBundle({
-      url: '/openapi.json',
-      dom_id: '#swagger-ui',
-      deepLinking: true,
-      displayRequestDuration: true,
-      persistAuthorization: true,
-      tryItOutEnabled: true
-    });
+    (function () {
+      const storageKey = 'xeno.swagger.auth';
+      const fields = {
+        tenantId: 'xeno-tenant-id',
+        bearerToken: 'xeno-bearer-token',
+        xToken: 'xeno-token',
+        accessKey: 'xeno-access-key',
+        secretKey: 'xeno-secret-key'
+      };
+
+      function loadAuth() {
+        try {
+          return JSON.parse(localStorage.getItem(storageKey) || '{}') || {};
+        } catch {
+          return {};
+        }
+      }
+
+      function setStatus(message) {
+        const status = document.getElementById('xeno-auth-status');
+        if (!status) return;
+        status.textContent = message;
+        if (message) window.setTimeout(() => { status.textContent = ''; }, 1800);
+      }
+
+      function fieldValue(id) {
+        const field = document.getElementById(id);
+        return field ? field.value.trim() : '';
+      }
+
+      function hydrateAuthInputs() {
+        const auth = loadAuth();
+        Object.keys(fields).forEach((key) => {
+          const field = document.getElementById(fields[key]);
+          if (field) field.value = auth[key] || '';
+        });
+      }
+
+      function saveAuth() {
+        const auth = {};
+        Object.keys(fields).forEach((key) => { auth[key] = fieldValue(fields[key]); });
+        localStorage.setItem(storageKey, JSON.stringify(auth));
+        setStatus('Authentication saved');
+      }
+
+      function clearAuth() {
+        localStorage.removeItem(storageKey);
+        Object.values(fields).forEach((id) => {
+          const field = document.getElementById(id);
+          if (field) field.value = '';
+        });
+        setStatus('Authentication cleared');
+      }
+
+      function bearerHeader(value) {
+        if (!value) return '';
+        return /^Bearer\s+/i.test(value) ? value : 'Bearer ' + value;
+      }
+
+      function applyAuth(request) {
+        const auth = loadAuth();
+        request.headers = request.headers || {};
+        if (auth.tenantId) request.headers['x-tenant-guid'] = auth.tenantId;
+        if (auth.bearerToken) request.headers.Authorization = bearerHeader(auth.bearerToken);
+        if (auth.xToken) request.headers['x-token'] = auth.xToken;
+        if (auth.accessKey) request.headers['x-access-key'] = auth.accessKey;
+        if (auth.secretKey) request.headers['x-secret-key'] = auth.secretKey;
+        return request;
+      }
+
+      function preauthorize(ui) {
+        const auth = loadAuth();
+        if (!ui || !ui.preauthorizeApiKey) return;
+        if (auth.bearerToken) ui.preauthorizeApiKey('bearerAuth', auth.bearerToken.replace(/^Bearer\s+/i, ''));
+        if (auth.xToken) ui.preauthorizeApiKey('xTokenAuth', auth.xToken);
+        if (auth.accessKey) ui.preauthorizeApiKey('accessKeyAuth', auth.accessKey);
+        if (auth.secretKey) ui.preauthorizeApiKey('secretKeyAuth', auth.secretKey);
+        if (auth.tenantId) ui.preauthorizeApiKey('tenantHeader', auth.tenantId);
+      }
+
+      window.onload = function () {
+        hydrateAuthInputs();
+        document.getElementById('xeno-auth-save').addEventListener('click', saveAuth);
+        document.getElementById('xeno-auth-clear').addEventListener('click', clearAuth);
+        let ui;
+        ui = SwaggerUIBundle({
+          url: '/openapi.json',
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          displayRequestDuration: true,
+          persistAuthorization: true,
+          tryItOutEnabled: true,
+          requestInterceptor: applyAuth,
+          onComplete: function () { preauthorize(ui); }
+        });
+        window.xenoSwaggerUi = ui;
+      };
+    })();
   </script>
 </body>
 </html>
@@ -2493,8 +2671,22 @@ namespace Xeno.Server
                 }
             };
 
-            if (auth) operation["security"] = new object[] { new Dictionary<string, object> { ["bearerAuth"] = Array.Empty<string>() } };
+            if (auth) operation["security"] = AuthSecurityRequirements();
             return new KeyValuePair<string, object>(method, operation);
+        }
+
+        private static object[] AuthSecurityRequirements()
+        {
+            return new object[]
+            {
+                new Dictionary<string, object> { ["bearerAuth"] = Array.Empty<string>() },
+                new Dictionary<string, object> { ["xTokenAuth"] = Array.Empty<string>() },
+                new Dictionary<string, object>
+                {
+                    ["accessKeyAuth"] = Array.Empty<string>(),
+                    ["secretKeyAuth"] = Array.Empty<string>()
+                }
+            };
         }
 
         private static Dictionary<string, object> ObjectSchema(params KeyValuePair<string, object>[] properties)

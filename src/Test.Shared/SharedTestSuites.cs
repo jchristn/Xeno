@@ -677,9 +677,20 @@ namespace Test.Shared
                         string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
                         if (!openApi.Contains("client-model", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("clientmodels", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing client model delete route.");
                         if (!openApi.Contains("request-history", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("requesthistory", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing request history delete route.");
+                        foreach ((string Scheme, string Header) scheme in new[] { ("xTokenAuth", "x-token"), ("accessKeyAuth", "x-access-key"), ("secretKeyAuth", "x-secret-key"), ("tenantHeader", "x-tenant-guid"), ("tenantIdHeader", "x-tenant-id") })
+                        {
+                            if (!OpenApiHasSecurityScheme(openApi, scheme.Scheme, scheme.Header)) throw new InvalidOperationException("OpenAPI missing security scheme " + scheme.Scheme + ".");
+                        }
+
                         foreach ((string Route, string Method) route in new[] { ("/metrics", "get"), ("/openapi.json", "get"), ("/v1.0/api/auth/token/details", "get"), ("/v1.0/api/auth/token/refresh", "post"), ("/v1.0/api/auth/logout", "post") })
                         {
                             if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
+                        }
+
+                        string swagger = await httpClient.GetStringAsync(baseUrl + "/swagger").ConfigureAwait(false);
+                        if (!swagger.Contains("xeno-auth-panel", StringComparison.Ordinal) || !swagger.Contains("xeno.swagger.auth", StringComparison.Ordinal) || !swagger.Contains("requestInterceptor", StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Swagger UI does not include Xeno authentication loading support.");
                         }
 
                         using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}").ConfigureAwait(false))
@@ -1421,6 +1432,18 @@ namespace Test.Shared
                 if (!TryGetProperty(document.RootElement, "paths", out JsonElement paths)) return false;
                 if (!TryGetProperty(paths, path, out JsonElement pathItem)) return false;
                 return TryGetProperty(pathItem, method, out _);
+            }
+        }
+
+        private static bool OpenApiHasSecurityScheme(string json, string schemeName, string headerName)
+        {
+            using (JsonDocument document = JsonDocument.Parse(json))
+            {
+                if (!TryGetProperty(document.RootElement, "components", out JsonElement components)) return false;
+                if (!TryGetProperty(components, "securitySchemes", out JsonElement securitySchemes)) return false;
+                if (!TryGetProperty(securitySchemes, schemeName, out JsonElement scheme)) return false;
+                string actualHeader = TryGetString(scheme, "name") ?? String.Empty;
+                return String.Equals(actualHeader, headerName, StringComparison.OrdinalIgnoreCase);
             }
         }
 

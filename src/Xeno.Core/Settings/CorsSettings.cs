@@ -22,7 +22,7 @@ namespace Xeno.Core.Settings
         /// <summary>
         /// Allowed headers.
         /// </summary>
-        public List<string> AllowedHeaders { get; set; } = new List<string> { "Authorization", "Content-Type", "x-token", "x-tenant-guid" };
+        public List<string> AllowedHeaders { get; set; } = new List<string> { "Authorization", "Content-Type", "x-token", "x-tenant-guid", "x-tenant-id", "x-access-key", "x-secret-key" };
 
         /// <summary>
         /// Allowed methods.
