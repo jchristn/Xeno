@@ -322,7 +322,7 @@ namespace Xeno.Server
                 path,
                 DefaultRouteAsync,
                 ExceptionRouteAsync,
-                openApiMetadata: OpenApiRouteMetadata.Create(summary, tag));
+                openApiMetadata: BuildRouteMetadata(method, path, summary, tag));
         }
 
         private void RegisterParameterizedRoute(HttpMethod method, string path, string summary, string tag)
@@ -332,7 +332,526 @@ namespace Xeno.Server
                 path,
                 DefaultRouteAsync,
                 ExceptionRouteAsync,
-                openApiMetadata: OpenApiRouteMetadata.Create(summary, tag));
+                openApiMetadata: BuildRouteMetadata(method, path, summary, tag));
+        }
+
+        private static OpenApiRouteMetadata BuildRouteMetadata(HttpMethod method, string path, string summary, string tag)
+        {
+            OpenApiRouteMetadata metadata = OpenApiRouteMetadata.Create(summary, tag)
+                .WithDescription(summary + ".");
+
+            foreach (string parameterName in ExtractPathParameterNames(path))
+            {
+                metadata = metadata.WithParameter(OpenApiParameterMetadata.Path(parameterName, "Route identifier.", OpenApiSchemaMetadata.String("Identifier.")));
+            }
+
+            if (SupportsTenantQuery(path))
+            {
+                metadata = metadata.WithParameter(OpenApiParameterMetadata.Query("tenantId", "Optional tenant identifier. Defaults to ten_default.", false, OpenApiSchemaMetadata.String("Tenant identifier.")));
+            }
+
+            if (IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("bucketMinutes", "Bucket width in minutes.", false, IntegerSchemaMetadata("Bucket width in minutes.")));
+            }
+
+            OpenApiRequestBodyMetadata? requestBody = BuildRequestBodyMetadata(method, path);
+            if (requestBody != null) metadata = metadata.WithRequestBody(requestBody);
+
+            metadata = metadata
+                .WithResponse(200, OpenApiResponseMetadata.Json("OK", OpenApiSchemaMetadata.Create("object", "JSON response.")))
+                .WithResponse(400, OpenApiResponseMetadata.BadRequest(OpenApiSchemaMetadata.Create("object", "Error response.")))
+                .WithResponse(401, OpenApiResponseMetadata.Unauthorized())
+                .WithResponse(500, OpenApiResponseMetadata.InternalError(OpenApiSchemaMetadata.Create("object", "Error response.")));
+            return metadata;
+        }
+
+        private static IEnumerable<string> ExtractPathParameterNames(string path)
+        {
+            int searchIndex = 0;
+            while (searchIndex < path.Length)
+            {
+                int start = path.IndexOf('{', searchIndex);
+                if (start < 0) yield break;
+                int end = path.IndexOf('}', start + 1);
+                if (end < 0) yield break;
+                string name = path.Substring(start + 1, end - start - 1).Trim();
+                if (!String.IsNullOrWhiteSpace(name)) yield return name;
+                searchIndex = end + 1;
+            }
+        }
+
+        private static bool SupportsTenantQuery(string path)
+        {
+            return !IsPath(path, "/", "/health", "/metrics", "/openapi.json", "/swagger", "/v1.0/api/health");
+        }
+
+        private static OpenApiRequestBodyMetadata? BuildRequestBodyMetadata(HttpMethod method, string path)
+        {
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/auth/login", "/v1.0/api/auth/login"))
+            {
+                return JsonBody(
+                    "User login request. The password is exchanged for a client credential and is not stored by the Xeno client.",
+                    ObjectSchemaMetadata(
+                        "Login request.",
+                        new[] { "username", "password" },
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Tenant identifier.")),
+                        SchemaProperty("username", OpenApiSchemaMetadata.String("Username or email address.")),
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("Optional email alias for username.")),
+                        SchemaProperty("password", OpenApiSchemaMetadata.String("User password."))),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantId"] = Constants.DefaultTenantId,
+                        ["username"] = "admin",
+                        ["password"] = "password"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
+            {
+                return JsonBody(
+                    "Credential token request. Access and secret keys may also be supplied as x-access-key and x-secret-key headers.",
+                    ObjectSchemaMetadata(
+                        "Credential token request.",
+                        new[] { "accessKey", "secretKey" },
+                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Client access key.")),
+                        SchemaProperty("secretKey", OpenApiSchemaMetadata.String("Client secret key."))),
+                    new Dictionary<string, object>
+                    {
+                        ["accessKey"] = "default",
+                        ["secretKey"] = "default"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
+            {
+                return JsonBody(
+                    "Tenant create request.",
+                    ObjectSchemaMetadata(
+                        "Tenant create request.",
+                        new[] { "name" },
+                        SchemaProperty("id", OpenApiSchemaMetadata.String("Optional tenant ID.")),
+                        SchemaProperty("name", OpenApiSchemaMetadata.String("Tenant display name.")),
+                        SchemaProperty("active", BooleanSchemaMetadata("Whether the tenant is active."))),
+                    new Dictionary<string, object>
+                    {
+                        ["name"] = "Example Tenant",
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.PUT && path.Contains("/tenants/{id}", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "Tenant update request.",
+                    ObjectSchemaMetadata(
+                        "Tenant update request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("name", OpenApiSchemaMetadata.String("Tenant display name.")),
+                        SchemaProperty("active", BooleanSchemaMetadata("Whether the tenant is active."))),
+                    new Dictionary<string, object>
+                    {
+                        ["name"] = "Example Tenant",
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
+            {
+                return JsonBody(
+                    "User create request.",
+                    ObjectSchemaMetadata(
+                        "User create request.",
+                        new[] { "username", "password" },
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Tenant identifier.")),
+                        SchemaProperty("username", OpenApiSchemaMetadata.String("Username.")),
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("Email address.")),
+                        SchemaProperty("password", OpenApiSchemaMetadata.String("Initial password.")),
+                        SchemaProperty("isAdmin", BooleanSchemaMetadata("Whether the user is a global administrator.")),
+                        SchemaProperty("isTenantAdmin", BooleanSchemaMetadata("Whether the user is a tenant administrator.")),
+                        SchemaProperty("active", BooleanSchemaMetadata("Whether the user is active."))),
+                    new Dictionary<string, object>
+                    {
+                        ["username"] = "operator",
+                        ["email"] = "operator@example.com",
+                        ["password"] = "password",
+                        ["isAdmin"] = false,
+                        ["isTenantAdmin"] = false,
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.PUT && path.Contains("/users/{id}", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "User update request.",
+                    ObjectSchemaMetadata(
+                        "User update request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("username", OpenApiSchemaMetadata.String("Username.")),
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("Email address.")),
+                        SchemaProperty("password", OpenApiSchemaMetadata.String("Optional replacement password.")),
+                        SchemaProperty("isAdmin", BooleanSchemaMetadata("Whether the user is a global administrator.")),
+                        SchemaProperty("isTenantAdmin", BooleanSchemaMetadata("Whether the user is a tenant administrator.")),
+                        SchemaProperty("active", BooleanSchemaMetadata("Whether the user is active."))),
+                    new Dictionary<string, object>
+                    {
+                        ["email"] = "operator@example.com",
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
+            {
+                return JsonBody(
+                    "Credential create request. The secret key is returned once.",
+                    ObjectSchemaMetadata(
+                        "Credential create request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Tenant identifier.")),
+                        SchemaProperty("userId", OpenApiSchemaMetadata.String("Owning user ID.")),
+                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Optional access key. Generated when omitted.")),
+                        SchemaProperty("secretKey", OpenApiSchemaMetadata.String("Optional secret key. Generated when omitted.")),
+                        SchemaProperty("active", BooleanSchemaMetadata("Whether the credential is active."))),
+                    new Dictionary<string, object>
+                    {
+                        ["userId"] = "usr_example",
+                        ["accessKey"] = "default",
+                        ["secretKey"] = "default",
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.PUT && path.Contains("/credentials/{id}", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "Credential update request.",
+                    ObjectSchemaMetadata(
+                        "Credential update request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("userId", OpenApiSchemaMetadata.String("Owning user ID.")),
+                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Access key.")),
+                        SchemaProperty("secretKey", OpenApiSchemaMetadata.String("Optional replacement secret key.")),
+                        SchemaProperty("active", BooleanSchemaMetadata("Whether the credential is active."))),
+                    new Dictionary<string, object>
+                    {
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
+            {
+                return JsonBody(
+                    "Role create request.",
+                    RoleBodySchema("Role create request.", true),
+                    new Dictionary<string, object>
+                    {
+                        ["name"] = "Operators",
+                        ["permissionIds"] = Array.Empty<string>(),
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.PUT && path.Contains("/roles/{id}", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "Role update request.",
+                    RoleBodySchema("Role update request.", false),
+                    new Dictionary<string, object>
+                    {
+                        ["name"] = "Operators",
+                        ["permissionIds"] = Array.Empty<string>(),
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
+            {
+                return JsonBody(
+                    "Permission create request.",
+                    PermissionBodySchema("Permission create request.", true),
+                    new Dictionary<string, object>
+                    {
+                        ["resourceType"] = "Clients",
+                        ["operationType"] = "Read",
+                        ["permit"] = true,
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.PUT && path.Contains("/permissions/{id}", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "Permission update request.",
+                    PermissionBodySchema("Permission update request.", false),
+                    new Dictionary<string, object>
+                    {
+                        ["resourceType"] = "Clients",
+                        ["operationType"] = "Read",
+                        ["permit"] = true,
+                        ["active"] = true
+                    });
+            }
+
+            if (method == HttpMethod.DELETE && IsPath(path, "/api/v1/clientmodels", "/v1.0/api/client-models"))
+            {
+                return JsonBody(
+                    "Client-advertised model delete request.",
+                    ObjectSchemaMetadata(
+                        "Client-advertised model delete request.",
+                        new[] { "clientId", "name" },
+                        SchemaProperty("clientId", OpenApiSchemaMetadata.String("Client ID.")),
+                        SchemaProperty("name", OpenApiSchemaMetadata.String("Model name.")),
+                        SchemaProperty("source", OpenApiSchemaMetadata.String("Optional provider/source name."))),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["name"] = "llama3.2:latest",
+                        ["source"] = "local-ollama"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/requesthistory/bulk", "/v1.0/api/request-history/bulk"))
+            {
+                return JsonBody(
+                    "Bulk request-history delete request.",
+                    ObjectSchemaMetadata(
+                        "Bulk request-history delete request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("ids", ArraySchemaMetadata("Request history IDs.", OpenApiSchemaMetadata.String("Request history ID."))),
+                        SchemaProperty("id", OpenApiSchemaMetadata.String("Single request history ID.")),
+                        SchemaProperty("model", OpenApiSchemaMetadata.String("Optional model filter.")),
+                        SchemaProperty("path", OpenApiSchemaMetadata.String("Optional path filter.")),
+                        SchemaProperty("selectedClientId", OpenApiSchemaMetadata.String("Optional selected client ID filter."))),
+                    new Dictionary<string, object>
+                    {
+                        ["ids"] = new[] { "req_example" },
+                        ["model"] = "llama3.2:latest",
+                        ["path"] = "/v1/chat/completions"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
+            {
+                return JsonBody(
+                    "Server settings update request. Some setting groups require a server restart before taking effect.",
+                    XenoSettingsBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["rest"] = new Dictionary<string, object> { ["hostname"] = "0.0.0.0", ["port"] = 9000, ["ssl"] = false },
+                        ["cors"] = new Dictionary<string, object> { ["enabled"] = true, ["allowedOrigins"] = new[] { "*" } },
+                        ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" }
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/restore", "/v1.0/api/restore"))
+            {
+                return JsonBody(
+                    "Platform-state restore request.",
+                    ObjectSchemaMetadata(
+                        "Platform-state restore request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("tenants", ArraySchemaMetadata("Tenants.", OpenApiSchemaMetadata.Create("object", "Tenant."))),
+                        SchemaProperty("users", ArraySchemaMetadata("Users.", OpenApiSchemaMetadata.Create("object", "User."))),
+                        SchemaProperty("credentials", ArraySchemaMetadata("Credentials.", OpenApiSchemaMetadata.Create("object", "Credential.")))),
+                    new Dictionary<string, object>
+                    {
+                        ["tenants"] = Array.Empty<object>(),
+                        ["users"] = Array.Empty<object>(),
+                        ["credentials"] = Array.Empty<object>()
+                    });
+            }
+
+            if (method == HttpMethod.POST && path.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "OpenAI-compatible chat completion request.",
+                    ChatCompletionBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "gpt-oss:120b",
+                        ["messages"] = new[]
+                        {
+                            new Dictionary<string, object> { ["role"] = "system", ["content"] = "You are a helpful and concise assistant." },
+                            new Dictionary<string, object> { ["role"] = "user", ["content"] = "Hello! Can you give me a brief explanation of how an inverted index works?" }
+                        },
+                        ["temperature"] = 0.7,
+                        ["max_tokens"] = 150
+                    });
+            }
+
+            if (method == HttpMethod.POST && path.EndsWith("/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "OpenAI-compatible text completion request.",
+                    CompletionBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "gpt-oss:120b",
+                        ["prompt"] = "Explain how an inverted index works in two concise paragraphs.",
+                        ["temperature"] = 0.7,
+                        ["max_tokens"] = 150
+                    });
+            }
+
+            if (method == HttpMethod.POST && path.Contains("/embeddings", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "OpenAI-compatible embeddings request.",
+                    EmbeddingsBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "all-minilm",
+                        ["input"] = new[]
+                        {
+                            "The quick brown fox jumps over the lazy dog.",
+                            "Artificial intelligence is transforming software development.",
+                            "How do I cook a perfect medium-rare steak?"
+                        }
+                    });
+            }
+
+            return null;
+        }
+
+        private static OpenApiRequestBodyMetadata JsonBody(string description, OpenApiSchemaMetadata schema, object example)
+        {
+            OpenApiRequestBodyMetadata body = OpenApiRequestBodyMetadata.Json(schema, description, true);
+            if (body.Content.TryGetValue("application/json", out OpenApiMediaTypeMetadata? mediaType))
+            {
+                mediaType.Example = example;
+            }
+
+            return body;
+        }
+
+        private static OpenApiSchemaMetadata ObjectSchemaMetadata(string description, IEnumerable<string> required, params KeyValuePair<string, OpenApiSchemaMetadata>[] properties)
+        {
+            OpenApiSchemaMetadata schema = OpenApiSchemaMetadata.Create("object", description);
+            schema.Properties = properties.ToDictionary(property => property.Key, property => property.Value, StringComparer.Ordinal);
+            schema.Required = required.Where(item => !String.IsNullOrWhiteSpace(item)).ToList();
+            return schema;
+        }
+
+        private static KeyValuePair<string, OpenApiSchemaMetadata> SchemaProperty(string name, OpenApiSchemaMetadata schema)
+        {
+            return new KeyValuePair<string, OpenApiSchemaMetadata>(name, schema);
+        }
+
+        private static OpenApiSchemaMetadata ArraySchemaMetadata(string description, OpenApiSchemaMetadata itemSchema)
+        {
+            OpenApiSchemaMetadata schema = OpenApiSchemaMetadata.CreateArray(itemSchema);
+            schema.Description = description;
+            return schema;
+        }
+
+        private static OpenApiSchemaMetadata BooleanSchemaMetadata(string description)
+        {
+            OpenApiSchemaMetadata schema = OpenApiSchemaMetadata.Boolean();
+            schema.Description = description;
+            return schema;
+        }
+
+        private static OpenApiSchemaMetadata IntegerSchemaMetadata(string description)
+        {
+            return OpenApiSchemaMetadata.Integer(description);
+        }
+
+        private static OpenApiSchemaMetadata NumberSchemaMetadata(string description)
+        {
+            return OpenApiSchemaMetadata.Number(description);
+        }
+
+        private static OpenApiSchemaMetadata DateTimeSchema(string description)
+        {
+            OpenApiSchemaMetadata schema = OpenApiSchemaMetadata.String(description);
+            schema.Format = "date-time";
+            return schema;
+        }
+
+        private static OpenApiSchemaMetadata StringEnumSchemaMetadata(string description, params string[] values)
+        {
+            OpenApiSchemaMetadata schema = OpenApiSchemaMetadata.String(description);
+            schema.Enum = values.Cast<object>().ToList();
+            return schema;
+        }
+
+        private static OpenApiSchemaMetadata RoleBodySchema(string description, bool requireName)
+        {
+            return ObjectSchemaMetadata(
+                description,
+                requireName ? new[] { "name" } : Array.Empty<string>(),
+                SchemaProperty("name", OpenApiSchemaMetadata.String("Role name.")),
+                SchemaProperty("permissionIds", ArraySchemaMetadata("Permission IDs assigned to this role.", OpenApiSchemaMetadata.String("Permission ID."))),
+                SchemaProperty("active", BooleanSchemaMetadata("Whether the role is active.")));
+        }
+
+        private static OpenApiSchemaMetadata PermissionBodySchema(string description, bool requireResourceType)
+        {
+            return ObjectSchemaMetadata(
+                description,
+                requireResourceType ? new[] { "resourceType" } : Array.Empty<string>(),
+                SchemaProperty("resourceType", OpenApiSchemaMetadata.String("Resource type.")),
+                SchemaProperty("operationType", StringEnumSchemaMetadata("Operation type.", "Read", "Write", "Delete", "Admin")),
+                SchemaProperty("permit", BooleanSchemaMetadata("Whether this permission permits the operation.")),
+                SchemaProperty("active", BooleanSchemaMetadata("Whether the permission is active.")));
+        }
+
+        private static OpenApiSchemaMetadata ChatCompletionBodySchema()
+        {
+            OpenApiSchemaMetadata messageSchema = ObjectSchemaMetadata(
+                "Chat message.",
+                new[] { "role", "content" },
+                SchemaProperty("role", StringEnumSchemaMetadata("Message role.", "system", "user", "assistant", "tool")),
+                SchemaProperty("content", OpenApiSchemaMetadata.String("Message content.")));
+
+            return ObjectSchemaMetadata(
+                "Chat completion request.",
+                new[] { "model", "messages" },
+                SchemaProperty("model", OpenApiSchemaMetadata.String("Model name.")),
+                SchemaProperty("messages", ArraySchemaMetadata("Chat messages.", messageSchema)),
+                SchemaProperty("temperature", NumberSchemaMetadata("Sampling temperature.")),
+                SchemaProperty("max_tokens", IntegerSchemaMetadata("Maximum output tokens.")),
+                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")));
+        }
+
+        private static OpenApiSchemaMetadata CompletionBodySchema()
+        {
+            return ObjectSchemaMetadata(
+                "Text completion request.",
+                new[] { "model", "prompt" },
+                SchemaProperty("model", OpenApiSchemaMetadata.String("Model name.")),
+                SchemaProperty("prompt", OpenApiSchemaMetadata.String("Prompt text.")),
+                SchemaProperty("temperature", NumberSchemaMetadata("Sampling temperature.")),
+                SchemaProperty("max_tokens", IntegerSchemaMetadata("Maximum output tokens.")),
+                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")));
+        }
+
+        private static OpenApiSchemaMetadata EmbeddingsBodySchema()
+        {
+            return ObjectSchemaMetadata(
+                "Embeddings request.",
+                new[] { "model", "input" },
+                SchemaProperty("model", OpenApiSchemaMetadata.String("Embedding model name.")),
+                SchemaProperty("input", ArraySchemaMetadata("Input strings.", OpenApiSchemaMetadata.String("Input text."))));
+        }
+
+        private static OpenApiSchemaMetadata XenoSettingsBodySchema()
+        {
+            return ObjectSchemaMetadata(
+                "Server settings.",
+                Array.Empty<string>(),
+                SchemaProperty("rest", OpenApiSchemaMetadata.Create("object", "REST settings.")),
+                SchemaProperty("cors", OpenApiSchemaMetadata.Create("object", "CORS settings.")),
+                SchemaProperty("logging", OpenApiSchemaMetadata.Create("object", "Logging settings.")),
+                SchemaProperty("webSocket", OpenApiSchemaMetadata.Create("object", "WebSocket settings.")),
+                SchemaProperty("database", OpenApiSchemaMetadata.Create("object", "Database settings.")),
+                SchemaProperty("auth", OpenApiSchemaMetadata.Create("object", "Authentication settings.")),
+                SchemaProperty("requestHistory", OpenApiSchemaMetadata.Create("object", "Request history settings.")),
+                SchemaProperty("routing", OpenApiSchemaMetadata.Create("object", "Routing settings.")));
         }
 
         private async Task PreflightRouteAsync(HttpContextBase context)
@@ -2671,8 +3190,298 @@ namespace Xeno.Server
                 }
             };
 
+            List<object> parameters = ManualParametersForOperation(operationId, auth);
+            if (parameters.Count > 0) operation["parameters"] = parameters;
+
+            object? requestBody = ManualRequestBodyForOperation(operationId);
+            if (requestBody != null) operation["requestBody"] = requestBody;
+
             if (auth) operation["security"] = AuthSecurityRequirements();
             return new KeyValuePair<string, object>(method, operation);
+        }
+
+        private static List<object> ManualParametersForOperation(string operationId, bool auth)
+        {
+            List<object> parameters = new List<object>();
+            if (auth || IsTenantAwareOperation(operationId))
+            {
+                parameters.Add(Parameter("tenantId", "query", false, "Optional tenant identifier. Defaults to ten_default.", StringSchema()));
+            }
+
+            if (RequiresIdPathParameter(operationId))
+            {
+                parameters.Add(Parameter("id", "path", true, "Route identifier.", StringSchema()));
+            }
+
+            if (String.Equals(operationId, "summarizeRequestHistory", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
+                parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
+                parameters.Add(Parameter("bucketMinutes", "query", false, "Bucket width in minutes.", IntegerSchema()));
+            }
+
+            return parameters;
+        }
+
+        private static bool IsTenantAwareOperation(string operationId)
+        {
+            return String.Equals(operationId, "login", StringComparison.Ordinal)
+                || String.Equals(operationId, "createToken", StringComparison.Ordinal)
+                || String.Equals(operationId, "listOpenAiModels", StringComparison.Ordinal)
+                || String.Equals(operationId, "createChatCompletion", StringComparison.Ordinal)
+                || String.Equals(operationId, "createCompletion", StringComparison.Ordinal)
+                || String.Equals(operationId, "createEmbedding", StringComparison.Ordinal);
+        }
+
+        private static bool RequiresIdPathParameter(string operationId)
+        {
+            return operationId is "updateTenant"
+                or "deleteTenant"
+                or "updateUser"
+                or "deleteUser"
+                or "updateCredential"
+                or "deleteCredential"
+                or "updateRole"
+                or "deleteRole"
+                or "updatePermission"
+                or "deletePermission"
+                or "deleteAuditRecord"
+                or "deleteClient"
+                or "getRequestHistory"
+                or "deleteRequestHistory";
+        }
+
+        private static object? ManualRequestBodyForOperation(string operationId)
+        {
+            if (String.Equals(operationId, "login", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "User login request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("username", StringSchema()),
+                        Property("email", StringSchema()),
+                        Property("password", StringSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantId"] = Constants.DefaultTenantId,
+                        ["username"] = "admin",
+                        ["password"] = "password"
+                    });
+            }
+
+            if (String.Equals(operationId, "createToken", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Credential token request.",
+                    ObjectSchema(Property("accessKey", StringSchema()), Property("secretKey", StringSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["accessKey"] = "default",
+                        ["secretKey"] = "default"
+                    });
+            }
+
+            if (String.Equals(operationId, "createTenant", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Tenant create request.",
+                    ObjectSchema(Property("id", StringSchema()), Property("name", StringSchema()), Property("active", BooleanSchema())),
+                    new Dictionary<string, object> { ["name"] = "Example Tenant", ["active"] = true });
+            }
+
+            if (String.Equals(operationId, "updateTenant", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Tenant update request.",
+                    ObjectSchema(Property("name", StringSchema()), Property("active", BooleanSchema())),
+                    new Dictionary<string, object> { ["name"] = "Example Tenant", ["active"] = true });
+            }
+
+            if (String.Equals(operationId, "createUser", StringComparison.Ordinal) || String.Equals(operationId, "updateUser", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    String.Equals(operationId, "createUser", StringComparison.Ordinal) ? "User create request." : "User update request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("username", StringSchema()),
+                        Property("email", StringSchema()),
+                        Property("password", StringSchema()),
+                        Property("isAdmin", BooleanSchema()),
+                        Property("isTenantAdmin", BooleanSchema()),
+                        Property("active", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["username"] = "operator",
+                        ["email"] = "operator@example.com",
+                        ["password"] = "password",
+                        ["isAdmin"] = false,
+                        ["isTenantAdmin"] = false,
+                        ["active"] = true
+                    });
+            }
+
+            if (String.Equals(operationId, "createCredential", StringComparison.Ordinal) || String.Equals(operationId, "updateCredential", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    String.Equals(operationId, "createCredential", StringComparison.Ordinal) ? "Credential create request." : "Credential update request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("userId", StringSchema()),
+                        Property("accessKey", StringSchema()),
+                        Property("secretKey", StringSchema()),
+                        Property("active", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["userId"] = "usr_example",
+                        ["accessKey"] = "default",
+                        ["secretKey"] = "default",
+                        ["active"] = true
+                    });
+            }
+
+            if (String.Equals(operationId, "createRole", StringComparison.Ordinal) || String.Equals(operationId, "updateRole", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    String.Equals(operationId, "createRole", StringComparison.Ordinal) ? "Role create request." : "Role update request.",
+                    ObjectSchema(
+                        Property("name", StringSchema()),
+                        Property("permissionIds", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() }),
+                        Property("active", BooleanSchema())),
+                    new Dictionary<string, object> { ["name"] = "Operators", ["permissionIds"] = Array.Empty<string>(), ["active"] = true });
+            }
+
+            if (String.Equals(operationId, "createPermission", StringComparison.Ordinal) || String.Equals(operationId, "updatePermission", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    String.Equals(operationId, "createPermission", StringComparison.Ordinal) ? "Permission create request." : "Permission update request.",
+                    ObjectSchema(
+                        Property("resourceType", StringSchema()),
+                        Property("operationType", StringEnumSchema("Read", "Write", "Delete", "Admin")),
+                        Property("permit", BooleanSchema()),
+                        Property("active", BooleanSchema())),
+                    new Dictionary<string, object> { ["resourceType"] = "Clients", ["operationType"] = "Read", ["permit"] = true, ["active"] = true });
+            }
+
+            if (String.Equals(operationId, "deleteClientModel", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Client-advertised model delete request.",
+                    ObjectSchema(Property("clientId", StringSchema()), Property("name", StringSchema()), Property("source", StringSchema())),
+                    new Dictionary<string, object> { ["clientId"] = "xcl_example", ["name"] = "llama3.2:latest", ["source"] = "local-ollama" });
+            }
+
+            if (String.Equals(operationId, "bulkDeleteRequestHistory", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Bulk request-history delete request.",
+                    ObjectSchema(
+                        Property("ids", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() }),
+                        Property("id", StringSchema()),
+                        Property("model", StringSchema()),
+                        Property("path", StringSchema()),
+                        Property("selectedClientId", StringSchema())),
+                    new Dictionary<string, object> { ["ids"] = new[] { "req_example" }, ["model"] = "llama3.2:latest", ["path"] = "/v1/chat/completions" });
+            }
+
+            if (String.Equals(operationId, "updateSettings", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Server settings update request.",
+                    ObjectSchema(
+                        Property("rest", ObjectSchema()),
+                        Property("cors", ObjectSchema()),
+                        Property("logging", ObjectSchema()),
+                        Property("webSocket", ObjectSchema()),
+                        Property("database", ObjectSchema()),
+                        Property("auth", ObjectSchema()),
+                        Property("requestHistory", ObjectSchema()),
+                        Property("routing", ObjectSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["rest"] = new Dictionary<string, object> { ["hostname"] = "0.0.0.0", ["port"] = 9000, ["ssl"] = false },
+                        ["cors"] = new Dictionary<string, object> { ["enabled"] = true, ["allowedOrigins"] = new[] { "*" } },
+                        ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" }
+                    });
+            }
+
+            if (String.Equals(operationId, "restore", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Platform-state restore request.",
+                    ObjectSchema(
+                        Property("tenants", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }),
+                        Property("users", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }),
+                        Property("credentials", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
+                    new Dictionary<string, object> { ["tenants"] = Array.Empty<object>(), ["users"] = Array.Empty<object>(), ["credentials"] = Array.Empty<object>() });
+            }
+
+            if (String.Equals(operationId, "createChatCompletion", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "OpenAI-compatible chat completion request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("messages", new Dictionary<string, object>
+                        {
+                            ["type"] = "array",
+                            ["items"] = ObjectSchema(Property("role", StringSchema()), Property("content", StringSchema()))
+                        }),
+                        Property("temperature", NumberSchema()),
+                        Property("max_tokens", IntegerSchema()),
+                        Property("stream", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "gpt-oss:120b",
+                        ["messages"] = new[]
+                        {
+                            new Dictionary<string, object> { ["role"] = "system", ["content"] = "You are a helpful and concise assistant." },
+                            new Dictionary<string, object> { ["role"] = "user", ["content"] = "Hello! Can you give me a brief explanation of how an inverted index works?" }
+                        },
+                        ["temperature"] = 0.7,
+                        ["max_tokens"] = 150
+                    });
+            }
+
+            if (String.Equals(operationId, "createCompletion", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "OpenAI-compatible text completion request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("prompt", StringSchema()),
+                        Property("temperature", NumberSchema()),
+                        Property("max_tokens", IntegerSchema()),
+                        Property("stream", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "gpt-oss:120b",
+                        ["prompt"] = "Explain how an inverted index works in two concise paragraphs.",
+                        ["temperature"] = 0.7,
+                        ["max_tokens"] = 150
+                    });
+            }
+
+            if (String.Equals(operationId, "createEmbedding", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "OpenAI-compatible embeddings request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("input", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() })),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "all-minilm",
+                        ["input"] = new[]
+                        {
+                            "The quick brown fox jumps over the lazy dog.",
+                            "Artificial intelligence is transforming software development.",
+                            "How do I cook a perfect medium-rare steak?"
+                        }
+                    });
+            }
+
+            return null;
         }
 
         private static object[] AuthSecurityRequirements()
@@ -2685,6 +3494,35 @@ namespace Xeno.Server
                 {
                     ["accessKeyAuth"] = Array.Empty<string>(),
                     ["secretKeyAuth"] = Array.Empty<string>()
+                }
+            };
+        }
+
+        private static Dictionary<string, object> Parameter(string name, string location, bool required, string description, object schema)
+        {
+            return new Dictionary<string, object>
+            {
+                ["name"] = name,
+                ["in"] = location,
+                ["required"] = required,
+                ["description"] = description,
+                ["schema"] = schema
+            };
+        }
+
+        private static Dictionary<string, object> JsonRequestBody(string description, object schema, object example)
+        {
+            return new Dictionary<string, object>
+            {
+                ["description"] = description,
+                ["required"] = true,
+                ["content"] = new Dictionary<string, object>
+                {
+                    ["application/json"] = new Dictionary<string, object>
+                    {
+                        ["schema"] = schema,
+                        ["example"] = example
+                    }
                 }
             };
         }
@@ -2723,9 +3561,19 @@ namespace Xeno.Server
             return new Dictionary<string, object> { ["type"] = "boolean" };
         }
 
+        private static Dictionary<string, object> NumberSchema()
+        {
+            return new Dictionary<string, object> { ["type"] = "number", ["format"] = "double" };
+        }
+
         private static Dictionary<string, object> IntegerSchema()
         {
             return new Dictionary<string, object> { ["type"] = "integer", ["format"] = "int32" };
+        }
+
+        private static Dictionary<string, object> StringEnumSchema(params string[] values)
+        {
+            return new Dictionary<string, object> { ["type"] = "string", ["enum"] = values };
         }
     }
 }

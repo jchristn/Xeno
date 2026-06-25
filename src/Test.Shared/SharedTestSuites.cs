@@ -687,6 +687,16 @@ namespace Test.Shared
                             if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
                         }
 
+                        foreach ((string Route, string Method, string Name, string Location) parameter in new[] { ("/v1.0/api/users/{id}", "put", "id", "path"), ("/v1.0/api/request-history/summary", "get", "fromUtc", "query"), ("/v1.0/api/request-history/summary", "get", "toUtc", "query"), ("/v1.0/api/request-history/summary", "get", "bucketMinutes", "query") })
+                        {
+                            if (!OpenApiHasParameter(openApi, parameter.Route, parameter.Method, parameter.Name, parameter.Location)) throw new InvalidOperationException("OpenAPI missing " + parameter.Location + " parameter " + parameter.Name + " on " + parameter.Method.ToUpperInvariant() + " " + parameter.Route + ".");
+                        }
+
+                        foreach ((string Route, string Method) route in new[] { ("/v1.0/api/auth/login", "post"), ("/v1.0/api/auth/token", "post"), ("/v1.0/api/users", "post"), ("/v1.0/api/users/{id}", "put"), ("/v1.0/api/client-models", "delete"), ("/v1.0/api/request-history/bulk", "post"), ("/v1.0/api/settings", "post"), ("/v1/chat/completions", "post"), ("/v1/completions", "post"), ("/v1/embeddings", "post") })
+                        {
+                            if (!OpenApiHasRequestBody(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing editable request body on " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
+                        }
+
                         string swagger = await httpClient.GetStringAsync(baseUrl + "/swagger").ConfigureAwait(false);
                         if (!swagger.Contains("xeno-auth-panel", StringComparison.Ordinal) || !swagger.Contains("xeno.swagger.auth", StringComparison.Ordinal) || !swagger.Contains("requestInterceptor", StringComparison.Ordinal))
                         {
@@ -1445,6 +1455,43 @@ namespace Test.Shared
                 string actualHeader = TryGetString(scheme, "name") ?? String.Empty;
                 return String.Equals(actualHeader, headerName, StringComparison.OrdinalIgnoreCase);
             }
+        }
+
+        private static bool OpenApiHasParameter(string json, string path, string method, string name, string location)
+        {
+            using (JsonDocument document = JsonDocument.Parse(json))
+            {
+                if (!TryGetOpenApiOperation(document.RootElement, path, method, out JsonElement operation)) return false;
+                if (!TryGetProperty(operation, "parameters", out JsonElement parameters) || parameters.ValueKind != JsonValueKind.Array) return false;
+                foreach (JsonElement parameter in parameters.EnumerateArray())
+                {
+                    string actualName = TryGetString(parameter, "name") ?? String.Empty;
+                    string actualLocation = TryGetString(parameter, "in") ?? String.Empty;
+                    if (String.Equals(actualName, name, StringComparison.OrdinalIgnoreCase) && String.Equals(actualLocation, location, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+
+                return false;
+            }
+        }
+
+        private static bool OpenApiHasRequestBody(string json, string path, string method)
+        {
+            using (JsonDocument document = JsonDocument.Parse(json))
+            {
+                if (!TryGetOpenApiOperation(document.RootElement, path, method, out JsonElement operation)) return false;
+                if (!TryGetProperty(operation, "requestBody", out JsonElement requestBody) || requestBody.ValueKind != JsonValueKind.Object) return false;
+                if (!TryGetProperty(requestBody, "content", out JsonElement content) || content.ValueKind != JsonValueKind.Object) return false;
+                if (!TryGetProperty(content, "application/json", out JsonElement mediaType) || mediaType.ValueKind != JsonValueKind.Object) return false;
+                return TryGetProperty(mediaType, "schema", out JsonElement schema) && schema.ValueKind == JsonValueKind.Object;
+            }
+        }
+
+        private static bool TryGetOpenApiOperation(JsonElement root, string path, string method, out JsonElement operation)
+        {
+            operation = default;
+            if (!TryGetProperty(root, "paths", out JsonElement paths)) return false;
+            if (!TryGetProperty(paths, path, out JsonElement pathItem)) return false;
+            return TryGetProperty(pathItem, method, out operation);
         }
 
         private static async Task<string?> ReceiveWebSocketTextAsync(ClientWebSocket socket, CancellationToken token)
