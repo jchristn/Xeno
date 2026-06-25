@@ -2,6 +2,8 @@ namespace Xeno.Client
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.Globalization;
     using System.IO;
     using System.Net.Http;
     using System.Net.WebSockets;
@@ -764,17 +766,23 @@ namespace Xeno.Client
                 JsonElement root = document.RootElement;
                 string requestId = TryGetString(root, "requestId") ?? Guid.NewGuid().ToString("N");
                 string? sourceName = TryGetString(root, "source") ?? TryGetString(root, "runnerName");
+                string proxy = String.IsNullOrWhiteSpace(sourceName) ? "(default provider)" : sourceName;
+                string relativePath = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
+                string method = TryGetString(root, "method") ?? "POST";
+                string requestorIp = RequestorIpFromServerRequest(root);
+                string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
+                Stopwatch stopwatch = Stopwatch.StartNew();
                 ClientRunnerSettings? runner = String.IsNullOrWhiteSpace(sourceName)
                     ? (settings.Runners.Count > 0 ? settings.Runners[0] : null)
                     : settings.Runners.Find(item => String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
 
                 if (runner == null)
                 {
+                    stopwatch.Stop();
+                    WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
                     return new { type = "client.response", requestId, clientId = settings.ClientId, tenantId = settings.TenantId, success = false, error = "No configured provider endpoint is available." };
                 }
 
-                string relativePath = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
-                string method = TryGetString(root, "method") ?? "POST";
                 Dictionary<string, string> forwardedHeaders = TryGetStringMap(root, "headers");
                 string body = "{}";
                 if (root.TryGetProperty("body", out JsonElement bodyElement))
@@ -807,6 +815,8 @@ namespace Xeno.Client
 
                     HttpResponseMessage result = await httpClient.SendAsync(request, token).ConfigureAwait(false);
                     string content = await result.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    stopwatch.Stop();
+                    WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
                     return new
                     {
                         type = "client.response",
@@ -988,6 +998,12 @@ namespace Xeno.Client
             return comma >= 0 ? requestorIp.Substring(0, comma).Trim() : requestorIp.Trim();
         }
 
+        private static void WriteRequestCompleted(string requestId, string requestorIp, string method, string path, string proxy, double elapsedMs)
+        {
+            string elapsed = elapsedMs.ToString("0.00", CultureInfo.InvariantCulture);
+            WriteInfo("Completed request " + requestId + " for " + requestorIp + ": " + method + " " + path + " via " + proxy + " (" + elapsed + "ms)");
+        }
+
         private static string[] ApplyGlobalOptions(string[] args, ClientSettings? settings)
         {
             _UseColors = settings?.UseColors ?? true;
@@ -1087,8 +1103,8 @@ namespace Xeno.Client
                         string path = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
                         string source = TryGetString(root, "source") ?? TryGetString(root, "runnerName") ?? "(default provider)";
                         string requestorIp = RequestorIpFromServerRequest(root);
-                        string requestorSuffix = String.IsNullOrWhiteSpace(requestorIp) ? String.Empty : " from " + requestorIp;
-                        WriteInfo("Received request " + requestId + ": " + method + " " + path + " via " + source + requestorSuffix + ".");
+                        string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
+                        WriteInfo("Request " + requestId + " received from " + requestorLabel + ": " + method + " " + path + " via " + source);
                         return;
                     }
 
