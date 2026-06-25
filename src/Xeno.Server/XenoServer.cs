@@ -2109,7 +2109,7 @@ namespace Xeno.Server
                 DateTime bucketEnd = cursor.AddMinutes(bucketMinutes);
                 int count = entries.Count(item => item.CreatedUtc >= cursor && item.CreatedUtc < bucketEnd);
                 int errors = entries.Count(item => item.CreatedUtc >= cursor && item.CreatedUtc < bucketEnd && item.StatusCode >= 400);
-                buckets.Add(new { startUtc = cursor, endUtc = bucketEnd, count, errors });
+                buckets.Add(new { startUtc = cursor, endUtc = bucketEnd, count, errors, success = count - errors, failed = errors });
                 cursor = bucketEnd;
             }
 
@@ -2238,9 +2238,16 @@ namespace Xeno.Server
                 info = new { title = "Xeno API", version = Constants.Version, description = "Xeno AI control plane API." },
                 paths = new Dictionary<string, object>
                 {
+                    ["/"] = Path(Operation("get", "rootHealth", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
                     ["/health"] = Path(Operation("get", "health", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
+                    ["/v1.0/api/health"] = Path(Operation("get", "apiHealth", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
+                    ["/metrics"] = Path(Operation("get", "metrics", "Health", "Prometheus metrics", "Returns Prometheus-style metrics.", "GenericObject", false)),
+                    ["/openapi.json"] = Path(Operation("get", "openApi", "Health", "OpenAPI document", "Returns the OpenAPI document.", "GenericObject", false)),
                     ["/v1.0/api/auth/login"] = Path(Operation("post", "login", "Authentication", "Login", "Validates a user password and returns a one-time-visible client credential for WebSocket use.", "CredentialLoginResponse", false)),
                     ["/v1.0/api/auth/token"] = Path(Operation("post", "createToken", "Authentication", "Create token", "Creates a development session token.", "TokenResponse", false)),
+                    ["/v1.0/api/auth/token/details"] = Path(Operation("get", "tokenDetails", "Authentication", "Token details", "Returns details for the current token.", "GenericObject", true)),
+                    ["/v1.0/api/auth/token/refresh"] = Path(Operation("post", "refreshToken", "Authentication", "Refresh token", "Refreshes the current bearer token.", "TokenResponse", true)),
+                    ["/v1.0/api/auth/logout"] = Path(Operation("post", "logout", "Authentication", "Logout", "Revokes the current session token.", "GenericObject", true)),
                     ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true), Operation("post", "createTenant", "Tenants", "Create tenant", "Creates a tenant.", "Tenant", true)),
                     ["/v1.0/api/tenants/{id}"] = Path(Operation("put", "updateTenant", "Tenants", "Update tenant", "Updates tenant name and active state.", "Tenant", true), Operation("delete", "deleteTenant", "Tenants", "Delete tenant", "Deletes a tenant and its scoped records.", "GenericObject", true)),
                     ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true), Operation("post", "createUser", "Tenants", "Create user", "Creates a tenant user with a required password.", "User", true)),

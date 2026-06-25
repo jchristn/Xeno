@@ -215,6 +215,18 @@ xeno model add --provider vllm --name meta-llama/Llama-3.1-8B-Instruct
 
 By default, `xeno model add` records the model as completion-capable. Edit `~/.xeno/client.json` directly if a model should also advertise embeddings before the CLI exposes a dedicated flag.
 
+Delete a model from every configured provider endpoint that advertises it:
+
+```powershell
+xeno model delete --name llama3.2:latest
+```
+
+Delete a model only from one provider endpoint:
+
+```powershell
+xeno model delete --provider local-ollama --name llama3.2:latest
+```
+
 ## Verify Inventory and Status
 
 Show the hardware and model inventory that the client will advertise:

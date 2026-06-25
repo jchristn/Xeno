@@ -122,15 +122,49 @@ function buildBuckets(rawBuckets, selectedRange) {
     ? rawBuckets
     : Array.from({ length: selectedRange.buckets }, (_, index) => ({
         label: fallbackLabel(selectedRange.key, index, selectedRange.buckets),
-        success: index % 4,
-        failed: index % 5 === 0 ? 1 : 0
+        success: 0,
+        failed: 0
       }));
 
-  return source.slice(-selectedRange.buckets).map((bucket, index) => ({
-    failed: Number(bucket.failed ?? bucket.Failed ?? 0),
-    label: String(bucket.label ?? bucket.Label ?? fallbackLabel(selectedRange.key, index, source.length)),
-    success: Number(bucket.success ?? bucket.Success ?? 0)
-  }));
+  return source.slice(-selectedRange.buckets).map((bucket, index) => normalizeBucket(bucket, selectedRange, index, source.length));
+}
+
+function normalizeBucket(bucket, selectedRange, index, count) {
+  const total = Number(bucket.count ?? bucket.Count ?? 0);
+  const failed = Number(bucket.failed ?? bucket.Failed ?? bucket.errors ?? bucket.Errors ?? 0);
+  const explicitSuccess = bucket.success ?? bucket.Success;
+  const success = explicitSuccess === undefined || explicitSuccess === null
+    ? Math.max(0, total - failed)
+    : Number(explicitSuccess);
+
+  return {
+    failed: Number.isFinite(failed) ? failed : 0,
+    label: bucketLabel(bucket, selectedRange, index, count),
+    success: Number.isFinite(success) ? success : 0
+  };
+}
+
+function bucketLabel(bucket, selectedRange, index, count) {
+  const label = bucket.label ?? bucket.Label;
+  if (label) return String(label);
+
+  const start = bucket.startUtc ?? bucket.StartUtc;
+  if (start) {
+    const date = new Date(start);
+    if (!Number.isNaN(date.getTime())) {
+      if (selectedRange.key === 'lastHour') {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      if (selectedRange.key === 'lastDay') {
+        return date.toLocaleTimeString([], { hour: '2-digit' });
+      }
+
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+  }
+
+  return fallbackLabel(selectedRange.key, index, count);
 }
 
 function fallbackLabel(range, index, count) {

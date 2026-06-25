@@ -163,9 +163,7 @@ namespace Xeno.Client
             }
             else
             {
-                Console.WriteLine();
-                WriteSuccess("Reset Xeno client to factory defaults.");
-                Console.WriteLine();
+                WriteSuccessHeading("Reset Xeno client to factory defaults.");
                 Console.WriteLine("  Settings: " + ClientSettings.SettingsFile);
                 Console.WriteLine("  State:    " + ClientConnectionState.StateFile + " (removed)");
             }
@@ -175,9 +173,7 @@ namespace Xeno.Client
 
         private static bool ConfirmReset()
         {
-            Console.WriteLine();
-            WriteWarning("This will reset the Xeno client to factory defaults.");
-            Console.WriteLine();
+            WriteWarningHeading("This will reset the Xeno client to factory defaults.");
             Console.WriteLine("  Settings: " + ClientSettings.SettingsFile);
             Console.WriteLine("  State:    " + ClientConnectionState.StateFile);
             Console.WriteLine();
@@ -613,6 +609,50 @@ namespace Xeno.Client
                 return 0;
             }
 
+            if (args.Length >= 2 && (args[1] == "delete" || args[1] == "remove"))
+            {
+                string runnerName = String.Empty;
+                string modelName = String.Empty;
+                for (int i = 2; i < args.Length - 1; i += 2)
+                {
+                    if (args[i] == "--runner" || args[i] == "--provider") runnerName = args[i + 1];
+                    if (args[i] == "--name") modelName = args[i + 1];
+                }
+
+                if (String.IsNullOrWhiteSpace(modelName))
+                {
+                    WriteError("Model name is required.");
+                    PrintModelHelp();
+                    return 1;
+                }
+
+                if (!String.IsNullOrWhiteSpace(runnerName) && !settings.Runners.Exists(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    WriteError("Provider endpoint not found: " + runnerName);
+                    return 1;
+                }
+
+                int removed = 0;
+                foreach (ClientRunnerSettings runner in settings.Runners)
+                {
+                    if (!String.IsNullOrWhiteSpace(runnerName) && !String.Equals(runner.Name, runnerName, StringComparison.OrdinalIgnoreCase)) continue;
+                    removed += runner.Models.RemoveAll(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (removed == 0)
+                {
+                    if (String.IsNullOrWhiteSpace(runnerName)) WriteError("Model not found: " + modelName);
+                    else WriteError("Model not found in provider endpoint '" + runnerName + "': " + modelName);
+                    return 1;
+                }
+
+                settings.Save();
+                if (!String.IsNullOrWhiteSpace(runnerName)) WriteSuccess("Deleted model '" + modelName + "' from provider endpoint '" + runnerName + "'.");
+                else if (removed == 1) WriteSuccess("Deleted model '" + modelName + "'.");
+                else WriteSuccess("Deleted model '" + modelName + "' (" + removed + " entries removed).");
+                return 0;
+            }
+
             WriteError("Unknown model command.");
             PrintModelHelp();
             return 1;
@@ -937,35 +977,31 @@ namespace Xeno.Client
 
         private static void PrintConfig(ClientSettings settings)
         {
-            WriteInfo("Xeno client configuration");
+            WriteInfoHeading("Xeno client configuration");
             Console.WriteLine("  File:       " + ClientSettings.SettingsFile);
             Console.WriteLine("  Name:       " + settings.Name);
             Console.WriteLine("  Client ID:  " + DisplayValue(settings.ClientId, "(created on first connect)"));
             Console.WriteLine("  Tenant:     " + settings.TenantId);
             Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
-            Console.WriteLine();
-            Console.WriteLine("Server");
+            WritePlainHeading("Server");
             Console.WriteLine("  WebSocket:  " + settings.Server.Url);
             Console.WriteLine("  REST:       " + DisplayValue(settings.Server.RestUrl, "(derived from WebSocket URL)"));
             Console.WriteLine("  Access key: " + DisplayValue(settings.Server.AccessKey, "(not set)"));
             Console.WriteLine("  Secret key: " + MaskSecret(settings.Server.SecretKey));
             Console.WriteLine("  REST token: " + MaskSecret(settings.Server.Token));
-            Console.WriteLine();
             PrintProviders(settings);
         }
 
         private static void PrintInventory(ClientSettings settings)
         {
-            WriteInfo("Advertised client inventory");
+            WriteInfoHeading("Advertised client inventory");
             Console.WriteLine("  Machine:    " + Environment.MachineName);
             Console.WriteLine("  OS:         " + Environment.OSVersion);
             Console.WriteLine("  Arch:       " + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
             Console.WriteLine("  Processors: " + Environment.ProcessorCount);
             Console.WriteLine("  Memory:     " + FormatBytes(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes));
             Console.WriteLine("  Version:    " + ClientVersion);
-            Console.WriteLine();
             PrintProviders(settings);
-            Console.WriteLine();
             PrintModels(settings);
         }
 
@@ -1062,7 +1098,7 @@ namespace Xeno.Client
                 return;
             }
 
-            WriteInfo("Xeno client status");
+            WriteInfoHeading("Xeno client status");
             Console.WriteLine("  Name:       " + settings.Name);
             Console.WriteLine("  Client ID:  " + (String.IsNullOrWhiteSpace(settings.ClientId) ? "(created on first connect)" : settings.ClientId));
             Console.WriteLine("  Tenant:     " + settings.TenantId);
@@ -1071,8 +1107,7 @@ namespace Xeno.Client
             Console.WriteLine("  Auth:       " + DescribeAuth(settings));
             Console.WriteLine("  Providers:  " + settings.Runners.Count);
             Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
-            Console.WriteLine();
-            Console.WriteLine("Connection");
+            WritePlainHeading("Connection");
             Console.WriteLine("  Connected:           " + FormatTrueFalse(connection.IsConnected));
             Console.WriteLine("  Connected UTC:       " + FormatUtc(connection.ConnectedUtc));
             Console.WriteLine("  Disconnected UTC:    " + FormatUtc(connection.DisconnectedUtc));
@@ -1106,12 +1141,11 @@ namespace Xeno.Client
 
             if (settings.Runners.Count == 0)
             {
-                WriteInfo("No provider endpoints are configured.");
+                WriteInfoHeading("No provider endpoints are configured.");
                 return;
             }
 
-            WriteInfo("Configured provider endpoints");
-            Console.WriteLine();
+            WriteInfoHeading("Configured provider endpoints");
             for (int i = 0; i < settings.Runners.Count; i++)
             {
                 if (i > 0) Console.WriteLine();
@@ -1154,7 +1188,8 @@ namespace Xeno.Client
             {
                 foreach (ClientModelSettings model in runner.Models)
                 {
-                    if (!any) WriteInfo("Configured models");
+                    if (!any) WriteInfoHeading("Configured models");
+                    else Console.WriteLine();
                     any = true;
                     Console.WriteLine("  - " + model.Name);
                     Console.WriteLine("    Provider:    " + runner.Name + " [" + runner.Provider + "]");
@@ -1163,7 +1198,7 @@ namespace Xeno.Client
                 }
             }
 
-            if (!any) WriteInfo("No models are configured.");
+            if (!any) WriteInfoHeading("No models are configured.");
         }
 
         private static ClientRunnerSettings? FindDuplicateProvider(ClientSettings settings, ClientRunnerSettings candidate)
@@ -1287,7 +1322,7 @@ namespace Xeno.Client
 
         private static void PrintConfigHelp()
         {
-            WriteInfo("Configuration commands");
+            WriteInfoHeading("Configuration commands");
             Console.WriteLine("  xeno config show");
             Console.WriteLine("      Show the client configuration in formatted text.");
             Console.WriteLine("  xeno config colors on");
@@ -1298,7 +1333,7 @@ namespace Xeno.Client
 
         private static void PrintServerHelp()
         {
-            WriteInfo("Server commands");
+            WriteInfoHeading("Server commands");
             Console.WriteLine("  xeno server set-url <websocket-url>");
             Console.WriteLine("      Set the Xeno server WebSocket endpoint.");
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
@@ -1307,7 +1342,7 @@ namespace Xeno.Client
 
         private static void PrintResetHelp()
         {
-            WriteInfo("Reset command");
+            WriteInfoHeading("Reset command");
             Console.WriteLine("  xeno reset");
             Console.WriteLine("      Prompt for confirmation, then restore ~/.xeno/client.json to factory defaults and remove runtime state.");
             Console.WriteLine("  xeno reset --force");
@@ -1316,7 +1351,7 @@ namespace Xeno.Client
 
         private static void PrintLoginHelp()
         {
-            WriteInfo("Login command");
+            WriteInfoHeading("Login command");
             Console.WriteLine("  xeno login -u <username>");
             Console.WriteLine("      Prompt for a password and store only the returned client credential.");
             Console.WriteLine("  xeno login -u <username>");
@@ -1327,7 +1362,7 @@ namespace Xeno.Client
 
         private static void PrintAuthHelp()
         {
-            WriteInfo("Authentication commands");
+            WriteInfoHeading("Authentication commands");
             Console.WriteLine("  xeno login -u <username>");
             Console.WriteLine("             [--tenant <tenant-id>]");
             Console.WriteLine("             [--server <rest-url>]");
@@ -1341,7 +1376,7 @@ namespace Xeno.Client
 
         private static void PrintProviderHelp()
         {
-            WriteInfo("Provider commands");
+            WriteInfoHeading("Provider commands");
             Console.WriteLine("  xeno provider list");
             Console.WriteLine("      Show configured provider endpoints.");
             Console.WriteLine("  xeno provider test --name <name>");
@@ -1357,12 +1392,15 @@ namespace Xeno.Client
 
         private static void PrintModelHelp()
         {
-            WriteInfo("Model commands");
+            WriteInfoHeading("Model commands");
             Console.WriteLine("  xeno model list");
             Console.WriteLine("      Show models advertised by this client.");
             Console.WriteLine("  xeno model add --provider <provider-name>");
             Console.WriteLine("                 --name <model-name>");
             Console.WriteLine("      Add a model to one configured provider endpoint.");
+            Console.WriteLine("  xeno model delete --name <model-name>");
+            Console.WriteLine("                    [--provider <provider-name>]");
+            Console.WriteLine("      Delete a model from one provider endpoint, or from all providers when omitted.");
         }
 
         private static void WriteSuccess(string message)
@@ -1385,6 +1423,34 @@ namespace Xeno.Client
             WriteColored("Error: " + message, ConsoleColor.Red);
         }
 
+        private static void WriteInfoHeading(string message)
+        {
+            Console.WriteLine();
+            WriteInfo(message);
+            Console.WriteLine();
+        }
+
+        private static void WriteSuccessHeading(string message)
+        {
+            Console.WriteLine();
+            WriteSuccess(message);
+            Console.WriteLine();
+        }
+
+        private static void WriteWarningHeading(string message)
+        {
+            Console.WriteLine();
+            WriteWarning(message);
+            Console.WriteLine();
+        }
+
+        private static void WritePlainHeading(string message)
+        {
+            Console.WriteLine();
+            Console.WriteLine(message);
+            Console.WriteLine();
+        }
+
         private static void WriteColored(string message, ConsoleColor color)
         {
             if (!_UseColors || Console.IsOutputRedirected)
@@ -1401,34 +1467,30 @@ namespace Xeno.Client
 
         private static void PrintHelp()
         {
-            WriteInfo("xeno " + ClientVersion);
-            Console.WriteLine();
+            WriteInfoHeading("xeno " + ClientVersion);
             Console.WriteLine("Usage:");
-            Console.WriteLine("  xeno <command> [options]");
             Console.WriteLine();
-            Console.WriteLine("Common commands:");
+            Console.WriteLine("  xeno <command> [options]");
+            WritePlainHeading("Common commands:");
             Console.WriteLine("  xeno init");
             Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno status");
             Console.WriteLine("  xeno inventory");
             Console.WriteLine("  xeno connect");
-            Console.WriteLine();
-            Console.WriteLine("Configuration:");
+            WritePlainHeading("Configuration:");
             Console.WriteLine("  xeno config show");
             Console.WriteLine("  xeno config colors on");
             Console.WriteLine("  xeno config colors off");
             Console.WriteLine("  xeno server set-url <websocket-url>");
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
-            Console.WriteLine();
-            Console.WriteLine("Authentication:");
+            WritePlainHeading("Authentication:");
             Console.WriteLine("  xeno login -u <username>");
             Console.WriteLine("             [--tenant <tenant-id>]");
             Console.WriteLine("             [--server <rest-url>]");
             Console.WriteLine("  xeno set-auth --access-key <key>");
             Console.WriteLine("                --secret-key <secret>");
             Console.WriteLine("  xeno set-auth --clear");
-            Console.WriteLine();
-            Console.WriteLine("Providers:");
+            WritePlainHeading("Providers:");
             Console.WriteLine("  xeno provider list");
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("  xeno provider delete --name <name>");
@@ -1436,18 +1498,17 @@ namespace Xeno.Client
             Console.WriteLine("                    --provider <provider>");
             Console.WriteLine("                    --endpoint <url>");
             Console.WriteLine("                    [--credential <value>]");
-            Console.WriteLine();
-            Console.WriteLine("Models:");
+            WritePlainHeading("Models:");
             Console.WriteLine("  xeno model list");
             Console.WriteLine("  xeno model add --provider <provider-name>");
             Console.WriteLine("                 --name <model-name>");
-            Console.WriteLine();
-            Console.WriteLine("Global options:");
+            Console.WriteLine("  xeno model delete --name <model-name>");
+            Console.WriteLine("                    [--provider <provider-name>]");
+            WritePlainHeading("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");
             Console.WriteLine("  --json        Emit machine-readable JSON for supported commands.");
-            Console.WriteLine();
-            Console.WriteLine("Reset:");
+            WritePlainHeading("Reset:");
             Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno reset --force");
             Console.WriteLine();

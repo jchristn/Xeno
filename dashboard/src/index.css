@@ -1590,6 +1590,29 @@ html[data-theme='dark'] .permission-option {
   overflow-wrap: anywhere;
 }
 
+.explorer-description {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.explorer-operation-select {
+  width: 100%;
+}
+
+.explorer-json-editor {
+  min-height: 178px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.explorer-json-editor.small {
+  min-height: 92px;
+}
+
 .backup-editor {
   width: 100%;
   min-height: 220px;

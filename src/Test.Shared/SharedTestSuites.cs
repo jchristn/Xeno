@@ -157,6 +157,47 @@ namespace Test.Shared
                             {
                                 if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
                             }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientModelDeleteRemovesConfiguredModels",
+                        "Client model delete removes configured models",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-model-delete-" + Guid.NewGuid().ToString("N"));
+                            Directory.CreateDirectory(clientHome);
+
+                            try
+                            {
+                                (int ExitCode, string StandardOutput, string StandardError) initial = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
+                                if (initial.ExitCode != 0) throw new InvalidOperationException("Initial model list failed: " + initial.StandardError + initial.StandardOutput);
+                                if (!initial.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Default model was not listed before delete.");
+
+                                (int ExitCode, string StandardOutput, string StandardError) deleted = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                if (deleted.ExitCode != 0) throw new InvalidOperationException("Model delete failed: " + deleted.StandardError + deleted.StandardOutput);
+                                if (!deleted.StandardOutput.Contains("Deleted model", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model delete did not report success.");
+
+                                (int ExitCode, string StandardOutput, string StandardError) emptyList = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
+                                if (emptyList.ExitCode != 0) throw new InvalidOperationException("Model list after delete failed: " + emptyList.StandardError + emptyList.StandardOutput);
+                                using (JsonDocument document = JsonDocument.Parse(emptyList.StandardOutput))
+                                {
+                                    if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() != 0) throw new InvalidOperationException("Model delete did not remove the configured model.");
+                                }
+
+                                (int ExitCode, string StandardOutput, string StandardError) missing = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                if (missing.ExitCode == 0) throw new InvalidOperationException("Deleting a missing model should fail.");
+                                if (!missing.StandardOutput.Contains("Model not found", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Missing model delete did not print a useful error.");
+
+                                (int ExitCode, string StandardOutput, string StandardError) added = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                if (added.ExitCode != 0) throw new InvalidOperationException("Model add before scoped delete failed: " + added.StandardError + added.StandardOutput);
+
+                                (int ExitCode, string StandardOutput, string StandardError) scopedDelete = await RunXenoClientAsync(new[] { "model", "delete", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                if (scopedDelete.ExitCode != 0) throw new InvalidOperationException("Provider-scoped model delete failed: " + scopedDelete.StandardError + scopedDelete.StandardOutput);
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
                         })
                 });
         }
@@ -562,6 +603,24 @@ namespace Test.Shared
                         string analytics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/analytics/overview").ConfigureAwait(false);
                         if (!analytics.Contains("failureRate", StringComparison.Ordinal)) throw new InvalidOperationException("Analytics overview missing failureRate.");
 
+                        using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1/chat/completions", "{\"model\":\"missing-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}").ConfigureAwait(false))
+                        {
+                            string completionBody = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)completionResponse.StatusCode < 400 || !completionBody.Contains("ModelNotFound", StringComparison.Ordinal)) throw new InvalidOperationException("Expected missing model request to be recorded as a failed request: " + completionBody);
+                        }
+
+                        string summary = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/request-history/summary").ConfigureAwait(false);
+                        if (!summary.Contains("\"count\"", StringComparison.Ordinal) || !summary.Contains("\"errors\"", StringComparison.Ordinal) || !summary.Contains("\"success\"", StringComparison.Ordinal) || !summary.Contains("\"failed\"", StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Request history summary missing chart bucket fields: " + summary);
+                        }
+
+                        string requestHistory = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/request-history").ConfigureAwait(false);
+                        if (!requestHistory.Contains("/v1/chat/completions", StringComparison.Ordinal) || !requestHistory.Contains("ModelNotFound", StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Request history list missing recorded OpenAI request: " + requestHistory);
+                        }
+
                         string metrics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/metrics").ConfigureAwait(false);
                         if (!metrics.Contains("xeno_connected_clients", StringComparison.Ordinal)) throw new InvalidOperationException("Metrics output missing connected clients.");
                     }
@@ -618,6 +677,10 @@ namespace Test.Shared
                         string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
                         if (!openApi.Contains("client-model", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("clientmodels", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing client model delete route.");
                         if (!openApi.Contains("request-history", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("requesthistory", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing request history delete route.");
+                        foreach ((string Route, string Method) route in new[] { ("/metrics", "get"), ("/openapi.json", "get"), ("/v1.0/api/auth/token/details", "get"), ("/v1.0/api/auth/token/refresh", "post"), ("/v1.0/api/auth/logout", "post") })
+                        {
+                            if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
+                        }
 
                         using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}").ConfigureAwait(false))
                         {

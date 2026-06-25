@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next';
 
 const sampleStorageKey = 'xeno.connectedClients.samples';
 const ranges = [
-  { key: 'lastHour', durationMs: 60 * 60 * 1000 },
-  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000 },
-  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000 },
-  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000 }
+  { key: 'lastHour', durationMs: 60 * 60 * 1000, buckets: 12 },
+  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, buckets: 24 },
+  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, buckets: 14 },
+  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, buckets: 30 }
 ];
 
 export default function ConnectedClientsChart({ connected, onRefresh, sampleVersion, total }) {
@@ -19,12 +19,11 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   const [samples, setSamples] = useState(loadSamples);
   const selectedRange = ranges.find((item) => item.key === range) || ranges[1];
   const now = Date.now();
-  const rangeStart = now - selectedRange.durationMs;
-  const visibleSamples = useMemo(
-    () => normalizeSamples(samples, connected, total, rangeStart, now),
-    [connected, now, rangeStart, samples, total]
+  const buckets = useMemo(
+    () => buildBuckets(samples, connected, total, selectedRange, now),
+    [connected, now, samples, selectedRange, total]
   );
-  const max = Math.max(1, total || 0, ...visibleSamples.map((sample) => sample.connected));
+  const max = Math.max(1, total || 0, ...buckets.map((bucket) => bucket.connected));
 
   useEffect(() => {
     refreshRef.current = onRefresh;
@@ -75,15 +74,8 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   chart.plotHeight = chart.height - chart.top - chart.bottom;
   chart.baseY = chart.top + chart.plotHeight;
   const yTicks = [max, Math.round(max / 2), 0];
-  const points = visibleSamples.map((sample) => {
-    const x = chart.left + ((sample.ts - rangeStart) / selectedRange.durationMs) * chart.plotWidth;
-    const y = chart.baseY - (sample.connected / max) * chart.plotHeight;
-    return { ...sample, x, y };
-  });
-  const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
-  const areaPath = points.length > 0
-    ? `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${chart.baseY} L ${points[0].x.toFixed(2)} ${chart.baseY} Z`
-    : '';
+  const barSlot = chart.plotWidth / Math.max(1, buckets.length);
+  const barWidth = Math.max(5, barSlot - 6);
 
   return (
     <div className="activity-chart-panel">
@@ -114,33 +106,33 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
           })}
           <text className="axis-title" transform={`translate(16 ${chart.top + chart.plotHeight / 2}) rotate(-90)`}>{t('connectedNodeCount')}</text>
           <text className="axis-title" x={chart.left + chart.plotWidth / 2} y={chart.height - 12} textAnchor="middle">{t('time')}</text>
-          <text className="axis-label" x={chart.left} y={chart.baseY + 20} textAnchor="start">{formatTime(rangeStart, selectedRange.key)}</text>
-          <text className="axis-label" x={chart.left + chart.plotWidth / 2} y={chart.baseY + 20} textAnchor="middle">{formatTime(rangeStart + selectedRange.durationMs / 2, selectedRange.key)}</text>
-          <text className="axis-label" x={chart.left + chart.plotWidth} y={chart.baseY + 20} textAnchor="end">{formatTime(now, selectedRange.key)}</text>
-          {areaPath ? <path d={areaPath} fill="var(--color-info-soft)" opacity="0.78" /> : null}
-          {linePath ? <path d={linePath} fill="none" stroke="var(--color-info)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" /> : null}
-          {points.map((point, index) => (
-            <circle
-              cx={point.x}
-              cy={point.y}
-              fill="var(--color-info)"
-              key={`${point.ts}-${index}`}
-              onBlur={() => setHovered(null)}
-              onFocus={() => setHovered(point)}
-              onMouseLeave={() => setHovered(null)}
-              onMouseMove={() => setHovered(point)}
-              r="4"
-              tabIndex={0}
-            >
-              <title>{`${formatTime(point.ts, selectedRange.key)}: ${point.connected}`}</title>
-            </circle>
-          ))}
+          {buckets.map((bucket, index) => {
+            const x = chart.left + index * barSlot + (barSlot - barWidth) / 2;
+            const height = (bucket.connected / max) * chart.plotHeight;
+            const y = chart.baseY - height;
+            const showTick = shouldShowTick(index, buckets.length);
+            return (
+              <g
+                key={`${bucket.start}-${index}`}
+                onBlur={() => setHovered(null)}
+                onFocus={() => setHovered({ bucket, x: x + barWidth / 2, y })}
+                onMouseLeave={() => setHovered(null)}
+                onMouseMove={() => setHovered({ bucket, x: x + barWidth / 2, y })}
+                tabIndex={0}
+              >
+                <title>{`${bucket.label}: ${bucket.connected}`}</title>
+                <rect x={x} y={chart.top} width={barWidth} height={chart.plotHeight} fill="transparent" />
+                <rect x={x} y={y} width={barWidth} height={height} rx="3" fill="var(--color-info)" />
+                {showTick ? <text className="axis-label" x={x + barWidth / 2} y={chart.baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
+              </g>
+            );
+          })}
         </svg>
         {hovered ? (
           <div className="chart-tooltip" style={{ left: `${(hovered.x / chart.width) * 100}%`, top: `${(hovered.y / chart.height) * 100}%` }}>
-            <strong>{formatTime(hovered.ts, selectedRange.key)}</strong>
-            <span>{t('connectedClients')}: {hovered.connected}</span>
-            <span>{t('clients')}: {hovered.total}</span>
+            <strong>{hovered.bucket.label}</strong>
+            <span>{t('connectedClients')}: {hovered.bucket.connected}</span>
+            <span>{t('clients')}: {hovered.bucket.total}</span>
           </div>
         ) : null}
       </div>
@@ -180,23 +172,28 @@ function pruneSamples(samples) {
     .slice(-500);
 }
 
-function normalizeSamples(samples, connected, total, rangeStart, now) {
-  const visible = samples.filter((sample) => sample.ts >= rangeStart && sample.ts <= now);
-  if (visible.length === 0) {
-    return [
-      { connected: Number(connected || 0), total: Number(total || 0), ts: rangeStart },
-      { connected: Number(connected || 0), total: Number(total || 0), ts: now }
-    ];
-  }
+function buildBuckets(samples, connected, total, selectedRange, now) {
+  const rangeStart = now - selectedRange.durationMs;
+  const bucketMs = selectedRange.durationMs / selectedRange.buckets;
+  const source = pruneSamples([
+    ...samples,
+    { connected: Number(connected || 0), total: Number(total || 0), ts: now }
+  ]).filter((sample) => sample.ts >= rangeStart && sample.ts <= now);
 
-  if (visible.length === 1) {
-    return [
-      { ...visible[0], ts: rangeStart },
-      visible[0]
-    ];
-  }
-
-  return visible;
+  return Array.from({ length: selectedRange.buckets }, (_, index) => {
+    const start = rangeStart + index * bucketMs;
+    const end = index === selectedRange.buckets - 1 ? now + 1 : start + bucketMs;
+    const bucketSamples = source
+      .filter((sample) => sample.ts >= start && sample.ts < end)
+      .sort((left, right) => left.ts - right.ts);
+    const latest = bucketSamples[bucketSamples.length - 1];
+    return {
+      connected: latest ? latest.connected : 0,
+      label: formatTime(start, selectedRange.key),
+      start,
+      total: latest ? latest.total : Number(total || 0)
+    };
+  });
 }
 
 function formatTime(timestamp, range) {
@@ -208,4 +205,10 @@ function formatTime(timestamp, range) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function shouldShowTick(index, count) {
+  if (count <= 12) return true;
+  if (count <= 24) return index % 4 === 0 || index === count - 1;
+  return index % 5 === 0 || index === count - 1;
 }

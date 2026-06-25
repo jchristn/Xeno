@@ -37,6 +37,29 @@ export default class ApiClient {
     return response.json();
   }
 
+  async request(path, { body, method = 'GET' } = {}) {
+    const options = {
+      method,
+      headers: this.headers()
+    };
+    if (body !== undefined && body !== null && method.toUpperCase() !== 'GET') {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, options);
+    const text = await response.text();
+    const headers = {};
+    response.headers.forEach((value, key) => { headers[key] = value; });
+
+    return {
+      body: parseBody(text),
+      headers,
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText
+    };
+  }
+
   async text(path) {
     const response = await fetch(`${this.baseUrl}${path}`, { headers: this.headers() });
     return response.text();
@@ -47,5 +70,14 @@ export default class ApiClient {
       'Content-Type': 'application/json',
       'Accept-Language': document.documentElement.lang || 'en'
     };
+  }
+}
+
+function parseBody(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
 }

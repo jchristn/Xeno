@@ -14,7 +14,6 @@ import {
   Download,
   FileJson,
   Gauge,
-  Github,
   Globe2,
   History,
   KeyRound,
@@ -50,6 +49,8 @@ import Modal from './components/Modal.jsx';
 import Pagination from './components/Pagination.jsx';
 
 const api = new ApiClient();
+const requestHistoryEndpoint = '/v1.0/api/request-history';
+const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
 
 const interactiveRowClickSelector = [
   'button',
@@ -76,7 +77,7 @@ const navGroups = [
     key: 'control',
     links: [
       { to: '/dashboard/clients', key: 'clients', icon: Network },
-      { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit, nested: true }
+      { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit }
     ]
   },
   {
@@ -167,7 +168,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
               target="_blank"
               title={t('github')}
             >
-              <Github size={17} />
+              <GitHubMark size={17} />
             </a>
             <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('toggleTheme')} type="button">
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
@@ -221,7 +222,7 @@ function LoginView({ onToggleTheme, theme }) {
         <section className="login-card">
           <div className="login-card-actions">
             <a aria-label={t('github')} className="icon-button" href="https://github.com/jchristn/Xeno" rel="noreferrer" target="_blank" title={t('github')}>
-              <Github size={17} />
+              <GitHubMark size={17} />
             </a>
             <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('toggleTheme')} type="button">
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
@@ -254,7 +255,7 @@ function LoginView({ onToggleTheme, theme }) {
 function HomeView() {
   const { t } = useTranslation();
   const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
-  const summary = useResource('/api/v1/requesthistory/summary', { buckets: [] });
+  const summary = useResource(requestHistorySummaryEndpoint, { buckets: [] });
   const clients = useResource('/api/v1/clients', []);
   const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
@@ -304,14 +305,14 @@ function HomeView() {
 
 function RequestHistoryView() {
   const { t } = useTranslation();
-  const history = useResource('/api/v1/requesthistory', []);
-  const summary = useResource('/api/v1/requesthistory/summary', { buckets: [] });
+  const history = useResource(requestHistoryEndpoint, []);
+  const summary = useResource(requestHistorySummaryEndpoint, { buckets: [] });
   const [selected, setSelected] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const bucketTotals = summarizeBuckets(summary.data.buckets || []);
 
   async function clearHistory() {
-    await api.post('/api/v1/requesthistory/bulk', {});
+    await api.post(`${requestHistoryEndpoint}/bulk`, {});
     history.refresh();
     summary.refresh();
     setConfirmClear(false);
@@ -340,7 +341,7 @@ function RequestHistoryView() {
         columns={['statusCode', 'method', 'path', 'model', 'selectedClientId', 'durationMs', 'createdUtc']}
         onDelete={(row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
-          return deleteRecord('/api/v1/requesthistory', row);
+          return deleteRecord(requestHistoryEndpoint, row);
         }}
         onRowClick={setSelected}
         onRefresh={() => { history.refresh(); summary.refresh(); }}
@@ -364,98 +365,244 @@ function RequestHistoryView() {
 
 function ApiExplorerView() {
   const { t } = useTranslation();
-  const operations = [
-    { key: 'chatCompletions', method: 'POST', path: '/v1/chat/completions' },
-    { key: 'completions', method: 'POST', path: '/v1/completions' },
-    { key: 'embeddings', method: 'POST', path: '/v1/embeddings' },
-    { key: 'listModels', method: 'GET', path: '/v1/models' }
-  ];
-  const [operation, setOperation] = useState('chatCompletions');
-  const [model, setModel] = useState('llama3.2:latest');
+  const openApi = useResource('/openapi.json', { paths: {} });
+  const models = useResource('/v1/models', { data: [] });
+  const operations = useMemo(() => buildApiOperations(openApi.data), [openApi.data]);
+  const tags = useMemo(() => ['all', ...new Set(operations.map((item) => item.tag).filter(Boolean))], [operations]);
+  const modelOptions = useMemo(() => extractModelOptions(models.data), [models.data]);
+  const [tag, setTag] = useState('all');
+  const [operationKey, setOperationKey] = useState('');
+  const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('hello');
   const [input, setInput] = useState('hello');
   const [maxTokens, setMaxTokens] = useState(128);
+  const [pathValues, setPathValues] = useState({});
+  const [queryText, setQueryText] = useState('{}');
+  const [bodyText, setBodyText] = useState('{}');
   const [request, setRequest] = useState(null);
   const [response, setResponse] = useState(null);
-  const selected = operations.find((item) => item.key === operation) || operations[0];
+  const visibleOperations = tag === 'all' ? operations : operations.filter((item) => item.tag === tag);
+  const selected = operations.find((item) => item.key === operationKey) || visibleOperations[0] || operations[0];
+  const pathParameters = selected ? extractPathParameters(selected.path) : [];
+  const usesModel = selected ? operationUsesModel(selected) : false;
 
-  function buildRequestBody() {
-    if (operation === 'chatCompletions') {
-      return { model, messages: [{ role: 'user', content: prompt }], stream: false, max_tokens: Number(maxTokens) || 128 };
+  useEffect(() => {
+    if (operationKey || operations.length === 0) return;
+    const preferred = operations.find((item) => item.path === '/v1/chat/completions') || operations[0];
+    setOperationKey(preferred.key);
+  }, [operationKey, operations]);
+
+  useEffect(() => {
+    if (model || modelOptions.length === 0) return;
+    const nextModel = modelOptions[0];
+    setModel(nextModel);
+    if (selected && operationUsesModel(selected)) {
+      setBodyText(formatJson(exampleBodyForOperation(selected, nextModel, prompt, input, maxTokens)));
     }
-    if (operation === 'completions') {
-      return { model, prompt, stream: false, max_tokens: Number(maxTokens) || 128 };
+  }, [input, maxTokens, model, modelOptions, prompt, selected?.key]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setPathValues(Object.fromEntries(extractPathParameters(selected.path).map((name) => [name, ''])));
+    setQueryText(formatJson(defaultQueryForOperation(selected)));
+    setBodyText(formatJson(exampleBodyForOperation(selected, model, prompt, input, maxTokens)));
+    setResponse(null);
+    setRequest(null);
+  }, [selected?.key]);
+
+  function updateOperation(nextKey) {
+    setOperationKey(nextKey);
+  }
+
+  function updateTag(nextTag) {
+    setTag(nextTag);
+    const nextOperations = nextTag === 'all' ? operations : operations.filter((item) => item.tag === nextTag);
+    if (nextOperations.length > 0) setOperationKey(nextOperations[0].key);
+  }
+
+  function patchBody(updater) {
+    const current = parseJsonOrFallback(bodyText, exampleBodyForOperation(selected, model, prompt, input, maxTokens));
+    setBodyText(formatJson(updater(current)));
+  }
+
+  function updateModel(nextModel) {
+    setModel(nextModel);
+    if (usesModel) patchBody((current) => ({ ...current, model: nextModel }));
+  }
+
+  function updatePrompt(nextPrompt) {
+    setPrompt(nextPrompt);
+    if (!selected) return;
+    if (selected.operationId === 'createChatCompletion') {
+      patchBody((current) => ({ ...current, messages: [{ role: 'user', content: nextPrompt }] }));
+    } else if (selected.operationId === 'createCompletion') {
+      patchBody((current) => ({ ...current, prompt: nextPrompt }));
     }
-    if (operation === 'embeddings') {
-      return { model, input };
+  }
+
+  function updateInput(nextInput) {
+    setInput(nextInput);
+    if (selected?.operationId === 'createEmbedding') {
+      patchBody((current) => ({ ...current, input: nextInput }));
     }
-    return null;
+  }
+
+  function updateMaxTokens(nextMaxTokens) {
+    setMaxTokens(nextMaxTokens);
+    if (selected?.operationId === 'createChatCompletion' || selected?.operationId === 'createCompletion') {
+      patchBody((current) => ({ ...current, max_tokens: Number(nextMaxTokens) || 128 }));
+    }
   }
 
   async function execute() {
-    const body = buildRequestBody();
-    setRequest({ method: selected.method, path: selected.path, body });
-    const data = selected.method === 'GET'
-      ? await api.get(selected.path)
-      : await api.post(selected.path, body);
-    setResponse(data);
+    if (!selected) return;
+
+    const queryResult = parseJsonForExplorer(queryText, {});
+    if (!queryResult.ok) {
+      setResponse({ body: { error: t('invalidJson'), field: t('queryParameters'), details: queryResult.error }, ok: false, status: 0, statusText: 'Invalid JSON' });
+      return;
+    }
+
+    const bodyResult = selected.method === 'GET'
+      ? { ok: true, value: undefined }
+      : parseJsonForExplorer(bodyText, {});
+    if (!bodyResult.ok) {
+      setResponse({ body: { error: t('invalidJson'), field: t('requestBody'), details: bodyResult.error }, ok: false, status: 0, statusText: 'Invalid JSON' });
+      return;
+    }
+
+    const query = queryResult.value;
+    const requestPath = buildExplorerPath(selected.path, pathValues, query);
+    const body = bodyResult.value;
+    const requestPreview = {
+      body: body ?? null,
+      method: selected.method,
+      path: requestPath
+    };
+    setRequest(requestPreview);
+
+    try {
+      const result = await api.request(requestPath, { body, method: selected.method });
+      setResponse(result);
+    } catch (error) {
+      setResponse({
+        body: { error: error instanceof Error ? error.message : String(error) },
+        ok: false,
+        status: 0,
+        statusText: 'Client Error'
+      });
+    }
   }
+
+  const requestPreview = selected
+    ? { body: selected.method === 'GET' ? null : parseJsonOrFallback(bodyText, {}), method: selected.method, path: buildExplorerPath(selected.path, pathValues, parseJsonOrFallback(queryText, {})) }
+    : { status: t('noData') };
 
   return (
     <div className="view-stack">
       <Panel
-        actions={<IconButton onClick={execute} label={t('execute')} icon={<Play size={16} />} variant="primary" />}
+        actions={<IconButton disabled={!selected} onClick={execute} label={t('execute')} icon={<Play size={16} />} variant="primary" />}
         title={t('requestBuilder')}
       >
-        <div className="form-stack">
-          <div className="segmented-control" role="tablist" aria-label={t('operation')}>
-            {operations.map((item) => (
-              <button
-                aria-selected={item.key === operation}
-                className={item.key === operation ? 'active' : ''}
-                key={item.key}
-                onClick={() => setOperation(item.key)}
-                role="tab"
-                type="button"
-              >
-                {t(item.key)}
-              </button>
-            ))}
-          </div>
-          <div className="route-preview">
-            <span className="status-chip neutral">{selected.method}</span>
-            <code>{selected.path}</code>
-            <span className="muted-copy">{api.baseUrl}</span>
-          </div>
-          {operation !== 'listModels' ? (
+        {operations.length === 0 ? (
+          <EmptyState message={t('openApiUnavailable')} title={t('noData')} />
+        ) : (
+          <div className="form-stack">
             <div className="form-grid two">
               <label className="form-field">
-                <span>{t('model')}</span>
-                <input value={model} onChange={(event) => setModel(event.target.value)} />
+                <span>{t('endpoints')}</span>
+                <select value={tag} onChange={(event) => updateTag(event.target.value)}>
+                  {tags.map((item) => <option key={item} value={item}>{item === 'all' ? t('allEndpoints') : item}</option>)}
+                </select>
               </label>
-              {operation !== 'embeddings' ? (
-                <label className="form-field">
-                  <span>{t('maxTokens')}</span>
-                  <input min="1" type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />
-                </label>
-              ) : null}
+              <label className="form-field">
+                <span>{t('operation')}</span>
+                <select className="explorer-operation-select" value={selected?.key || ''} onChange={(event) => updateOperation(event.target.value)}>
+                  {visibleOperations.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.method} {item.path} - {item.summary}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-          ) : null}
-          {operation === 'embeddings' ? (
-            <label className="form-field">
-              <span>{t('input')}</span>
-              <textarea rows={5} value={input} onChange={(event) => setInput(event.target.value)} />
-            </label>
-          ) : operation !== 'listModels' ? (
-            <label className="form-field">
-              <span>{t('prompt')}</span>
-              <textarea rows={5} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-            </label>
-          ) : null}
-        </div>
+
+            {selected ? (
+              <>
+                <div className="route-preview">
+                  <span className={`status-chip ${methodTone(selected.method)}`}>{selected.method}</span>
+                  <code>{selected.path}</code>
+                  <span className="muted-copy">{selected.summary}</span>
+                </div>
+                {selected.description ? <p className="explorer-description">{selected.description}</p> : null}
+
+                {pathParameters.length > 0 ? (
+                  <div className="form-grid two">
+                    {pathParameters.map((name) => (
+                      <label className="form-field" key={name}>
+                        <span>{t('pathParameter')}: {name}</span>
+                        <input
+                          value={pathValues[name] || ''}
+                          onChange={(event) => setPathValues((current) => ({ ...current, [name]: event.target.value }))}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+
+                {usesModel ? (
+                  <div className="form-grid two">
+                    <label className="form-field">
+                      <span>{t('model')}</span>
+                      <select value={model} onChange={(event) => updateModel(event.target.value)}>
+                        {modelOptions.length === 0 ? <option value="">{t('noData')}</option> : null}
+                        {modelOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    {selected.operationId === 'createChatCompletion' || selected.operationId === 'createCompletion' ? (
+                      <label className="form-field">
+                        <span>{t('maxTokens')}</span>
+                        <input min="1" type="number" value={maxTokens} onChange={(event) => updateMaxTokens(event.target.value)} />
+                      </label>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {selected.operationId === 'createEmbedding' ? (
+                  <label className="form-field">
+                    <span>{t('input')}</span>
+                    <textarea rows={5} value={input} onChange={(event) => updateInput(event.target.value)} />
+                  </label>
+                ) : selected.operationId === 'createChatCompletion' || selected.operationId === 'createCompletion' ? (
+                  <label className="form-field">
+                    <span>{t('prompt')}</span>
+                    <textarea rows={5} value={prompt} onChange={(event) => updatePrompt(event.target.value)} />
+                  </label>
+                ) : null}
+
+                <div className="form-grid two">
+                  <label className="form-field">
+                    <span>{t('queryParameters')}</span>
+                    <textarea className="explorer-json-editor small" rows={4} value={queryText} onChange={(event) => setQueryText(event.target.value)} />
+                  </label>
+                  <label className="form-field">
+                    <span>{t('requestBody')}</span>
+                    <textarea
+                      className="explorer-json-editor"
+                      disabled={selected.method === 'GET'}
+                      rows={selected.method === 'GET' ? 4 : 9}
+                      value={selected.method === 'GET' ? t('noRequestBody') : bodyText}
+                      onChange={(event) => setBodyText(event.target.value)}
+                    />
+                  </label>
+                </div>
+              </>
+            ) : null}
+          </div>
+        )}
       </Panel>
       <div className="workspace-grid explorer-grid">
-        <JsonPanelInline title={t('request')} data={request || { method: selected.method, path: selected.path, body: buildRequestBody() }} />
+        <JsonPanelInline title={t('request')} data={request || requestPreview} />
         <JsonPanelInline title={t('response')} data={response || { status: t('noData') }} />
       </div>
     </div>
@@ -760,8 +907,8 @@ function AdvertisedModelsView() {
 function AnalyticsView() {
   const { t } = useTranslation();
   const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
-  const summary = useResource('/api/v1/requesthistory/summary', { buckets: [] });
-  const history = useResource('/api/v1/requesthistory', []);
+  const summary = useResource(requestHistorySummaryEndpoint, { buckets: [] });
+  const history = useResource(requestHistoryEndpoint, []);
   const metrics = useTextResource('/metrics', '');
   const byModel = groupByCount(history.data, 'model');
   const byPath = groupByCount(history.data, 'path');
@@ -1067,6 +1214,20 @@ function SettingImpactNote({ live, restart }) {
   );
 }
 
+function GitHubMark({ size = 17 }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="currentColor"
+      height={size}
+      viewBox="0 0 16 16"
+      width={size}
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 3.87c.68 0 1.36.09 2 .26 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
 function useResource(path, fallback) {
   const [data, setData] = useState(fallback);
   const [updatedAt, setUpdatedAt] = useState(0);
@@ -1174,9 +1335,9 @@ function Panel({ actions, children, className = '', eyebrow, title }) {
   );
 }
 
-function IconButton({ icon, iconOnly = false, label, onClick, variant = 'secondary' }) {
+function IconButton({ disabled = false, icon, iconOnly = false, label, onClick, variant = 'secondary' }) {
   return (
-    <button className={`action-button ${variant} ${iconOnly ? 'icon-only' : ''}`} onClick={onClick} title={label} type="button">
+    <button className={`action-button ${variant} ${iconOnly ? 'icon-only' : ''}`} disabled={disabled} onClick={onClick} title={label} type="button">
       {icon}
       <span className={iconOnly ? 'sr-only' : ''}>{label}</span>
     </button>
@@ -1193,7 +1354,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
   const [sort, setSort] = useState({ key: '', direction: 'asc' });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const safeRows = Array.isArray(rows) ? rows : [];
+  const safeRows = collectionRows(rows);
   const normalizedColumns = columns.map((column) => (typeof column === 'string' ? { key: column } : column));
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -2140,13 +2301,175 @@ async function deleteClientModel(row) {
 }
 
 async function deleteRequestHistoryGroup(filter) {
-  await api.post('/api/v1/requesthistory/bulk', filter);
+  await api.post(`${requestHistoryEndpoint}/bulk`, filter);
+}
+
+function buildApiOperations(openApi) {
+  const paths = openApi?.paths && typeof openApi.paths === 'object' ? openApi.paths : {};
+  const methods = ['get', 'post', 'put', 'delete', 'patch'];
+  return Object.entries(paths)
+    .flatMap(([path, pathItem]) => methods
+      .filter((method) => pathItem?.[method])
+      .map((method) => {
+        const operation = pathItem[method] || {};
+        const tag = Array.isArray(operation.tags) && operation.tags.length > 0 ? operation.tags[0] : 'Other';
+        return {
+          description: operation.description || '',
+          key: `${method.toUpperCase()} ${path}`,
+          method: method.toUpperCase(),
+          operationId: operation.operationId || `${method}_${path}`,
+          path,
+          summary: operation.summary || path,
+          tag
+        };
+      }))
+    .sort((left, right) => {
+      const tag = String(left.tag).localeCompare(String(right.tag));
+      if (tag !== 0) return tag;
+      const path = String(left.path).localeCompare(String(right.path));
+      if (path !== 0) return path;
+      return methodWeight(left.method) - methodWeight(right.method);
+    });
+}
+
+function methodWeight(method) {
+  return { GET: 1, POST: 2, PUT: 3, PATCH: 4, DELETE: 5 }[method] || 99;
+}
+
+function methodTone(method) {
+  if (method === 'GET') return 'neutral';
+  if (method === 'POST') return 'success';
+  if (method === 'PUT' || method === 'PATCH') return 'warning';
+  if (method === 'DELETE') return 'danger';
+  return 'neutral';
+}
+
+function extractPathParameters(path) {
+  return [...String(path || '').matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+}
+
+function buildExplorerPath(path, pathValues, query) {
+  const resolvedPath = String(path || '').replace(/\{([^}]+)\}/g, (_, name) => {
+    const value = pathValues?.[name];
+    return value ? encodeURIComponent(value) : `{${name}}`;
+  });
+  const search = new URLSearchParams();
+  Object.entries(query && typeof query === 'object' && !Array.isArray(query) ? query : {}).forEach(([key, itemValue]) => {
+    if (itemValue === undefined || itemValue === null || itemValue === '') return;
+    if (Array.isArray(itemValue)) {
+      itemValue.forEach((arrayValue) => search.append(key, String(arrayValue)));
+    } else {
+      search.append(key, String(itemValue));
+    }
+  });
+  const queryString = search.toString();
+  return queryString ? `${resolvedPath}?${queryString}` : resolvedPath;
+}
+
+function extractModelOptions(input) {
+  return collectionRows(input)
+    .map((model) => value(model, 'id') || value(model, 'name'))
+    .filter(Boolean)
+    .map(String);
+}
+
+function operationUsesModel(operation) {
+  return ['createChatCompletion', 'createCompletion', 'createEmbedding'].includes(operation?.operationId);
+}
+
+function defaultQueryForOperation(operation) {
+  if (!operation) return {};
+  if (operation.operationId === 'summarizeRequestHistory') return { bucketMinutes: 60 };
+  return {};
+}
+
+function exampleBodyForOperation(operation, model, prompt, input, maxTokens) {
+  if (!operation || operation.method === 'GET') return {};
+  const selectedModel = model || '';
+  const tokenCount = Number(maxTokens) || 128;
+
+  switch (operation.operationId) {
+    case 'login':
+      return { tenantId: 'ten_default', username: 'admin@xeno', password: 'password' };
+    case 'createToken':
+      return { accessKey: 'default', secretKey: '' };
+    case 'createTenant':
+      return { name: 'Example Tenant', active: true };
+    case 'updateTenant':
+      return { name: 'Updated Tenant', active: true };
+    case 'createUser':
+      return { tenantId: 'ten_default', username: 'user@example.com', email: 'user@example.com', password: 'password', isAdmin: false, isTenantAdmin: false, active: true };
+    case 'updateUser':
+      return { username: 'user@example.com', email: 'user@example.com', isAdmin: false, isTenantAdmin: false, active: true };
+    case 'createCredential':
+      return { tenantId: 'ten_default', userId: '', accessKey: '', secretKey: '', active: true };
+    case 'updateCredential':
+      return { userId: '', accessKey: '', secretKey: '', active: true };
+    case 'createRole':
+      return { name: 'Example Role', permissionIds: [], active: true };
+    case 'updateRole':
+      return { name: 'Updated Role', permissionIds: [], active: true };
+    case 'createPermission':
+      return { resourceType: 'Clients', operationType: 'Read', permit: true, active: true };
+    case 'updatePermission':
+      return { resourceType: 'Clients', operationType: 'Read', permit: true, active: true };
+    case 'deleteClientModel':
+      return { clientId: '', name: selectedModel, source: '' };
+    case 'bulkDeleteRequestHistory':
+      return {};
+    case 'updateSettings':
+      return defaultServerSettings();
+    case 'restore':
+      return {};
+    case 'createChatCompletion':
+      return { model: selectedModel, messages: [{ role: 'user', content: prompt }], stream: false, max_tokens: tokenCount };
+    case 'createCompletion':
+      return { model: selectedModel, prompt, stream: false, max_tokens: tokenCount };
+    case 'createEmbedding':
+      return { model: selectedModel, input };
+    default:
+      return {};
+  }
+}
+
+function formatJson(input) {
+  return JSON.stringify(input ?? {}, null, 2);
+}
+
+function parseJsonOrFallback(text, fallback) {
+  if (typeof text !== 'string' || text.trim() === '') return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJsonForExplorer(text, fallback) {
+  if (typeof text !== 'string' || text.trim() === '') return { ok: true, value: fallback };
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error), ok: false, value: fallback };
+  }
 }
 
 function value(row, key) {
   if (!row) return undefined;
   const pascal = key.charAt(0).toUpperCase() + key.slice(1);
   return row[key] ?? row[pascal];
+}
+
+function collectionRows(input) {
+  if (Array.isArray(input)) return input;
+  if (!input || typeof input !== 'object') return [];
+
+  const keys = ['data', 'Data', 'items', 'Items', 'rows', 'Rows', 'entries', 'Entries', 'records', 'Records', 'requestHistory', 'RequestHistory'];
+  for (const key of keys) {
+    if (Array.isArray(input[key])) return input[key];
+  }
+
+  return [];
 }
 
 function formatNumber(input) {
@@ -2161,19 +2484,25 @@ function formatPercent(input) {
 
 function summarizeBuckets(buckets) {
   return buckets.reduce((summary, bucket) => {
-    const success = Number(bucket.success || bucket.Success || 0);
-    const failed = Number(bucket.failed || bucket.Failed || 0);
+    const total = Number(bucket.count ?? bucket.Count ?? 0);
+    const failed = Number(bucket.failed ?? bucket.Failed ?? bucket.errors ?? bucket.Errors ?? 0);
+    const explicitSuccess = bucket.success ?? bucket.Success;
+    const success = explicitSuccess === undefined || explicitSuccess === null
+      ? Math.max(0, total - failed)
+      : Number(explicitSuccess);
+    const normalizedFailed = Number.isFinite(failed) ? failed : 0;
+    const normalizedSuccess = Number.isFinite(success) ? success : 0;
     return {
-      failed: summary.failed + failed,
-      success: summary.success + success,
-      total: summary.total + success + failed
+      failed: summary.failed + normalizedFailed,
+      success: summary.success + normalizedSuccess,
+      total: summary.total + normalizedSuccess + normalizedFailed
     };
   }, { failed: 0, success: 0, total: 0 });
 }
 
 function groupByCount(rows, key) {
   const groups = new Map();
-  (Array.isArray(rows) ? rows : []).forEach((row) => {
+  collectionRows(rows).forEach((row) => {
     const groupName = String(value(row, key) || 'unknown');
     const statusCode = Number(value(row, 'statusCode') || 0);
     const current = groups.get(groupName) || { name: groupName, count: 0, success: 0, failed: 0 };
