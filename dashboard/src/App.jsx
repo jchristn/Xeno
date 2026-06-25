@@ -381,9 +381,6 @@ function ApiExplorerView() {
   const [tag, setTag] = useState('all');
   const [operationKey, setOperationKey] = useState('');
   const [model, setModel] = useState('');
-  const [prompt, setPrompt] = useState(defaultOpenAiPrompt);
-  const [input, setInput] = useState(defaultEmbeddingInputText);
-  const [maxTokens, setMaxTokens] = useState(150);
   const [pathValues, setPathValues] = useState({});
   const [queryText, setQueryText] = useState('{}');
   const [bodyText, setBodyText] = useState('{}');
@@ -393,10 +390,7 @@ function ApiExplorerView() {
   const abortControllerRef = useRef(null);
   const visibleOperations = tag === 'all' ? operations : operations.filter((item) => item.tag === tag);
   const selected = operations.find((item) => item.key === operationKey) || visibleOperations[0] || operations[0];
-  const selectedKind = operationKind(selected);
   const pathParameters = selected ? extractPathParameters(selected.path) : [];
-  const usesModel = selected ? operationUsesModel(selected) : false;
-  const usesPrompt = selectedKind === 'createChatCompletion' || selectedKind === 'createCompletion';
 
   useEffect(() => {
     if (operationKey || operations.length === 0) return;
@@ -409,9 +403,9 @@ function ApiExplorerView() {
     const nextModel = modelOptions[0];
     setModel(nextModel);
     if (selected && operationUsesModel(selected)) {
-      setBodyText(formatJson(exampleBodyForOperation(selected, nextModel, prompt, input, maxTokens)));
+      setBodyText(formatJson(exampleBodyForOperation(selected, nextModel)));
     }
-  }, [input, maxTokens, model, modelOptions, prompt, selected?.key]);
+  }, [model, modelOptions, selected?.key]);
 
   useEffect(() => {
     if (!selected) return;
@@ -419,7 +413,7 @@ function ApiExplorerView() {
     if (nextModel !== model) setModel(nextModel);
     setPathValues(Object.fromEntries(extractPathParameters(selected.path).map((name) => [name, ''])));
     setQueryText(formatJson(defaultQueryForOperation(selected)));
-    setBodyText(formatJson(exampleBodyForOperation(selected, nextModel, prompt, input, maxTokens)));
+    setBodyText(formatJson(exampleBodyForOperation(selected, nextModel)));
     setResponse(null);
     setRequest(null);
   }, [selected?.key]);
@@ -432,42 +426,6 @@ function ApiExplorerView() {
     setTag(nextTag);
     const nextOperations = nextTag === 'all' ? operations : operations.filter((item) => item.tag === nextTag);
     if (nextOperations.length > 0) setOperationKey(nextOperations[0].key);
-  }
-
-  function patchBody(updater) {
-    const current = parseJsonOrFallback(bodyText, exampleBodyForOperation(selected, model, prompt, input, maxTokens));
-    setBodyText(formatJson(updater(current)));
-  }
-
-  function updateModel(nextModel) {
-    setModel(nextModel);
-    if (usesModel) patchBody((current) => ({ ...current, model: nextModel }));
-  }
-
-  function updatePrompt(nextPrompt) {
-    setPrompt(nextPrompt);
-    if (!selected) return;
-    const kind = operationKind(selected);
-    if (kind === 'createChatCompletion') {
-      patchBody((current) => ({ ...current, messages: openAiChatMessages(nextPrompt) }));
-    } else if (kind === 'createCompletion') {
-      patchBody((current) => ({ ...current, prompt: nextPrompt }));
-    }
-  }
-
-  function updateInput(nextInput) {
-    setInput(nextInput);
-    if (operationKind(selected) === 'createEmbedding') {
-      patchBody((current) => ({ ...current, input: embeddingInputsFromText(nextInput) }));
-    }
-  }
-
-  function updateMaxTokens(nextMaxTokens) {
-    setMaxTokens(nextMaxTokens);
-    const kind = operationKind(selected);
-    if (kind === 'createChatCompletion' || kind === 'createCompletion') {
-      patchBody((current) => ({ ...current, max_tokens: Number(nextMaxTokens) || 128 }));
-    }
   }
 
   async function execute() {
@@ -608,47 +566,17 @@ function ApiExplorerView() {
                   </div>
                 ) : null}
 
-                {usesModel ? (
-                  <div className="form-grid two">
-                    <label className="form-field">
-                      <span>{t('model')}</span>
-                      <select value={model} onChange={(event) => updateModel(event.target.value)}>
-                        {modelOptions.length === 0 ? <option value="">{t('noData')}</option> : null}
-                        {modelOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                      </select>
-                    </label>
-                    {usesPrompt ? (
-                      <label className="form-field">
-                        <span>{t('maxTokens')}</span>
-                        <input min="1" type="number" value={maxTokens} onChange={(event) => updateMaxTokens(event.target.value)} />
-                      </label>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {selectedKind === 'createEmbedding' ? (
-                  <label className="form-field">
-                    <span>{t('input')}</span>
-                    <textarea rows={5} value={input} onChange={(event) => updateInput(event.target.value)} />
-                  </label>
-                ) : usesPrompt ? (
-                  <label className="form-field">
-                    <span>{t('prompt')}</span>
-                    <textarea rows={5} value={prompt} onChange={(event) => updatePrompt(event.target.value)} />
-                  </label>
-                ) : null}
-
                 <div className="form-grid two">
                   <label className="form-field">
                     <span>{t('queryParameters')}</span>
-                    <textarea className="explorer-json-editor small" rows={4} value={queryText} onChange={(event) => setQueryText(event.target.value)} />
+                    <textarea className="explorer-json-editor" rows={10} value={queryText} onChange={(event) => setQueryText(event.target.value)} />
                   </label>
                   <label className="form-field">
                     <span>{t('requestBody')}</span>
                     <textarea
                       className="explorer-json-editor"
                       disabled={selected.method === 'GET'}
-                      rows={selected.method === 'GET' ? 4 : 9}
+                      rows={10}
                       value={selected.method === 'GET' ? t('noRequestBody') : bodyText}
                       onChange={(event) => setBodyText(event.target.value)}
                     />
@@ -2734,10 +2662,9 @@ function defaultQueryForOperation(operation) {
   return {};
 }
 
-function exampleBodyForOperation(operation, model, prompt, input, maxTokens) {
+function exampleBodyForOperation(operation, model) {
   if (!operation || operation.method === 'GET') return {};
   const selectedModel = modelForOperation(operation, model);
-  const tokenCount = Number(maxTokens) || 150;
 
   switch (operationKind(operation)) {
     case 'login':
@@ -2844,21 +2771,21 @@ function exampleBodyForOperation(operation, model, prompt, input, maxTokens) {
     case 'createChatCompletion':
       return {
         model: selectedModel || 'gpt-oss:120b',
-        messages: openAiChatMessages(prompt),
+        messages: openAiChatMessages(),
         temperature: 0.7,
-        max_tokens: tokenCount
+        max_tokens: 150
       };
     case 'createCompletion':
       return {
         model: selectedModel || 'gpt-oss:120b',
         prompt: 'Write a concise explanation of how an inverted index works in search engines.',
         temperature: 0.7,
-        max_tokens: tokenCount
+        max_tokens: 150
       };
     case 'createEmbedding':
       return {
         model: selectedModel || 'all-minilm',
-        input: embeddingInputsFromText(input)
+        input: embeddingInputsFromText()
       };
     case 'deleteTenant':
     case 'deleteUser':
