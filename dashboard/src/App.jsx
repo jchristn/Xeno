@@ -393,8 +393,10 @@ function ApiExplorerView() {
   const abortControllerRef = useRef(null);
   const visibleOperations = tag === 'all' ? operations : operations.filter((item) => item.tag === tag);
   const selected = operations.find((item) => item.key === operationKey) || visibleOperations[0] || operations[0];
+  const selectedKind = operationKind(selected);
   const pathParameters = selected ? extractPathParameters(selected.path) : [];
   const usesModel = selected ? operationUsesModel(selected) : false;
+  const usesPrompt = selectedKind === 'createChatCompletion' || selectedKind === 'createCompletion';
 
   useEffect(() => {
     if (operationKey || operations.length === 0) return;
@@ -445,23 +447,25 @@ function ApiExplorerView() {
   function updatePrompt(nextPrompt) {
     setPrompt(nextPrompt);
     if (!selected) return;
-    if (selected.operationId === 'createChatCompletion') {
+    const kind = operationKind(selected);
+    if (kind === 'createChatCompletion') {
       patchBody((current) => ({ ...current, messages: openAiChatMessages(nextPrompt) }));
-    } else if (selected.operationId === 'createCompletion') {
+    } else if (kind === 'createCompletion') {
       patchBody((current) => ({ ...current, prompt: nextPrompt }));
     }
   }
 
   function updateInput(nextInput) {
     setInput(nextInput);
-    if (selected?.operationId === 'createEmbedding') {
+    if (operationKind(selected) === 'createEmbedding') {
       patchBody((current) => ({ ...current, input: embeddingInputsFromText(nextInput) }));
     }
   }
 
   function updateMaxTokens(nextMaxTokens) {
     setMaxTokens(nextMaxTokens);
-    if (selected?.operationId === 'createChatCompletion' || selected?.operationId === 'createCompletion') {
+    const kind = operationKind(selected);
+    if (kind === 'createChatCompletion' || kind === 'createCompletion') {
       patchBody((current) => ({ ...current, max_tokens: Number(nextMaxTokens) || 128 }));
     }
   }
@@ -613,7 +617,7 @@ function ApiExplorerView() {
                         {modelOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                       </select>
                     </label>
-                    {selected.operationId === 'createChatCompletion' || selected.operationId === 'createCompletion' ? (
+                    {usesPrompt ? (
                       <label className="form-field">
                         <span>{t('maxTokens')}</span>
                         <input min="1" type="number" value={maxTokens} onChange={(event) => updateMaxTokens(event.target.value)} />
@@ -622,12 +626,12 @@ function ApiExplorerView() {
                   </div>
                 ) : null}
 
-                {selected.operationId === 'createEmbedding' ? (
+                {selectedKind === 'createEmbedding' ? (
                   <label className="form-field">
                     <span>{t('input')}</span>
                     <textarea rows={5} value={input} onChange={(event) => updateInput(event.target.value)} />
                   </label>
-                ) : selected.operationId === 'createChatCompletion' || selected.operationId === 'createCompletion' ? (
+                ) : usesPrompt ? (
                   <label className="form-field">
                     <span>{t('prompt')}</span>
                     <textarea rows={5} value={prompt} onChange={(event) => updatePrompt(event.target.value)} />
@@ -2635,17 +2639,89 @@ function extractModelOptions(input) {
   return [...new Set([...discovered, 'gpt-oss:120b', 'all-minilm'])];
 }
 
+function operationKind(operation) {
+  if (!operation) return '';
+
+  const operationId = String(operation.operationId || '').toLowerCase();
+  const method = String(operation.method || '').toUpperCase();
+  const path = normalizeOperationPath(operation.path);
+  if (operationId === 'createchatcompletion' || path.endsWith('/v1/chat/completions')) return 'createChatCompletion';
+  if (operationId === 'createcompletion' || path.endsWith('/v1/completions')) return 'createCompletion';
+  if (operationId === 'createembedding' || path.endsWith('/v1/embeddings')) return 'createEmbedding';
+  if (operationId) {
+    const known = {
+      login: 'login',
+      createtoken: 'createToken',
+      refreshtoken: 'refreshToken',
+      logout: 'logout',
+      createtenant: 'createTenant',
+      updatetenant: 'updateTenant',
+      createuser: 'createUser',
+      updateuser: 'updateUser',
+      createcredential: 'createCredential',
+      updatecredential: 'updateCredential',
+      createrole: 'createRole',
+      updaterole: 'updateRole',
+      createpermission: 'createPermission',
+      updatepermission: 'updatePermission',
+      deleteclientmodel: 'deleteClientModel',
+      bulkdeleterequesthistory: 'bulkDeleteRequestHistory',
+      updatesettings: 'updateSettings',
+      restore: 'restore',
+      deletetenant: 'deleteTenant',
+      deleteuser: 'deleteUser',
+      deletecredential: 'deleteCredential',
+      deleterole: 'deleteRole',
+      deletepermission: 'deletePermission',
+      deleteauditrecord: 'deleteAuditRecord',
+      deleteclient: 'deleteClient',
+      deleterequesthistory: 'deleteRequestHistory'
+    };
+    if (known[operationId]) return known[operationId];
+  }
+
+  if (method === 'POST' && path.endsWith('/auth/login')) return 'login';
+  if (method === 'POST' && path.endsWith('/auth/token')) return 'createToken';
+  if (method === 'POST' && path.endsWith('/auth/token/refresh')) return 'refreshToken';
+  if (method === 'POST' && path.endsWith('/auth/logout')) return 'logout';
+  if (method === 'POST' && path.endsWith('/tenants')) return 'createTenant';
+  if (method === 'PUT' && path.includes('/tenants/{id}')) return 'updateTenant';
+  if (method === 'POST' && path.endsWith('/users')) return 'createUser';
+  if (method === 'PUT' && path.includes('/users/{id}')) return 'updateUser';
+  if (method === 'POST' && path.endsWith('/credentials')) return 'createCredential';
+  if (method === 'PUT' && path.includes('/credentials/{id}')) return 'updateCredential';
+  if (method === 'POST' && path.endsWith('/roles')) return 'createRole';
+  if (method === 'PUT' && path.includes('/roles/{id}')) return 'updateRole';
+  if (method === 'POST' && path.endsWith('/permissions')) return 'createPermission';
+  if (method === 'PUT' && path.includes('/permissions/{id}')) return 'updatePermission';
+  if (method === 'DELETE' && (path.endsWith('/client-models') || path.endsWith('/clientmodels'))) return 'deleteClientModel';
+  if (method === 'POST' && path.endsWith('/request-history/bulk')) return 'bulkDeleteRequestHistory';
+  if (method === 'POST' && path.endsWith('/requesthistory/bulk')) return 'bulkDeleteRequestHistory';
+  if (method === 'POST' && path.endsWith('/settings')) return 'updateSettings';
+  if (method === 'POST' && path.endsWith('/restore')) return 'restore';
+  return '';
+}
+
+function normalizeOperationPath(path) {
+  const normalized = String(path || '').toLowerCase().replace(/\/+$/, '');
+  if (normalized.startsWith('/api/v1/openai/v1/')) return normalized.replace('/api/v1/openai/v1/', '/v1/');
+  if (normalized.startsWith('/api/v1/requesthistory')) return normalized.replace('/api/v1/requesthistory', '/v1.0/api/request-history');
+  if (normalized === '/api/v1/clientmodels') return '/v1.0/api/client-models';
+  return normalized;
+}
+
 function operationUsesModel(operation) {
-  return ['createChatCompletion', 'createCompletion', 'createEmbedding'].includes(operation?.operationId);
+  return ['createChatCompletion', 'createCompletion', 'createEmbedding'].includes(operationKind(operation));
 }
 
 function modelForOperation(operation, model) {
   const current = String(model || '').trim();
-  if (operation?.operationId === 'createEmbedding') {
+  const kind = operationKind(operation);
+  if (kind === 'createEmbedding') {
     return !current || current === 'gpt-oss:120b' ? 'all-minilm' : current;
   }
 
-  if (operation?.operationId === 'createChatCompletion' || operation?.operationId === 'createCompletion') {
+  if (kind === 'createChatCompletion' || kind === 'createCompletion') {
     return !current || current === 'all-minilm' ? 'gpt-oss:120b' : current;
   }
 
@@ -2663,7 +2739,7 @@ function exampleBodyForOperation(operation, model, prompt, input, maxTokens) {
   const selectedModel = modelForOperation(operation, model);
   const tokenCount = Number(maxTokens) || 150;
 
-  switch (operation.operationId) {
+  switch (operationKind(operation)) {
     case 'login':
       return {
         tenantId: 'ten_default',
