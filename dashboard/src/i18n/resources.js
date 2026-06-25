@@ -87,7 +87,7 @@ const en = {
     requestVolume: 'Request volume',
     connectedClients: 'Connected clients',
     connectedNodeCount: 'Connected nodes',
-    advertisedModels: 'Advertised models',
+    advertisedModels: 'Advertised Models',
     completionModels: 'Completion models',
     embeddingModels: 'Embedding models',
     activeModels: 'Active models',
