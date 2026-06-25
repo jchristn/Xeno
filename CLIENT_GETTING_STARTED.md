@@ -22,6 +22,8 @@ Runtime connection status is stored in:
 ~/.xeno/state.json
 ```
 
+For sandboxed testing, set `XENO_CLIENT_HOME` to override the local client settings directory.
+
 ## Build the Client
 
 From the repository root:
@@ -61,6 +63,20 @@ Create the default client settings file:
 ```powershell
 xeno init
 ```
+
+Restore the client to factory defaults when you want to clear local configuration and runtime state:
+
+```powershell
+xeno reset
+```
+
+The command prompts you to type `RESET`. For scripts or disposable development environments:
+
+```powershell
+xeno reset --force
+```
+
+Reset recreates `~/.xeno/client.json` with default settings and removes `~/.xeno/state.json`.
 
 Check the formatted configuration:
 

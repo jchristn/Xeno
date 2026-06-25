@@ -55,6 +55,8 @@ dotnet run --project src/Xeno.Client -- status
 dotnet run --project src/Xeno.Client -- inventory
 ```
 
+Use `dotnet run --project src/Xeno.Client -- reset` to restore local client settings to factory defaults, or add `--force` to skip the confirmation prompt.
+
 The seeded development user is `admin@xeno` with password `password`. The seeded development credential uses access key `default` and secret key `default`. `xeno login -u ...` prompts for the password, exchanges it for a client access key and secret, and stores only that client credential in `~/.xeno/client.json`. The WebSocket connection does not accept user passwords or bearer session tokens.
 
 ## Docker

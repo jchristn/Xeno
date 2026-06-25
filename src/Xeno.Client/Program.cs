@@ -32,6 +32,12 @@ namespace Xeno.Client
         {
             try
             {
+                string[] earlyArgs = ApplyGlobalOptions(args, null);
+                if (earlyArgs.Length > 0 && String.Equals(earlyArgs[0], "reset", StringComparison.OrdinalIgnoreCase))
+                {
+                    return HandleReset(earlyArgs);
+                }
+
                 ClientSettings settings = ClientSettings.Load();
                 args = ApplyGlobalOptions(args, settings);
 
@@ -55,6 +61,8 @@ namespace Xeno.Client
                             settings.Save();
                             WriteSuccess("Created " + ClientSettings.SettingsFile);
                             return 0;
+                        case "reset":
+                            return HandleReset(args);
                         case "config":
                             return HandleConfig(args, settings);
                         case "server":
@@ -112,6 +120,81 @@ namespace Xeno.Client
                 WriteError(ex.Message);
                 return 1;
             }
+        }
+
+        private static int HandleReset(string[] args)
+        {
+            bool force = false;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (IsHelp(args[i]))
+                {
+                    PrintResetHelp();
+                    return 0;
+                }
+
+                if (String.Equals(args[i], "--force", StringComparison.OrdinalIgnoreCase))
+                {
+                    force = true;
+                    continue;
+                }
+
+                WriteError("Unknown reset option: " + args[i]);
+                PrintResetHelp();
+                return 1;
+            }
+
+            if (!force && !ConfirmReset())
+            {
+                if (_UseJson) WriteJson(new { reset = false, cancelled = true });
+                else WriteInfo("Reset cancelled.");
+                return 0;
+            }
+
+            ResetClientFiles();
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    reset = true,
+                    settingsFile = ClientSettings.SettingsFile,
+                    stateFile = ClientConnectionState.StateFile
+                });
+            }
+            else
+            {
+                Console.WriteLine();
+                WriteSuccess("Reset Xeno client to factory defaults.");
+                Console.WriteLine();
+                Console.WriteLine("  Settings: " + ClientSettings.SettingsFile);
+                Console.WriteLine("  State:    " + ClientConnectionState.StateFile + " (removed)");
+            }
+
+            return 0;
+        }
+
+        private static bool ConfirmReset()
+        {
+            Console.WriteLine();
+            WriteWarning("This will reset the Xeno client to factory defaults.");
+            Console.WriteLine();
+            Console.WriteLine("  Settings: " + ClientSettings.SettingsFile);
+            Console.WriteLine("  State:    " + ClientConnectionState.StateFile);
+            Console.WriteLine();
+            Console.Write("Type RESET to continue: ");
+            string? confirmation = Console.ReadLine();
+            return String.Equals(confirmation, "RESET", StringComparison.Ordinal);
+        }
+
+        private static void ResetClientFiles()
+        {
+            Directory.CreateDirectory(ClientSettings.SettingsDirectory);
+            if (File.Exists(ClientSettings.SettingsFile)) File.Delete(ClientSettings.SettingsFile);
+            if (File.Exists(ClientConnectionState.StateFile)) File.Delete(ClientConnectionState.StateFile);
+
+            ClientSettings defaults = new ClientSettings();
+            defaults.Runners.Add(new ClientRunnerSettings());
+            defaults.Save();
         }
 
         private static int HandleConfig(string[] args, ClientSettings settings)
@@ -821,9 +904,9 @@ namespace Xeno.Client
             return property.ToString();
         }
 
-        private static string[] ApplyGlobalOptions(string[] args, ClientSettings settings)
+        private static string[] ApplyGlobalOptions(string[] args, ClientSettings? settings)
         {
-            _UseColors = settings.UseColors;
+            _UseColors = settings?.UseColors ?? true;
             _UseJson = false;
             List<string> normalized = new List<string>();
             foreach (string arg in args)
@@ -1222,6 +1305,15 @@ namespace Xeno.Client
             Console.WriteLine("      Set the Xeno server REST API endpoint.");
         }
 
+        private static void PrintResetHelp()
+        {
+            WriteInfo("Reset command");
+            Console.WriteLine("  xeno reset");
+            Console.WriteLine("      Prompt for confirmation, then restore ~/.xeno/client.json to factory defaults and remove runtime state.");
+            Console.WriteLine("  xeno reset --force");
+            Console.WriteLine("      Restore factory defaults without prompting.");
+        }
+
         private static void PrintLoginHelp()
         {
             WriteInfo("Login command");
@@ -1316,6 +1408,7 @@ namespace Xeno.Client
             Console.WriteLine();
             Console.WriteLine("Common commands:");
             Console.WriteLine("  xeno init");
+            Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno status");
             Console.WriteLine("  xeno inventory");
             Console.WriteLine("  xeno connect");
@@ -1353,6 +1446,10 @@ namespace Xeno.Client
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");
             Console.WriteLine("  --json        Emit machine-readable JSON for supported commands.");
+            Console.WriteLine();
+            Console.WriteLine("Reset:");
+            Console.WriteLine("  xeno reset");
+            Console.WriteLine("  xeno reset --force");
             Console.WriteLine();
             Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key/secret.");
         }

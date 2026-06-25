@@ -2,6 +2,7 @@ namespace Test.Shared
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Net.Http;
@@ -41,6 +42,7 @@ namespace Test.Shared
                     AuthenticationSuite(),
                     RoutingSuite(),
                     TenantIsolationSuite(),
+                    ClientCliSuite(),
                     ManagementApiSuite(),
                     RelaySuite()
                 };
@@ -105,6 +107,56 @@ namespace Test.Shared
 
                             if (!sawNonHexRandomCharacter) throw new InvalidOperationException("Generated random portions looked hexadecimal-only.");
                             return Task.CompletedTask;
+                        })
+                });
+        }
+
+        /// <summary>
+        /// Client CLI test suite.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor ClientCliSuite()
+        {
+            return new TestSuiteDescriptor(
+                "ClientCli",
+                "Client CLI",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientResetRestoresFactoryDefaults",
+                        "Client reset restores factory defaults",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-reset-" + Guid.NewGuid().ToString("N"));
+                            Directory.CreateDirectory(clientHome);
+                            string settingsFile = Path.Combine(clientHome, "client.json");
+                            string stateFile = Path.Combine(clientHome, "state.json");
+
+                            try
+                            {
+                                File.WriteAllText(settingsFile, "{\"TenantId\":\"custom\",\"UseColors\":false,\"Providers\":[]}");
+                                File.WriteAllText(stateFile, "{\"IsConnected\":true}");
+                                (int ExitCode, string StandardOutput, string StandardError) cancelled = await RunXenoClientAsync(new[] { "reset" }, clientHome, "NO" + Environment.NewLine).ConfigureAwait(false);
+                                if (cancelled.ExitCode != 0) throw new InvalidOperationException("Reset cancel failed: " + cancelled.StandardError + cancelled.StandardOutput);
+                                if (!File.ReadAllText(settingsFile).Contains("\"custom\"", StringComparison.Ordinal)) throw new InvalidOperationException("Cancelled reset changed client settings.");
+                                if (!File.Exists(stateFile)) throw new InvalidOperationException("Cancelled reset removed runtime state.");
+
+                                (int ExitCode, string StandardOutput, string StandardError) confirmed = await RunXenoClientAsync(new[] { "reset" }, clientHome, "RESET" + Environment.NewLine).ConfigureAwait(false);
+                                if (confirmed.ExitCode != 0) throw new InvalidOperationException("Confirmed reset failed: " + confirmed.StandardError + confirmed.StandardOutput);
+                                AssertFactoryDefaultClientSettings(settingsFile, stateFile);
+
+                                File.WriteAllText(settingsFile, "{broken json");
+                                File.WriteAllText(stateFile, "{\"IsConnected\":true}");
+                                (int ExitCode, string StandardOutput, string StandardError) forced = await RunXenoClientAsync(new[] { "--json", "reset", "--force" }, clientHome).ConfigureAwait(false);
+                                if (forced.ExitCode != 0) throw new InvalidOperationException("Forced reset failed: " + forced.StandardError + forced.StandardOutput);
+                                if (!forced.StandardOutput.Contains("\"reset\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Forced reset JSON output did not report success.");
+                                AssertFactoryDefaultClientSettings(settingsFile, stateFile);
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
                         })
                 });
         }
@@ -1308,6 +1360,59 @@ namespace Test.Shared
 
             server.Dispose();
             await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+        }
+
+        private static void AssertFactoryDefaultClientSettings(string settingsFile, string stateFile)
+        {
+            if (!File.Exists(settingsFile)) throw new InvalidOperationException("Reset did not recreate client settings.");
+            if (File.Exists(stateFile)) throw new InvalidOperationException("Reset did not remove runtime state.");
+
+            using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(settingsFile)))
+            {
+                JsonElement root = document.RootElement;
+                string tenantId = TryGetString(root, "TenantId") ?? String.Empty;
+                if (!String.Equals(tenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default tenant.");
+                if (!TryGetProperty(root, "Providers", out JsonElement providers) || providers.ValueKind != JsonValueKind.Array || providers.GetArrayLength() == 0)
+                {
+                    throw new InvalidOperationException("Reset did not restore the default provider endpoint.");
+                }
+            }
+        }
+
+        private static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunXenoClientAsync(string[] args, string clientHome, string? standardInput = null)
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                RedirectStandardError = true,
+                RedirectStandardInput = standardInput != null,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add(typeof(Xeno.Client.Program).Assembly.Location);
+            foreach (string arg in args)
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+
+            startInfo.Environment["XENO_CLIENT_HOME"] = clientHome;
+            startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+
+            using (Process process = new Process { StartInfo = startInfo })
+            {
+                if (!process.Start()) throw new InvalidOperationException("Unable to start Xeno client process.");
+
+                if (standardInput != null)
+                {
+                    await process.StandardInput.WriteAsync(standardInput).ConfigureAwait(false);
+                    process.StandardInput.Close();
+                }
+
+                string standardOutput = await process.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+                string standardError = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
+                await process.WaitForExitAsync().ConfigureAwait(false);
+                return (process.ExitCode, standardOutput, standardError);
+            }
         }
 
         private static int GetFreePort()

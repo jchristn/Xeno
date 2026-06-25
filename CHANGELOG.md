@@ -6,3 +6,4 @@
 - Added multitenant seeded state and OpenAI-compatible routing.
 - Added WebSocket client registration endpoint.
 - Added C#, JavaScript, and Python SDKs with tests, documentation, and interactive console harnesses.
+- Added `xeno reset` and `xeno reset --force` to restore client settings to factory defaults.

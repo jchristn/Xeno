@@ -19,6 +19,9 @@ namespace Xeno.Client
         {
             get
             {
+                string? overrideDirectory = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                if (!String.IsNullOrWhiteSpace(overrideDirectory)) return Path.GetFullPath(Environment.ExpandEnvironmentVariables(overrideDirectory));
+
                 return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".xeno");
             }
         }
