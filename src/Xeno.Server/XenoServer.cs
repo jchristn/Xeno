@@ -886,6 +886,8 @@ namespace Xeno.Server
             try
             {
                 string relativePath = NormalizeOpenAiPath(path);
+                string requestorIp = GetRequestorIp(context, requestContext);
+                Dictionary<string, string> forwardedHeaders = BuildForwardedHeaders(context, requestContext, requestorIp);
                 string payload = JsonUtil.Serialize(new
                 {
                     type = "server.request",
@@ -900,6 +902,8 @@ namespace Xeno.Server
                     model = decision.EffectiveModel,
                     embeddings,
                     stream,
+                    requestorIp,
+                    headers = forwardedHeaders,
                     body = JsonUtil.Serialize(body)
                 });
 
@@ -1338,6 +1342,46 @@ namespace Xeno.Server
             AddTraceHeader(context, "X-Xeno-Request-Duration-Ms", Math.Max(0, (long)(DateTime.UtcNow - requestContext.StartedUtc).TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
             AddTraceHeader(context, "X-Xeno-Request-History-ID", history?.Id);
             AddTraceHeader(context, "X-Xeno-Routing-Timeline", String.Join(",", decision.Timeline));
+        }
+
+        private static Dictionary<string, string> BuildForwardedHeaders(HttpContextBase context, RequestContext requestContext, string requestorIp)
+        {
+            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string sourceIp = requestContext.SourceIp ?? String.Empty;
+            string existingForwardedFor = FirstNonEmpty(context.Request.Headers.Get("X-Forwarded-For"), context.Request.Headers.Get("x-forwarded-for"));
+            string forwardedFor = existingForwardedFor;
+            if (!String.IsNullOrWhiteSpace(sourceIp))
+            {
+                forwardedFor = String.IsNullOrWhiteSpace(existingForwardedFor)
+                    ? sourceIp
+                    : existingForwardedFor.Trim() + ", " + sourceIp;
+            }
+
+            AddForwardedHeader(headers, "X-Forwarded-For", forwardedFor);
+            AddForwardedHeader(headers, "X-Real-IP", requestorIp);
+            AddForwardedHeader(headers, "X-Xeno-Requestor-IP", requestorIp);
+            AddForwardedHeader(headers, "X-Xeno-Request-ID", requestContext.RequestId);
+            AddForwardedHeader(headers, "X-Xeno-Tenant-ID", requestContext.TenantId);
+            return headers;
+        }
+
+        private static string GetRequestorIp(HttpContextBase context, RequestContext requestContext)
+        {
+            string existingForwardedFor = FirstNonEmpty(context.Request.Headers.Get("X-Forwarded-For"), context.Request.Headers.Get("x-forwarded-for"));
+            if (!String.IsNullOrWhiteSpace(existingForwardedFor))
+            {
+                string first = existingForwardedFor.Split(',')[0].Trim();
+                if (!String.IsNullOrWhiteSpace(first)) return SanitizeHeaderValue(first);
+            }
+
+            return SanitizeHeaderValue(requestContext.SourceIp);
+        }
+
+        private static void AddForwardedHeader(Dictionary<string, string> headers, string name, string? value)
+        {
+            string sanitized = SanitizeHeaderValue(value);
+            if (String.IsNullOrWhiteSpace(sanitized)) return;
+            headers[name] = sanitized;
         }
 
         private static void AddTraceHeader(HttpContextBase context, string name, string? value)

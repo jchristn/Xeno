@@ -1272,6 +1272,14 @@ namespace Test.Shared
                 using (JsonDocument document = JsonDocument.Parse(message))
                 {
                     string requestId = TryGetString(document.RootElement, "requestId") ?? Guid.NewGuid().ToString("N");
+                    string requestorIp = TryGetString(document.RootElement, "requestorIp") ?? String.Empty;
+                    if (String.IsNullOrWhiteSpace(requestorIp)) throw new InvalidOperationException("Server request did not include requestorIp.");
+                    if (!TryGetProperty(document.RootElement, "headers", out JsonElement headers) || headers.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Server request did not include forwarded headers.");
+                    string forwardedFor = TryGetString(headers, "X-Forwarded-For") ?? String.Empty;
+                    if (!forwardedFor.Contains(requestorIp, StringComparison.Ordinal)) throw new InvalidOperationException("X-Forwarded-For did not include requestor IP.");
+                    if (TryGetString(headers, "X-Real-IP") != requestorIp) throw new InvalidOperationException("X-Real-IP did not match requestor IP.");
+                    if (TryGetString(headers, "X-Xeno-Requestor-IP") != requestorIp) throw new InvalidOperationException("X-Xeno-Requestor-IP did not match requestor IP.");
+                    if (TryGetString(headers, "X-Xeno-Request-ID") != requestId) throw new InvalidOperationException("Forwarded request ID did not match server request ID.");
                     string completion = "{\"id\":\"chatcmpl_touchstone\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"relay-ok\"},\"finish_reason\":\"stop\"}]}";
                     await SendWebSocketJsonAsync(socket, new
                     {

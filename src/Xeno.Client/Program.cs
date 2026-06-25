@@ -775,6 +775,7 @@ namespace Xeno.Client
 
                 string relativePath = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
                 string method = TryGetString(root, "method") ?? "POST";
+                Dictionary<string, string> forwardedHeaders = TryGetStringMap(root, "headers");
                 string body = "{}";
                 if (root.TryGetProperty("body", out JsonElement bodyElement))
                 {
@@ -794,6 +795,14 @@ namespace Xeno.Client
                     if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
                     {
                         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    }
+
+                    foreach (KeyValuePair<string, string> header in forwardedHeaders)
+                    {
+                        if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content != null)
+                        {
+                            request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                        }
                     }
 
                     HttpResponseMessage result = await httpClient.SendAsync(request, token).ConfigureAwait(false);
@@ -944,6 +953,41 @@ namespace Xeno.Client
             return property.ToString();
         }
 
+        private static Dictionary<string, string> TryGetStringMap(JsonElement element, string propertyName)
+        {
+            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (!element.TryGetProperty(propertyName, out JsonElement property) || property.ValueKind != JsonValueKind.Object) return values;
+
+            foreach (JsonProperty header in property.EnumerateObject())
+            {
+                if (header.Value.ValueKind == JsonValueKind.Null || header.Value.ValueKind == JsonValueKind.Undefined) continue;
+                string value = header.Value.ToString();
+                if (String.IsNullOrWhiteSpace(header.Name) || String.IsNullOrWhiteSpace(value)) continue;
+                values[header.Name] = value;
+            }
+
+            return values;
+        }
+
+        private static string RequestorIpFromServerRequest(JsonElement root)
+        {
+            string requestorIp = TryGetString(root, "requestorIp") ?? String.Empty;
+            if (!String.IsNullOrWhiteSpace(requestorIp)) return requestorIp;
+
+            Dictionary<string, string> headers = TryGetStringMap(root, "headers");
+            string? headerValue;
+            if (!headers.TryGetValue("X-Xeno-Requestor-IP", out headerValue) &&
+                !headers.TryGetValue("X-Real-IP", out headerValue) &&
+                !headers.TryGetValue("X-Forwarded-For", out headerValue))
+            {
+                return String.Empty;
+            }
+
+            requestorIp = headerValue ?? String.Empty;
+            int comma = requestorIp.IndexOf(',');
+            return comma >= 0 ? requestorIp.Substring(0, comma).Trim() : requestorIp.Trim();
+        }
+
         private static string[] ApplyGlobalOptions(string[] args, ClientSettings? settings)
         {
             _UseColors = settings?.UseColors ?? true;
@@ -1042,7 +1086,9 @@ namespace Xeno.Client
                         string method = TryGetString(root, "method") ?? "POST";
                         string path = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
                         string source = TryGetString(root, "source") ?? TryGetString(root, "runnerName") ?? "(default provider)";
-                        WriteInfo("Received request " + requestId + ": " + method + " " + path + " via " + source + ".");
+                        string requestorIp = RequestorIpFromServerRequest(root);
+                        string requestorSuffix = String.IsNullOrWhiteSpace(requestorIp) ? String.Empty : " from " + requestorIp;
+                        WriteInfo("Received request " + requestId + ": " + method + " " + path + " via " + source + requestorSuffix + ".");
                         return;
                     }
 

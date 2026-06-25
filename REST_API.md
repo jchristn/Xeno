@@ -149,6 +149,13 @@ Routed OpenAI-compatible responses include Xeno trace headers for debugging mode
 - `X-Xeno-Client-Roundtrip-Ms` and `X-Xeno-Request-Duration-Ms`: relay timing.
 - `X-Xeno-Routing-Timeline`: comma-separated routing steps.
 
+Requests relayed from the Xeno server to a connected `xeno` client also include a forwarded requestor identity header set. The client forwards these headers to its configured provider endpoint and prints the requestor IP in `xeno connect` logs:
+
+- `X-Forwarded-For`: original requestor IP, appended to any inbound forwarded-for chain.
+- `X-Real-IP`: original requestor IP observed by Xeno.
+- `X-Xeno-Requestor-IP`: original requestor IP observed by Xeno.
+- `X-Xeno-Request-ID` and `X-Xeno-Tenant-ID`: Xeno request and tenant trace values.
+
 ## Request History
 
 `GET /v1.0/api/request-history`
