@@ -51,6 +51,13 @@ import Pagination from './components/Pagination.jsx';
 const api = new ApiClient();
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
+const defaultOpenAiPrompt = 'Hello! Can you give me a brief explanation of how an inverted index works?';
+const defaultOpenAiSystemPrompt = 'You are a helpful and concise assistant.';
+const defaultEmbeddingInputText = [
+  'The quick brown fox jumps over the lazy dog.',
+  'Artificial intelligence is transforming software development.',
+  'How do I cook a perfect medium-rare steak?'
+].join('\n');
 
 const interactiveRowClickSelector = [
   'button',
@@ -373,9 +380,9 @@ function ApiExplorerView() {
   const [tag, setTag] = useState('all');
   const [operationKey, setOperationKey] = useState('');
   const [model, setModel] = useState('');
-  const [prompt, setPrompt] = useState('hello');
-  const [input, setInput] = useState('hello');
-  const [maxTokens, setMaxTokens] = useState(128);
+  const [prompt, setPrompt] = useState(defaultOpenAiPrompt);
+  const [input, setInput] = useState(defaultEmbeddingInputText);
+  const [maxTokens, setMaxTokens] = useState(150);
   const [pathValues, setPathValues] = useState({});
   const [queryText, setQueryText] = useState('{}');
   const [bodyText, setBodyText] = useState('{}');
@@ -403,9 +410,11 @@ function ApiExplorerView() {
 
   useEffect(() => {
     if (!selected) return;
+    const nextModel = modelForOperation(selected, model);
+    if (nextModel !== model) setModel(nextModel);
     setPathValues(Object.fromEntries(extractPathParameters(selected.path).map((name) => [name, ''])));
     setQueryText(formatJson(defaultQueryForOperation(selected)));
-    setBodyText(formatJson(exampleBodyForOperation(selected, model, prompt, input, maxTokens)));
+    setBodyText(formatJson(exampleBodyForOperation(selected, nextModel, prompt, input, maxTokens)));
     setResponse(null);
     setRequest(null);
   }, [selected?.key]);
@@ -434,7 +443,7 @@ function ApiExplorerView() {
     setPrompt(nextPrompt);
     if (!selected) return;
     if (selected.operationId === 'createChatCompletion') {
-      patchBody((current) => ({ ...current, messages: [{ role: 'user', content: nextPrompt }] }));
+      patchBody((current) => ({ ...current, messages: openAiChatMessages(nextPrompt) }));
     } else if (selected.operationId === 'createCompletion') {
       patchBody((current) => ({ ...current, prompt: nextPrompt }));
     }
@@ -443,7 +452,7 @@ function ApiExplorerView() {
   function updateInput(nextInput) {
     setInput(nextInput);
     if (selected?.operationId === 'createEmbedding') {
-      patchBody((current) => ({ ...current, input: nextInput }));
+      patchBody((current) => ({ ...current, input: embeddingInputsFromText(nextInput) }));
     }
   }
 
@@ -2367,14 +2376,28 @@ function buildExplorerPath(path, pathValues, query) {
 }
 
 function extractModelOptions(input) {
-  return collectionRows(input)
+  const discovered = collectionRows(input)
     .map((model) => value(model, 'id') || value(model, 'name'))
     .filter(Boolean)
     .map(String);
+  return [...new Set([...discovered, 'gpt-oss:120b', 'all-minilm'])];
 }
 
 function operationUsesModel(operation) {
   return ['createChatCompletion', 'createCompletion', 'createEmbedding'].includes(operation?.operationId);
+}
+
+function modelForOperation(operation, model) {
+  const current = String(model || '').trim();
+  if (operation?.operationId === 'createEmbedding') {
+    return !current || current === 'gpt-oss:120b' ? 'all-minilm' : current;
+  }
+
+  if (operation?.operationId === 'createChatCompletion' || operation?.operationId === 'createCompletion') {
+    return !current || current === 'all-minilm' ? 'gpt-oss:120b' : current;
+  }
+
+  return current;
 }
 
 function defaultQueryForOperation(operation) {
@@ -2385,51 +2408,186 @@ function defaultQueryForOperation(operation) {
 
 function exampleBodyForOperation(operation, model, prompt, input, maxTokens) {
   if (!operation || operation.method === 'GET') return {};
-  const selectedModel = model || '';
-  const tokenCount = Number(maxTokens) || 128;
+  const selectedModel = modelForOperation(operation, model);
+  const tokenCount = Number(maxTokens) || 150;
 
   switch (operation.operationId) {
     case 'login':
-      return { tenantId: 'ten_default', username: 'admin@xeno', password: 'password' };
+      return {
+        tenantId: 'ten_default',
+        username: 'admin@xeno',
+        password: 'password'
+      };
     case 'createToken':
-      return { accessKey: 'default', secretKey: '' };
-    case 'createTenant':
-      return { name: 'Example Tenant', active: true };
-    case 'updateTenant':
-      return { name: 'Updated Tenant', active: true };
-    case 'createUser':
-      return { tenantId: 'ten_default', username: 'user@example.com', email: 'user@example.com', password: 'password', isAdmin: false, isTenantAdmin: false, active: true };
-    case 'updateUser':
-      return { username: 'user@example.com', email: 'user@example.com', isAdmin: false, isTenantAdmin: false, active: true };
-    case 'createCredential':
-      return { tenantId: 'ten_default', userId: '', accessKey: '', secretKey: '', active: true };
-    case 'updateCredential':
-      return { userId: '', accessKey: '', secretKey: '', active: true };
-    case 'createRole':
-      return { name: 'Example Role', permissionIds: [], active: true };
-    case 'updateRole':
-      return { name: 'Updated Role', permissionIds: [], active: true };
-    case 'createPermission':
-      return { resourceType: 'Clients', operationType: 'Read', permit: true, active: true };
-    case 'updatePermission':
-      return { resourceType: 'Clients', operationType: 'Read', permit: true, active: true };
-    case 'deleteClientModel':
-      return { clientId: '', name: selectedModel, source: '' };
-    case 'bulkDeleteRequestHistory':
+      return {
+        accessKey: 'default',
+        secretKey: 'default'
+      };
+    case 'refreshToken':
+    case 'logout':
       return {};
+    case 'createTenant':
+      return {
+        id: '',
+        name: 'Example Tenant',
+        active: true
+      };
+    case 'updateTenant':
+      return {
+        name: 'Updated Tenant',
+        active: true
+      };
+    case 'createUser':
+      return {
+        tenantId: 'ten_default',
+        username: 'user@example.com',
+        email: 'user@example.com',
+        password: 'password',
+        isAdmin: false,
+        isTenantAdmin: false,
+        active: true
+      };
+    case 'updateUser':
+      return {
+        username: 'user@example.com',
+        email: 'user@example.com',
+        isAdmin: false,
+        isTenantAdmin: false,
+        active: true
+      };
+    case 'createCredential':
+      return {
+        tenantId: 'ten_default',
+        userId: 'usr_replace_me',
+        accessKey: '',
+        secretKey: '',
+        active: true
+      };
+    case 'updateCredential':
+      return {
+        userId: 'usr_replace_me',
+        accessKey: 'default',
+        secretKey: '',
+        active: true
+      };
+    case 'createRole':
+      return {
+        name: 'Example Role',
+        permissionIds: [],
+        active: true
+      };
+    case 'updateRole':
+      return {
+        name: 'Updated Role',
+        permissionIds: [],
+        active: true
+      };
+    case 'createPermission':
+      return {
+        resourceType: 'Clients',
+        operationType: 'Read',
+        permit: true,
+        active: true
+      };
+    case 'updatePermission':
+      return {
+        resourceType: 'Clients',
+        operationType: 'Read',
+        permit: true,
+        active: true
+      };
+    case 'deleteClientModel':
+      return {
+        clientId: 'xcl_replace_me',
+        name: selectedModel || 'gpt-oss:120b',
+        source: ''
+      };
+    case 'bulkDeleteRequestHistory':
+      return {
+        ids: [],
+        model: selectedModel || 'gpt-oss:120b',
+        path: '/v1/chat/completions',
+        selectedClientId: ''
+      };
     case 'updateSettings':
       return defaultServerSettings();
     case 'restore':
-      return {};
+      return samplePlatformState();
     case 'createChatCompletion':
-      return { model: selectedModel, messages: [{ role: 'user', content: prompt }], stream: false, max_tokens: tokenCount };
+      return {
+        model: selectedModel || 'gpt-oss:120b',
+        messages: openAiChatMessages(prompt),
+        temperature: 0.7,
+        max_tokens: tokenCount
+      };
     case 'createCompletion':
-      return { model: selectedModel, prompt, stream: false, max_tokens: tokenCount };
+      return {
+        model: selectedModel || 'gpt-oss:120b',
+        prompt: 'Write a concise explanation of how an inverted index works in search engines.',
+        temperature: 0.7,
+        max_tokens: tokenCount
+      };
     case 'createEmbedding':
-      return { model: selectedModel, input };
+      return {
+        model: selectedModel || 'all-minilm',
+        input: embeddingInputsFromText(input)
+      };
+    case 'deleteTenant':
+    case 'deleteUser':
+    case 'deleteCredential':
+    case 'deleteRole':
+    case 'deletePermission':
+    case 'deleteAuditRecord':
+    case 'deleteClient':
+    case 'deleteRequestHistory':
+      return {};
     default:
       return {};
   }
+}
+
+function openAiChatMessages(prompt) {
+  return [
+    {
+      role: 'system',
+      content: defaultOpenAiSystemPrompt
+    },
+    {
+      role: 'user',
+      content: prompt || defaultOpenAiPrompt
+    }
+  ];
+}
+
+function embeddingInputsFromText(input) {
+  const values = String(input || defaultEmbeddingInputText)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return values.length > 0 ? values : defaultEmbeddingInputText.split(/\r?\n/);
+}
+
+function samplePlatformState() {
+  return {
+    tenants: [
+      {
+        id: 'ten_default',
+        name: 'Default',
+        active: true
+      }
+    ],
+    users: [],
+    credentials: [],
+    roles: [],
+    permissions: [],
+    roleAssignments: [],
+    clients: [],
+    modelDefinitions: [],
+    modelConfigurations: [],
+    requestHistory: [],
+    auditRecords: [],
+    authSessions: []
+  };
 }
 
 function formatJson(input) {
