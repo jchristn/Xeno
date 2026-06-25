@@ -384,7 +384,6 @@ function ApiExplorerView() {
   const [pathValues, setPathValues] = useState({});
   const [queryText, setQueryText] = useState('{}');
   const [bodyText, setBodyText] = useState('{}');
-  const [request, setRequest] = useState(null);
   const [response, setResponse] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const abortControllerRef = useRef(null);
@@ -415,7 +414,6 @@ function ApiExplorerView() {
     setQueryText(formatJson(defaultQueryForOperation(selected)));
     setBodyText(formatJson(exampleBodyForOperation(selected, nextModel)));
     setResponse(null);
-    setRequest(null);
   }, [selected?.key]);
 
   function updateOperation(nextKey) {
@@ -448,15 +446,6 @@ function ApiExplorerView() {
     const query = queryResult.value;
     const requestPath = buildExplorerPath(selected.path, pathValues, query);
     const body = bodyResult.value;
-    const headers = api.headers();
-    const requestPreview = {
-      body: body ?? null,
-      headers,
-      method: selected.method,
-      path: requestPath,
-      url: `${api.baseUrl}${requestPath}`
-    };
-    setRequest(requestPreview);
     setResponse(null);
 
     if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -498,16 +487,6 @@ function ApiExplorerView() {
   function clearExplorerResponse() {
     setResponse(null);
   }
-
-  const requestPreview = selected
-    ? {
-        body: selected.method === 'GET' ? null : parseJsonOrFallback(bodyText, {}),
-        headers: api.headers(),
-        method: selected.method,
-        path: buildExplorerPath(selected.path, pathValues, parseJsonOrFallback(queryText, {})),
-        url: `${api.baseUrl}${buildExplorerPath(selected.path, pathValues, parseJsonOrFallback(queryText, {}))}`
-      }
-    : { status: t('noData') };
 
   return (
     <div className="view-stack">
@@ -588,7 +567,6 @@ function ApiExplorerView() {
         )}
       </Panel>
       <div className="api-explorer-results">
-        <ExplorerJsonPanel title={t('jsonRequest')} data={request || requestPreview} />
         <ExplorerResponsePanel isSending={isSending} onClear={clearExplorerResponse} response={response} />
       </div>
     </div>
@@ -2192,20 +2170,6 @@ function NestedRecordTable({ rows }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function ExplorerJsonPanel({ data, title }) {
-  const { t } = useTranslation();
-  const text = formatExplorerValue(data);
-  return (
-    <section className="api-explorer-card">
-      <div className="api-explorer-card-header">
-        <h2>{title}</h2>
-        <CopyButton label={t('copyJson')} value={text} />
-      </div>
-      <pre className="api-explorer-code">{text}</pre>
-    </section>
   );
 }
 
