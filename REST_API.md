@@ -16,9 +16,11 @@ The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-s
 
 `GET /metrics`
 
-## SDK Generation
+## SDKs
 
-No generated SDK packages are checked into the v0.1.0 alpha repository. Generate SDKs from the live OpenAPI document at `GET /openapi.json`.
+C#, JavaScript, and Python SDKs are checked in under `src/sdk/`. Each SDK includes its own `README.md`, `TESTING.md`, automated tests, and an interactive console harness.
+
+The live OpenAPI document remains available at `GET /openapi.json` and should be treated as the contract source of truth when validating or regenerating SDK coverage.
 
 ## Authentication
 

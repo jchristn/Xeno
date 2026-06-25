@@ -1,0 +1,288 @@
+export class XenoApiError extends Error {
+  constructor(message, status, endpoint, response) {
+    super(message);
+    this.name = 'XenoApiError';
+    this.status = status;
+    this.endpoint = endpoint;
+    this.response = response;
+  }
+}
+
+export class XenoClient {
+  constructor({
+    baseUrl = 'http://localhost:9000',
+    bearerToken = null,
+    tenantId = 'ten_default',
+    fetchImpl = globalThis.fetch
+  } = {}) {
+    if (!baseUrl) {
+      throw new Error('baseUrl is required');
+    }
+
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('fetchImpl must be a function');
+    }
+
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.bearerToken = bearerToken;
+    this.tenantId = tenantId;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async getHealth() {
+    return this.#request('GET', '/health');
+  }
+
+  async getOpenApi() {
+    return this.#request('GET', '/openapi.json');
+  }
+
+  async getMetrics() {
+    return this.#request('GET', '/metrics', null, { responseType: 'text' });
+  }
+
+  async login(username, password, tenantId = this.tenantId) {
+    return this.#request('POST', '/v1.0/api/auth/login', { username, password, tenantId });
+  }
+
+  async createToken(accessKey, secretKey) {
+    return this.#request('POST', '/v1.0/api/auth/token', { accessKey, secretKey });
+  }
+
+  async getTokenDetails() {
+    return this.#request('GET', '/v1.0/api/auth/token/details');
+  }
+
+  async refreshToken() {
+    return this.#request('POST', '/v1.0/api/auth/token/refresh', {});
+  }
+
+  async logout() {
+    return this.#request('POST', '/v1.0/api/auth/logout', {});
+  }
+
+  async listTenants() {
+    return this.#request('GET', '/v1.0/api/tenants');
+  }
+
+  async createTenant(tenant = {}) {
+    return this.#request('POST', '/v1.0/api/tenants', tenant);
+  }
+
+  async updateTenant(id, tenant = {}) {
+    return this.#request('PUT', `/v1.0/api/tenants/${encodeURIComponent(id)}`, tenant);
+  }
+
+  async deleteTenant(id) {
+    return this.#request('DELETE', `/v1.0/api/tenants/${encodeURIComponent(id)}`);
+  }
+
+  async listUsers() {
+    return this.#request('GET', '/v1.0/api/users');
+  }
+
+  async createUser(user = {}) {
+    return this.#request('POST', '/v1.0/api/users', user);
+  }
+
+  async updateUser(id, user = {}) {
+    return this.#request('PUT', `/v1.0/api/users/${encodeURIComponent(id)}`, user);
+  }
+
+  async deleteUser(id) {
+    return this.#request('DELETE', `/v1.0/api/users/${encodeURIComponent(id)}`);
+  }
+
+  async listCredentials() {
+    return this.#request('GET', '/v1.0/api/credentials');
+  }
+
+  async createCredential(credential = {}) {
+    return this.#request('POST', '/v1.0/api/credentials', credential);
+  }
+
+  async updateCredential(id, credential = {}) {
+    return this.#request('PUT', `/v1.0/api/credentials/${encodeURIComponent(id)}`, credential);
+  }
+
+  async deleteCredential(id) {
+    return this.#request('DELETE', `/v1.0/api/credentials/${encodeURIComponent(id)}`);
+  }
+
+  async listRoles() {
+    return this.#request('GET', '/v1.0/api/roles');
+  }
+
+  async createRole(role = {}) {
+    return this.#request('POST', '/v1.0/api/roles', role);
+  }
+
+  async updateRole(id, role = {}) {
+    return this.#request('PUT', `/v1.0/api/roles/${encodeURIComponent(id)}`, role);
+  }
+
+  async deleteRole(id) {
+    return this.#request('DELETE', `/v1.0/api/roles/${encodeURIComponent(id)}`);
+  }
+
+  async listPermissions() {
+    return this.#request('GET', '/v1.0/api/permissions');
+  }
+
+  async createPermission(permission = {}) {
+    return this.#request('POST', '/v1.0/api/permissions', permission);
+  }
+
+  async updatePermission(id, permission = {}) {
+    return this.#request('PUT', `/v1.0/api/permissions/${encodeURIComponent(id)}`, permission);
+  }
+
+  async deletePermission(id) {
+    return this.#request('DELETE', `/v1.0/api/permissions/${encodeURIComponent(id)}`);
+  }
+
+  async listEffectivePermissions() {
+    return this.#request('GET', '/v1.0/api/effective-permissions');
+  }
+
+  async listAuditRecords() {
+    return this.#request('GET', '/v1.0/api/audit');
+  }
+
+  async deleteAuditRecord(id) {
+    return this.#request('DELETE', `/v1.0/api/audit/${encodeURIComponent(id)}`);
+  }
+
+  async listClients() {
+    return this.#request('GET', '/v1.0/api/clients');
+  }
+
+  async deleteClient(id) {
+    return this.#request('DELETE', `/v1.0/api/clients/${encodeURIComponent(id)}`);
+  }
+
+  async deleteClientModel(model = {}) {
+    return this.#request('DELETE', '/v1.0/api/client-models', model);
+  }
+
+  async listModelDefinitions() {
+    return this.#request('GET', '/v1.0/api/model-definitions');
+  }
+
+  async listModelConfigurations() {
+    return this.#request('GET', '/v1.0/api/model-configurations');
+  }
+
+  async listOpenAiModels() {
+    return this.#request('GET', '/v1/models');
+  }
+
+  async createChatCompletion(request = {}) {
+    return this.#request('POST', '/v1/chat/completions', request);
+  }
+
+  async createCompletion(request = {}) {
+    return this.#request('POST', '/v1/completions', request);
+  }
+
+  async createEmbedding(request = {}) {
+    return this.#request('POST', '/v1/embeddings', request);
+  }
+
+  async listRequestHistory(filters = {}) {
+    return this.#request('GET', `/v1.0/api/request-history${this.#queryString(filters)}`);
+  }
+
+  async getRequestHistory(id) {
+    return this.#request('GET', `/v1.0/api/request-history/${encodeURIComponent(id)}`);
+  }
+
+  async deleteRequestHistory(id) {
+    return this.#request('DELETE', `/v1.0/api/request-history/${encodeURIComponent(id)}`);
+  }
+
+  async getRequestHistorySummary(filters = {}) {
+    return this.#request('GET', `/v1.0/api/request-history/summary${this.#queryString(filters)}`);
+  }
+
+  async getRequestAnalyticsOverview() {
+    return this.#request('GET', '/v1.0/api/request-history/analytics/overview');
+  }
+
+  async bulkDeleteRequestHistory(filter = {}) {
+    return this.#request('POST', '/v1.0/api/request-history/bulk', filter);
+  }
+
+  async getAnalyticsOverview() {
+    return this.#request('GET', '/v1.0/api/analytics/overview');
+  }
+
+  async getSettings() {
+    return this.#request('GET', '/v1.0/api/settings');
+  }
+
+  async updateSettings(settings = {}) {
+    return this.#request('POST', '/v1.0/api/settings', settings);
+  }
+
+  async getBackup() {
+    return this.#request('GET', '/v1.0/api/backup');
+  }
+
+  async restoreBackup(backup = {}) {
+    return this.#request('POST', '/v1.0/api/restore', backup);
+  }
+
+  async #request(method, endpoint, body = null, options = {}) {
+    const headers = {};
+    if (options.responseType !== 'text') {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    if (this.bearerToken) {
+      headers.Authorization = `Bearer ${this.bearerToken}`;
+    }
+
+    if (this.tenantId) {
+      headers['x-tenant-guid'] = this.tenantId;
+    }
+
+    const response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, {
+      method,
+      headers,
+      body: body != null ? JSON.stringify(body) : null
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new XenoApiError(
+        errorData?.message || errorData?.error || `HTTP ${response.status}`,
+        response.status,
+        endpoint,
+        errorData
+      );
+    }
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    if (options.responseType === 'text') {
+      return response.text();
+    }
+
+    return response.json();
+  }
+
+  #queryString(filters = {}) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters || {})) {
+      if (value !== null && value !== undefined && value !== '') {
+        query.append(key, value);
+      }
+    }
+
+    const serialized = query.toString();
+    return serialized ? `?${serialized}` : '';
+  }
+}

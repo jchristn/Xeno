@@ -1,0 +1,21 @@
+{
+  "name": "@xeno-control-plane/sdk",
+  "version": "0.1.0",
+  "description": "JavaScript SDK for the Xeno AI control plane.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "console": "node console.js"
+  },
+  "keywords": [
+    "xeno",
+    "ai",
+    "control-plane",
+    "openai"
+  ],
+  "license": "MIT"
+}

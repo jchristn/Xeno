@@ -29,7 +29,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 - `/build-server.bat`: builds and pushes `jchristn77/xeno-server:{tag}` and `latest`.
 - `/build-dashboard.bat`: builds and pushes `jchristn77/xeno-dashboard:{tag}` and `latest`.
 - `/build-all.bat`: accepts a Docker image tag and delegates to server and dashboard build scripts.
-- `/src`: C# solution, server, client, core library, and Touchstone test projects.
+- `/src`: C# solution, server, client, core library, Touchstone test projects, and checked-in C#, JavaScript, and Python SDKs.
 - `/dashboard`: React/Vite dashboard.
 - `/docker`: compose files, settings, nginx assets, PostgreSQL init assets.
 - `/docker/factory`: reset scripts.
@@ -52,6 +52,7 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
 | API Explorer | In progress | Integrated request builders for chat completions, completions, embeddings, and models. | Add saved examples, response timing, auth header display, and streaming toggle. |
 | Docker | In progress | Server/dashboard Dockerfiles, PostgreSQL default compose, initialization container, factory reset scripts. | Add deployment docs for TLS, external databases, and production secrets. |
 | Client | In progress | Console client initializes settings, logs in, stores access key/secret, connects WebSocket, advertises inventory, and handles requests. | Add packaged tool publishing matrix and stronger provider configuration validation. |
+| SDKs | In progress | C#, JavaScript, and Python SDKs exist under `src/sdk/`, each with README, TESTING guide, focused automated tests, and interactive console harness. | Add generated model types if the OpenAPI schema stabilizes enough to warrant a strongly typed package surface. |
 | Testing | In progress | Touchstone shared suites run through automated, xUnit, and NUnit projects. Routing, database, auth, WebSocket, management delete, management update, and inventory smoke coverage exists. | Add dashboard interaction tests and provider emulator coverage for OpenAI-compatible endpoints. |
 | Documentation | In progress | README, REST_API, Postman, dashboard audit, and this plan updated for v0.1.0 alpha. | Add complete endpoint examples and troubleshooting guides. |
 
@@ -166,6 +167,22 @@ Xeno is an AI control plane with a Watson 7 C# server, a React dashboard, a cros
    - OpenAI;
    - Gemini;
    - OpenAI-compatible endpoint such as vLLM.
+
+## SDK Plan
+
+1. Keep SDKs under `src/sdk/`:
+   - `src/sdk/csharp`;
+   - `src/sdk/javascript`;
+   - `src/sdk/python`.
+2. Each SDK must include:
+   - a package/library project;
+   - an interactive console harness;
+   - focused automated tests;
+   - `README.md`;
+   - `TESTING.md`.
+3. Cover authentication, administration, clients, advertised models, OpenAI-compatible routes, request history, analytics, settings, backup, and restore.
+4. Keep command-line console UX concise, readable, and oriented around common operator actions.
+5. Use `/openapi.json` as the source of truth when endpoint coverage changes.
 
 ## Docker Plan
 

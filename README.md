@@ -14,6 +14,7 @@ The first implementation includes:
 - a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client access-key/secret credentials;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
 - a React/Vite dashboard under `dashboard/` with create/edit workflows for tenants, users, credentials, roles, and permissions plus settings, clients, advertised models, analytics, request history, and integrated API explorer views;
+- C#, JavaScript, and Python SDKs under `src/sdk/`, each with tests, quick-start docs, and an interactive console harness;
 - Touchstone shared tests with automated, xUnit, and NUnit runners.
 
 ## Quick Start
@@ -31,7 +32,15 @@ curl http://localhost:9000/health
 curl http://localhost:9000/v1/models
 ```
 
-The OpenAPI contract is available at `/openapi.json` and Swagger UI is available at `/swagger`. No generated SDK packages are checked into v0.1.0; use `/openapi.json` as the SDK generation source of truth.
+The OpenAPI contract is available at `/openapi.json` and Swagger UI is available at `/swagger`. SDKs are checked in under `src/sdk/`; `/openapi.json` remains the API contract source of truth.
+
+## SDKs
+
+- C#: `src/sdk/csharp`
+- JavaScript: `src/sdk/javascript`
+- Python: `src/sdk/python`
+
+Each SDK includes `README.md`, `TESTING.md`, a focused test harness, and an interactive console application for exploring the server.
 
 ## Client
 
