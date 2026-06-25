@@ -35,6 +35,41 @@ namespace Xeno.Core.Models
         public string? SelectedClientId { get; set; } = null;
 
         /// <summary>
+        /// Selected client name.
+        /// </summary>
+        public string? SelectedClientName { get; set; } = null;
+
+        /// <summary>
+        /// Selected client provider.
+        /// </summary>
+        public string? SelectedProvider { get; set; } = null;
+
+        /// <summary>
+        /// Selected client-local source.
+        /// </summary>
+        public string? SelectedSource { get; set; } = null;
+
+        /// <summary>
+        /// Selected client in-flight request count at selection time.
+        /// </summary>
+        public int? SelectedClientInFlightRequests { get; set; } = null;
+
+        /// <summary>
+        /// Selected client maximum parallel request count.
+        /// </summary>
+        public int? SelectedClientMaxParallelRequests { get; set; } = null;
+
+        /// <summary>
+        /// Selected client routing weight.
+        /// </summary>
+        public int? SelectedClientWeight { get; set; } = null;
+
+        /// <summary>
+        /// Selected client last heartbeat timestamp.
+        /// </summary>
+        public DateTime? SelectedClientLastHeartbeatUtc { get; set; } = null;
+
+        /// <summary>
         /// Effective model name.
         /// </summary>
         public string? EffectiveModel { get; set; } = null;
@@ -43,6 +78,21 @@ namespace Xeno.Core.Models
         /// Candidate client IDs.
         /// </summary>
         public List<string> CandidateClientIds { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Number of eligible candidate clients.
+        /// </summary>
+        public int CandidateCount { get; set; } = 0;
+
+        /// <summary>
+        /// Human-readable selection reason.
+        /// </summary>
+        public string SelectionReason { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Server-to-client round-trip duration in milliseconds.
+        /// </summary>
+        public long? ClientRoundTripMs { get; set; } = null;
 
         /// <summary>
         /// Timeline entries.

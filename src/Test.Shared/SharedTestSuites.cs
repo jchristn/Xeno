@@ -1090,6 +1090,18 @@ namespace Test.Shared
                                 string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Relay returned " + (int)response.StatusCode + ": " + body);
                                 if (!body.Contains("relay-ok", StringComparison.Ordinal)) throw new InvalidOperationException("Relay body mismatch: " + body);
+                                if (HeaderValue(response, "X-Client-ID") != "xcl_touchstone") throw new InvalidOperationException("Relay response did not include selected client header.");
+                                if (HeaderValue(response, "X-Xeno-Routing-Outcome") != "Completed") throw new InvalidOperationException("Relay response did not include completed routing outcome.");
+                                if (HeaderValue(response, "X-Xeno-Model") != "llama3.2:latest") throw new InvalidOperationException("Relay response did not include effective model header.");
+                                if (HeaderValue(response, "X-Xeno-Selected-Provider") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include selected provider header.");
+                                if (HeaderValue(response, "X-Xeno-Selected-Source") != "touchstone-runner") throw new InvalidOperationException("Relay response did not include selected source header.");
+                                if (HeaderValue(response, "X-Xeno-Routing-Candidate-Count") != "1") throw new InvalidOperationException("Relay response did not include candidate count header.");
+                                if (!HeaderValue(response, "X-Xeno-Selection-Reason").Contains("lowest in-flight", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Relay response did not include selection reason header.");
+                                if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Request-History-ID"))) throw new InvalidOperationException("Relay response did not include request history trace header.");
+                                if (HeaderLong(response, "X-Xeno-Client-Roundtrip-Ms") < 0) throw new InvalidOperationException("Relay response included invalid client roundtrip header.");
+                                if (HeaderLong(response, "X-Xeno-Request-Duration-Ms") < 0) throw new InvalidOperationException("Relay response included invalid request duration header.");
+                                string timeline = HeaderValue(response, "X-Xeno-Routing-Timeline");
+                                if (!timeline.Contains("ClientSelection", StringComparison.Ordinal) || !timeline.Contains("ClientResponse", StringComparison.Ordinal)) throw new InvalidOperationException("Relay response did not include routing timeline header.");
                             }
                         }
 
@@ -1362,6 +1374,18 @@ namespace Test.Shared
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
                 return await httpClient.SendAsync(request).ConfigureAwait(false);
             }
+        }
+
+        private static string HeaderValue(HttpResponseMessage response, string name)
+        {
+            if (!response.Headers.TryGetValues(name, out IEnumerable<string>? values)) return String.Empty;
+            return values.FirstOrDefault() ?? String.Empty;
+        }
+
+        private static long HeaderLong(HttpResponseMessage response, string name)
+        {
+            string value = HeaderValue(response, name);
+            return Int64.TryParse(value, out long parsed) ? parsed : -1;
         }
 
         private static async Task<string> FirstRecordIdAsync(HttpClient httpClient, string url)

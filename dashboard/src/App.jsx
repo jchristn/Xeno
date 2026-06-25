@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -31,6 +31,7 @@ import {
   Settings as SettingsIcon,
   Shield,
   ShieldCheck,
+  Square,
   Sun,
   Trash2,
   Upload,
@@ -388,6 +389,8 @@ function ApiExplorerView() {
   const [bodyText, setBodyText] = useState('{}');
   const [request, setRequest] = useState(null);
   const [response, setResponse] = useState(null);
+  const [isSending, setIsSending] = useState(false);
+  const abortControllerRef = useRef(null);
   const visibleOperations = tag === 'all' ? operations : operations.filter((item) => item.tag === tag);
   const selected = operations.find((item) => item.key === operationKey) || visibleOperations[0] || operations[0];
   const pathParameters = selected ? extractPathParameters(selected.path) : [];
@@ -464,11 +467,11 @@ function ApiExplorerView() {
   }
 
   async function execute() {
-    if (!selected) return;
+    if (!selected || isSending) return;
 
     const queryResult = parseJsonForExplorer(queryText, {});
     if (!queryResult.ok) {
-      setResponse({ body: { error: t('invalidJson'), field: t('queryParameters'), details: queryResult.error }, ok: false, status: 0, statusText: 'Invalid JSON' });
+      setResponse({ body: { error: t('invalidJson'), field: t('queryParameters'), details: queryResult.error }, error: t('invalidJson'), headers: {}, ok: false, rawBody: '', status: 0, statusText: 'Invalid JSON' });
       return;
     }
 
@@ -476,41 +479,83 @@ function ApiExplorerView() {
       ? { ok: true, value: undefined }
       : parseJsonForExplorer(bodyText, {});
     if (!bodyResult.ok) {
-      setResponse({ body: { error: t('invalidJson'), field: t('requestBody'), details: bodyResult.error }, ok: false, status: 0, statusText: 'Invalid JSON' });
+      setResponse({ body: { error: t('invalidJson'), field: t('requestBody'), details: bodyResult.error }, error: t('invalidJson'), headers: {}, ok: false, rawBody: '', status: 0, statusText: 'Invalid JSON' });
       return;
     }
 
     const query = queryResult.value;
     const requestPath = buildExplorerPath(selected.path, pathValues, query);
     const body = bodyResult.value;
+    const headers = api.headers();
     const requestPreview = {
       body: body ?? null,
+      headers,
       method: selected.method,
-      path: requestPath
+      path: requestPath,
+      url: `${api.baseUrl}${requestPath}`
     };
     setRequest(requestPreview);
+    setResponse(null);
+
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    setIsSending(true);
 
     try {
-      const result = await api.request(requestPath, { body, method: selected.method });
+      const result = await api.request(requestPath, {
+        body,
+        expectStream: Boolean(body && typeof body === 'object' && body.stream === true),
+        method: selected.method,
+        onProgress: (progress) => setResponse(progress),
+        signal: abortController.signal
+      });
       setResponse(result);
     } catch (error) {
+      const cancelled = error instanceof Error && error.name === 'AbortError';
       setResponse({
-        body: { error: error instanceof Error ? error.message : String(error) },
+        body: { error: cancelled ? t('requestCancelled') : (error instanceof Error ? error.message : String(error)) },
+        error: cancelled ? t('requestCancelled') : (error instanceof Error ? error.message : String(error)),
+        headers: {},
         ok: false,
+        rawBody: '',
         status: 0,
-        statusText: 'Client Error'
+        statusText: cancelled ? 'Cancelled' : 'Client Error',
+        timing: {}
       });
+    } finally {
+      setIsSending(false);
+      abortControllerRef.current = null;
     }
   }
 
+  function stopRequest() {
+    abortControllerRef.current?.abort();
+  }
+
+  function clearExplorerResponse() {
+    setResponse(null);
+  }
+
   const requestPreview = selected
-    ? { body: selected.method === 'GET' ? null : parseJsonOrFallback(bodyText, {}), method: selected.method, path: buildExplorerPath(selected.path, pathValues, parseJsonOrFallback(queryText, {})) }
+    ? {
+        body: selected.method === 'GET' ? null : parseJsonOrFallback(bodyText, {}),
+        headers: api.headers(),
+        method: selected.method,
+        path: buildExplorerPath(selected.path, pathValues, parseJsonOrFallback(queryText, {})),
+        url: `${api.baseUrl}${buildExplorerPath(selected.path, pathValues, parseJsonOrFallback(queryText, {}))}`
+      }
     : { status: t('noData') };
 
   return (
     <div className="view-stack">
       <Panel
-        actions={<IconButton disabled={!selected} onClick={execute} label={t('execute')} icon={<Play size={16} />} variant="primary" />}
+        actions={(
+          <div className="button-row">
+            <IconButton disabled={!selected || isSending} onClick={execute} label={isSending ? t('sending') : t('execute')} icon={<Play size={16} />} variant="primary" />
+            {isSending ? <IconButton onClick={stopRequest} label={t('stop')} icon={<Square size={16} />} variant="danger" /> : null}
+          </div>
+        )}
         title={t('requestBuilder')}
       >
         {operations.length === 0 ? (
@@ -610,9 +655,9 @@ function ApiExplorerView() {
           </div>
         )}
       </Panel>
-      <div className="workspace-grid explorer-grid">
-        <JsonPanelInline title={t('request')} data={request || requestPreview} />
-        <JsonPanelInline title={t('response')} data={response || { status: t('noData') }} />
+      <div className="api-explorer-results">
+        <ExplorerJsonPanel title={t('jsonRequest')} data={request || requestPreview} />
+        <ExplorerResponsePanel isSending={isSending} onClear={clearExplorerResponse} response={response} />
       </div>
     </div>
   );
@@ -2218,6 +2263,139 @@ function NestedRecordTable({ rows }) {
   );
 }
 
+function ExplorerJsonPanel({ data, title }) {
+  const { t } = useTranslation();
+  const text = formatExplorerValue(data);
+  return (
+    <section className="api-explorer-card">
+      <div className="api-explorer-card-header">
+        <h2>{title}</h2>
+        <CopyButton label={t('copyJson')} value={text} />
+      </div>
+      <pre className="api-explorer-code">{text}</pre>
+    </section>
+  );
+}
+
+function ExplorerResponsePanel({ isSending, onClear, response }) {
+  const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState('preview');
+  const normalized = normalizeExplorerResponse(response);
+  const tabs = [
+    { id: 'preview', label: t('responsePreview') },
+    { id: 'body', label: t('responseBody') },
+    { id: 'headers', label: t('responseHeaders') },
+    { id: 'status', label: t('responseStatus') }
+  ];
+  const bodyText = explorerResponseBodyText(normalized);
+  const headersText = formatExplorerValue(normalized.headers);
+  const previewText = normalized.preview || extractExplorerPreview(normalized.body) || bodyText;
+  const hasHeaders = Object.keys(normalized.headers || {}).length > 0;
+  const hasStatus = normalized.status !== null || normalized.error;
+
+  return (
+    <section className="api-explorer-card">
+      <div className="api-explorer-card-header api-explorer-response-header">
+        <h2>{t('jsonResponse')}</h2>
+        <div className="api-explorer-tabs" role="tablist" aria-label={t('response')}>
+          {tabs.map((tab) => (
+            <button
+              aria-selected={activeTab === tab.id}
+              className={`api-explorer-tab ${activeTab === tab.id ? 'active' : ''}`}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="api-explorer-response-actions">
+          {renderExplorerStatusBadge(normalized, t)}
+          {response ? <IconButton iconOnly onClick={onClear} label={t('clear')} icon={<Trash2 size={16} />} /> : null}
+        </div>
+      </div>
+      <div className="api-explorer-response-body">
+        {activeTab === 'preview' ? (
+          <div className="api-explorer-tab-content">
+            {isSending ? (
+              <div className="api-explorer-streaming">
+                <span className="streaming-dot" />
+                <span>{normalized.streamed ? t('streamingResponse') : t('waitingForResponse')}</span>
+              </div>
+            ) : null}
+            {previewText ? (
+              <>
+                <pre className="api-explorer-code plain">{previewText}</pre>
+                <div className="api-explorer-copy-overlay">
+                  <CopyButton label={t('copy')} value={previewText} />
+                </div>
+              </>
+            ) : (
+              <EmptyState title={t('noData')} message={isSending ? t('waitingForResponse') : t('noResponseBody')} />
+            )}
+          </div>
+        ) : null}
+
+        {activeTab === 'body' ? (
+          <div className="api-explorer-tab-content">
+            {bodyText ? (
+              <>
+                <pre className="api-explorer-code">{bodyText}</pre>
+                <div className="api-explorer-copy-overlay">
+                  <CopyButton label={t('copyJson')} value={bodyText} />
+                </div>
+              </>
+            ) : (
+              <EmptyState title={t('noData')} message={t('noResponseBody')} />
+            )}
+          </div>
+        ) : null}
+
+        {activeTab === 'headers' ? (
+          <div className="api-explorer-tab-content">
+            {hasHeaders ? (
+              <>
+                <pre className="api-explorer-code">{headersText}</pre>
+                <div className="api-explorer-copy-overlay">
+                  <CopyButton label={t('copyJson')} value={headersText} />
+                </div>
+              </>
+            ) : (
+              <EmptyState title={t('noData')} message={t('noResponseHeaders')} />
+            )}
+          </div>
+        ) : null}
+
+        {activeTab === 'status' ? (
+          <div className="api-explorer-tab-content">
+            {hasStatus ? (
+              <div className="api-explorer-metrics">
+                <MetricTile label={t('status')} value={normalized.error ? normalized.error : `${normalized.status} ${normalized.statusText || ''}`.trim()} />
+                <MetricTile label={t('transferMode')} value={normalized.streamed ? streamTypeLabel(normalized.streamType, t) : t('standardResponse')} />
+                <MetricTile label={t('timeToFirstByte')} value={formatDuration(normalized.timing.timeToFirstByteMs)} />
+                <MetricTile label={t('totalTime')} value={formatDuration(normalized.timing.totalTimeMs ?? normalized.timing.requestTimeMs)} />
+              </div>
+            ) : (
+              <EmptyState title={t('noData')} message={t('noResponseStatus')} />
+            )}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function MetricTile({ label, value }) {
+  return (
+    <div className="api-explorer-metric">
+      <span>{label}</span>
+      <strong>{value || '-'}</strong>
+    </div>
+  );
+}
+
 function JsonPanelInline({ title, data }) {
   const { t } = useTranslation();
   return (
@@ -2311,6 +2489,80 @@ async function deleteClientModel(row) {
 
 async function deleteRequestHistoryGroup(filter) {
   await api.post(`${requestHistoryEndpoint}/bulk`, filter);
+}
+
+function normalizeExplorerResponse(response) {
+  return {
+    body: response?.body ?? null,
+    error: response?.error || '',
+    headers: response?.headers || {},
+    ok: response?.ok === true,
+    preview: response?.preview || '',
+    rawBody: response?.rawBody || '',
+    status: response?.status ?? null,
+    statusText: response?.statusText || '',
+    streamed: response?.streamed === true,
+    streamType: response?.streamType || 'standard',
+    timing: response?.timing || {}
+  };
+}
+
+function explorerResponseBodyText(response) {
+  if (response.rawBody) return formatExplorerValue(response.rawBody);
+  if (response.body !== null && response.body !== undefined) return formatExplorerValue(response.body);
+  return '';
+}
+
+function formatExplorerValue(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') {
+    if (!value.trim()) return '';
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  }
+
+  return JSON.stringify(value, null, 2);
+}
+
+function extractExplorerPreview(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(extractExplorerPreview).filter(Boolean).join('');
+  if (typeof value !== 'object') return String(value);
+
+  const choice = Array.isArray(value.choices) ? value.choices[0] : null;
+  if (typeof choice?.message?.content === 'string') return choice.message.content;
+  if (typeof choice?.delta?.content === 'string') return choice.delta.content;
+  if (typeof choice?.text === 'string') return choice.text;
+  if (typeof value.response === 'string') return value.response;
+  if (typeof value.output_text === 'string') return value.output_text;
+  if (typeof value.content === 'string') return value.content;
+  return '';
+}
+
+function renderExplorerStatusBadge(response, t) {
+  if (response.error) return <StatusChip tone="danger" value={response.statusText || t('failed')} />;
+  if (response.status === null) return null;
+  if (response.status >= 200 && response.status < 300) return <StatusChip tone="success" value={`${response.status} ${response.statusText || ''}`.trim()} />;
+  if (response.status >= 400) return <StatusChip tone="danger" value={`${response.status} ${response.statusText || ''}`.trim()} />;
+  return <StatusChip tone="warning" value={`${response.status} ${response.statusText || ''}`.trim()} />;
+}
+
+function streamTypeLabel(streamType, t) {
+  if (streamType === 'sse') return t('serverSentEvents');
+  if (streamType === 'ndjson') return t('ndjsonStream');
+  if (streamType === 'chunked') return t('chunkedResponse');
+  return t('standardResponse');
+}
+
+function formatDuration(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  if (number < 1000) return `${Math.max(0, number).toFixed(0)} ms`;
+  return `${(number / 1000).toFixed(2)} s`;
 }
 
 function buildApiOperations(openApi) {

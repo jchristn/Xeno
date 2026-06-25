@@ -10,6 +10,7 @@ The first implementation includes:
 
 - multitenant server state with seeded tenant, user, credential, connected clients, and advertised models;
 - OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
+- routed OpenAI-compatible responses include `X-Client-ID` and `X-Xeno-*` trace headers for selected node, routing reason, candidate count, request history ID, and timing;
 - management routes for health, OpenAPI, clients, advertised models, tenants, users, credentials, roles, permissions, settings, request history, and token bootstrap;
 - a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client access-key/secret credentials;
 - a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;

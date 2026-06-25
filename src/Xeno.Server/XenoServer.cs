@@ -2,6 +2,7 @@ namespace Xeno.Server
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Net.WebSockets;
@@ -28,6 +29,8 @@ namespace Xeno.Server
     /// </summary>
     public sealed class XenoServer : IDisposable
     {
+        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline";
+
         private readonly XenoSettings _Settings;
         private readonly string _SettingsFile;
         private readonly Webserver _Webserver;
@@ -806,7 +809,8 @@ namespace Xeno.Server
 
             if (!decision.Success)
             {
-                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, null, null, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -822,7 +826,8 @@ namespace Xeno.Server
 
             if (!decision.Success)
             {
-                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, null, null, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -847,7 +852,9 @@ namespace Xeno.Server
                 decision.HttpStatusCode = 502;
                 decision.OutcomeCode = "ClientMissing";
                 decision.Message = "The selected client no longer exists.";
-                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                decision.Timeline.Add("ClientMissing");
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, null, null, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -859,7 +866,9 @@ namespace Xeno.Server
                 decision.HttpStatusCode = 503;
                 decision.OutcomeCode = "ClientNotConnected";
                 decision.Message = "The selected client is not connected.";
-                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                decision.Timeline.Add("ClientNotConnected");
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, client, null, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
                 return;
             }
@@ -873,6 +882,7 @@ namespace Xeno.Server
 
             XenoClientModel? selectedModel = client.Models.FirstOrDefault(item => String.Equals(item.Name, decision.EffectiveModel, StringComparison.OrdinalIgnoreCase));
             client.InFlightRequests++;
+            DateTime? clientRequestStartedUtc = null;
             try
             {
                 string relativePath = NormalizeOpenAiPath(path);
@@ -893,9 +903,13 @@ namespace Xeno.Server
                     body = JsonUtil.Serialize(body)
                 });
 
+                clientRequestStartedUtc = DateTime.UtcNow;
+                decision.Timeline.Add("ClientDispatch");
                 await SendToClientAsync(connection, payload, token).ConfigureAwait(false);
                 string responseJson = await WaitForClientResponseAsync(requestId, completion, token).ConfigureAwait(false);
-                await SendClientResponseAsync(context, requestContext, path, decision, responseJson, token).ConfigureAwait(false);
+                decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
+                decision.Timeline.Add("ClientResponse");
+                await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, responseJson, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -903,7 +917,10 @@ namespace Xeno.Server
                 decision.HttpStatusCode = 504;
                 decision.OutcomeCode = "ClientTimeout";
                 decision.Message = "The selected client did not respond before the timeout.";
-                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, CancellationToken.None).ConfigureAwait(false);
+                if (clientRequestStartedUtc.HasValue) decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
+                decision.Timeline.Add("ClientTimeout");
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, CancellationToken.None).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, client, selectedModel, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
             }
             finally
@@ -922,6 +939,8 @@ namespace Xeno.Server
             RequestContext requestContext,
             string path,
             RoutingDecision decision,
+            XenoClientRecord client,
+            XenoClientModel? selectedModel,
             string responseJson,
             CancellationToken token)
         {
@@ -943,11 +962,12 @@ namespace Xeno.Server
                 decision.HttpStatusCode = statusCode;
                 decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
                 decision.Message = success ? "Client completed the routed request." : TryGetString(root, "error") ?? "Client request failed.";
-                await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
 
                 context.Response.StatusCode = statusCode;
                 string contentType = TryGetString(root, "contentType") ?? "application/json";
                 context.Response.ContentType = contentType;
+                ApplyRoutingTraceHeaders(context, requestContext, decision, client, selectedModel, history);
                 string body = TryGetString(root, "body") ?? "{}";
                 await context.Response.Send(body, context.Token).ConfigureAwait(false);
             }
@@ -1282,10 +1302,56 @@ namespace Xeno.Server
             }
         }
 
-        private async Task RecordAndSaveHistoryAsync(RequestContext requestContext, string method, string path, RoutingDecision decision, CancellationToken token)
+        private async Task<RequestHistoryEntry> RecordAndSaveHistoryAsync(RequestContext requestContext, string method, string path, RoutingDecision decision, CancellationToken token)
         {
-            RequireRouting().RecordHistory(requestContext, path, method, decision);
+            RequestHistoryEntry entry = RequireRouting().RecordHistory(requestContext, path, method, decision);
             await SavePlatformAsync(token).ConfigureAwait(false);
+            return entry;
+        }
+
+        private static void ApplyRoutingTraceHeaders(
+            HttpContextBase context,
+            RequestContext requestContext,
+            RoutingDecision decision,
+            XenoClientRecord? client,
+            XenoClientModel? selectedModel,
+            RequestHistoryEntry? history)
+        {
+            string? selectedClientId = FirstNonEmpty(decision.SelectedClientId, client?.Id);
+            AddTraceHeader(context, "X-Client-ID", selectedClientId);
+            AddTraceHeader(context, "X-Xeno-Request-ID", requestContext.RequestId);
+            AddTraceHeader(context, "X-Xeno-Tenant-ID", requestContext.TenantId);
+            AddTraceHeader(context, "X-Xeno-Model", decision.EffectiveModel);
+            AddTraceHeader(context, "X-Xeno-Routing-Outcome", decision.OutcomeCode);
+            AddTraceHeader(context, "X-Xeno-Routing-Message", decision.Message);
+            AddTraceHeader(context, "X-Xeno-Routing-Candidate-Count", decision.CandidateCount.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Routing-Candidates", String.Join(",", decision.CandidateClientIds));
+            AddTraceHeader(context, "X-Xeno-Selection-Reason", decision.SelectionReason);
+            AddTraceHeader(context, "X-Xeno-Selected-Client-Name", FirstNonEmpty(decision.SelectedClientName, client?.Name));
+            AddTraceHeader(context, "X-Xeno-Selected-Provider", FirstNonEmpty(decision.SelectedProvider, selectedModel?.Provider.ToString()));
+            AddTraceHeader(context, "X-Xeno-Selected-Source", FirstNonEmpty(decision.SelectedSource, selectedModel?.Source));
+            AddTraceHeader(context, "X-Xeno-Selected-In-Flight", decision.SelectedClientInFlightRequests?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Selected-Max-Parallel", decision.SelectedClientMaxParallelRequests?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Selected-Weight", decision.SelectedClientWeight?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Selected-Last-Heartbeat-UTC", decision.SelectedClientLastHeartbeatUtc?.ToString("O", CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Client-Roundtrip-Ms", decision.ClientRoundTripMs?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Request-Duration-Ms", Math.Max(0, (long)(DateTime.UtcNow - requestContext.StartedUtc).TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Request-History-ID", history?.Id);
+            AddTraceHeader(context, "X-Xeno-Routing-Timeline", String.Join(",", decision.Timeline));
+        }
+
+        private static void AddTraceHeader(HttpContextBase context, string name, string? value)
+        {
+            string sanitized = SanitizeHeaderValue(value);
+            if (String.IsNullOrWhiteSpace(sanitized)) return;
+            context.Response.Headers.Add(name, sanitized);
+        }
+
+        private static string SanitizeHeaderValue(string? value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return String.Empty;
+            string sanitized = value.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
+            return sanitized.Length <= 1024 ? sanitized : sanitized.Substring(0, 1024);
         }
 
         private async Task SavePlatformAsync(CancellationToken token)
@@ -2151,7 +2217,7 @@ namespace Xeno.Server
             response.Headers.Add("Access-Control-Allow-Origin", String.Join(",", _Settings.Cors.AllowedOrigins));
             response.Headers.Add("Access-Control-Allow-Headers", String.Join(",", _Settings.Cors.AllowedHeaders));
             response.Headers.Add("Access-Control-Allow-Methods", String.Join(",", _Settings.Cors.AllowedMethods));
-            response.Headers.Add("Access-Control-Expose-Headers", "Content-Type, Authorization, x-token, x-tenant-guid");
+            response.Headers.Add("Access-Control-Expose-Headers", "Content-Type, Authorization, x-token, x-tenant-guid, " + RoutingTraceExposeHeaders);
         }
 
         private XenoPlatform RequirePlatform()

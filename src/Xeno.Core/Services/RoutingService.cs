@@ -77,12 +77,22 @@ namespace Xeno.Core.Services
             }
 
             XenoClientRecord selected = candidates[0];
+            XenoClientModel? selectedModel = selected.Models.FirstOrDefault(item => String.Equals(item.Name, effectiveModel, StringComparison.OrdinalIgnoreCase));
             decision.CandidateClientIds = candidates.Select(item => item.Id).ToList();
+            decision.CandidateCount = candidates.Count;
             decision.Success = true;
             decision.HttpStatusCode = 200;
             decision.OutcomeCode = "Routed";
             decision.Message = "Request routed to client '" + selected.Name + "'.";
             decision.SelectedClientId = selected.Id;
+            decision.SelectedClientName = selected.Name;
+            decision.SelectedProvider = selectedModel?.Provider.ToString();
+            decision.SelectedSource = selectedModel?.Source;
+            decision.SelectedClientInFlightRequests = selected.InFlightRequests;
+            decision.SelectedClientMaxParallelRequests = selected.MaxParallelRequests;
+            decision.SelectedClientWeight = selected.Weight;
+            decision.SelectedClientLastHeartbeatUtc = selected.LastHeartbeatUtc;
+            decision.SelectionReason = "Selected first eligible connected client after sorting by lowest in-flight requests, highest weight, then client name.";
             decision.Timeline.Add("ClientSelection");
             return Task.FromResult(decision);
         }

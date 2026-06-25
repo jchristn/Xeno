@@ -134,6 +134,21 @@ Legacy dashboard aliases under `/api/v1/...` are also registered for administrat
 
 OpenAI-compatible aliases are also available under `/api/v1/openai/v1/...`.
 
+Routed OpenAI-compatible responses include Xeno trace headers for debugging model placement and node selection:
+
+- `X-Client-ID`: selected connected client/node ID.
+- `X-Xeno-Request-ID`: Xeno request trace ID.
+- `X-Xeno-Request-History-ID`: persisted request-history entry ID.
+- `X-Xeno-Model`: effective model used for routing.
+- `X-Xeno-Routing-Outcome`: routing outcome such as `Completed`, `ModelNotFound`, or `NoEligibleClients`.
+- `X-Xeno-Routing-Message`: human-readable routing result.
+- `X-Xeno-Routing-Candidate-Count` and `X-Xeno-Routing-Candidates`: eligible client count and IDs.
+- `X-Xeno-Selection-Reason`: reason the selected node won.
+- `X-Xeno-Selected-Client-Name`, `X-Xeno-Selected-Provider`, and `X-Xeno-Selected-Source`: selected node and advertised model source metadata.
+- `X-Xeno-Selected-In-Flight`, `X-Xeno-Selected-Max-Parallel`, `X-Xeno-Selected-Weight`, and `X-Xeno-Selected-Last-Heartbeat-UTC`: selected node load and health inputs.
+- `X-Xeno-Client-Roundtrip-Ms` and `X-Xeno-Request-Duration-Ms`: relay timing.
+- `X-Xeno-Routing-Timeline`: comma-separated routing steps.
+
 ## Request History
 
 `GET /v1.0/api/request-history`
