@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -59,6 +59,7 @@ const defaultEmbeddingInputText = [
   'Artificial intelligence is transforming software development.',
   'How do I cook a perfect medium-rare steak?'
 ].join('\n');
+const MarkdownPreview = lazy(() => import('./components/MarkdownPreview.jsx'));
 
 const interactiveRowClickSelector = [
   'button',
@@ -2223,7 +2224,9 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
             ) : null}
             {previewText ? (
               <>
-                <pre className="api-explorer-code plain">{previewText}</pre>
+                <Suspense fallback={<pre className="api-explorer-code plain">{previewText}</pre>}>
+                  <MarkdownPreview text={previewText} />
+                </Suspense>
                 <div className="api-explorer-copy-overlay">
                   <CopyButton label={t('copy')} value={previewText} />
                 </div>
