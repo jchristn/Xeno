@@ -1,3 +1,13 @@
+export const authFailureEventName = 'xeno.dashboard.authFailed';
+
+export class ApiAuthenticationError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = 'ApiAuthenticationError';
+    this.status = status;
+  }
+}
+
 export default class ApiClient {
   constructor(baseUrl = window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000') {
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -21,7 +31,7 @@ export default class ApiClient {
 
   async get(path, options = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, { headers: this.headers(options) });
-    return readJsonResponse(response);
+    return readJsonResponse(response, options);
   }
 
   async post(path, body, options = {}) {
@@ -30,7 +40,7 @@ export default class ApiClient {
       headers: this.headers(options),
       body: JSON.stringify(body ?? {})
     });
-    return readJsonResponse(response);
+    return readJsonResponse(response, options);
   }
 
   async put(path, body, options = {}) {
@@ -39,7 +49,7 @@ export default class ApiClient {
       headers: this.headers(options),
       body: JSON.stringify(body ?? {})
     });
-    return readJsonResponse(response);
+    return readJsonResponse(response, options);
   }
 
   async delete(path, body, options = {}) {
@@ -50,7 +60,7 @@ export default class ApiClient {
     if (body !== undefined) requestOptions.body = JSON.stringify(body ?? {});
     const response = await fetch(`${this.baseUrl}${path}`, requestOptions);
     if (response.status === 204) return {};
-    return readJsonResponse(response);
+    return readJsonResponse(response, options);
   }
 
   async request(path, { body, expectStream = false, method = 'GET', onProgress, signal } = {}) {
@@ -67,6 +77,12 @@ export default class ApiClient {
     const response = await fetch(`${this.baseUrl}${path}`, options);
     const headers = {};
     response.headers.forEach((value, key) => { headers[key] = value; });
+    if (isAuthenticationFailure(response)) {
+      const text = await response.text();
+      const body = parseBody(text);
+      throwAuthenticationFailure(response, body);
+    }
+
     const contentType = response.headers.get('content-type') || '';
     const transferEncoding = response.headers.get('transfer-encoding') || '';
     const streamType = response.ok ? detectStreamType(contentType, transferEncoding, expectStream) : 'standard';
@@ -116,6 +132,12 @@ export default class ApiClient {
 
   async text(path) {
     const response = await fetch(`${this.baseUrl}${path}`, { headers: this.headers() });
+    if (isAuthenticationFailure(response)) {
+      const text = await response.text();
+      const body = parseBody(text);
+      throwAuthenticationFailure(response, body);
+    }
+
     return response.text();
   }
 
@@ -136,17 +158,43 @@ export default class ApiClient {
   }
 }
 
-async function readJsonResponse(response) {
+async function readJsonResponse(response, options = {}) {
   const text = await response.text();
+  const parsed = parseResponseText(text, response.ok);
+  if (!options.skipAuth && isAuthenticationFailure(response)) {
+    throwAuthenticationFailure(response, parsed);
+  }
+
+  if (!text) return {};
+  return parsed;
+}
+
+function parseResponseText(text, ok) {
   if (!text) return {};
   try {
     return JSON.parse(text);
   } catch {
     return {
-      error: response.ok ? 'InvalidJson' : 'RequestFailed',
+      error: ok ? 'InvalidJson' : 'RequestFailed',
       message: text
     };
   }
+}
+
+function isAuthenticationFailure(response) {
+  return response.status === 401 || response.status === 403;
+}
+
+function throwAuthenticationFailure(response, payload) {
+  const message = payload?.message || payload?.error || 'Dashboard session expired. Please sign in again.';
+  const error = new ApiAuthenticationError(message, response.status);
+  window.dispatchEvent(new CustomEvent(authFailureEventName, {
+    detail: {
+      message,
+      status: response.status
+    }
+  }));
+  throw error;
 }
 
 function parseBody(text) {

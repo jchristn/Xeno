@@ -16,10 +16,26 @@ namespace Xeno.Core.Models
         public string Name { get; set; } = "local";
 
         /// <summary>
-        /// Provider family name.
+        /// Upstream API type name.
+        /// </summary>
+        [JsonPropertyName("apiType")]
+        public string ApiType { get; set; } = "Ollama";
+
+        /// <summary>
+        /// Backward-compatible upstream API type alias.
         /// </summary>
         [JsonPropertyName("provider")]
-        public string Provider { get; set; } = "Ollama";
+        public string? LegacyProvider
+        {
+            get
+            {
+                return null;
+            }
+            set
+            {
+                if (!String.IsNullOrWhiteSpace(value)) ApiType = value;
+            }
+        }
 
         /// <summary>
         /// Models exposed through this source.

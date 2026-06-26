@@ -172,8 +172,22 @@ namespace Test.Shared
                                 ClientCommandResult initial = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
                                 if (initial.ExitCode != 0) throw new InvalidOperationException("Initial model list failed: " + initial.StandardError + initial.StandardOutput);
                                 if (!initial.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Default model was not listed before delete.");
+                                ClientCommandResult modelAliasList = await RunXenoClientAsync(new[] { "--json", "model", "ls" }, clientHome).ConfigureAwait(false);
+                                if (modelAliasList.ExitCode != 0 || !modelAliasList.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Model ls alias failed: " + modelAliasList.StandardError + modelAliasList.StandardOutput);
+                                ClientCommandResult providerAliasList = await RunXenoClientAsync(new[] { "provider", "ls" }, clientHome).ConfigureAwait(false);
+                                if (providerAliasList.ExitCode != 0 || !providerAliasList.StandardOutput.Contains("local-ollama", StringComparison.Ordinal)) throw new InvalidOperationException("Provider ls alias failed: " + providerAliasList.StandardError + providerAliasList.StandardOutput);
+                                ClientCommandResult configShow = await RunXenoClientAsync(new[] { "config", "show" }, clientHome).ConfigureAwait(false);
+                                if (configShow.ExitCode != 0) throw new InvalidOperationException("Config show failed: " + configShow.StandardError + configShow.StandardOutput);
+                                if (!configShow.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include configured models.");
+                                if (!configShow.StandardOutput.Contains("Completions:", StringComparison.Ordinal) || !configShow.StandardOutput.Contains("Embeddings:", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include model capabilities.");
+                                ClientCommandResult providerAdd = await RunXenoClientAsync(new[] { "provider", "add", "--name", "openai-compatible", "--type", "OpenAICompatible", "--endpoint", "http://127.0.0.1:11435" }, clientHome).ConfigureAwait(false);
+                                if (providerAdd.ExitCode != 0) throw new InvalidOperationException("Provider add with API type failed: " + providerAdd.StandardError + providerAdd.StandardOutput);
+                                ClientCommandResult startHelp = await RunXenoClientAsync(new[] { "start", "--help" }, clientHome).ConfigureAwait(false);
+                                if (startHelp.ExitCode != 0 || !startHelp.StandardOutput.Contains("xeno start", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Start alias help failed: " + startHelp.StandardError + startHelp.StandardOutput);
+                                ClientCommandResult disconnect = await RunXenoClientAsync(new[] { "disconnect" }, clientHome).ConfigureAwait(false);
+                                if (disconnect.ExitCode != 0 || !disconnect.StandardOutput.Contains("not running", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Disconnect alias failed: " + disconnect.StandardError + disconnect.StandardOutput);
 
-                                ClientCommandResult deleted = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult deleted = await RunXenoClientAsync(new[] { "model", "rm", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
                                 if (deleted.ExitCode != 0) throw new InvalidOperationException("Model delete failed: " + deleted.StandardError + deleted.StandardOutput);
                                 if (!deleted.StandardOutput.Contains("Deleted model", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model delete did not report success.");
 
@@ -186,11 +200,26 @@ namespace Test.Shared
                                 if (missing.ExitCode == 0) throw new InvalidOperationException("Deleting a missing model should fail.");
                                 if (!missing.StandardOutput.Contains("Model not found", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Missing model delete did not print a useful error.");
 
-                                ClientCommandResult added = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
-                                if (added.ExitCode != 0) throw new InvalidOperationException("Model add before scoped delete failed: " + added.StandardError + added.StandardOutput);
+                                ClientCommandResult addedWithEndpoint = await RunXenoClientAsync(new[] { "model", "add", "--name", "all-minilm", "--provider", "ollama", "--endpoint", "http://view.homedns.org:11434", "--api-type", "Ollama", "--type", "embedding" }, clientHome).ConfigureAwait(false);
+                                if (addedWithEndpoint.ExitCode == 0) throw new InvalidOperationException("Model add should not accept endpoint URL arguments.");
+                                if (!addedWithEndpoint.StandardOutput.Contains("Unknown model add option: --endpoint", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model add endpoint error was not useful: " + addedWithEndpoint.StandardError + addedWithEndpoint.StandardOutput);
+                                ClientCommandResult addedEmbedding = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "embed-test", "--type", "embedding" }, clientHome).ConfigureAwait(false);
+                                if (addedEmbedding.ExitCode != 0) throw new InvalidOperationException("Embedding model add failed: " + addedEmbedding.StandardError + addedEmbedding.StandardOutput);
+                                ClientCommandResult addedBoth = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "both-test", "--completions", "true", "--embeddings", "true" }, clientHome).ConfigureAwait(false);
+                                if (addedBoth.ExitCode != 0) throw new InvalidOperationException("Dual-capability model add failed: " + addedBoth.StandardError + addedBoth.StandardOutput);
 
-                                ClientCommandResult scopedDelete = await RunXenoClientAsync(new[] { "model", "delete", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult capabilityList = await RunXenoClientAsync(new[] { "--json", "model", "ls" }, clientHome).ConfigureAwait(false);
+                                if (capabilityList.ExitCode != 0) throw new InvalidOperationException("Capability model list failed: " + capabilityList.StandardError + capabilityList.StandardOutput);
+                                List<TestCliModelRecord> capabilityModels = DeserializeRequired<List<TestCliModelRecord>>(capabilityList.StandardOutput);
+                                TestCliModelRecord? embeddingModel = capabilityModels.FirstOrDefault(item => String.Equals(item.Name, "embed-test", StringComparison.Ordinal));
+                                if (embeddingModel == null || embeddingModel.SupportsCompletions || !embeddingModel.SupportsEmbeddings) throw new InvalidOperationException("Embedding model capabilities were not persisted.");
+                                TestCliModelRecord? bothModel = capabilityModels.FirstOrDefault(item => String.Equals(item.Name, "both-test", StringComparison.Ordinal));
+                                if (bothModel == null || !bothModel.SupportsCompletions || !bothModel.SupportsEmbeddings) throw new InvalidOperationException("Dual-capability model capabilities were not persisted.");
+
+                                ClientCommandResult scopedDelete = await RunXenoClientAsync(new[] { "model", "remote", "--provider", "local-ollama", "--name", "embed-test" }, clientHome).ConfigureAwait(false);
                                 if (scopedDelete.ExitCode != 0) throw new InvalidOperationException("Provider-scoped model delete failed: " + scopedDelete.StandardError + scopedDelete.StandardOutput);
+                                ClientCommandResult providerDelete = await RunXenoClientAsync(new[] { "provider", "rm", "--name", "local-ollama" }, clientHome).ConfigureAwait(false);
+                                if (providerDelete.ExitCode != 0) throw new InvalidOperationException("Provider rm alias failed: " + providerDelete.StandardError + providerDelete.StandardOutput);
                             }
                             finally
                             {
@@ -1385,7 +1414,7 @@ namespace Test.Shared
                                     new
                                     {
                                         Name = "pascal-provider",
-                                        Provider = "Ollama",
+                                        ApiType = "Ollama",
                                         Models = new[]
                                         {
                                             new { Name = "touchstone-pascal-model", SupportsCompletions = true, SupportsEmbeddings = true }
@@ -1480,6 +1509,7 @@ namespace Test.Shared
 
                     ClientCommandResult logs = await RunXenoClientAsync(new[] { "logs", "--tail", "20" }, clientHome).ConfigureAwait(false);
                     if (logs.ExitCode != 0) throw new InvalidOperationException("Logs command failed: " + logs.StandardError + logs.StandardOutput);
+                    if (!logs.StandardOutput.Contains("Attempting connection to server at ws://127.0.0.1:" + port, StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include connection attempt output: " + logs.StandardOutput);
                     if (!logs.StandardOutput.Contains("Client registered with Xeno server.", StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include registration output: " + logs.StandardOutput);
 
                     ClientCommandResult stop = await RunXenoClientAsync(new[] { "--json", "stop" }, clientHome).ConfigureAwait(false);
@@ -1545,7 +1575,7 @@ namespace Test.Shared
                                     new
                                     {
                                         name = "touchstone-runner",
-                                        provider = "OpenAICompatible",
+                                        apiType = "OpenAICompatible",
                                         endpoint = "http://127.0.0.1:1",
                                         models = new[]
                                         {
@@ -1574,7 +1604,8 @@ namespace Test.Shared
                                 if (HeaderValue(response, "X-Client-ID") != "xcl_touchstone") throw new InvalidOperationException("Relay response did not include selected client header.");
                                 if (HeaderValue(response, "X-Xeno-Routing-Outcome") != "Completed") throw new InvalidOperationException("Relay response did not include completed routing outcome.");
                                 if (HeaderValue(response, "X-Xeno-Model") != "llama3.2:latest") throw new InvalidOperationException("Relay response did not include effective model header.");
-                                if (HeaderValue(response, "X-Xeno-Selected-Provider") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include selected provider header.");
+                                if (HeaderValue(response, "X-Xeno-Selected-API-Type") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include selected API type header.");
+                                if (HeaderValue(response, "X-Xeno-Selected-Provider") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include backward-compatible selected provider header.");
                                 if (HeaderValue(response, "X-Xeno-Selected-Source") != "touchstone-runner") throw new InvalidOperationException("Relay response did not include selected source header.");
                                 if (HeaderValue(response, "X-Xeno-Routing-Candidate-Count") != "1") throw new InvalidOperationException("Relay response did not include candidate count header.");
                                 if (HeaderValue(response, "X-Xeno-Load-Balancing-Mode") != "LeastRecentlyUsed") throw new InvalidOperationException("Relay response did not include load-balancing mode header.");
@@ -1723,7 +1754,7 @@ namespace Test.Shared
                                     new
                                     {
                                         name = "touchstone-runner",
-                                        provider = "OpenAICompatible",
+                                        apiType = "OpenAICompatible",
                                         endpoint = "http://127.0.0.1:1",
                                         models = new[]
                                         {

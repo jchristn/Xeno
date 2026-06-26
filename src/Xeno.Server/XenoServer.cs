@@ -28,7 +28,7 @@ namespace Xeno.Server
     /// </summary>
     public sealed class XenoServer : IDisposable
     {
-        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Policy-ID, X-Xeno-Routing-Policy-Name, X-Xeno-Routing-Policy-Match, X-Xeno-Routing-Policy-Reason, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
+        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Policy-ID, X-Xeno-Routing-Policy-Name, X-Xeno-Routing-Policy-Match, X-Xeno-Routing-Policy-Reason, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-API-Type, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
         private const int MaxCapturedBodyChars = 131072;
 
         private readonly XenoSettings _Settings;
@@ -1601,7 +1601,7 @@ namespace Xeno.Server
                     TenantId = requestContext.TenantId,
                     ClientId = client.Id,
                     ClientName = client.Name,
-                    Provider = selectedModel?.Provider.ToString(),
+                    ApiType = selectedModel?.Provider.ToString(),
                     Source = selectedModel?.Source,
                     Method = context.Request.Method.ToString().ToUpperInvariant(),
                     RelativePath = relativePath,
@@ -2009,7 +2009,7 @@ namespace Xeno.Server
             foreach (ClientInventorySourceMessage source in sources)
             {
                 string sourceName = String.IsNullOrWhiteSpace(source.Name) ? "local" : source.Name;
-                string providerName = String.IsNullOrWhiteSpace(source.Provider) ? "Ollama" : source.Provider;
+                string providerName = String.IsNullOrWhiteSpace(source.ApiType) ? "Ollama" : source.ApiType;
                 ApiProviderTypeEnum provider = Enum.TryParse(providerName, true, out ApiProviderTypeEnum parsedProvider) ? parsedProvider : ApiProviderTypeEnum.OpenAICompatible;
                 if (source.Models.Count > 0)
                 {
@@ -2445,6 +2445,7 @@ namespace Xeno.Server
             AddTraceHeader(context, "X-Xeno-Adaptive-Score", decision.AdaptiveScore);
             AddTraceHeader(context, "X-Xeno-Selection-Reason", decision.SelectionReason);
             AddTraceHeader(context, "X-Xeno-Selected-Client-Name", FirstNonEmpty(decision.SelectedClientName, client?.Name));
+            AddTraceHeader(context, "X-Xeno-Selected-API-Type", FirstNonEmpty(decision.SelectedProvider, selectedModel?.Provider.ToString()));
             AddTraceHeader(context, "X-Xeno-Selected-Provider", FirstNonEmpty(decision.SelectedProvider, selectedModel?.Provider.ToString()));
             AddTraceHeader(context, "X-Xeno-Selected-Source", FirstNonEmpty(decision.SelectedSource, selectedModel?.Source));
             AddTraceHeader(context, "X-Xeno-Selected-In-Flight", decision.SelectedClientInFlightRequests?.ToString(CultureInfo.InvariantCulture));

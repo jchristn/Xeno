@@ -9,5 +9,15 @@ namespace Test.Shared
         /// Model name.
         /// </summary>
         public string? Name { get; set; } = null;
+
+        /// <summary>
+        /// Whether completions are supported.
+        /// </summary>
+        public bool SupportsCompletions { get; set; } = false;
+
+        /// <summary>
+        /// Whether embeddings are supported.
+        /// </summary>
+        public bool SupportsEmbeddings { get; set; } = false;
     }
 }

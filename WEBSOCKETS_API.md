@@ -205,7 +205,8 @@ Schema:
 | `tenantId` | string | yes | Authenticated tenant. |
 | `clientId` | string | yes | Selected client ID. |
 | `clientName` | string | no | Selected client name. |
-| `provider` | string | no | Provider family selected by routing. |
+| `apiType` | string | no | Upstream API type selected by routing. |
+| `provider` | string | no | Backward-compatible alias for `apiType`. |
 | `source` | string | no | Client-local provider endpoint name. |
 | `runnerName` | string | no | Backward-compatible alias for `source`. |
 | `method` | string | yes | HTTP method to use upstream. |
@@ -237,7 +238,7 @@ Example:
   "tenantId": "ten_default",
   "clientId": "xcl_mqty9z4a_7jJS1gNtyq7m",
   "clientName": "THINKPAD",
-  "provider": "Ollama",
+  "apiType": "Ollama",
   "source": "local-ollama",
   "method": "POST",
   "relativePath": "/v1/chat/completions",
@@ -286,7 +287,8 @@ Provider source schema:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | string | yes | Client-local provider endpoint name. |
-| `provider` | string | yes | Provider family: `Ollama`, `OpenAI`, `Gemini`, `vLLM`, or `OpenAICompatible`. |
+| `apiType` | string | yes | Upstream API type: `Ollama`, `OpenAI`, `Gemini`, `vLLM`, or `OpenAICompatible`. |
+| `provider` | string | no | Backward-compatible alias for `apiType`. |
 | `models` | array | yes | Models exposed by this provider endpoint. |
 
 Model schema:
@@ -309,7 +311,7 @@ Example:
     "providers": [
       {
         "name": "local-ollama",
-        "provider": "Ollama",
+        "apiType": "Ollama",
         "models": [
           {
             "name": "llama3.2:latest",
@@ -595,7 +597,8 @@ Common headers:
 | `X-Xeno-Adaptive-Score` | Selected client adaptive score, when adaptive mode is used. |
 | `X-Xeno-Selection-Reason` | Reason the selected client was chosen. |
 | `X-Xeno-Selected-Client-Name` | Selected client name. |
-| `X-Xeno-Selected-Provider` | Selected provider family. |
+| `X-Xeno-Selected-API-Type` | Selected upstream API type. |
+| `X-Xeno-Selected-Provider` | Backward-compatible selected upstream API type header. |
 | `X-Xeno-Selected-Source` | Selected provider source. |
 | `X-Xeno-Selected-In-Flight` | Selected client in-flight count. |
 | `X-Xeno-Selected-Max-Parallel` | Selected client max parallel limit. |
@@ -740,6 +743,7 @@ The server currently accepts these compatibility aliases:
 
 | New field | Alias |
 | --- | --- |
+| `apiType` | `provider` |
 | `source` | `runnerName` |
 | `relativePath` | `path` |
 | `inventory.providers` | `inventory.runners` |

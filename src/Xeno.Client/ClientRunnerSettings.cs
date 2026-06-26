@@ -3,6 +3,7 @@ namespace Xeno.Client
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Text.Json.Serialization;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -16,9 +17,25 @@ namespace Xeno.Client
         public string Name { get; set; } = "local-ollama";
 
         /// <summary>
-        /// Provider family.
+        /// Upstream API type.
         /// </summary>
-        public string Provider { get; set; } = "Ollama";
+        public string ApiType { get; set; } = "Ollama";
+
+        /// <summary>
+        /// Backward-compatible upstream API type alias.
+        /// </summary>
+        [JsonPropertyName("Provider")]
+        public string? LegacyProvider
+        {
+            get
+            {
+                return null;
+            }
+            set
+            {
+                if (!String.IsNullOrWhiteSpace(value)) ApiType = value;
+            }
+        }
 
         /// <summary>
         /// Endpoint URL.

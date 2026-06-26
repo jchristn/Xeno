@@ -10,7 +10,6 @@ import {
   BrainCircuit,
   ChevronDown,
   ChevronRight,
-  CircleDot,
   Cpu,
   Download,
   FileJson,
@@ -39,7 +38,7 @@ import {
   Upload,
   Zap
 } from 'lucide-react';
-import ApiClient from './utils/api.js';
+import ApiClient, { authFailureEventName } from './utils/api.js';
 import ActionMenu from './components/ActionMenu.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
 import CopyButton from './components/CopyButton.jsx';
@@ -242,10 +241,6 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <strong>{t('appTitle')}</strong>
           </div>
         </div>
-        <div className="release-badge">
-          <CircleDot size={12} />
-          <span>{t('alphaRelease')}</span>
-        </div>
         <nav className="sidebar-nav" aria-label={t('dashboard')}>
           {navGroups.map((group) => (
             <div className="sidebar-group" key={group.key}>
@@ -342,6 +337,13 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
       return;
     }
 
+    await authenticate();
+  }
+
+  async function handleLoginKeyDown(event) {
+    if (event.key !== 'Enter' || step !== 'password') return;
+    event.preventDefault();
+    if (loading || !canSubmit) return;
     await authenticate();
   }
 
@@ -450,7 +452,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
               <h2>{t('signInToDashboard')}</h2>
             </div>
           </div>
-          <form className="login-form" onSubmit={submitLogin}>
+          <form className="login-form" onKeyDown={handleLoginKeyDown} onSubmit={submitLogin}>
             <label className="form-field" title={t('tooltipLoginServerUrl')}>
               <span>{t('serverUrl')}</span>
               <input
@@ -1117,24 +1119,24 @@ function AdvertisedModelsView() {
         <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(completionModelCount)} />
         <MetricCard icon={<Cpu size={18} />} label={t('embeddingModels')} value={formatNumber(embeddingModelCount)} tone="info" />
       </div>
-      <div className="toolbar table-controls">
-        <label className="form-field inline compact-field">
-          <span>{t('clientFilter')}</span>
-          <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} title={t('tooltipNavAdvertisedModels')}>
-            <option value="all">{t('allClients')}</option>
-            {clients.data.map((client) => {
-              const clientId = String(value(client, 'id') || '');
-              return (
-                <option key={clientId || value(client, 'name')} value={clientId}>
-                  {value(client, 'name') || clientId}
-                </option>
-              );
-            })}
-          </select>
-        </label>
-      </div>
       <DataTable
-        columns={['clientName', 'clientId', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
+        actions={(
+          <label className="form-field inline compact-field table-inline-filter">
+            <span>{t('clientFilter')}</span>
+            <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} title={t('tooltipNavAdvertisedModels')}>
+              <option value="all">{t('allClients')}</option>
+              {clients.data.map((client) => {
+                const clientId = String(value(client, 'id') || '');
+                return (
+                  <option key={clientId || value(client, 'name')} value={clientId}>
+                    {value(client, 'name') || clientId}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+        )}
+        columns={['clientName', 'clientId', 'name', 'apiType', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
         onDelete={(row) => {
           if (recordId(selectedModel) === recordId(row)) setSelectedModel(null);
           return deleteClientModel(row);
@@ -1179,7 +1181,17 @@ function RoutingPoliciesView() {
       <DataTable
         actions={<IconButton onClick={() => setCreating(true)} label={t('createRoutingPolicy')} tooltip={t('tooltipCreateRoutingPolicy')} icon={<Plus size={16} />} variant="primary" />}
         canDelete={(row) => value(row, 'isDefault') !== true}
-        columns={['id', 'tenantId', 'name', 'modelName', 'clientName', 'loadBalancingMode', 'requestTimeoutMs', 'isDefault', 'active', 'lastUpdateUtc']}
+        columns={[
+          'id',
+          { key: 'tenantId', label: 'routingTenant' },
+          'name',
+          { key: 'modelName', label: 'routingModel' },
+          'clientName',
+          { className: 'col-compact col-mode', key: 'loadBalancingMode', label: 'routingMode' },
+          { className: 'col-compact col-timeout', key: 'requestTimeoutMs', label: 'routingTimeoutMs' },
+          { className: 'col-compact col-bool', key: 'isDefault', label: 'routingDefault' },
+          { className: 'col-compact col-bool', key: 'active' }
+        ]}
         deleteMessage={(row) => t('deleteRoutingPolicyMessage', { record: describeRow(row) })}
         deleteTitle={t('deleteRoutingPolicyTitle')}
         onDelete={(row) => {
@@ -1629,6 +1641,12 @@ function useResource(path, fallback) {
     api.get(path)
       .then((result) => {
         if (!alive) return;
+        if (result?.error) {
+          setData(fallback);
+          setUpdatedAt(Date.now());
+          return;
+        }
+
         setData(result);
         setUpdatedAt(Date.now());
       })
@@ -1752,6 +1770,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
+  const [columnFilterDrafts, setColumnFilterDrafts] = useState({});
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [jsonRow, setJsonRow] = useState(null);
@@ -1818,6 +1837,43 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
     const target = event.target instanceof Element ? event.target : event.currentTarget;
     if (target.closest(interactiveRowClickSelector)) return;
     onRowClick(row);
+  }
+
+  function columnFilterValue(columnKey) {
+    return Object.prototype.hasOwnProperty.call(columnFilterDrafts, columnKey)
+      ? columnFilterDrafts[columnKey]
+      : columnFilters[columnKey] || '';
+  }
+
+  function updateColumnFilterDraft(columnKey, filterValue) {
+    setColumnFilterDrafts((current) => ({ ...current, [columnKey]: filterValue }));
+  }
+
+  function applyColumnFilter(columnKey, filterValue) {
+    setColumnFilters((current) => ({ ...current, [columnKey]: filterValue }));
+    setColumnFilterDrafts((current) => {
+      const next = { ...current };
+      delete next[columnKey];
+      return next;
+    });
+  }
+
+  function handleColumnFilterKeyDown(event, columnKey) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      applyColumnFilter(columnKey, event.currentTarget.value);
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setColumnFilterDrafts((current) => {
+        const next = { ...current };
+        delete next[columnKey];
+        return next;
+      });
+    }
   }
 
   async function confirmDelete() {
@@ -1899,7 +1955,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
           <thead>
             <tr>
               {normalizedColumns.map((column) => (
-                <th className={column.sortable === false ? '' : 'sortable'} key={column.key} onClick={() => handleSort(column)} title={column.sortable === false ? undefined : t('tooltipSortColumn')}>
+                <th className={[column.sortable === false ? '' : 'sortable', column.className || ''].filter(Boolean).join(' ')} key={column.key} onClick={() => handleSort(column)} title={column.sortable === false ? undefined : t('tooltipSortColumn')}>
                   <span className="th-content">
                     <span>{t(column.label || column.key, column.label || column.key)}</span>
                     {renderSortIcon(column)}
@@ -1911,15 +1967,17 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
             {hasColumnFilters ? (
               <tr className="table-filter-row">
                 {normalizedColumns.map((column) => (
-                  <th key={`${column.key}-filter`}>
+                  <th className={column.className || undefined} key={`${column.key}-filter`}>
                     {column.filterable === false ? <span /> : (
                       <input
                         aria-label={t('filterColumn', { column: t(column.label || column.key, column.label || column.key) })}
-                        onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
+                        onBlur={(event) => applyColumnFilter(column.key, event.target.value)}
+                        onChange={(event) => updateColumnFilterDraft(column.key, event.target.value)}
                         onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => handleColumnFilterKeyDown(event, column.key)}
                         placeholder={t('filter')}
                         title={t('tooltipColumnFilter')}
-                        value={columnFilters[column.key] || ''}
+                        value={columnFilterValue(column.key)}
                       />
                     )}
                   </th>
@@ -1939,7 +1997,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
             {pagedRows.map((row, index) => (
               <tr className={onRowClick ? 'clickable-row' : ''} key={value(row, 'id') || value(row, 'guid') || index} onClick={(event) => handleRowClick(event, row)}>
                 {normalizedColumns.map((column) => (
-                  <td key={column.key}>
+                  <td className={column.className || undefined} key={column.key}>
                     <CellValue columnKey={column.key} value={column.render ? column.render(row) : value(row, column.key)} />
                   </td>
                 ))}
@@ -2024,7 +2082,7 @@ function RequestDetailsModal({ data, onClose }) {
     { label: t('loadBalancingMode', 'Load-balancing mode'), value: value(routing, 'loadBalancingMode') },
     { label: t('candidateCount', 'Candidate count'), value: formatOptionalNumber(value(routing, 'candidateCount')) },
     { label: t('candidateClients', 'Candidate clients'), value: Array.isArray(candidateClientIds) ? candidateClientIds.join(', ') : candidateClientIds, copy: true },
-    { label: t('selectedProvider', 'Selected provider'), value: value(routing, 'selectedProvider') },
+    { label: t('selectedApiType', 'Selected API Type'), value: value(routing, 'selectedProvider') },
     { label: t('selectedSource', 'Selected source'), value: value(routing, 'selectedSource') },
     { label: t('selectedInFlight', 'Selected in-flight'), value: formatOptionalNumber(value(routing, 'selectedClientInFlightRequests')) },
     { label: t('selectedMaxParallel', 'Selected max parallel'), value: formatOptionalNumber(value(routing, 'selectedClientMaxParallelRequests')) },
@@ -2974,18 +3032,32 @@ function NestedRecordTable({ rows }) {
 function ExplorerResponsePanel({ isSending, onClear, response }) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('preview');
+  const hadResponseRef = useRef(false);
   const normalized = normalizeExplorerResponse(response);
   const tabs = [
     { id: 'preview', label: t('responsePreview') },
     { id: 'body', label: t('responseBody') },
-    { id: 'headers', label: t('responseHeaders') },
-    { id: 'status', label: t('responseStatus') }
+    { id: 'headers', label: t('responseHeaders') }
   ];
   const bodyText = explorerResponseBodyText(normalized);
   const headersText = formatExplorerValue(normalized.headers);
   const previewText = normalized.preview || extractExplorerPreview(normalized.body) || (normalized.streamed ? '' : bodyText);
   const hasHeaders = Object.keys(normalized.headers || {}).length > 0;
-  const hasStatus = normalized.status !== null || normalized.error;
+  const hasJsonBody = isExplorerJsonResponse(normalized);
+  const copyText = explorerResponseCopyText(activeTab, normalized, bodyText, headersText, previewText);
+
+  useEffect(() => {
+    if (!response) {
+      hadResponseRef.current = false;
+      setActiveTab('preview');
+      return;
+    }
+
+    if (!hadResponseRef.current) {
+      hadResponseRef.current = true;
+      setActiveTab(normalized.streamed ? 'preview' : 'body');
+    }
+  }, [normalized.streamed, response]);
 
   return (
     <section className="api-explorer-card">
@@ -3008,6 +3080,23 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
         </div>
         <div className="api-explorer-response-actions">
           {renderExplorerStatusBadge(normalized, t)}
+          {response ? (
+            <div className="api-explorer-response-indicators" aria-label={t('responseStatus')}>
+              <ResponseHeaderIndicator label={t('transferMode')} value={normalized.streamed ? streamTypeLabel(normalized.streamType, t) : t('standardResponse')} />
+              <ResponseHeaderIndicator label={t('timeToFirstByte')} value={formatDuration(normalized.timing.timeToFirstByteMs)} />
+              <ResponseHeaderIndicator label={t('totalTime')} value={formatDuration(normalized.timing.totalTimeMs ?? normalized.timing.requestTimeMs)} />
+            </div>
+          ) : null}
+          {response ? <CopyButton label={t('copy')} value={copyText} /> : null}
+          {response && hasJsonBody ? (
+            <IconButton
+              iconOnly
+              onClick={() => setActiveTab('body')}
+              label={t('formatJson')}
+              tooltip={t('tooltipFormatJson')}
+              icon={<FileJson size={16} />}
+            />
+          ) : null}
           {response ? <IconButton iconOnly onClick={onClear} label={t('clear')} tooltip={t('tooltipClearResponse')} icon={<Trash2 size={16} />} /> : null}
         </div>
       </div>
@@ -3021,14 +3110,13 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
               </div>
             ) : null}
             {previewText ? (
-              <>
-                <Suspense fallback={<pre className="api-explorer-code plain">{previewText}</pre>}>
+              normalized.streamed ? (
+                <Suspense fallback={<pre className="api-explorer-code">{previewText}</pre>}>
                   <MarkdownPreview text={previewText} />
                 </Suspense>
-                <div className="api-explorer-copy-overlay">
-                  <CopyButton label={t('copy')} value={previewText} />
-                </div>
-              </>
+              ) : (
+                <pre className="api-explorer-code">{previewText}</pre>
+              )
             ) : (
               <EmptyState title={t('noData')} message={isSending ? t('waitingForResponse') : t('noResponseBody')} />
             )}
@@ -3038,12 +3126,7 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
         {activeTab === 'body' ? (
           <div className="api-explorer-tab-content">
             {bodyText ? (
-              <>
-                <pre className="api-explorer-code">{bodyText}</pre>
-                <div className="api-explorer-copy-overlay">
-                  <CopyButton label={t('copyJson')} value={bodyText} />
-                </div>
-              </>
+              <pre className="api-explorer-code">{bodyText}</pre>
             ) : (
               <EmptyState title={t('noData')} message={t('noResponseBody')} />
             )}
@@ -3053,29 +3136,9 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
         {activeTab === 'headers' ? (
           <div className="api-explorer-tab-content">
             {hasHeaders ? (
-              <>
-                <pre className="api-explorer-code">{headersText}</pre>
-                <div className="api-explorer-copy-overlay">
-                  <CopyButton label={t('copyJson')} value={headersText} />
-                </div>
-              </>
+              <pre className="api-explorer-code">{headersText}</pre>
             ) : (
               <EmptyState title={t('noData')} message={t('noResponseHeaders')} />
-            )}
-          </div>
-        ) : null}
-
-        {activeTab === 'status' ? (
-          <div className="api-explorer-tab-content">
-            {hasStatus ? (
-              <div className="api-explorer-metrics">
-                <MetricTile label={t('status')} value={normalized.error ? normalized.error : `${normalized.status} ${normalized.statusText || ''}`.trim()} />
-                <MetricTile label={t('transferMode')} value={normalized.streamed ? streamTypeLabel(normalized.streamType, t) : t('standardResponse')} />
-                <MetricTile label={t('timeToFirstByte')} value={formatDuration(normalized.timing.timeToFirstByteMs)} />
-                <MetricTile label={t('totalTime')} value={formatDuration(normalized.timing.totalTimeMs ?? normalized.timing.requestTimeMs)} />
-              </div>
-            ) : (
-              <EmptyState title={t('noData')} message={t('noResponseStatus')} />
             )}
           </div>
         ) : null}
@@ -3084,12 +3147,12 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
   );
 }
 
-function MetricTile({ label, value }) {
+function ResponseHeaderIndicator({ label, value }) {
   return (
-    <div className="api-explorer-metric">
+    <span className="api-explorer-response-indicator" title={`${label}: ${value || '-'}`}>
       <span>{label}</span>
       <strong>{value || '-'}</strong>
-    </div>
+    </span>
   );
 }
 
@@ -3208,6 +3271,26 @@ function explorerResponseBodyText(response) {
   if (response.rawBody) return formatExplorerValue(response.rawBody);
   if (response.body !== null && response.body !== undefined) return formatExplorerValue(response.body);
   return '';
+}
+
+function explorerResponseCopyText(activeTab, response, bodyText, headersText, previewText) {
+  if (activeTab === 'headers') return headersText;
+  if (activeTab === 'preview') return previewText;
+  return bodyText;
+}
+
+function isExplorerJsonResponse(response) {
+  if (!response) return false;
+  const contentType = String(response.headers?.['content-type'] || response.headers?.['Content-Type'] || '').toLowerCase();
+  if (contentType.includes('json')) return true;
+  if (response.body !== null && response.body !== undefined && typeof response.body === 'object') return true;
+  if (!response.rawBody || typeof response.rawBody !== 'string') return false;
+  try {
+    JSON.parse(response.rawBody);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function formatExplorerValue(value) {
@@ -3799,7 +3882,7 @@ function flattenClientModels(clients) {
       clientId,
       clientName,
       name: value(model, 'name'),
-      provider: value(model, 'provider'),
+      apiType: value(model, 'apiType') || value(model, 'provider'),
       source: value(model, 'source'),
       supportsCompletions: value(model, 'supportsCompletions'),
       supportsEmbeddings: value(model, 'supportsEmbeddings'),
@@ -3821,7 +3904,7 @@ function isPlainRecord(input) {
 }
 
 function nestedRecordColumns(rows) {
-  const preferred = ['id', 'name', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc', 'active'];
+  const preferred = ['id', 'name', 'apiType', 'provider', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc', 'active'];
   const keys = [];
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     Object.entries(row || {}).forEach(([key, itemValue]) => {
@@ -3896,6 +3979,17 @@ function AppRoutes() {
     if (session) api.setAuth(session);
     else api.clearAuth();
   }, [session]);
+
+  useEffect(() => {
+    function handleAuthFailure() {
+      writeDashboardSession(null);
+      api.clearAuth();
+      setSession(null);
+    }
+
+    window.addEventListener(authFailureEventName, handleAuthFailure);
+    return () => window.removeEventListener(authFailureEventName, handleAuthFailure);
+  }, []);
 
   function toggleTheme() {
     setTheme((current) => current === 'dark' ? 'light' : 'dark');

@@ -133,7 +133,7 @@ namespace Xeno.Client
                 providers = Runners.ConvertAll(runner => new
                 {
                     name = runner.Name,
-                    provider = runner.Provider,
+                    apiType = runner.ApiType,
                     endpoint = runner.Endpoint,
                     timeoutMs = runner.TimeoutMs,
                     models = runner.Models.ConvertAll(model => new

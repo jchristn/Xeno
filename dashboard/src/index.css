@@ -894,6 +894,39 @@ html[data-theme='dark'] .primitive-list-item {
   flex-shrink: 0;
 }
 
+.api-explorer-response-indicators {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.api-explorer-response-indicator {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  color: var(--color-muted);
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.api-explorer-response-indicator span {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.api-explorer-response-indicator strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .api-explorer-response-body,
 .api-explorer-tab-content {
   min-width: 0;
@@ -919,10 +952,6 @@ html[data-theme='dark'] .primitive-list-item {
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.api-explorer-code.plain {
-  font-family: inherit;
 }
 
 .api-explorer-markdown {
@@ -1038,12 +1067,6 @@ html[data-theme='dark'] .primitive-list-item {
   font-weight: 800;
 }
 
-.api-explorer-copy-overlay {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-}
-
 .api-explorer-streaming {
   display: inline-flex;
   align-items: center;
@@ -1069,36 +1092,6 @@ html[data-theme='dark'] .primitive-list-item {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
-}
-
-.api-explorer-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.api-explorer-metric {
-  min-width: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-panel-soft);
-  padding: 14px;
-}
-
-.api-explorer-metric span {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--color-muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.api-explorer-metric strong {
-  display: block;
-  color: var(--color-text);
-  font-size: 15px;
-  overflow-wrap: anywhere;
 }
 
 .workspace-card {
@@ -1142,6 +1135,16 @@ html[data-theme='dark'] .primitive-list-item {
 
 .toolbar.table-controls {
   justify-content: flex-end;
+}
+
+.table-inline-filter {
+  min-height: 34px;
+}
+
+.table-inline-filter select {
+  min-height: 34px;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 
 .workspace-card-body {
@@ -1373,6 +1376,28 @@ html[data-theme='dark'] .primitive-list-item {
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text);
   vertical-align: top;
+}
+
+.data-table th.col-compact,
+.data-table td.col-compact {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.data-table th.col-mode,
+.data-table td.col-mode {
+  max-width: 150px;
+}
+
+.data-table th.col-timeout,
+.data-table td.col-timeout {
+  max-width: 110px;
+}
+
+.data-table th.col-bool,
+.data-table td.col-bool {
+  max-width: 86px;
+  text-align: center;
 }
 
 .data-table tbody tr {

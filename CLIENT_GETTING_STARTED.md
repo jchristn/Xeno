@@ -84,10 +84,20 @@ Check the formatted configuration:
 xeno config show
 ```
 
+The formatted configuration includes server settings, credential status,
+configured provider endpoints, and each model advertised by those providers.
+
 Use JSON only when scripting:
 
 ```powershell
 xeno --json config show
+```
+
+Enable or disable colored output:
+
+```powershell
+xeno config colors on
+xeno config colors off
 ```
 
 ## Point the Client at a Server
@@ -164,7 +174,7 @@ Add a local Ollama endpoint:
 
 ```powershell
 xeno provider add --name local-ollama `
-                  --provider Ollama `
+                  --type Ollama `
                   --endpoint http://127.0.0.1:11434
 ```
 
@@ -172,11 +182,12 @@ Add an OpenAI-compatible endpoint such as vLLM:
 
 ```powershell
 xeno provider add --name vllm `
-                  --provider OpenAI `
+                  --type OpenAI `
                   --endpoint http://127.0.0.1:8000 `
                   --credential <upstream-token>
 ```
 
+The `--type` value is the upstream API type, such as `Ollama`, `OpenAI`, `Gemini`, `vLLM`, or `OpenAICompatible`.
 The optional provider credential is sent to the upstream provider as a bearer token.
 
 Adding a provider with an existing name or endpoint is ignored so the same provider is not duplicated.
@@ -193,12 +204,27 @@ Delete a configured provider endpoint:
 xeno provider delete --name local-ollama
 ```
 
+Aliases:
+
+```powershell
+xeno provider ls
+xeno provider rm --name local-ollama
+xeno provider remove --name local-ollama
+xeno provider remote --name local-ollama
+```
+
 ## Add Models
 
 List models advertised by this client:
 
 ```powershell
 xeno model list
+```
+
+Alias:
+
+```powershell
+xeno model ls
 ```
 
 Add an Ollama model:
@@ -213,18 +239,37 @@ Add a model exposed by an OpenAI-compatible endpoint:
 xeno model add --provider vllm --name meta-llama/Llama-3.1-8B-Instruct
 ```
 
-By default, `xeno model add` records the model as completion-capable. Edit `~/.xeno/client.json` directly if a model should also advertise embeddings before the CLI exposes a dedicated flag.
+By default, `xeno model add` records the model as completion-capable. Use `--type completion`, `--type embedding`, or `--type both` to explicitly control the capabilities advertised for that model.
+The `--provider` value is the name of an existing provider endpoint from `xeno provider list`; use `xeno provider add` to configure endpoint URLs and API types.
+`xeno model add` does not accept endpoint URLs; endpoint URL, upstream credential, and API type belong to `xeno provider add`.
 
-Delete a model from every configured provider endpoint that advertises it:
+Equivalent explicit capability forms:
+
+```powershell
+xeno model add --provider local-ollama --name llama3.2:latest --type completion
+xeno model add --provider local-ollama --name all-minilm --type embedding
+xeno model add --provider local-ollama --name hybrid-model --type both
+xeno model add --provider local-ollama --name hybrid-model --completions true --embeddings true
+```
+
+Delete a model from every configured provider that advertises it:
 
 ```powershell
 xeno model delete --name llama3.2:latest
 ```
 
-Delete a model only from one provider endpoint:
+Delete a model only from one provider:
 
 ```powershell
 xeno model delete --provider local-ollama --name llama3.2:latest
+```
+
+Aliases:
+
+```powershell
+xeno model rm --name llama3.2:latest
+xeno model remove --name llama3.2:latest
+xeno model remote --name llama3.2:latest
 ```
 
 ## Verify Inventory and Status
@@ -251,15 +296,52 @@ xeno --json status
 
 ## Connect to the Xeno Server
 
-Start the persistent WebSocket client:
+Start the persistent WebSocket client in the background:
 
 ```powershell
 xeno connect
 ```
 
-The client automatically reconnects after disconnects. While it is running, `xeno status` in another terminal shows `Connected: true`.
+Alias:
 
-Stop the client with `Ctrl+C`.
+```powershell
+xeno start
+```
+
+`xeno connect` starts a background process and returns after the client is
+registered with the server. The client automatically reconnects after
+disconnects. While it is running, `xeno status` shows connection, registration,
+background-process, heartbeat, and last-disconnect state.
+
+Run the WebSocket loop in the current terminal when you want foreground logs:
+
+```powershell
+xeno connect --foreground
+```
+
+Control how long the background command waits for registration:
+
+```powershell
+xeno connect --timeout 30000
+```
+
+View or follow client logs:
+
+```powershell
+xeno logs
+xeno logs -f
+xeno logs --tail 200
+xeno logs --errors
+```
+
+Stop the background client:
+
+```powershell
+xeno stop
+xeno disconnect
+```
+
+Use `Ctrl+C` only when the client is running with `xeno connect --foreground`.
 
 ## Common Help Commands
 
@@ -270,6 +352,44 @@ xeno server help
 xeno auth help
 xeno provider help
 xeno model help
+xeno logs help
+xeno stop help
 ```
 
 Invalid commands print formatted command-specific usage blocks instead of single-line usage strings.
+
+## Client Configuration Shape
+
+The current settings file uses `Providers` for configured provider endpoints and
+`ApiType` for the upstream API family:
+
+```json
+{
+  "TenantId": "ten_default",
+  "Name": "WORKSTATION",
+  "UseColors": true,
+  "Server": {
+    "Url": "ws://localhost:9000/ws/v1/clients",
+    "AccessKey": "default",
+    "SecretKey": "default"
+  },
+  "Providers": [
+    {
+      "Name": "local-ollama",
+      "ApiType": "Ollama",
+      "Endpoint": "http://127.0.0.1:11434",
+      "TimeoutMs": 300000,
+      "Models": [
+        {
+          "Name": "llama3.2:latest",
+          "SupportsCompletions": true,
+          "SupportsEmbeddings": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+Legacy `Runners` arrays and per-provider `Provider` fields are still read for
+backward compatibility, but new output uses `Providers` and `ApiType`.

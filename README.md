@@ -138,26 +138,41 @@ Log in and configure a local Ollama provider:
 
 ```powershell
 xeno login -u admin@xeno --server http://localhost:9000
-xeno provider add --name local-ollama --provider Ollama --endpoint http://127.0.0.1:11434
-xeno model add --provider local-ollama --name llama3.2:latest
+xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:11434
+xeno model add --provider local-ollama --name llama3.2:latest --type completion
 xeno inventory
 xeno connect
 ```
 
+`xeno connect` starts a background client process and returns after the client
+registers with the server. Use `xeno connect --foreground` when you want the
+WebSocket loop to stay attached to the current terminal.
+
 Useful client commands:
 
 ```powershell
-xeno status
-xeno provider list
-xeno provider delete --name local-ollama
-xeno model list
-xeno model delete --name llama3.2:latest
 xeno config show
+xeno status
+xeno logs -f
+xeno stop
+xeno disconnect
+xeno provider list
+xeno provider ls
+xeno provider delete --name local-ollama
+xeno provider rm --name local-ollama
+xeno model list
+xeno model ls
+xeno model add --provider local-ollama --name all-minilm --type embedding
+xeno model delete --name llama3.2:latest
+xeno model rm --name llama3.2:latest
 xeno reset
 xeno reset --force
 ```
 
-For the full walkthrough, see [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md).
+Provider endpoint URLs and upstream API types are configured with
+`xeno provider add`; `xeno model add` takes the configured provider name and a
+model name. For the full walkthrough, see
+[CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md).
 
 ## Calling The API
 

@@ -14,7 +14,7 @@ namespace Xeno.Core.Models
         public string Name { get; set; } = "llama3.2:latest";
 
         /// <summary>
-        /// Provider family used by the client.
+        /// Upstream API type used by the client.
         /// </summary>
         public ApiProviderTypeEnum Provider { get; set; } = ApiProviderTypeEnum.Ollama;
 

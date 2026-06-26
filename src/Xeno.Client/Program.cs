@@ -92,6 +92,7 @@ namespace Xeno.Client
                             PrintStatus(settings);
                             return 0;
                         case "connect":
+                        case "start":
                             return await HandleConnectAsync(args, settings).ConfigureAwait(false);
                         case "logs":
                             return await HandleLogsAsync(args, CancellationToken.None).ConfigureAwait(false);
@@ -634,7 +635,7 @@ namespace Xeno.Client
                 return 0;
             }
 
-            if (args.Length >= 2 && args[1] == "list")
+            if (args.Length >= 2 && IsListCommand(args[1]))
             {
                 PrintProviders(settings);
                 return 0;
@@ -668,7 +669,7 @@ namespace Xeno.Client
                 return success ? 0 : 2;
             }
 
-            if (args.Length >= 2 && (args[1] == "delete" || args[1] == "remove"))
+            if (args.Length >= 2 && IsDeleteCommand(args[1]))
             {
                 string runnerName = String.Empty;
                 for (int i = 2; i < args.Length - 1; i += 2)
@@ -700,26 +701,48 @@ namespace Xeno.Client
             {
                 ClientRunnerSettings runner = new ClientRunnerSettings();
                 runner.Name = String.Empty;
-                runner.Provider = String.Empty;
+                runner.ApiType = String.Empty;
                 runner.Endpoint = String.Empty;
-                for (int i = 2; i < args.Length - 1; i += 2)
+                bool usedLegacyProviderOption = false;
+                for (int i = 2; i < args.Length; i++)
                 {
-                    if (args[i] == "--name") runner.Name = args[i + 1];
-                    if (args[i] == "--provider") runner.Provider = args[i + 1];
-                    if (args[i] == "--endpoint") runner.Endpoint = args[i + 1];
-                    if (args[i] == "--credential") runner.Credential = args[i + 1];
+                    string option = args[i];
+                    if (i + 1 >= args.Length)
+                    {
+                        WriteError(option + " requires a value.");
+                        PrintProviderHelp();
+                        return 1;
+                    }
+
+                    if (option == "--name") runner.Name = args[++i];
+                    else if (option == "--type" || option == "--api-type") runner.ApiType = args[++i];
+                    else if (option == "--provider")
+                    {
+                        runner.ApiType = args[++i];
+                        usedLegacyProviderOption = true;
+                    }
+                    else if (option == "--endpoint") runner.Endpoint = args[++i];
+                    else if (option == "--credential") runner.Credential = args[++i];
+                    else
+                    {
+                        WriteError("Unknown provider add option: " + option);
+                        PrintProviderHelp();
+                        return 1;
+                    }
                 }
 
-                if (String.IsNullOrWhiteSpace(runner.Name) || String.IsNullOrWhiteSpace(runner.Provider) || String.IsNullOrWhiteSpace(runner.Endpoint))
+                if (String.IsNullOrWhiteSpace(runner.Name) || String.IsNullOrWhiteSpace(runner.ApiType) || String.IsNullOrWhiteSpace(runner.Endpoint))
                 {
                     List<string> missing = new List<string>();
                     if (String.IsNullOrWhiteSpace(runner.Name)) missing.Add("--name");
-                    if (String.IsNullOrWhiteSpace(runner.Provider)) missing.Add("--provider");
+                    if (String.IsNullOrWhiteSpace(runner.ApiType)) missing.Add("--type");
                     if (String.IsNullOrWhiteSpace(runner.Endpoint)) missing.Add("--endpoint");
                     WriteError("Missing required option(s): " + String.Join(", ", missing) + ".");
                     PrintProviderHelp();
                     return 1;
                 }
+
+                if (usedLegacyProviderOption) WriteWarning("--provider is deprecated for 'xeno provider add'; use --type for the upstream API type.");
 
                 ClientRunnerSettings? duplicate = FindDuplicateProvider(settings, runner);
                 if (duplicate != null)
@@ -755,7 +778,7 @@ namespace Xeno.Client
                 return 0;
             }
 
-            if (args.Length >= 2 && args[1] == "list")
+            if (args.Length >= 2 && IsListCommand(args[1]))
             {
                 PrintModels(settings);
                 return 0;
@@ -765,10 +788,124 @@ namespace Xeno.Client
             {
                 string runnerName = String.Empty;
                 string modelName = String.Empty;
-                for (int i = 2; i < args.Length - 1; i += 2)
+                bool supportsCompletions = true;
+                bool supportsEmbeddings = false;
+                for (int i = 2; i < args.Length; i++)
                 {
-                    if (args[i] == "--runner" || args[i] == "--provider") runnerName = args[i + 1];
-                    if (args[i] == "--name") modelName = args[i + 1];
+                    string option = args[i];
+                    if (String.Equals(option, "--runner", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--provider", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 >= args.Length)
+                        {
+                            WriteError(option + " requires a value.");
+                            PrintModelHelp();
+                            return 1;
+                        }
+
+                        runnerName = args[++i];
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--name", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 >= args.Length)
+                        {
+                            WriteError("--name requires a value.");
+                            PrintModelHelp();
+                            return 1;
+                        }
+
+                        modelName = args[++i];
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--completion", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--completions", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 < args.Length && IsBooleanLiteral(args[i + 1]))
+                        {
+                            supportsCompletions = ParseBooleanLiteral(args[++i]);
+                        }
+                        else
+                        {
+                            supportsCompletions = true;
+                        }
+
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--embedding", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--embeddings", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 < args.Length && IsBooleanLiteral(args[i + 1]))
+                        {
+                            supportsEmbeddings = ParseBooleanLiteral(args[++i]);
+                        }
+                        else
+                        {
+                            supportsEmbeddings = true;
+                        }
+
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--no-completion", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--no-completions", StringComparison.OrdinalIgnoreCase))
+                    {
+                        supportsCompletions = false;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--no-embedding", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--no-embeddings", StringComparison.OrdinalIgnoreCase))
+                    {
+                        supportsEmbeddings = false;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--type", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 >= args.Length)
+                        {
+                            WriteError("--type requires completion, embedding, or both.");
+                            PrintModelHelp();
+                            return 1;
+                        }
+
+                        string type = args[++i];
+                        if (String.Equals(type, "completion", StringComparison.OrdinalIgnoreCase) ||
+                            String.Equals(type, "completions", StringComparison.OrdinalIgnoreCase))
+                        {
+                            supportsCompletions = true;
+                            supportsEmbeddings = false;
+                            continue;
+                        }
+
+                        if (String.Equals(type, "embedding", StringComparison.OrdinalIgnoreCase) ||
+                            String.Equals(type, "embeddings", StringComparison.OrdinalIgnoreCase))
+                        {
+                            supportsCompletions = false;
+                            supportsEmbeddings = true;
+                            continue;
+                        }
+
+                        if (String.Equals(type, "both", StringComparison.OrdinalIgnoreCase) ||
+                            String.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
+                        {
+                            supportsCompletions = true;
+                            supportsEmbeddings = true;
+                            continue;
+                        }
+
+                        WriteError("--type requires completion, embedding, or both.");
+                        PrintModelHelp();
+                        return 1;
+                    }
+
+                    WriteError("Unknown model add option: " + option);
+                    PrintModelHelp();
+                    return 1;
                 }
 
                 if (String.IsNullOrWhiteSpace(runnerName) || String.IsNullOrWhiteSpace(modelName))
@@ -781,20 +918,32 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                ClientRunnerSettings? runner = FindModelAddProvider(settings, runnerName);
                 if (runner == null)
                 {
                     WriteError("Provider endpoint not found: " + runnerName);
                     return 1;
                 }
 
-                runner.Models.Add(new ClientModelSettings { Name = modelName });
+                if (!supportsCompletions && !supportsEmbeddings)
+                {
+                    WriteError("Model must support completions, embeddings, or both.");
+                    PrintModelHelp();
+                    return 1;
+                }
+
+                runner.Models.Add(new ClientModelSettings
+                {
+                    Name = modelName,
+                    SupportsCompletions = supportsCompletions,
+                    SupportsEmbeddings = supportsEmbeddings
+                });
                 settings.Save();
                 WriteSuccess("Added model '" + modelName + "' to provider endpoint '" + runner.Name + "'.");
                 return 0;
             }
 
-            if (args.Length >= 2 && (args[1] == "delete" || args[1] == "remove"))
+            if (args.Length >= 2 && IsDeleteCommand(args[1]))
             {
                 string runnerName = String.Empty;
                 string modelName = String.Empty;
@@ -874,6 +1023,7 @@ namespace Xeno.Client
                 return 0;
             }
 
+            WriteConnectionAttempt(settings);
             ClientConnectionState.ClearStopRequest();
             ProcessStartInfo startInfo = CreateBackgroundStartInfo();
             using (Process process = new Process { StartInfo = startInfo })
@@ -944,6 +1094,12 @@ namespace Xeno.Client
             }
         }
 
+        private static void WriteConnectionAttempt(ClientSettings settings)
+        {
+            if (_UseJson) return;
+            WriteInfo("Attempting connection to server at " + settings.Server.Url);
+        }
+
         private static async Task ConnectAsync(ClientSettings settings, CancellationToken token)
         {
             EnsureClientId(settings);
@@ -952,6 +1108,7 @@ namespace Xeno.Client
                 throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key and secret key before connecting.");
             }
 
+            WriteConnectionAttempt(settings);
             while (!token.IsCancellationRequested)
             {
                 try
@@ -1393,7 +1550,7 @@ namespace Xeno.Client
 
         private static async Task<bool> TestRunnerAsync(ClientRunnerSettings runner, CancellationToken token)
         {
-            string relativePath = String.Equals(runner.Provider, "Ollama", StringComparison.OrdinalIgnoreCase) ? "/api/tags" : "/v1/models";
+            string relativePath = String.Equals(runner.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) ? "/api/tags" : "/v1/models";
             string endpoint = runner.Endpoint.TrimEnd('/') + relativePath;
             using (HttpClient httpClient = new HttpClient())
             using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, endpoint))
@@ -1479,9 +1636,135 @@ namespace Xeno.Client
             {
                 AutoFlush = true
             };
-            Console.SetOut(output);
-            Console.SetError(error);
+            Console.SetOut(new TimestampedLogWriter(output, "INFO"));
+            Console.SetError(new TimestampedLogWriter(error, "ERROR"));
             _UseColors = false;
+        }
+
+        private sealed class TimestampedLogWriter : TextWriter
+        {
+            private readonly TextWriter _Inner;
+            private readonly string _Severity;
+            private readonly object _SyncRoot = new object();
+            private bool _AtLineStart = true;
+
+            public TimestampedLogWriter(TextWriter inner, string severity)
+            {
+                _Inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                _Severity = String.IsNullOrWhiteSpace(severity) ? "INFO" : severity.Trim().ToUpperInvariant();
+            }
+
+            public override Encoding Encoding
+            {
+                get
+                {
+                    return _Inner.Encoding;
+                }
+            }
+
+            public override IFormatProvider FormatProvider
+            {
+                get
+                {
+                    return CultureInfo.InvariantCulture;
+                }
+            }
+
+            public override void Flush()
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.Flush();
+                }
+            }
+
+            public override Task FlushAsync()
+            {
+                Flush();
+                return Task.CompletedTask;
+            }
+
+            public override void Write(char value)
+            {
+                lock (_SyncRoot)
+                {
+                    WritePrefixIfNeeded();
+                    _Inner.Write(value);
+                    if (value == '\n') _AtLineStart = true;
+                }
+            }
+
+            public override void Write(string? value)
+            {
+                if (String.IsNullOrEmpty(value)) return;
+                lock (_SyncRoot)
+                {
+                    for (int i = 0; i < value.Length; i++)
+                    {
+                        WritePrefixIfNeeded();
+                        char item = value[i];
+                        _Inner.Write(item);
+                        if (item == '\n') _AtLineStart = true;
+                    }
+                }
+            }
+
+            public override void WriteLine()
+            {
+                lock (_SyncRoot)
+                {
+                    WritePrefixIfNeeded();
+                    _Inner.WriteLine();
+                    _AtLineStart = true;
+                }
+            }
+
+            public override void WriteLine(string? value)
+            {
+                lock (_SyncRoot)
+                {
+                    Write(value ?? String.Empty);
+                    if (!_AtLineStart)
+                    {
+                        _Inner.WriteLine();
+                        _AtLineStart = true;
+                    }
+                    else
+                    {
+                        WriteLine();
+                    }
+
+                    _AtLineStart = true;
+                }
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    lock (_SyncRoot)
+                    {
+                        _Inner.Dispose();
+                    }
+                }
+
+                base.Dispose(disposing);
+            }
+
+            private void WritePrefixIfNeeded()
+            {
+                if (!_AtLineStart) return;
+                _Inner.Write(FormatLogPrefix(DateTimeOffset.UtcNow, _Severity));
+                _AtLineStart = false;
+            }
+        }
+
+        private static string FormatLogPrefix(DateTimeOffset timestamp, string severity)
+        {
+            string formattedTimestamp = timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.", CultureInfo.InvariantCulture) +
+                (timestamp.UtcDateTime.Ticks % TimeSpan.TicksPerSecond / 10).ToString("D6", CultureInfo.InvariantCulture) +
+                "Z";
+            return formattedTimestamp + " [" + severity + "] ";
         }
 
         private static ProcessStartInfo CreateBackgroundStartInfo()
@@ -1712,7 +1995,7 @@ namespace Xeno.Client
             Console.WriteLine("  Access key: " + DisplayValue(settings.Server.AccessKey, "(not set)"));
             Console.WriteLine("  Secret key: " + MaskSecret(settings.Server.SecretKey));
             Console.WriteLine("  REST token: " + MaskSecret(settings.Server.Token));
-            PrintProviders(settings);
+            PrintProviders(settings, true);
         }
 
         private static void PrintInventory(ClientSettings settings)
@@ -1892,12 +2175,17 @@ namespace Xeno.Client
 
         private static void PrintProviders(ClientSettings settings)
         {
+            PrintProviders(settings, false);
+        }
+
+        private static void PrintProviders(ClientSettings settings, bool includeModelDetails)
+        {
             if (_UseJson)
             {
                 WriteJson(settings.Runners.ConvertAll(runner => new
                 {
                     name = runner.Name,
-                    provider = runner.Provider,
+                    apiType = runner.ApiType,
                     endpoint = runner.Endpoint,
                     timeoutMs = runner.TimeoutMs,
                     credentialConfigured = !String.IsNullOrWhiteSpace(runner.Credential),
@@ -1923,11 +2211,20 @@ namespace Xeno.Client
                 if (i > 0) Console.WriteLine();
                 ClientRunnerSettings runner = settings.Runners[i];
                 Console.WriteLine("  - " + runner.Name);
-                Console.WriteLine("    Type:       " + runner.Provider);
+                Console.WriteLine("    API Type:   " + runner.ApiType);
                 Console.WriteLine("    Endpoint:   " + runner.Endpoint);
                 Console.WriteLine("    Timeout:    " + runner.TimeoutMs + " ms");
                 Console.WriteLine("    Credential: " + (String.IsNullOrWhiteSpace(runner.Credential) ? "not configured" : "configured"));
                 Console.WriteLine("    Models:     " + runner.Models.Count);
+                if (includeModelDetails && runner.Models.Count > 0)
+                {
+                    foreach (ClientModelSettings model in runner.Models)
+                    {
+                        Console.WriteLine("      - " + model.Name);
+                        Console.WriteLine("        Completions: " + FormatBool(model.SupportsCompletions));
+                        Console.WriteLine("        Embeddings:  " + FormatBool(model.SupportsEmbeddings));
+                    }
+                }
             }
         }
 
@@ -1944,7 +2241,7 @@ namespace Xeno.Client
                         {
                             name = model.Name,
                             providerName = runner.Name,
-                            provider = runner.Provider,
+                            apiType = runner.ApiType,
                             supportsCompletions = model.SupportsCompletions,
                             supportsEmbeddings = model.SupportsEmbeddings
                         });
@@ -1964,7 +2261,8 @@ namespace Xeno.Client
                     else Console.WriteLine();
                     any = true;
                     Console.WriteLine("  - " + model.Name);
-                    Console.WriteLine("    Provider:    " + runner.Name + " [" + runner.Provider + "]");
+                    Console.WriteLine("    Provider:    " + runner.Name);
+                    Console.WriteLine("    API Type:    " + runner.ApiType);
                     Console.WriteLine("    Completions: " + FormatBool(model.SupportsCompletions));
                     Console.WriteLine("    Embeddings:  " + FormatBool(model.SupportsEmbeddings));
                 }
@@ -1991,6 +2289,11 @@ namespace Xeno.Client
             }
 
             return null;
+        }
+
+        private static ClientRunnerSettings? FindModelAddProvider(ClientSettings settings, string providerName)
+        {
+            return settings.Runners.Find(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase));
         }
 
         private static string NormalizeEndpoint(string? endpoint)
@@ -2089,6 +2392,37 @@ namespace Xeno.Client
                    String.Equals(value, "-h", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsListCommand(string value)
+        {
+            return String.Equals(value, "list", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "ls", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsDeleteCommand(string value)
+        {
+            return String.Equals(value, "delete", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "remove", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "remote", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "rm", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsBooleanLiteral(string value)
+        {
+            return String.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "false", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "no", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "on", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ParseBooleanLiteral(string value)
+        {
+            return String.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static void PrintConfigHelp()
         {
             WriteInfoHeading("Configuration commands");
@@ -2123,21 +2457,16 @@ namespace Xeno.Client
             WriteInfoHeading("Login command");
             Console.WriteLine("  xeno login -u <username>");
             Console.WriteLine("      Prompt for a password and store only the returned client credential.");
-            Console.WriteLine("  xeno login -u <username>");
-            Console.WriteLine("             --tenant <tenant-id>");
-            Console.WriteLine("             --server <rest-url>");
+            Console.WriteLine("  xeno login -u <username> --tenant <tenant-id> --server <rest-url>");
             Console.WriteLine("      Login against a specific tenant and REST server.");
         }
 
         private static void PrintAuthHelp()
         {
             WriteInfoHeading("Authentication commands");
-            Console.WriteLine("  xeno login -u <username>");
-            Console.WriteLine("             [--tenant <tenant-id>]");
-            Console.WriteLine("             [--server <rest-url>]");
+            Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
             Console.WriteLine("      Prompt for a password and store only the returned access key/secret.");
-            Console.WriteLine("  xeno set-auth --access-key <key>");
-            Console.WriteLine("                --secret-key <secret>");
+            Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
             Console.WriteLine("      Store an existing client credential for WebSocket and API use.");
             Console.WriteLine("  xeno set-auth --clear");
             Console.WriteLine("      Remove stored authentication.");
@@ -2147,15 +2476,14 @@ namespace Xeno.Client
         {
             WriteInfoHeading("Provider commands");
             Console.WriteLine("  xeno provider list");
+            Console.WriteLine("  xeno provider ls");
             Console.WriteLine("      Show configured provider endpoints.");
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("      Test connectivity to one configured provider endpoint.");
             Console.WriteLine("  xeno provider delete --name <name>");
+            Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete one configured provider endpoint.");
-            Console.WriteLine("  xeno provider add --name <name>");
-            Console.WriteLine("                    --provider <provider>");
-            Console.WriteLine("                    --endpoint <url>");
-            Console.WriteLine("                    [--credential <value>]");
+            Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>]");
             Console.WriteLine("      Add an Ollama, OpenAI, Gemini, or compatible endpoint.");
         }
 
@@ -2163,19 +2491,21 @@ namespace Xeno.Client
         {
             WriteInfoHeading("Model commands");
             Console.WriteLine("  xeno model list");
+            Console.WriteLine("  xeno model ls");
             Console.WriteLine("      Show models advertised by this client.");
-            Console.WriteLine("  xeno model add --provider <provider-name>");
-            Console.WriteLine("                 --name <model-name>");
-            Console.WriteLine("      Add a model to one configured provider endpoint.");
-            Console.WriteLine("  xeno model delete --name <model-name>");
-            Console.WriteLine("                    [--provider <provider-name>]");
-            Console.WriteLine("      Delete a model from one provider endpoint, or from all providers when omitted.");
+            Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--type completion|embedding|both]");
+            Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--completions true|false] [--embeddings true|false]");
+            Console.WriteLine("      Add a model to a configured provider.");
+            Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]");
+            Console.WriteLine("      Aliases: remove, remote, rm.");
+            Console.WriteLine("      Delete a model from one provider, or from all providers when omitted.");
         }
 
         private static void PrintConnectHelp()
         {
             WriteInfoHeading("Connect commands");
             Console.WriteLine("  xeno connect");
+            Console.WriteLine("  xeno start");
             Console.WriteLine("      Start the client as a background process and return after registration succeeds.");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("      Run the client WebSocket loop in the current terminal.");
@@ -2200,6 +2530,7 @@ namespace Xeno.Client
         {
             WriteInfoHeading("Stop commands");
             Console.WriteLine("  xeno stop");
+            Console.WriteLine("  xeno disconnect");
             Console.WriteLine("      Request the background Xeno client process to stop.");
             Console.WriteLine("  xeno stop --force");
             Console.WriteLine("      Request stop, then terminate the recorded process if it does not exit.");
@@ -2279,9 +2610,11 @@ namespace Xeno.Client
             Console.WriteLine("  xeno status");
             Console.WriteLine("  xeno inventory");
             Console.WriteLine("  xeno connect");
+            Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs -f");
             Console.WriteLine("  xeno stop");
+            Console.WriteLine("  xeno disconnect");
             WritePlainHeading("Configuration:");
             Console.WriteLine("  xeno config show");
             Console.WriteLine("  xeno config colors on");
@@ -2289,31 +2622,27 @@ namespace Xeno.Client
             Console.WriteLine("  xeno server set-url <websocket-url>");
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
             WritePlainHeading("Authentication:");
-            Console.WriteLine("  xeno login -u <username>");
-            Console.WriteLine("             [--tenant <tenant-id>]");
-            Console.WriteLine("             [--server <rest-url>]");
-            Console.WriteLine("  xeno set-auth --access-key <key>");
-            Console.WriteLine("                --secret-key <secret>");
+            Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
+            Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
             Console.WriteLine("  xeno set-auth --clear");
             WritePlainHeading("Providers:");
             Console.WriteLine("  xeno provider list");
+            Console.WriteLine("  xeno provider ls");
             Console.WriteLine("  xeno provider test --name <name>");
-            Console.WriteLine("  xeno provider delete --name <name>");
-            Console.WriteLine("  xeno provider add --name <name>");
-            Console.WriteLine("                    --provider <provider>");
-            Console.WriteLine("                    --endpoint <url>");
-            Console.WriteLine("                    [--credential <value>]");
+            Console.WriteLine("  xeno provider delete --name <name>  (aliases: remove, remote, rm)");
+            Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>]");
             WritePlainHeading("Models:");
             Console.WriteLine("  xeno model list");
-            Console.WriteLine("  xeno model add --provider <provider-name>");
-            Console.WriteLine("                 --name <model-name>");
-            Console.WriteLine("  xeno model delete --name <model-name>");
-            Console.WriteLine("                    [--provider <provider-name>]");
+            Console.WriteLine("  xeno model ls");
+            Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--type completion|embedding|both]");
+            Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]  (aliases: remove, remote, rm)");
             WritePlainHeading("Runtime:");
             Console.WriteLine("  xeno connect");
+            Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs [--tail <lines>] [-f]");
             Console.WriteLine("  xeno stop [--force]");
+            Console.WriteLine("  xeno disconnect");
             WritePlainHeading("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");

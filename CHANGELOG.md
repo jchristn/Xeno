@@ -8,3 +8,9 @@
 - Added C#, JavaScript, and Python SDKs with tests, documentation, and interactive console harnesses.
 - Added `xeno reset` and `xeno reset --force` to restore client settings to factory defaults.
 - Added `xeno model delete` to remove advertised models from client configuration.
+- Added background client process support: `xeno connect` and `xeno start` now return after registration, with `xeno connect --foreground` for attached operation.
+- Added `xeno logs`, `xeno logs -f`, `xeno stop`, and `xeno disconnect` for background client operation.
+- Added `ls`, `rm`, `remove`, and `remote` aliases for supported provider and model commands.
+- Added model capability flags to `xeno model add` through `--type completion|embedding|both`, `--completions`, and `--embeddings`.
+- Updated client configuration to write provider endpoint API family as `ApiType`; legacy `Provider` fields are still read for compatibility.
+- Updated `xeno config show` to display provider endpoint models and capabilities in formatted output.

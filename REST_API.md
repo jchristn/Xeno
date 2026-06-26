@@ -156,7 +156,7 @@ Routed OpenAI-compatible responses include Xeno trace headers for debugging mode
 - `X-Xeno-Load-Balancing-Mode`: configured selection strategy used for the request. Supported values match Conductor: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - `X-Xeno-Adaptive-Sample-Count` and `X-Xeno-Adaptive-Score`: adaptive scoring evidence when `Adaptive` mode is used.
 - `X-Xeno-Selection-Reason`: reason the selected node won.
-- `X-Xeno-Selected-Client-Name`, `X-Xeno-Selected-Provider`, and `X-Xeno-Selected-Source`: selected node and advertised model source metadata.
+- `X-Xeno-Selected-Client-Name`, `X-Xeno-Selected-API-Type`, `X-Xeno-Selected-Provider` (backward-compatible), and `X-Xeno-Selected-Source`: selected node and advertised model source metadata.
 - `X-Xeno-Selected-In-Flight`, `X-Xeno-Selected-Max-Parallel`, `X-Xeno-Selected-Weight`, and `X-Xeno-Selected-Last-Heartbeat-UTC`: selected node load and health inputs.
 - `X-Xeno-Client-Roundtrip-Ms` and `X-Xeno-Request-Duration-Ms`: relay timing.
 - `X-Xeno-Routing-Timeline`: comma-separated routing steps.
@@ -189,5 +189,6 @@ Requests relayed from the Xeno server to a connected `xeno` client also include 
 `GET /ws/v1/clients`
 
 Upgrades to WebSocket. Clients send `client.register` and periodic `client.heartbeat` envelopes. Server-dispatched inference requests use `server.request`; clients respond with `client.response`.
+Streaming requests use `client.response.start`, `client.response.chunk`, and `client.response.complete` frames so the server can relay chunks and persist final telemetry.
 The server waits `WebSocket.RequestTimeoutMs` for each routed inference response before returning a `504 ClientTimeout`.
 The WebSocket handshake requires `x-access-key` plus `x-secret-key`, with `x-tenant-guid`. Bearer session tokens and user passwords are rejected for client control-plane connections.
