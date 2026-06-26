@@ -6,6 +6,7 @@
   --color-muted: #657282;
   --color-border: #dce3ea;
   --color-border-strong: #c5d0da;
+  --color-table-row-hover: #fbfcfd;
   --color-success: #16803d;
   --color-success-soft: #e7f6ec;
   --color-danger: #c73737;
@@ -33,6 +34,7 @@ html[data-theme='dark'] {
   --color-muted: #a7b2bd;
   --color-border: #34414c;
   --color-border-strong: #465764;
+  --color-table-row-hover: #26313a;
   --color-success-soft: #143923;
   --color-danger-soft: #442121;
   --color-warning-soft: #412f15;
@@ -1359,12 +1361,12 @@ html[data-theme='dark'] .primitive-list-item {
 .data-table td {
   padding: 12px;
   border-bottom: 1px solid var(--color-border);
-  color: #24303a;
+  color: var(--color-text);
   vertical-align: top;
 }
 
 .data-table tbody tr:hover {
-  background: #fbfcfd;
+  background: var(--color-table-row-hover);
 }
 
 .data-table tbody tr:last-child td {
@@ -2458,6 +2460,25 @@ html[data-theme='dark'] .permission-option {
   border-bottom: 1px solid var(--color-border);
   background: var(--color-panel-soft);
   padding: 12px;
+}
+
+.request-payload-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  padding: 0;
+  text-align: left;
+}
+
+.request-payload-toggle:hover {
+  color: var(--color-accent);
+}
+
+.request-payload-toggle h3 {
+  margin: 0;
 }
 
 .request-payload-header span {

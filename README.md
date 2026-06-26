@@ -1,85 +1,342 @@
-# Xeno v0.1.0 ALPHA
+# Xeno
 
 ![Xeno logo](assets/logo.png)
 
-Xeno v0.1.0 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, and client commands are subject to change before a stable release.
+**Version:** v0.1.0
 
-Xeno is an AI control plane for routing OpenAI-compatible completions and embeddings to distributed computers running the `xeno` client.
+**Status:** ALPHA
 
-The first implementation includes:
+Xeno v0.1.0 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, SDKs, and client commands may change before a stable release.
 
-- multitenant server state with seeded tenant, user, credential, connected clients, and advertised models;
-- OpenAI-compatible routes at `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/models`;
-- Conductor-compatible connected-client load balancing: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`;
-- routed OpenAI-compatible responses include `X-Client-ID` and `X-Xeno-*` trace headers for selected node, load-balancing mode, routing reason, candidate count, request history ID, and timing;
-- management routes for health, OpenAPI, clients, advertised models, tenants, users, credentials, roles, permissions, settings, request history, and token bootstrap;
-- a WebSocket registration endpoint at `/ws/v1/clients` gated by tenant-bound client access-key/secret credentials;
-- a cross-platform `xeno` console tool with `~/.xeno/client.json` configuration;
-- a React/Vite dashboard under `dashboard/` with create/edit workflows for tenants, users, credentials, roles, and permissions plus settings, clients, advertised models, analytics, request history, and integrated API explorer views;
-- C#, JavaScript, and Python SDKs under `src/sdk/`, each with tests, quick-start docs, and an interactive console harness;
-- Touchstone shared tests with automated, xUnit, and NUnit runners.
+Xeno is an AI control plane for turning distributed computers into a shared model-serving network. A lightweight client runs on laptops, desktops, workstations, and servers, advertises the machine's available providers and models, and maintains a persistent WebSocket connection to the Xeno server. The server exposes OpenAI-compatible APIs and routes requests to connected clients that can service the selected model.
 
-## Quick Start
+## What Xeno Does
+
+Xeno gives teams one place to manage and use distributed AI capacity.
+
+- Exposes OpenAI-compatible routes for chat completions, completions, embeddings, model listing, and related workflows.
+- Connects remote machines through the cross-platform `xeno` client.
+- Lets clients advertise hardware, provider endpoints, and available models.
+- Routes requests to connected clients using Conductor-compatible load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
+- Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
+- Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
+- Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
+- Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
+- Ships with a web dashboard, REST API, OpenAPI/Swagger documentation, Postman collection, Docker deployment assets, and C#, JavaScript, and Python SDKs.
+
+## Why Use It
+
+Use Xeno when you want a single OpenAI-compatible endpoint backed by many machines.
+
+- Share idle GPUs and CPUs across a local network, lab, team, or private infrastructure.
+- Keep local and private model execution behind a central API.
+- Mix providers without forcing application code to know where a model actually runs.
+- Add authentication, multitenancy, request history, dashboard visibility, and routing policy around model execution.
+- Move between local Ollama, hosted APIs, and OpenAI-compatible model servers while keeping the same application integration point.
+- Debug agentic applications with response headers and request history that show which node handled a request and why it was selected.
+
+## How It Works
+
+1. The Xeno server starts a REST API, OpenAPI/Swagger endpoint, dashboard-facing management API, database layer, and WebSocket endpoint.
+2. A user logs in through the `xeno` client. The password is used only to bootstrap a tenant-bound client credential.
+3. The client stores an access key and secret key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
+4. The client connects to `/ws/v1/clients`, authenticates with its access credential, and advertises machine inventory, provider endpoints, and models.
+5. Applications call the Xeno OpenAI-compatible API.
+6. The server selects a connected client that advertises the requested model.
+7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
+8. The server returns the model response to the caller and persists request history for dashboard inspection.
+
+## Getting Started With Docker
+
+The default Docker deployment uses PostgreSQL and starts a one-shot initialization container before the server starts.
 
 ```powershell
-dotnet build src/Xeno.sln
-dotnet run --project src/Test.Automated -- --results results.json
-dotnet run --project src/Xeno.Server -- xeno.json
+cd docker
+docker compose pull
+docker compose up -d
+docker ps -a
 ```
 
-Then call:
+Default local endpoints:
 
-```bash
-curl http://localhost:9000/health
-curl http://localhost:9000/v1/models
-```
+- Dashboard: `http://localhost:9100`
+- Server REST API: `http://localhost:9000`
+- Health check: `http://localhost:9000/health`
+- OpenAPI JSON: `http://localhost:9000/openapi.json`
+- Swagger UI: `http://localhost:9000/swagger`
+- Client WebSocket: `ws://localhost:9000/ws/v1/clients`
 
-The OpenAPI contract is available at `/openapi.json` and Swagger UI is available at `/swagger`. SDKs are checked in under `src/sdk/`; `/openapi.json` remains the API contract source of truth.
+Seeded alpha credentials:
 
-## SDKs
+- Dashboard/server user: `admin@xeno`
+- Password: `password`
+- Default client access key: `default`
+- Default client secret key: `default`
 
-- C#: `src/sdk/csharp`
-- JavaScript: `src/sdk/javascript`
-- Python: `src/sdk/python`
+The Docker images are:
 
-Each SDK includes `README.md`, `TESTING.md`, a focused test harness, and an interactive console application for exploring the server.
+- `jchristn77/xeno-server:v0.1.0`
+- `jchristn77/xeno-dashboard:v0.1.0`
 
-## Client
-
-See [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) for the full client setup flow.
-
-On Windows, `install-tool.bat` rebuilds the client and installs `xeno` as a .NET global tool. `remove-tool.bat` uninstalls it.
-
-```powershell
-dotnet run --project src/Xeno.Client -- init
-dotnet run --project src/Xeno.Client -- login -u admin@xeno
-dotnet run --project src/Xeno.Client -- status
-dotnet run --project src/Xeno.Client -- inventory
-```
-
-Use `dotnet run --project src/Xeno.Client -- reset` to restore local client settings to factory defaults, or add `--force` to skip the confirmation prompt.
-
-The seeded development user is `admin@xeno` with password `password`. The seeded development credential uses access key `default` and secret key `default`. `xeno login -u ...` prompts for the password, exchanges it for a client access key and secret, and stores only that client credential in `~/.xeno/client.json`. The WebSocket connection does not accept user passwords or bearer session tokens.
-
-## Docker
+To rebuild and push images:
 
 ```powershell
 docker login
 build-server.bat v0.1.0
 build-dashboard.bat v0.1.0
 build-all.bat v0.1.0
-docker compose -f docker/compose.yaml up
 ```
 
-The build scripts build and push both the requested tag and `latest` to Docker Hub. `docker compose pull` requires those tags to exist in Docker Hub, so run `docker login` with access to `jchristn77` before invoking the build scripts.
+`build-all.bat` delegates to the server and dashboard build scripts and passes the requested image tag through to both.
 
-The default compose stack uses PostgreSQL. `xeno-postgres-init` runs before `xeno-server` and creates the `xeno` role/database expected by `docker/xeno.json`. MySQL and SQL Server remain optional compose profiles.
+## Getting Started From Source
 
-Images:
+Prerequisites:
 
-- `jchristn77/xeno-server:v0.1.0`
-- `jchristn77/xeno-dashboard:v0.1.0`
+- .NET SDK compatible with the solution target framework
+- Node.js and npm for the dashboard
+- Docker Desktop if you want to run the compose stack or publish images
 
-## Requirements
+Build the backend and tests:
 
-Implementation follows the repository, backend, frontend, authentication, i18n, and testing guidance in `C:\code\agents\requirements`. The implementation plan remains in `XENO_PLAN.md`.
+```powershell
+dotnet build src/Xeno.sln -c Release
+```
+
+Build and test the dashboard:
+
+```powershell
+cd dashboard
+npm install
+npm test
+npm run build
+```
+
+Run the server locally:
+
+```powershell
+dotnet run --project src/Xeno.Server -- xeno.json
+```
+
+Install the client as a global `xeno` tool on Windows:
+
+```powershell
+install-tool.bat
+```
+
+Remove it later with:
+
+```powershell
+remove-tool.bat
+```
+
+## Using The Xeno Client
+
+The client stores settings at `~/.xeno/client.json` and state at `~/.xeno/state.json`.
+
+Log in and configure a local Ollama provider:
+
+```powershell
+xeno login -u admin@xeno --server http://localhost:9000
+xeno provider add --name local-ollama --provider Ollama --endpoint http://127.0.0.1:11434
+xeno model add --provider local-ollama --name llama3.2:latest
+xeno inventory
+xeno connect
+```
+
+Useful client commands:
+
+```powershell
+xeno status
+xeno provider list
+xeno provider delete --name local-ollama
+xeno model list
+xeno model delete --name llama3.2:latest
+xeno config show
+xeno reset
+xeno reset --force
+```
+
+For the full walkthrough, see [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md).
+
+## Calling The API
+
+List models:
+
+```bash
+curl http://localhost:9000/v1/models
+```
+
+Send a chat completion:
+
+```bash
+curl http://localhost:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2:latest",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful and concise assistant."
+      },
+      {
+        "role": "user",
+        "content": "Explain how an inverted index works."
+      }
+    ],
+    "stream": true,
+    "max_output_tokens": 2000
+  }'
+```
+
+Depending on the endpoint and auth configuration, management APIs may require a bearer token. Use the dashboard, Swagger UI, Postman collection, or SDK console apps to explore the full API surface.
+
+## Dashboard
+
+The dashboard is the primary administration surface for Xeno. It includes:
+
+- Home charts for request activity and connected clients.
+- Connected client and advertised model views.
+- Request history with telemetry, headers, bodies, streaming details, and routing decisions.
+- Tenant, user, credential, role, and permission create/edit/delete workflows.
+- Settings management for server configuration.
+- Analytics by time window, path, model, and request behavior.
+- Integrated API Explorer with editable JSON request bodies, response headers, streaming previews, and copy-to-clipboard controls.
+
+## Configuration
+
+The server configuration file controls REST, CORS, logging, WebSocket, database, routing, and other operational settings. The default local file is [xeno.json](xeno.json), and the Docker deployment uses [docker/xeno.json](docker/xeno.json).
+
+Supported database engines:
+
+- SQLite
+- PostgreSQL
+- SQL Server
+- MySQL
+
+The default Docker compose stack uses PostgreSQL. Optional MySQL and SQL Server services are present in [docker/compose.yaml](docker/compose.yaml) for alternate deployments.
+
+## SDKs
+
+SDKs live under `src/sdk/`:
+
+- C#: [src/sdk/csharp](src/sdk/csharp)
+- JavaScript: [src/sdk/javascript](src/sdk/javascript)
+- Python: [src/sdk/python](src/sdk/python)
+
+Each SDK includes:
+
+- `README.md`
+- `TESTING.md`
+- focused tests
+- an interactive console application for exercising the SDK against a running Xeno server
+
+## Documentation
+
+Developer documentation:
+
+- [REST_API.md](REST_API.md)
+- [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
+- [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [AGENTS.md](AGENTS.md)
+- [Xeno.postman_collection.json](Xeno.postman_collection.json)
+
+Archived planning and audit documents are in [archive](archive).
+
+## Repository Layout
+
+```text
+/
+  README.md
+  CHANGELOG.md
+  REST_API.md
+  WEBSOCKETS_API.md
+  CLIENT_GETTING_STARTED.md
+  Xeno.postman_collection.json
+  build-all.bat
+  build-server.bat
+  build-dashboard.bat
+  install-tool.bat
+  remove-tool.bat
+  assets/
+  dashboard/
+  docker/
+  src/
+```
+
+Key directories:
+
+- `src/` contains the C# solution, server, client, core library, tests, and SDKs.
+- `dashboard/` contains the React/Vite dashboard.
+- `docker/` contains compose assets, server settings, database initialization scripts, and factory reset scripts.
+- `assets/` contains shared logo and icon assets.
+
+## Testing
+
+Run backend tests:
+
+```powershell
+dotnet build src/Xeno.sln -c Release
+dotnet run --project src/Test.Automated -- --results results.json
+dotnet test src/Test.Xunit
+dotnet test src/Test.Nunit
+```
+
+Run dashboard tests:
+
+```powershell
+cd dashboard
+npm test
+npm run build
+```
+
+The test projects follow the Touchstone package pattern used by the reference applications: `Test.Shared`, `Test.Automated`, `Test.Xunit`, and `Test.Nunit`.
+
+## Security Notes
+
+Xeno is alpha software. Do not expose a development deployment directly to the public internet without a deliberate production hardening pass.
+
+- Put public deployments behind TLS and a trusted reverse proxy.
+- Rotate seeded development credentials before real use.
+- Store client access keys and secret keys carefully.
+- Avoid committing provider credentials or private endpoints.
+- Use least-privilege database credentials in non-development deployments.
+- Treat request body and response body capture as sensitive because prompts, completions, and embeddings input may contain private data.
+
+## Filing Issues
+
+File issues at the GitHub repository:
+
+```text
+https://github.com/jchristn/Xeno/issues
+```
+
+Helpful issue reports include:
+
+- Xeno version and commit hash.
+- Operating system and architecture.
+- Whether the issue is in the server, dashboard, client, Docker deployment, or SDK.
+- Exact command, route, or dashboard workflow that failed.
+- Expected behavior and actual behavior.
+- Relevant logs with secrets redacted.
+- Minimal reproduction steps.
+
+## Contributing
+
+Contributions are welcome while Xeno is evolving through alpha.
+
+Recommended workflow:
+
+1. Open an issue or discussion for larger changes.
+2. Create a focused branch.
+3. Follow [AGENTS.md](AGENTS.md) and the style and testing requirements in `C:\code\agents\requirements` when working in this environment.
+4. Keep changes scoped and include tests for behavior changes.
+5. Update README, REST API docs, WebSocket docs, Postman, SDK docs, or dashboard text when behavior changes.
+6. Run the relevant backend, dashboard, and SDK tests before opening a pull request.
+
+Pull requests should describe the problem, the implementation, test coverage, and any migration or deployment impact.
+
+## License
+
+Xeno is licensed under the MIT License. See [LICENSE](LICENSE).

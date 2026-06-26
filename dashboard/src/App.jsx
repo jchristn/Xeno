@@ -8,6 +8,7 @@ import {
   ArrowUpDown,
   BarChart3,
   BrainCircuit,
+  ChevronDown,
   ChevronRight,
   CircleDot,
   Cpu,
@@ -1901,17 +1902,27 @@ function DetailTableValue({ row }) {
 
 function PayloadPanel({ meta, title, value: fieldValue }) {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(true);
   const text = formatPayload(fieldValue);
   return (
-    <section className="request-payload-panel">
+    <section className={`request-payload-panel ${expanded ? 'expanded' : 'collapsed'}`}>
       <div className="request-payload-header">
         <div>
-          <h3>{title}</h3>
+          <button
+            aria-expanded={expanded}
+            className="request-payload-toggle"
+            onClick={() => setExpanded((current) => !current)}
+            title={expanded ? t('collapse') : t('expand')}
+            type="button"
+          >
+            {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            <h3>{title}</h3>
+          </button>
           {meta ? <span>{meta}</span> : null}
         </div>
         <CopyButton label={t('copy')} value={text} />
       </div>
-      <pre className="request-detail-code">{text || '(empty)'}</pre>
+      {expanded ? <pre className="request-detail-code">{text || '(empty)'}</pre> : null}
     </section>
   );
 }
