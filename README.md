@@ -17,7 +17,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Exposes OpenAI-compatible routes for chat completions, completions, embeddings, model listing, and related workflows.
 - Connects remote machines through the cross-platform `xeno` client.
 - Lets clients advertise hardware, provider endpoints, and available models.
-- Routes requests to connected clients using configurable load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
+- Routes requests to connected clients through tenant-scoped routing policies with model/client match rules and load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
@@ -42,7 +42,7 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 3. The client stores an access key and secret key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
 4. The client connects to `/ws/v1/clients`, authenticates with its access credential, and advertises machine inventory, provider endpoints, and models.
 5. Applications call the Xeno OpenAI-compatible API.
-6. The server selects a connected client that advertises the requested model.
+6. The server resolves the tenant's effective routing policy, then selects a connected client that advertises the requested model.
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
 8. The server returns the model response to the caller and persists request history for dashboard inspection.
 
@@ -197,6 +197,7 @@ The dashboard is the primary administration surface for Xeno. It includes:
 
 - Home charts for request activity and connected clients.
 - Connected client and advertised model views.
+- Routing policy management for model/client matching and load-balancing behavior.
 - Request history with telemetry, headers, bodies, streaming details, and routing decisions.
 - Tenant, user, credential, role, and permission create/edit/delete workflows.
 - Settings management for server configuration.
@@ -237,6 +238,7 @@ Developer documentation:
 
 - [REST_API.md](REST_API.md)
 - [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
+- [MODEL_ROUTING.md](MODEL_ROUTING.md)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [AGENTS.md](AGENTS.md)

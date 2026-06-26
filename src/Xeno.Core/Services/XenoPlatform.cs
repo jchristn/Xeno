@@ -5,7 +5,9 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Enums;
     using Xeno.Core.Models;
+    using Xeno.Core.Settings;
 
     /// <summary>
     /// Tenant-aware platform state and domain operations.
@@ -66,6 +68,11 @@ namespace Xeno.Core.Services
         /// Model configurations.
         /// </summary>
         public List<ModelConfiguration> ModelConfigurations { get; } = new List<ModelConfiguration>();
+
+        /// <summary>
+        /// Routing policies.
+        /// </summary>
+        public List<RoutingPolicy> RoutingPolicies { get; } = new List<RoutingPolicy>();
 
         /// <summary>
         /// Request history.
@@ -234,7 +241,55 @@ namespace Xeno.Core.Services
             };
             ModelConfigurations.Add(modelConfiguration);
 
+            EnsureTenantDefaults(tenant.Id);
+
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Ensure first-boot and migration defaults exist for every tenant.
+        /// </summary>
+        public void EnsureTenantDefaults()
+        {
+            foreach (Tenant tenant in Tenants)
+            {
+                EnsureTenantDefaults(tenant.Id);
+            }
+        }
+
+        /// <summary>
+        /// Ensure first-boot and migration defaults exist for a tenant.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        public void EnsureTenantDefaults(string tenantId)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            EnsureDefaultTenantSecurity(tenantId);
+            EnsureDefaultRoutingPolicy(tenantId);
+        }
+
+        /// <summary>
+        /// Remove all tenant-scoped records for a deleted tenant.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <returns>Removed record count.</returns>
+        public int RemoveTenantScopedRecords(string tenantId)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+
+            int removed = Users.RemoveAll(item => item.TenantId == tenantId);
+            removed += Credentials.RemoveAll(item => item.TenantId == tenantId);
+            removed += AuthSessions.RemoveAll(item => item.TenantId == tenantId);
+            removed += Roles.RemoveAll(item => item.TenantId == tenantId);
+            removed += Permissions.RemoveAll(item => item.TenantId == tenantId);
+            removed += RoleAssignments.RemoveAll(item => item.TenantId == tenantId);
+            removed += AuditRecords.RemoveAll(item => item.TenantId == tenantId);
+            removed += Clients.RemoveAll(item => item.TenantId == tenantId);
+            removed += ModelDefinitions.RemoveAll(item => item.TenantId == tenantId);
+            removed += ModelConfigurations.RemoveAll(item => item.TenantId == tenantId);
+            removed += RoutingPolicies.RemoveAll(item => item.TenantId == tenantId);
+            removed += RequestHistory.RemoveAll(item => item.TenantId == tenantId);
+            return removed;
         }
 
         /// <summary>
@@ -256,6 +311,7 @@ namespace Xeno.Core.Services
                 Clients = Clients,
                 ModelDefinitions = ModelDefinitions,
                 ModelConfigurations = ModelConfigurations,
+                RoutingPolicies = RoutingPolicies,
                 RequestHistory = RequestHistory
             };
         }
@@ -301,8 +357,13 @@ namespace Xeno.Core.Services
             ModelConfigurations.Clear();
             ModelConfigurations.AddRange(state.ModelConfigurations);
 
+            RoutingPolicies.Clear();
+            RoutingPolicies.AddRange(state.RoutingPolicies);
+
             RequestHistory.Clear();
             RequestHistory.AddRange(state.RequestHistory);
+
+            EnsureTenantDefaults();
         }
 
         /// <summary>
@@ -314,6 +375,145 @@ namespace Xeno.Core.Services
             Tenant? tenant = Tenants.FirstOrDefault(item => item.Active);
             if (tenant == null) throw new InvalidOperationException("No active tenant exists.");
             return tenant;
+        }
+
+        private void EnsureDefaultRoutingPolicy(string tenantId)
+        {
+            RoutingPolicy? existing = RoutingPolicies.FirstOrDefault(item =>
+                item.TenantId == tenantId &&
+                item.IsDefault);
+            if (existing != null)
+            {
+                existing.ModelName = "*";
+                existing.ClientName = "*";
+                if (existing.RequestTimeoutMs < 1000) existing.RequestTimeoutMs = 300000;
+                if (!Enum.IsDefined(typeof(LoadBalancingModeEnum), existing.LoadBalancingMode)) existing.LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed;
+                existing.Active = true;
+                return;
+            }
+
+            RoutingPolicies.Add(new RoutingPolicy
+            {
+                TenantId = tenantId,
+                Name = "Default Routing Policy",
+                ModelName = "*",
+                ClientName = "*",
+                RequestTimeoutMs = 300000,
+                LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed,
+                Adaptive = new AdaptiveLoadBalancingSettings(),
+                IsDefault = true,
+                Active = true
+            });
+        }
+
+        private void EnsureDefaultTenantSecurity(string tenantId)
+        {
+            AuthenticationService authentication = new AuthenticationService();
+            User? adminUser = Users.FirstOrDefault(item => item.TenantId == tenantId && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase));
+            if (adminUser == null)
+            {
+                adminUser = new User
+                {
+                    TenantId = tenantId,
+                    Username = "admin",
+                    Email = "admin@xeno",
+                    IsAdmin = true,
+                    IsTenantAdmin = true,
+                    Active = true
+                };
+                authentication.SetUserPassword(adminUser, "password");
+                Users.Add(adminUser);
+            }
+
+            if (!Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, "default", StringComparison.Ordinal)))
+            {
+                Credentials.Add(new Credential
+                {
+                    TenantId = tenantId,
+                    UserId = adminUser.Id,
+                    AccessKey = "default",
+                    SecretKey = "default",
+                    Active = true
+                });
+            }
+
+            Permission readPermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Read);
+            Permission writePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Write);
+            Permission deletePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Delete);
+            Permission adminPermission = EnsurePermission(tenantId, "Admin", OperationTypeEnum.Admin);
+            Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, adminPermission.Id });
+            EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
+            EnsureRole(tenantId, "TenantMember", new List<string> { readPermission.Id });
+
+            bool hasAssignment = RoleAssignments.Any(item =>
+                item.TenantId == tenantId &&
+                item.RoleId == tenantAdmin.Id &&
+                item.PrincipalType == PrincipalTypeEnum.User &&
+                item.PrincipalId == adminUser.Id);
+            if (!hasAssignment)
+            {
+                RoleAssignments.Add(new RoleAssignment
+                {
+                    TenantId = tenantId,
+                    RoleId = tenantAdmin.Id,
+                    PrincipalType = PrincipalTypeEnum.User,
+                    PrincipalId = adminUser.Id
+                });
+            }
+        }
+
+        private Permission EnsurePermission(string tenantId, string resourceType, OperationTypeEnum operationType)
+        {
+            Permission? permission = Permissions.FirstOrDefault(item =>
+                item.TenantId == tenantId &&
+                String.Equals(item.ResourceType, resourceType, StringComparison.OrdinalIgnoreCase) &&
+                item.OperationType == operationType);
+            if (permission != null)
+            {
+                permission.Permit = true;
+                permission.Active = true;
+                return permission;
+            }
+
+            permission = new Permission
+            {
+                TenantId = tenantId,
+                ResourceType = resourceType,
+                OperationType = operationType,
+                Permit = true,
+                Active = true
+            };
+            Permissions.Add(permission);
+            return permission;
+        }
+
+        private Role EnsureRole(string tenantId, string name, List<string> permissionIds)
+        {
+            Role? role = Roles.FirstOrDefault(item =>
+                item.TenantId == tenantId &&
+                String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (role != null)
+            {
+                role.BuiltIn = true;
+                role.Active = true;
+                foreach (string permissionId in permissionIds)
+                {
+                    if (!role.PermissionIds.Contains(permissionId, StringComparer.OrdinalIgnoreCase)) role.PermissionIds.Add(permissionId);
+                }
+
+                return role;
+            }
+
+            role = new Role
+            {
+                TenantId = tenantId,
+                Name = name,
+                BuiltIn = true,
+                PermissionIds = permissionIds,
+                Active = true
+            };
+            Roles.Add(role);
+            return role;
         }
     }
 }

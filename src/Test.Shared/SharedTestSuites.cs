@@ -361,11 +361,15 @@ namespace Test.Shared
                         {
                             XenoPlatform platform = new XenoPlatform();
                             await platform.InitializeAsync().ConfigureAwait(false);
+                            RoutingPolicy? defaultPolicy = platform.RoutingPolicies.FirstOrDefault(item => item.TenantId == Constants.DefaultTenantId && item.IsDefault);
+                            if (defaultPolicy == null) throw new InvalidOperationException("Default routing policy was not seeded.");
+                            if (defaultPolicy.LoadBalancingMode != LoadBalancingModeEnum.LeastRecentlyUsed) throw new InvalidOperationException("Default routing policy did not use least-recently-used balancing.");
                             platform.Clients[0].Connected = true;
                             RoutingService routing = new RoutingService(platform);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (String.IsNullOrWhiteSpace(decision.SelectedClientId)) throw new InvalidOperationException("Client not selected.");
+                            if (String.IsNullOrWhiteSpace(decision.RoutingPolicyId)) throw new InvalidOperationException("Routing policy was not recorded.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
@@ -428,6 +432,7 @@ namespace Test.Shared
                             };
                             client.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
                             platform.Clients.Add(client);
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.Adaptive);
                             RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Adaptive });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
@@ -441,6 +446,7 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.RoundRobin);
                             RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.RoundRobin });
                             RoutingDecision first = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             RoutingDecision second = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
@@ -455,6 +461,7 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.FirstAvailable);
                             RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.FirstAvailable });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
@@ -467,6 +474,7 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.LeastRecentlyUsed);
                             RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
                             RoutingDecision first = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             RoutingDecision second = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
@@ -480,11 +488,52 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.Random);
                             RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Random });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.LoadBalancingMode != LoadBalancingModeEnum.Random) throw new InvalidOperationException("Random mode was not recorded.");
                             if (!decision.CandidateClientIds.Contains(decision.SelectedClientId ?? String.Empty)) throw new InvalidOperationException("Random selected a non-candidate client.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "ExactClientPolicyWinsOverWildcard",
+                        "Exact client routing policy wins over wildcard default",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingPolicy policy = new RoutingPolicy
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                Name = "Pin beta",
+                                ModelName = "llama3.2:latest",
+                                ClientName = "beta-client",
+                                LoadBalancingMode = LoadBalancingModeEnum.FirstAvailable,
+                                Active = true
+                            };
+                            platform.RoutingPolicies.Add(policy);
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException(decision.Message);
+                            if (decision.SelectedClientName != "beta-client") throw new InvalidOperationException("Exact client policy did not select beta-client.");
+                            if (decision.RoutingPolicyId != policy.Id) throw new InvalidOperationException("Exact client policy was not recorded.");
+                            if (decision.CandidateCount != 1) throw new InvalidOperationException("Exact client policy did not narrow candidate clients.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "RecordHistoryPersistsRoutingPolicyMetadata",
+                        "Request history persists routing policy metadata",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(platform);
+                            RequestContext context = new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true };
+                            RoutingDecision decision = await routing.RouteAsync(context, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException(decision.Message);
+                            RequestHistoryEntry entry = routing.RecordHistory(context, "/v1/chat/completions", "POST", decision);
+                            if (entry.RoutingDecision == null) throw new InvalidOperationException("Request history missing routing decision.");
+                            if (String.IsNullOrWhiteSpace(entry.RoutingDecision.RoutingPolicyId)) throw new InvalidOperationException("Request history missing routing policy ID.");
+                            if (entry.RoutingDecision.RoutingPolicyRequestTimeoutMs != 300000) throw new InvalidOperationException("Request history missing routing policy timeout.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
@@ -595,6 +644,11 @@ namespace Test.Shared
                         executeAsync: delegate { return RunManagementSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
+                        "DashboardLoginSmoke",
+                        "Dashboard login discovers tenants and issues an authenticated bearer session",
+                        executeAsync: delegate { return RunDashboardLoginSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
                         "ManagementDeleteRoutesSmoke",
                         "Management delete routes remove records and update OpenAPI",
                         executeAsync: delegate { return RunManagementDeleteSmokeAsync(); }),
@@ -656,6 +710,9 @@ namespace Test.Shared
                         string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
                         if (!clients.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Clients response missing advertised model.");
 
+                        string routingPolicies = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/routing-policies").ConfigureAwait(false);
+                        if (!routingPolicies.Contains("Default Routing Policy", StringComparison.Ordinal)) throw new InvalidOperationException("Routing policies response missing default policy.");
+
                         string analytics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/analytics/overview").ConfigureAwait(false);
                         if (!analytics.Contains("failureRate", StringComparison.Ordinal)) throw new InvalidOperationException("Analytics overview missing failureRate.");
 
@@ -679,6 +736,108 @@ namespace Test.Shared
 
                         string metrics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/metrics").ConfigureAwait(false);
                         if (!metrics.Contains("xeno_connected_clients", StringComparison.Ordinal)) throw new InvalidOperationException("Metrics output missing connected clients.");
+                    }
+                }
+                finally
+                {
+                    serverTokenSource.Cancel();
+                    server.Stop();
+                    try
+                    {
+                        await serverTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+
+                    server.Dispose();
+                    await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunDashboardLoginSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-dashboard-login-" + Guid.NewGuid().ToString("N") + ".db");
+            string settingsFile = Path.Combine(Path.GetTempPath(), "xeno-dashboard-login-" + Guid.NewGuid().ToString("N") + ".json");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    RequireAuthentication = true,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings, settingsFile);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        using (HttpResponseMessage tenantResponse = await httpClient.GetAsync(baseUrl + "/v1.0/api/auth/tenants?email=admin%40xeno").ConfigureAwait(false))
+                        {
+                            string tenantJson = await tenantResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tenantResponse.IsSuccessStatusCode) throw new InvalidOperationException("Tenant lookup failed: " + tenantJson);
+                            AuthTenantLookupResponse lookup = DeserializeRequired<AuthTenantLookupResponse>(tenantJson);
+                            if (lookup.Tenants.Count != 1) throw new InvalidOperationException("Tenant lookup did not return exactly one tenant.");
+                            if (lookup.Tenants[0].Id != Constants.DefaultTenantId) throw new InvalidOperationException("Tenant lookup returned the wrong tenant.");
+                        }
+
+                        using (HttpResponseMessage missingTenantResponse = await httpClient.GetAsync(baseUrl + "/v1.0/api/auth/tenants?email=missing%40xeno").ConfigureAwait(false))
+                        {
+                            string missingTenantJson = await missingTenantResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!missingTenantResponse.IsSuccessStatusCode) throw new InvalidOperationException("Missing-user tenant lookup failed: " + missingTenantJson);
+                            AuthTenantLookupResponse lookup = DeserializeRequired<AuthTenantLookupResponse>(missingTenantJson);
+                            if (lookup.Tenants.Count != 0) throw new InvalidOperationException("Unknown email should not return tenants.");
+                        }
+
+                        using (HttpResponseMessage unauthenticatedSettings = await httpClient.GetAsync(baseUrl + "/v1.0/api/settings").ConfigureAwait(false))
+                        {
+                            if ((int)unauthenticatedSettings.StatusCode != 401) throw new InvalidOperationException("Authenticated route did not reject anonymous dashboard request.");
+                        }
+
+                        string loginBody = JsonUtil.Serialize(new AuthLoginRequest
+                        {
+                            TenantId = Constants.DefaultTenantId,
+                            Email = "admin@xeno",
+                            Password = "password"
+                        });
+                        using (HttpResponseMessage loginResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/dashboard/login", loginBody).ConfigureAwait(false))
+                        {
+                            string loginJson = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!loginResponse.IsSuccessStatusCode) throw new InvalidOperationException("Dashboard login failed: " + loginJson);
+                            AuthDashboardLoginResponse login = DeserializeRequired<AuthDashboardLoginResponse>(loginJson);
+                            if (String.IsNullOrWhiteSpace(login.Token)) throw new InvalidOperationException("Dashboard login did not return a token.");
+                            if (login.TenantId != Constants.DefaultTenantId) throw new InvalidOperationException("Dashboard login returned the wrong tenant.");
+
+                            using (HttpRequestMessage settingsRequest = new HttpRequestMessage(HttpMethod.Get, baseUrl + "/v1.0/api/settings"))
+                            {
+                                settingsRequest.Headers.Add("Authorization", "Bearer " + login.Token);
+                                settingsRequest.Headers.Add("x-token", login.Token);
+                                settingsRequest.Headers.Add("x-tenant-guid", login.TenantId);
+                                using (HttpResponseMessage settingsResponse = await httpClient.SendAsync(settingsRequest).ConfigureAwait(false))
+                                {
+                                    string settingsJson = await settingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    if (!settingsResponse.IsSuccessStatusCode) throw new InvalidOperationException("Bearer-authenticated settings request failed: " + settingsJson);
+                                    if (!settingsJson.Contains("settingsFile", StringComparison.Ordinal)) throw new InvalidOperationException("Authenticated settings response missing settingsFile.");
+                                }
+                            }
+                        }
                     }
                 }
                 finally
@@ -751,7 +910,9 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/openapi.json", Method = "get" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token/details", Method = "get" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token/refresh", Method = "post" },
-                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/logout", Method = "post" }
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/logout", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" }
                         })
                         {
                             if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
@@ -774,6 +935,8 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/users", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/users/{id}", Method = "put" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/client-models", Method = "delete" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/request-history/bulk", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/settings", Method = "post" },
@@ -884,6 +1047,14 @@ namespace Test.Shared
             return platform;
         }
 
+        private static void SetDefaultRoutingPolicyMode(XenoPlatform platform, LoadBalancingModeEnum mode)
+        {
+            RoutingPolicy? policy = platform.RoutingPolicies.FirstOrDefault(item => item.TenantId == Constants.DefaultTenantId && item.IsDefault);
+            if (policy == null) throw new InvalidOperationException("Default routing policy was not seeded.");
+            policy.LoadBalancingMode = mode;
+            policy.LastUpdateUtc = DateTime.UtcNow;
+        }
+
         private static async Task RunManagementUpdateSmokeAsync()
         {
             int port = GetFreePort();
@@ -915,12 +1086,12 @@ namespace Test.Shared
                     {
                         string baseUrl = "http://127.0.0.1:" + port;
                         string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
-                        foreach (string route in new[] { "/v1.0/api/tenants/{id}", "/v1.0/api/users/{id}", "/v1.0/api/credentials/{id}", "/v1.0/api/roles/{id}", "/v1.0/api/permissions/{id}" })
+                        foreach (string route in new[] { "/v1.0/api/tenants/{id}", "/v1.0/api/users/{id}", "/v1.0/api/credentials/{id}", "/v1.0/api/roles/{id}", "/v1.0/api/permissions/{id}", "/v1.0/api/routing-policies/{id}" })
                         {
                             if (!OpenApiHasMethod(openApi, route, "put")) throw new InvalidOperationException("OpenAPI missing PUT " + route + ".");
                         }
 
-                        foreach (string route in new[] { "/v1.0/api/tenants", "/v1.0/api/users", "/v1.0/api/credentials", "/v1.0/api/roles", "/v1.0/api/permissions" })
+                        foreach (string route in new[] { "/v1.0/api/tenants", "/v1.0/api/users", "/v1.0/api/credentials", "/v1.0/api/roles", "/v1.0/api/permissions", "/v1.0/api/routing-policies" })
                         {
                             if (!OpenApiHasMethod(openApi, route, "post")) throw new InvalidOperationException("OpenAPI missing POST " + route + ".");
                         }
@@ -979,6 +1150,39 @@ namespace Test.Shared
                         {
                             string createRoleJson = await createRoleResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!createRoleResponse.IsSuccessStatusCode || !createRoleJson.Contains("Touchstone Created Role", StringComparison.Ordinal)) throw new InvalidOperationException("Role create failed: " + createRoleJson);
+                        }
+
+                        string routingPolicyId = String.Empty;
+                        using (HttpResponseMessage createRoutingPolicyResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/routing-policies", JsonUtil.Serialize(new
+                        {
+                            name = "Touchstone Routing Policy",
+                            modelName = "llama3.2:latest",
+                            clientName = "local-client",
+                            requestTimeoutMs = 250000,
+                            loadBalancingMode = "FirstAvailable",
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string createRoutingPolicyJson = await createRoutingPolicyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createRoutingPolicyResponse.IsSuccessStatusCode || !createRoutingPolicyJson.Contains("Touchstone Routing Policy", StringComparison.Ordinal)) throw new InvalidOperationException("Routing policy create failed: " + createRoutingPolicyJson);
+                            routingPolicyId = FirstRecordId("[" + createRoutingPolicyJson + "]");
+                        }
+
+                        using (HttpResponseMessage updateRoutingPolicyResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/routing-policies/" + Uri.EscapeDataString(routingPolicyId), JsonUtil.Serialize(new
+                        {
+                            name = "Touchstone Updated Routing Policy",
+                            loadBalancingMode = "Random",
+                            requestTimeoutMs = 260000,
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string updateRoutingPolicyJson = await updateRoutingPolicyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!updateRoutingPolicyResponse.IsSuccessStatusCode || !updateRoutingPolicyJson.Contains("Touchstone Updated Routing Policy", StringComparison.Ordinal) || !updateRoutingPolicyJson.Contains("Random", StringComparison.Ordinal)) throw new InvalidOperationException("Routing policy update failed: " + updateRoutingPolicyJson);
+                        }
+
+                        using (HttpResponseMessage deleteRoutingPolicyResponse = await httpClient.DeleteAsync(baseUrl + "/v1.0/api/routing-policies/" + Uri.EscapeDataString(routingPolicyId)).ConfigureAwait(false))
+                        {
+                            if (!deleteRoutingPolicyResponse.IsSuccessStatusCode) throw new InvalidOperationException("Routing policy delete failed: " + (int)deleteRoutingPolicyResponse.StatusCode);
                         }
 
                         string tenantId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/tenants").ConfigureAwait(false);
@@ -1230,7 +1434,9 @@ namespace Test.Shared
                                 if (HeaderValue(response, "X-Xeno-Selected-Provider") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include selected provider header.");
                                 if (HeaderValue(response, "X-Xeno-Selected-Source") != "touchstone-runner") throw new InvalidOperationException("Relay response did not include selected source header.");
                                 if (HeaderValue(response, "X-Xeno-Routing-Candidate-Count") != "1") throw new InvalidOperationException("Relay response did not include candidate count header.");
-                                if (HeaderValue(response, "X-Xeno-Load-Balancing-Mode") != "RoundRobin") throw new InvalidOperationException("Relay response did not include load-balancing mode header.");
+                                if (HeaderValue(response, "X-Xeno-Load-Balancing-Mode") != "LeastRecentlyUsed") throw new InvalidOperationException("Relay response did not include load-balancing mode header.");
+                                if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Routing-Policy-ID"))) throw new InvalidOperationException("Relay response did not include routing policy ID header.");
+                                if (HeaderValue(response, "X-Xeno-Routing-Policy-Match") != "*/*") throw new InvalidOperationException("Relay response did not include routing policy match header.");
                                 if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Selection-Reason"))) throw new InvalidOperationException("Relay response did not include selection reason header.");
                                 if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Request-History-ID"))) throw new InvalidOperationException("Relay response did not include request history trace header.");
                                 if (HeaderLong(response, "X-Xeno-Client-Roundtrip-Ms") < 0) throw new InvalidOperationException("Relay response included invalid client roundtrip header.");

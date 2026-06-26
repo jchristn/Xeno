@@ -56,6 +56,9 @@ namespace Xeno.Sdk.Tests
                 await client.CreatePermissionAsync(new { resourceType = "Clients", operationType = "Read" });
                 await client.UpdatePermissionAsync("perm_1", new { permit = false });
                 await client.DeletePermissionAsync("perm_1");
+                await client.CreateRoutingPolicyAsync(new { name = "Policy", modelName = "*", clientName = "*" });
+                await client.UpdateRoutingPolicyAsync("rpol_1", new { loadBalancingMode = "Random" });
+                await client.DeleteRoutingPolicyAsync("rpol_1");
 
                 Assert.Collection(
                     handler.Requests,
@@ -73,7 +76,10 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/roles/role_1"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/permissions", "\"resourceType\":\"Clients\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/permissions/perm_1", "\"permit\":false"),
-                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/permissions/perm_1"));
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/permissions/perm_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/routing-policies", "\"modelName\":\"*\""),
+                    request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/routing-policies/rpol_1", "\"loadBalancingMode\":\"Random\""),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/routing-policies/rpol_1"));
             }
         }
 

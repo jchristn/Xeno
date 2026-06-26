@@ -143,6 +143,18 @@ class XenoClient:
     def list_model_configurations(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/model-configurations")
 
+    def list_routing_policies(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/v1.0/api/routing-policies")
+
+    def create_routing_policy(self, policy: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/routing-policies", policy)
+
+    def update_routing_policy(self, policy_id: str, policy: dict[str, Any]) -> dict[str, Any]:
+        return self._request("PUT", f"/v1.0/api/routing-policies/{policy_id}", policy)
+
+    def delete_routing_policy(self, policy_id: str) -> None:
+        return self._request("DELETE", f"/v1.0/api/routing-policies/{policy_id}")
+
     def list_openai_models(self) -> dict[str, Any]:
         return self._request("GET", "/v1/models")
 

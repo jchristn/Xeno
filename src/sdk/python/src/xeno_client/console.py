@@ -58,6 +58,8 @@ def run_command(command: str, client: XenoClient, tenant_id: str) -> None:
         print_json(client.list_roles())
     elif command == "permissions":
         print_json(client.list_permissions())
+    elif command == "routing-policies":
+        print_json(client.list_routing_policies())
     elif command == "history":
         print_json(client.list_request_history())
     elif command == "settings":
@@ -101,6 +103,7 @@ def print_help(base_url: str, tenant_id: str) -> None:
     print("  credentials     credentials")
     print("  roles           roles")
     print("  permissions     permissions")
+    print("  routing-policies routing policies")
     print("  history         request history")
     print("  settings        server settings")
     print("  metrics         Prometheus metrics")

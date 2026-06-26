@@ -455,6 +455,50 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
+        /// Lists tenant routing policies.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Routing policy array JSON.</returns>
+        public async Task<XenoApiResponse> ListRoutingPoliciesAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/routing-policies", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates a routing policy.
+        /// </summary>
+        /// <param name="policy">Routing policy payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Routing policy JSON.</returns>
+        public async Task<XenoApiResponse> CreateRoutingPolicyAsync(object policy, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/routing-policies", policy ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Updates a routing policy.
+        /// </summary>
+        /// <param name="id">Routing policy identifier.</param>
+        /// <param name="policy">Routing policy payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Routing policy JSON.</returns>
+        public async Task<XenoApiResponse> UpdateRoutingPolicyAsync(string id, object policy, CancellationToken token = default)
+        {
+            return await PutJsonAsync("/v1.0/api/routing-policies/" + Escape(id), policy ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Deletes a non-default routing policy.
+        /// </summary>
+        /// <param name="id">Routing policy identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public async Task DeleteRoutingPolicyAsync(string id, CancellationToken token = default)
+        {
+            await DeleteAsync("/v1.0/api/routing-policies/" + Escape(id), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Lists OpenAI-compatible models.
         /// </summary>
         /// <param name="token">Cancellation token.</param>

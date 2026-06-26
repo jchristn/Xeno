@@ -81,6 +81,13 @@ namespace Xeno.Core.Services
                 .ToList();
             decision.Timeline.Add("ClientInventory");
 
+            RoutingPolicy policy = ResolveRoutingPolicy(context.TenantId, effectiveModel, candidates);
+            ApplyRoutingPolicy(decision, policy);
+            decision.Timeline.Add("PolicyResolution");
+
+            List<XenoClientRecord> policyCandidates = FilterCandidatesByPolicy(candidates, policy).ToList();
+            candidates = policyCandidates;
+
             if (candidates.Count < 1)
             {
                 decision.HttpStatusCode = 502;
@@ -89,11 +96,11 @@ namespace Xeno.Core.Services
                 return Task.FromResult(decision);
             }
 
-            XenoClientRecord selected = SelectClient(candidates, _Settings.LoadBalancingMode, BuildRouteScopeKey(context, effectiveModel, isEmbedding), decision);
+            XenoClientRecord selected = SelectClient(candidates, policy.LoadBalancingMode, BuildRouteScopeKey(context, effectiveModel, isEmbedding, policy), decision, policy.Adaptive);
             XenoClientModel? selectedModel = selected.Models.FirstOrDefault(item => String.Equals(item.Name, effectiveModel, StringComparison.OrdinalIgnoreCase));
             decision.CandidateClientIds = candidates.Select(item => item.Id).ToList();
             decision.CandidateCount = candidates.Count;
-            decision.LoadBalancingMode = _Settings.LoadBalancingMode;
+            decision.LoadBalancingMode = policy.LoadBalancingMode;
             decision.Success = true;
             decision.HttpStatusCode = 200;
             decision.OutcomeCode = "Routed";
@@ -106,7 +113,7 @@ namespace Xeno.Core.Services
             decision.SelectedClientMaxParallelRequests = selected.MaxParallelRequests;
             decision.SelectedClientWeight = selected.Weight;
             decision.SelectedClientLastHeartbeatUtc = selected.LastHeartbeatUtc;
-            decision.SelectionReason = BuildSelectionReason(_Settings.LoadBalancingMode, selected, decision);
+            decision.SelectionReason = BuildSelectionReason(policy.LoadBalancingMode, selected, decision);
             decision.Timeline.Add("ClientSelection");
             return Task.FromResult(decision);
         }
@@ -167,12 +174,12 @@ namespace Xeno.Core.Services
                 .FirstOrDefault() ?? String.Empty;
         }
 
-        private XenoClientRecord SelectClient(List<XenoClientRecord> candidates, LoadBalancingModeEnum mode, string routeScopeKey, RoutingDecision decision)
+        private XenoClientRecord SelectClient(List<XenoClientRecord> candidates, LoadBalancingModeEnum mode, string routeScopeKey, RoutingDecision decision, AdaptiveLoadBalancingSettings adaptive)
         {
             if (candidates.Count == 1)
             {
                 if (mode == LoadBalancingModeEnum.LeastRecentlyUsed) MarkLeastRecentlyUsedSelection(routeScopeKey, candidates[0].Id);
-                if (mode == LoadBalancingModeEnum.Adaptive) decision.AdaptiveScore = BuildAdaptiveScore(candidates[0]).ToString("F2", CultureInfo.InvariantCulture);
+                if (mode == LoadBalancingModeEnum.Adaptive) decision.AdaptiveScore = BuildAdaptiveScore(candidates[0], adaptive).ToString("F2", CultureInfo.InvariantCulture);
                 return candidates[0];
             }
 
@@ -185,7 +192,7 @@ namespace Xeno.Core.Services
                 case LoadBalancingModeEnum.LeastRecentlyUsed:
                     return SelectLeastRecentlyUsed(candidates, routeScopeKey);
                 case LoadBalancingModeEnum.Adaptive:
-                    return SelectAdaptive(candidates, decision);
+                    return SelectAdaptive(candidates, decision, adaptive);
                 case LoadBalancingModeEnum.RoundRobin:
                 default:
                     return SelectWeightedRoundRobin(candidates);
@@ -283,9 +290,9 @@ namespace Xeno.Core.Services
             return routeScopeKey + "|" + (clientId ?? String.Empty);
         }
 
-        private XenoClientRecord SelectAdaptive(List<XenoClientRecord> candidates, RoutingDecision decision)
+        private XenoClientRecord SelectAdaptive(List<XenoClientRecord> candidates, RoutingDecision decision, AdaptiveLoadBalancingSettings adaptive)
         {
-            AdaptiveLoadBalancingSettings settings = _Settings.Adaptive ?? new AdaptiveLoadBalancingSettings();
+            AdaptiveLoadBalancingSettings settings = adaptive ?? new AdaptiveLoadBalancingSettings();
             int sampleCount = Math.Min(Math.Max(1, settings.SampleCount), candidates.Count);
             List<XenoClientRecord> sampled = candidates
                 .OrderBy(item => item.InFlightRequests)
@@ -295,10 +302,10 @@ namespace Xeno.Core.Services
                 .ToList();
 
             XenoClientRecord selected = sampled[0];
-            double selectedScore = BuildAdaptiveScore(selected);
+            double selectedScore = BuildAdaptiveScore(selected, settings);
             for (int i = 1; i < sampled.Count; i++)
             {
-                double candidateScore = BuildAdaptiveScore(sampled[i]);
+                double candidateScore = BuildAdaptiveScore(sampled[i], settings);
                 if (candidateScore > selectedScore)
                 {
                     selected = sampled[i];
@@ -311,9 +318,9 @@ namespace Xeno.Core.Services
             return selected;
         }
 
-        private double BuildAdaptiveScore(XenoClientRecord client)
+        private static double BuildAdaptiveScore(XenoClientRecord client, AdaptiveLoadBalancingSettings adaptive)
         {
-            AdaptiveLoadBalancingSettings settings = _Settings.Adaptive ?? new AdaptiveLoadBalancingSettings();
+            AdaptiveLoadBalancingSettings settings = adaptive ?? new AdaptiveLoadBalancingSettings();
             double capacityScore = CapacityScore(client);
             double inFlightScore = InFlightScore(client);
             double clientWeightScore = ClientWeightScore(client);
@@ -359,9 +366,103 @@ namespace Xeno.Core.Services
             return value;
         }
 
-        private static string BuildRouteScopeKey(RequestContext context, string effectiveModel, bool isEmbedding)
+        private static string BuildRouteScopeKey(RequestContext context, string effectiveModel, bool isEmbedding, RoutingPolicy policy)
         {
-            return (context.TenantId ?? String.Empty) + ":" + effectiveModel + ":" + (isEmbedding ? "embeddings" : "completions");
+            return (context.TenantId ?? String.Empty) + ":" + effectiveModel + ":" + (isEmbedding ? "embeddings" : "completions") + ":" + policy.Id;
+        }
+
+        private RoutingPolicy ResolveRoutingPolicy(string tenantId, string effectiveModel, List<XenoClientRecord> candidates)
+        {
+            List<RoutingPolicy> policies = _Platform.RoutingPolicies
+                .Where(item => item.TenantId == tenantId)
+                .Where(item => item.Active)
+                .ToList();
+
+            RoutingPolicy? selected = null;
+            int selectedScore = -1;
+            DateTime selectedUpdated = DateTime.MinValue;
+
+            foreach (RoutingPolicy policy in policies)
+            {
+                int modelScore = ModelSpecificity(policy.ModelName, effectiveModel);
+                if (modelScore < 0) continue;
+
+                int clientScore = ClientSpecificity(policy.ClientName, candidates);
+                if (clientScore < 0) continue;
+
+                int score = (modelScore * 10) + clientScore;
+                bool replace = selected == null || score > selectedScore || (score == selectedScore && policy.LastUpdateUtc > selectedUpdated);
+                if (replace)
+                {
+                    selected = policy;
+                    selectedScore = score;
+                    selectedUpdated = policy.LastUpdateUtc;
+                }
+            }
+
+            return selected ?? FallbackPolicy(tenantId);
+        }
+
+        private static void ApplyRoutingPolicy(RoutingDecision decision, RoutingPolicy policy)
+        {
+            decision.RoutingPolicyId = policy.Id;
+            decision.RoutingPolicyName = policy.Name;
+            decision.RoutingPolicyModelName = policy.ModelName;
+            decision.RoutingPolicyClientName = policy.ClientName;
+            decision.RoutingPolicyRequestTimeoutMs = policy.RequestTimeoutMs;
+            decision.RoutingPolicyReason = BuildPolicyReason(policy);
+        }
+
+        private static IEnumerable<XenoClientRecord> FilterCandidatesByPolicy(List<XenoClientRecord> candidates, RoutingPolicy policy)
+        {
+            if (String.Equals(policy.ClientName, "*", StringComparison.Ordinal)) return candidates;
+            return candidates.Where(item => String.Equals(item.Name, policy.ClientName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool MatchesPolicyValue(string? policyValue, string? actual)
+        {
+            if (String.IsNullOrWhiteSpace(policyValue)) return true;
+            if (String.Equals(policyValue, "*", StringComparison.Ordinal)) return true;
+            return String.Equals(policyValue, actual, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int ModelSpecificity(string? policyModelName, string effectiveModel)
+        {
+            if (String.Equals(policyModelName, "*", StringComparison.Ordinal) || String.IsNullOrWhiteSpace(policyModelName)) return 0;
+            return MatchesPolicyValue(policyModelName, effectiveModel) ? 1 : -1;
+        }
+
+        private static int ClientSpecificity(string? policyClientName, List<XenoClientRecord> candidates)
+        {
+            if (String.Equals(policyClientName, "*", StringComparison.Ordinal) || String.IsNullOrWhiteSpace(policyClientName)) return 0;
+            bool clientExists = candidates.Any(item => MatchesPolicyValue(policyClientName, item.Name));
+            return clientExists ? 1 : -1;
+        }
+
+        private static string BuildPolicyReason(RoutingPolicy policy)
+        {
+            return "Matched routing policy '" + policy.Name + "' for model '" + policy.ModelName + "' and client '" + policy.ClientName + "'.";
+        }
+
+        private RoutingPolicy FallbackPolicy(string tenantId)
+        {
+            RoutingPolicy? defaultPolicy = _Platform.RoutingPolicies.FirstOrDefault(item =>
+                item.TenantId == tenantId &&
+                item.IsDefault);
+            if (defaultPolicy != null) return defaultPolicy;
+
+            return new RoutingPolicy
+            {
+                TenantId = tenantId,
+                Name = "Default Routing Policy",
+                ModelName = "*",
+                ClientName = "*",
+                RequestTimeoutMs = _Settings.DefaultTimeoutMs,
+                LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed,
+                Adaptive = _Settings.Adaptive,
+                IsDefault = true,
+                Active = true
+            };
         }
 
         private static string BuildSelectionReason(LoadBalancingModeEnum mode, XenoClientRecord selected, RoutingDecision decision)

@@ -63,6 +63,11 @@ namespace Xeno.Core.Models
         public List<ModelConfiguration> ModelConfigurations { get; set; } = new List<ModelConfiguration>();
 
         /// <summary>
+        /// Routing policies.
+        /// </summary>
+        public List<RoutingPolicy> RoutingPolicies { get; set; } = new List<RoutingPolicy>();
+
+        /// <summary>
         /// Request history entries.
         /// </summary>
         public List<RequestHistoryEntry> RequestHistory { get; set; } = new List<RequestHistoryEntry>();

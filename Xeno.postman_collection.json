@@ -43,6 +43,10 @@
     {
       "key": "permissionId",
       "value": "perm_..."
+    },
+    {
+      "key": "routingPolicyId",
+      "value": "rpol_..."
     }
   ],
   "item": [
@@ -346,6 +350,74 @@
           }
         ],
         "url": "{{baseUrl}}/v1.0/api/clients"
+      }
+    },
+    {
+      "name": "Routing Policies",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/routing-policies"
+      }
+    },
+    {
+      "name": "Create Routing Policy",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"GPU clients for gpt-oss\",\"modelName\":\"gpt-oss:120b\",\"clientName\":\"*\",\"requestTimeoutMs\":300000,\"loadBalancingMode\":\"LeastRecentlyUsed\",\"adaptive\":{\"sampleCount\":3,\"capacityWeight\":40,\"inFlightWeight\":30,\"clientWeight\":20,\"heartbeatWeight\":10},\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/routing-policies"
+      }
+    },
+    {
+      "name": "Update Routing Policy",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"GPU clients for gpt-oss\",\"loadBalancingMode\":\"Adaptive\",\"requestTimeoutMs\":300000,\"active\":true}"
+        },
+        "url": "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}"
+      }
+    },
+    {
+      "name": "Delete Routing Policy",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}"
       }
     },
     {

@@ -67,6 +67,9 @@ class XenoClientTests(unittest.TestCase):
         client.create_permission({"resourceType": "Clients", "operationType": "Read"})
         client.update_permission("perm_1", {"permit": False})
         client.delete_permission("perm_1")
+        client.create_routing_policy({"name": "Policy", "modelName": "*", "clientName": "*"})
+        client.update_routing_policy("rpol_1", {"loadBalancingMode": "Random"})
+        client.delete_routing_policy("rpol_1")
 
         self.assertEqual(
             [(call["request"].get_method(), call["request"].full_url) for call in opener.calls],
@@ -86,10 +89,14 @@ class XenoClientTests(unittest.TestCase):
                 ("POST", "https://xeno.local/v1.0/api/permissions"),
                 ("PUT", "https://xeno.local/v1.0/api/permissions/perm_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/permissions/perm_1"),
+                ("POST", "https://xeno.local/v1.0/api/routing-policies"),
+                ("PUT", "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
+                ("DELETE", "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
             ],
         )
         self.assertIn('"name": "Tenant"', opener.calls[0]["body"])
         self.assertIn('"permissionIds": ["perm_1"]', opener.calls[10]["body"])
+        self.assertIn('"modelName": "*"', opener.calls[15]["body"])
 
     def test_openai_and_request_history_methods_use_expected_routes(self):
         opener = FakeOpener()

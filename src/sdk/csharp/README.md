@@ -19,6 +19,7 @@ using (XenoClient client = new XenoClient("http://localhost:9000", tenantId: "te
 {
     XenoApiResponse health = await client.GetHealthAsync();
     XenoApiResponse models = await client.ListOpenAiModelsAsync();
+    XenoApiResponse policies = await client.ListRoutingPoliciesAsync();
 }
 ```
 
@@ -46,7 +47,7 @@ The SDK includes methods for:
 - authentication and token helpers;
 - tenants, users, credentials, roles, permissions, effective permissions, and audit;
 - clients and advertised client models;
-- model definitions and configurations;
+- model definitions, configurations, and routing policies;
 - OpenAI-compatible models, chat completions, completions, and embeddings;
 - request history, analytics, settings, backup, restore, health, metrics, and OpenAPI.
 

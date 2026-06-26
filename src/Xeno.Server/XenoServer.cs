@@ -28,7 +28,7 @@ namespace Xeno.Server
     /// </summary>
     public sealed class XenoServer : IDisposable
     {
-        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
+        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Policy-ID, X-Xeno-Routing-Policy-Name, X-Xeno-Routing-Policy-Match, X-Xeno-Routing-Policy-Reason, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
         private const int MaxCapturedBodyChars = 131072;
 
         private readonly XenoSettings _Settings;
@@ -217,6 +217,10 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/health", "Health check", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/metrics", "Prometheus-style metrics", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/health", "Health check", "Health");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/dashboard/login", "Dashboard login", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/dashboard/login", "Dashboard login", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token", "Create token", "Authentication");
@@ -259,6 +263,10 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-configurations", "List model configurations", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/routingpolicies", "List routing policies", "Routing");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/routing-policies", "List routing policies", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/routingpolicies", "Create routing policy", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/routing-policies", "Create routing policy", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/openai/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.POST, "/v1/chat/completions", "Create chat completion", "OpenAI");
@@ -309,6 +317,10 @@ namespace Xeno.Server
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/clients/{id}", "Delete client", "Clients");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/routingpolicies/{id}", "Update routing policy", "Routing");
+            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/routing-policies/{id}", "Update routing policy", "Routing");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/routingpolicies/{id}", "Delete routing policy", "Routing");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/routing-policies/{id}", "Delete routing policy", "Routing");
             RegisterParameterizedRoute(HttpMethod.GET, "/api/v1/requesthistory/{id}", "Get request history entry", "Request History");
             RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/request-history/{id}", "Get request history entry", "Request History");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/requesthistory/{id}", "Delete request history entry", "Request History");
@@ -356,6 +368,11 @@ namespace Xeno.Server
                     .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
                     .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")))
                     .WithParameter(OpenApiParameterMetadata.Query("bucketMinutes", "Bucket width in minutes.", false, IntegerSchemaMetadata("Bucket width in minutes.")));
+            }
+
+            if (IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
+            {
+                metadata = metadata.WithParameter(OpenApiParameterMetadata.Query("email", "Email address used to discover tenant login options.", true, OpenApiSchemaMetadata.String("User email address.")));
             }
 
             OpenApiRequestBodyMetadata? requestBody = BuildRequestBodyMetadata(method, path);
@@ -406,6 +423,24 @@ namespace Xeno.Server
                     {
                         ["tenantId"] = Constants.DefaultTenantId,
                         ["username"] = "admin",
+                        ["password"] = "password"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/auth/dashboard/login", "/v1.0/api/auth/dashboard/login"))
+            {
+                return JsonBody(
+                    "Dashboard login request. The password is exchanged for a bearer session used by the dashboard.",
+                    ObjectSchemaMetadata(
+                        "Dashboard login request.",
+                        new[] { "tenantId", "email", "password" },
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Tenant identifier.")),
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("User email address.")),
+                        SchemaProperty("password", OpenApiSchemaMetadata.String("User password."))),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantId"] = Constants.DefaultTenantId,
+                        ["email"] = "admin@xeno",
                         ["password"] = "password"
                     });
             }
@@ -594,6 +629,22 @@ namespace Xeno.Server
                         ["permit"] = true,
                         ["active"] = true
                     });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/routingpolicies", "/v1.0/api/routing-policies"))
+            {
+                return JsonBody(
+                    "Routing policy create request. Use '*' for modelName or clientName to match all values.",
+                    RoutingPolicyBodySchema("Routing policy create request.", true),
+                    RoutingPolicyExample());
+            }
+
+            if (method == HttpMethod.PUT && path.Contains("/routing", StringComparison.OrdinalIgnoreCase) && path.Contains("{id}", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonBody(
+                    "Routing policy update request. The tenant default policy keeps the */* match and cannot be disabled.",
+                    RoutingPolicyBodySchema("Routing policy update request.", false),
+                    RoutingPolicyExample());
             }
 
             if (method == HttpMethod.DELETE && IsPath(path, "/api/v1/clientmodels", "/v1.0/api/client-models"))
@@ -800,6 +851,42 @@ namespace Xeno.Server
                 SchemaProperty("active", BooleanSchemaMetadata("Whether the permission is active.")));
         }
 
+        private static OpenApiSchemaMetadata RoutingPolicyBodySchema(string description, bool requireName)
+        {
+            return ObjectSchemaMetadata(
+                description,
+                requireName ? new[] { "name" } : Array.Empty<string>(),
+                SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Tenant identifier.")),
+                SchemaProperty("name", OpenApiSchemaMetadata.String("Policy name.")),
+                SchemaProperty("modelName", OpenApiSchemaMetadata.String("Model match. Use '*' to match all models.")),
+                SchemaProperty("clientName", OpenApiSchemaMetadata.String("Client name match. Use '*' to match all clients.")),
+                SchemaProperty("requestTimeoutMs", IntegerSchemaMetadata("Request timeout in milliseconds.")),
+                SchemaProperty("loadBalancingMode", StringEnumSchemaMetadata("Load-balancing mode.", "RoundRobin", "Random", "FirstAvailable", "LeastRecentlyUsed", "Adaptive")),
+                SchemaProperty("adaptive", OpenApiSchemaMetadata.Create("object", "Adaptive load-balancing weights and sample count.")),
+                SchemaProperty("active", BooleanSchemaMetadata("Whether the routing policy is active.")));
+        }
+
+        private static Dictionary<string, object> RoutingPolicyExample()
+        {
+            return new Dictionary<string, object>
+            {
+                ["name"] = "GPU clients for gpt-oss",
+                ["modelName"] = "gpt-oss:120b",
+                ["clientName"] = "*",
+                ["requestTimeoutMs"] = 300000,
+                ["loadBalancingMode"] = "LeastRecentlyUsed",
+                ["adaptive"] = new Dictionary<string, object>
+                {
+                    ["sampleCount"] = 3,
+                    ["capacityWeight"] = 40,
+                    ["inFlightWeight"] = 30,
+                    ["clientWeight"] = 20,
+                    ["heartbeatWeight"] = 10
+                },
+                ["active"] = true
+            };
+        }
+
         private static OpenApiSchemaMetadata ChatCompletionBodySchema()
         {
             OpenApiSchemaMetadata messageSchema = ObjectSchemaMetadata(
@@ -959,6 +1046,18 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
+            {
+                await HandleLoginTenantLookupAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/auth/dashboard/login", "/v1.0/api/auth/dashboard/login"))
+            {
+                await HandleDashboardLoginAsync(context, token).ConfigureAwait(false);
+                return;
+            }
+
             RequestContext requestContext = CreateRequestContext(context);
 
             if (method == "POST" && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
@@ -1025,6 +1124,7 @@ namespace Xeno.Server
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
                 Tenant tenant = CreateTenant(context);
                 RequirePlatform().Tenants.Add(tenant);
+                RequirePlatform().EnsureTenantDefaults(tenant.Id);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, tenant).ConfigureAwait(false);
                 return;
@@ -1254,6 +1354,41 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/modelconfigurations", "/v1.0/api/model-configurations"))
             {
                 await SendJsonAsync(context, RequirePlatform().ModelConfigurations.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/routingpolicies", "/v1.0/api/routing-policies"))
+            {
+                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().RoutingPolicies.Where(item => item.TenantId == requestContext.TenantId).OrderByDescending(item => item.IsDefault).ThenBy(item => item.ModelName).ThenBy(item => item.ClientName).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/routingpolicies", "/v1.0/api/routing-policies"))
+            {
+                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                RoutingPolicy policy = CreateRoutingPolicy(requestContext, context);
+                RequirePlatform().RoutingPolicies.Add(policy);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, policy).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "PUT" && TryGetPathId(path, "/api/v1/routingpolicies/", "/v1.0/api/routing-policies/") is string updateRoutingPolicyId)
+            {
+                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                RoutingPolicy policy = UpdateRoutingPolicy(requestContext, updateRoutingPolicyId, context);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, policy).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/routingpolicies/", "/v1.0/api/routing-policies/") is string deleteRoutingPolicyId)
+            {
+                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                int removed = DeleteRoutingPolicy(requestContext, deleteRoutingPolicyId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
 
@@ -2299,6 +2434,10 @@ namespace Xeno.Server
             AddTraceHeader(context, "X-Xeno-Model", decision.EffectiveModel);
             AddTraceHeader(context, "X-Xeno-Routing-Outcome", decision.OutcomeCode);
             AddTraceHeader(context, "X-Xeno-Routing-Message", decision.Message);
+            AddTraceHeader(context, "X-Xeno-Routing-Policy-ID", decision.RoutingPolicyId);
+            AddTraceHeader(context, "X-Xeno-Routing-Policy-Name", decision.RoutingPolicyName);
+            AddTraceHeader(context, "X-Xeno-Routing-Policy-Match", FirstNonEmpty(decision.RoutingPolicyModelName, "*") + "/" + FirstNonEmpty(decision.RoutingPolicyClientName, "*"));
+            AddTraceHeader(context, "X-Xeno-Routing-Policy-Reason", decision.RoutingPolicyReason);
             AddTraceHeader(context, "X-Xeno-Routing-Candidate-Count", decision.CandidateCount.ToString(CultureInfo.InvariantCulture));
             AddTraceHeader(context, "X-Xeno-Routing-Candidates", String.Join(",", decision.CandidateClientIds));
             AddTraceHeader(context, "X-Xeno-Load-Balancing-Mode", decision.LoadBalancingMode.ToString());
@@ -2497,6 +2636,95 @@ namespace Xeno.Server
             }).ConfigureAwait(false);
         }
 
+        private async Task HandleLoginTenantLookupAsync(HttpContextBase context)
+        {
+            string email = Uri.UnescapeDataString(FirstNonEmpty(context.Request.Query.Elements.Get("email"))).Trim();
+            if (String.IsNullOrWhiteSpace(email))
+            {
+                throw new ArgumentException("Email is required.");
+            }
+
+            XenoPlatform platform = RequirePlatform();
+            List<AuthTenantSummary> tenants = platform.Users
+                .Where(user => user.Active && String.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase))
+                .Join(
+                    platform.Tenants.Where(tenant => tenant.Active),
+                    user => user.TenantId,
+                    tenant => tenant.Id,
+                    (user, tenant) => new AuthTenantSummary
+                    {
+                        Id = tenant.Id,
+                        Name = tenant.Name
+                    })
+                .GroupBy(tenant => tenant.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(tenant => tenant.Name)
+                .ToList();
+
+            AuthTenantLookupResponse response = new AuthTenantLookupResponse
+            {
+                Email = email,
+                Tenants = tenants
+            };
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        private async Task HandleDashboardLoginAsync(HttpContextBase context, CancellationToken token)
+        {
+            AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
+            string tenantId = ResolveTenantId(context, body.TenantId);
+            string email = FirstNonEmpty(body.Email, body.Username).Trim();
+            string password = FirstNonEmpty(body.Password);
+            if (String.IsNullOrWhiteSpace(email) || String.IsNullOrWhiteSpace(password))
+            {
+                throw new ArgumentException("Email and password are required.");
+            }
+
+            XenoPlatform platform = RequirePlatform();
+            User? user = _Authentication.ValidateUserPassword(platform, tenantId, email, password);
+            RequestContext loginContext = new RequestContext
+            {
+                TenantId = tenantId,
+                SourceIp = context.Request.Source.IpAddress,
+                PrincipalType = PrincipalTypeEnum.User,
+                UserId = user?.Id,
+                IsAuthenticated = user != null,
+                AuthScheme = AuthSchemeEnum.Password
+            };
+
+            if (user == null)
+            {
+                _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Read, false, "InvalidDashboardLogin", 401);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new UnauthorizedAccessException("Invalid email, tenant, or password.");
+            }
+
+            AuthTokenResult tokenResult = _Authentication.IssueToken(
+                platform,
+                _Settings.Auth,
+                tenantId,
+                PrincipalTypeEnum.User,
+                user.Id,
+                null,
+                AuthSchemeEnum.Bearer);
+            Tenant? tenant = platform.Tenants.FirstOrDefault(item => item.Id == tenantId);
+            _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Read, true, "DashboardLogin", 200);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+
+            AuthDashboardLoginResponse response = new AuthDashboardLoginResponse
+            {
+                Token = tokenResult.Token,
+                TokenType = tokenResult.TokenType,
+                TenantId = tokenResult.TenantId,
+                TenantName = tenant?.Name ?? tokenResult.TenantId,
+                UserId = user.Id,
+                Email = user.Email,
+                SessionId = tokenResult.SessionId,
+                ExpiresUtc = tokenResult.ExpiresUtc
+            };
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
         private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
         {
             if (!_Settings.Rest.RequireAuthentication && context.AuthScheme == AuthSchemeEnum.None)
@@ -2649,6 +2877,78 @@ namespace Xeno.Server
             return permission;
         }
 
+        private RoutingPolicy CreateRoutingPolicy(RequestContext requestContext, HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
+            if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
+            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
+
+            string name = FirstNonEmpty(body.Name);
+            if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Routing policy name is required.");
+
+            RoutingPolicy policy = new RoutingPolicy
+            {
+                TenantId = tenantId,
+                Name = name.Trim(),
+                ModelName = NormalizePolicyMatch(body.ModelName),
+                ClientName = NormalizePolicyMatch(body.ClientName),
+                RequestTimeoutMs = NormalizePolicyTimeout(body.RequestTimeoutMs),
+                LoadBalancingMode = body.LoadBalancingMode ?? LoadBalancingModeEnum.LeastRecentlyUsed,
+                Adaptive = body.Adaptive ?? new AdaptiveLoadBalancingSettings(),
+                IsDefault = false,
+                Active = body.Active ?? true,
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+
+            EnsureRoutingPolicyUnique(policy, null);
+            return policy;
+        }
+
+        private RoutingPolicy UpdateRoutingPolicy(RequestContext requestContext, string policyId, HttpContextBase context)
+        {
+            RoutingPolicy? policy = RequirePlatform().RoutingPolicies.FirstOrDefault(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            if (policy == null) throw new KeyNotFoundException("Routing policy not found.");
+
+            RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
+            string? name = body.Name;
+            if (name != null)
+            {
+                if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Routing policy name is required.");
+                policy.Name = name.Trim();
+            }
+
+            if (!policy.IsDefault)
+            {
+                if (body.ModelName != null) policy.ModelName = NormalizePolicyMatch(body.ModelName);
+                if (body.ClientName != null) policy.ClientName = NormalizePolicyMatch(body.ClientName);
+                if (body.Active.HasValue) policy.Active = body.Active.Value;
+            }
+            else
+            {
+                policy.ModelName = "*";
+                policy.ClientName = "*";
+                policy.Active = true;
+            }
+
+            if (body.RequestTimeoutMs.HasValue) policy.RequestTimeoutMs = NormalizePolicyTimeout(body.RequestTimeoutMs);
+            if (body.LoadBalancingMode.HasValue) policy.LoadBalancingMode = body.LoadBalancingMode.Value;
+            if (body.Adaptive != null) policy.Adaptive = body.Adaptive;
+            policy.LastUpdateUtc = DateTime.UtcNow;
+            EnsureRoutingPolicyUnique(policy, policy.Id);
+            return policy;
+        }
+
+        private int DeleteRoutingPolicy(RequestContext requestContext, string policyId)
+        {
+            RoutingPolicy? policy = RequirePlatform().RoutingPolicies.FirstOrDefault(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            if (policy == null) return 0;
+            if (policy.IsDefault) throw new InvalidOperationException("The default routing policy cannot be deleted.");
+            return RequirePlatform().RoutingPolicies.RemoveAll(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+        }
+
         private int DeleteTenant(string tenantId)
         {
             XenoPlatform platform = RequirePlatform();
@@ -2656,17 +2956,7 @@ namespace Xeno.Server
             int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
             if (removed == 0) return 0;
 
-            removed += platform.Users.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.Credentials.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.AuthSessions.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.Roles.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.Permissions.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.AuditRecords.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.Clients.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.ModelDefinitions.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.ModelConfigurations.RemoveAll(item => item.TenantId == tenantId);
-            removed += platform.RequestHistory.RemoveAll(item => item.TenantId == tenantId);
+            removed += platform.RemoveTenantScopedRecords(tenantId);
 
             lock (_ClientConnectionsLock)
             {
@@ -2674,6 +2964,30 @@ namespace Xeno.Server
             }
 
             return removed;
+        }
+
+        private void EnsureRoutingPolicyUnique(RoutingPolicy policy, string? existingPolicyId)
+        {
+            bool duplicate = RequirePlatform().RoutingPolicies.Any(item =>
+                item.TenantId == policy.TenantId &&
+                item.Id != existingPolicyId &&
+                String.Equals(item.ModelName, policy.ModelName, StringComparison.OrdinalIgnoreCase) &&
+                String.Equals(item.ClientName, policy.ClientName, StringComparison.OrdinalIgnoreCase));
+            if (duplicate) throw new ArgumentException("A routing policy with the same model and client match already exists in the tenant.");
+        }
+
+        private static string NormalizePolicyMatch(string? value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return "*";
+            return value.Trim();
+        }
+
+        private static int NormalizePolicyTimeout(int? value)
+        {
+            int timeout = value ?? 300000;
+            if (timeout < 1000) return 1000;
+            if (timeout > 3600000) return 3600000;
+            return timeout;
         }
 
         private Tenant UpdateTenant(string tenantId, HttpContextBase context)
@@ -3274,6 +3588,8 @@ namespace Xeno.Server
                     ["/v1.0/api/client-models"] = Path(Operation("delete", "deleteClientModel", "Clients", "Delete client model", "Deletes one model advertised by a client.", "GenericObject", true)),
                     ["/v1.0/api/model-definitions"] = Path(Operation("get", "listModelDefinitions", "Routing", "List model definitions", "Lists model definitions available for routing.", "ModelDefinitionArray", true)),
                     ["/v1.0/api/model-configurations"] = Path(Operation("get", "listModelConfigurations", "Routing", "List model configurations", "Lists pinned model configurations.", "ModelConfigurationArray", true)),
+                    ["/v1.0/api/routing-policies"] = Path(Operation("get", "listRoutingPolicies", "Routing", "List routing policies", "Lists tenant-scoped routing policies.", "RoutingPolicyArray", true), Operation("post", "createRoutingPolicy", "Routing", "Create routing policy", "Creates a tenant-scoped routing policy.", "RoutingPolicy", true)),
+                    ["/v1.0/api/routing-policies/{id}"] = Path(Operation("put", "updateRoutingPolicy", "Routing", "Update routing policy", "Updates a tenant-scoped routing policy.", "RoutingPolicy", true), Operation("delete", "deleteRoutingPolicy", "Routing", "Delete routing policy", "Deletes a non-default routing policy.", "GenericObject", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
                     ["/v1.0/api/request-history/{id}"] = Path(Operation("get", "getRequestHistory", "Request History", "Get request history", "Returns a captured request history entry.", "RequestHistoryEntry", true), Operation("delete", "deleteRequestHistory", "Request History", "Delete request history", "Deletes one captured request history entry.", "GenericObject", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
@@ -3314,6 +3630,7 @@ namespace Xeno.Server
                         ["ClientArray"] = ArraySchema("XenoClientRecord"),
                         ["ModelDefinitionArray"] = ArraySchema("ModelDefinition"),
                         ["ModelConfigurationArray"] = ArraySchema("ModelConfiguration"),
+                        ["RoutingPolicyArray"] = ArraySchema("RoutingPolicy"),
                         ["RequestHistoryArray"] = ArraySchema("RequestHistoryEntry"),
                         ["RequestHistorySummary"] = ObjectSchema(Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["RoutingDecision"] = ObjectSchema(Property("success", BooleanSchema()), Property("outcomeCode", StringSchema()), Property("message", StringSchema())),
@@ -3332,6 +3649,19 @@ namespace Xeno.Server
                         ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ModelDefinition"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelConfiguration"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
+                        ["RoutingPolicy"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("name", StringSchema()),
+                            Property("modelName", StringSchema()),
+                            Property("clientName", StringSchema()),
+                            Property("requestTimeoutMs", IntegerSchema()),
+                            Property("loadBalancingMode", StringSchema()),
+                            Property("adaptive", ObjectSchema()),
+                            Property("isDefault", BooleanSchema()),
+                            Property("active", BooleanSchema()),
+                            Property("createdUtc", StringSchema("date-time")),
+                            Property("lastUpdateUtc", StringSchema("date-time"))),
                         ["RequestHistoryEntry"] = ObjectSchema(
                             Property("id", StringSchema()),
                             Property("tenantId", StringSchema()),

@@ -22,6 +22,7 @@ const client = new XenoClient({
 
 const health = await client.getHealth();
 const models = await client.listOpenAiModels();
+const policies = await client.listRoutingPolicies();
 ```
 
 Authenticated servers can pass a bearer token:
@@ -40,7 +41,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, tenants, users, credentials, roles, permissions, clients, advertised models, OpenAI-compatible inference, request history, analytics, settings, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, tenants, users, credentials, roles, permissions, clients, advertised models, routing policies, OpenAI-compatible inference, request history, analytics, settings, backup, health, metrics, and OpenAPI.
 
 ## Alpha Notice
 

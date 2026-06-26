@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -15,6 +15,7 @@ import {
   Download,
   FileJson,
   Gauge,
+  GitBranch,
   Globe2,
   History,
   KeyRound,
@@ -51,6 +52,7 @@ import Modal from './components/Modal.jsx';
 import Pagination from './components/Pagination.jsx';
 
 const api = new ApiClient();
+const dashboardSessionKey = 'xeno.dashboard.session';
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
 const analyticsRanges = [
@@ -102,7 +104,8 @@ const navGroups = [
     key: 'control',
     links: [
       { to: '/dashboard/clients', key: 'clients', icon: Network },
-      { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit }
+      { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit },
+      { to: '/dashboard/routing-policies', key: 'routingPolicies', icon: GitBranch }
     ]
   },
   {
@@ -127,6 +130,7 @@ const pageMeta = {
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
+  '/dashboard/routing-policies': { title: 'routingPolicies', description: 'routingPoliciesDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
@@ -186,6 +190,26 @@ function describeInteractiveElement(t, element, label) {
   return t('tooltipGenericControl', { label });
 }
 
+function readDashboardSession() {
+  try {
+    const json = window.localStorage.getItem(dashboardSessionKey);
+    if (!json) return null;
+    const session = JSON.parse(json);
+    if (!session?.token || !session?.tenantId || !session?.serverUrl) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function writeDashboardSession(session) {
+  if (!session) {
+    window.localStorage.removeItem(dashboardSessionKey);
+    return;
+  }
+  window.localStorage.setItem(dashboardSessionKey, JSON.stringify(session));
+}
+
 function navTooltipKey(key) {
   const mapped = {
     advertisedModels: 'tooltipNavAdvertisedModels',
@@ -195,6 +219,7 @@ function navTooltipKey(key) {
     explorer: 'tooltipNavExplorer',
     home: 'tooltipNavHome',
     requests: 'tooltipNavRequests',
+    routingPolicies: 'tooltipNavRoutingPolicies',
     security: 'tooltipNavSecurity',
     settings: 'tooltipNavSettings',
     tenants: 'tooltipNavTenants',
@@ -288,6 +313,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <Route path="security" element={<SecurityView />} />
             <Route path="clients" element={<ClientsView />} />
             <Route path="clients/advertised-models" element={<AdvertisedModelsView />} />
+            <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
             <Route path="settings" element={<SettingsView />} />
             <Route path="*" element={<HomeView />} />
@@ -298,8 +324,105 @@ function Shell({ onLogout, onToggleTheme, theme }) {
   );
 }
 
-function LoginView({ onToggleTheme, theme }) {
+function LoginView({ onLogin, onToggleTheme, theme }) {
   const { t } = useTranslation();
+  const [serverUrl, setServerUrl] = useState(api.baseUrl || 'http://localhost:9000');
+  const [email, setEmail] = useState('');
+  const [tenants, setTenants] = useState([]);
+  const [selectedTenantId, setSelectedTenantId] = useState('');
+  const [password, setPassword] = useState('');
+  const [step, setStep] = useState('identity');
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function submitLogin(event) {
+    event.preventDefault();
+    if (step === 'identity') {
+      await discoverTenants();
+      return;
+    }
+
+    await authenticate();
+  }
+
+  async function discoverTenants() {
+    setStatus('');
+    setLoading(true);
+    try {
+      api.setBaseUrl(serverUrl);
+      const result = await api.get(`/api/v1/auth/tenants?email=${encodeURIComponent(email.trim())}`, { skipAuth: true });
+      if (result?.error) throw new Error(result.message || result.error);
+
+      const tenantList = Array.isArray(result.tenants) ? result.tenants : [];
+      if (tenantList.length === 0) {
+        setTenants([]);
+        setSelectedTenantId('');
+        setStatus(t('loginNoTenants'));
+        return;
+      }
+
+      setTenants(tenantList);
+      setSelectedTenantId(tenantList.length === 1 ? tenantList[0].id : '');
+      setStep('password');
+    } catch (error) {
+      setStatus(error?.message || t('loginTenantLookupFailed'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function authenticate() {
+    setStatus('');
+    if (!selectedTenantId) {
+      setStatus(t('loginSelectTenant'));
+      return;
+    }
+
+    setLoading(true);
+    try {
+      api.setBaseUrl(serverUrl);
+      const result = await api.post('/api/v1/auth/dashboard/login', {
+        tenantId: selectedTenantId,
+        email: email.trim(),
+        password
+      }, { skipAuth: true });
+      if (result?.error) throw new Error(result.message || result.error);
+      if (!result?.token || !result?.tenantId) throw new Error(t('loginInvalidResponse'));
+
+      onLogin({
+        email: result.email || email.trim(),
+        expiresUtc: result.expiresUtc,
+        serverUrl: api.baseUrl,
+        sessionId: result.sessionId,
+        tenantId: result.tenantId,
+        tenantName: result.tenantName || tenantName(result.tenantId),
+        token: result.token,
+        tokenType: result.tokenType || 'Bearer',
+        userId: result.userId
+      });
+    } catch (error) {
+      setStatus(error?.message || t('loginFailed'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function tenantName(tenantId) {
+    return tenants.find((tenant) => tenant.id === tenantId)?.name || tenantId;
+  }
+
+  function resetIdentity() {
+    setStep('identity');
+    setTenants([]);
+    setSelectedTenantId('');
+    setPassword('');
+    setStatus('');
+  }
+
+  const passwordStep = step === 'password';
+  const canSubmit = passwordStep
+    ? serverUrl.trim() && email.trim() && password && selectedTenantId
+    : serverUrl.trim() && email.trim();
 
   return (
     <div className="login-view">
@@ -309,11 +432,6 @@ function LoginView({ onToggleTheme, theme }) {
           <span className="eyebrow">{t('alphaRelease')}</span>
           <h1>{t('appTitle')}</h1>
           <p>{t('loginSubtitle')}</p>
-          <div className="login-signal-grid">
-            <span><Cpu size={16} />{t('advertisedHardware')}</span>
-            <span><BrainCircuit size={16} />{t('distributedModels')}</span>
-            <span><ShieldCheck size={16} />{t('credentialGated')}</span>
-          </div>
         </section>
 
         <section className="login-card">
@@ -332,10 +450,77 @@ function LoginView({ onToggleTheme, theme }) {
               <h2>{t('signInToDashboard')}</h2>
             </div>
           </div>
-          <button className="primary-button" onClick={() => { window.location.href = '/dashboard/home'; }} title={t('tooltipLogin')} type="button">
-            <Shield size={16} />
-            <span>{t('login')}</span>
-          </button>
+          <form className="login-form" onSubmit={submitLogin}>
+            <label className="form-field" title={t('tooltipLoginServerUrl')}>
+              <span>{t('serverUrl')}</span>
+              <input
+                autoComplete="url"
+                disabled={loading || passwordStep}
+                onChange={(event) => setServerUrl(event.target.value)}
+                title={t('tooltipLoginServerUrl')}
+                type="url"
+                value={serverUrl}
+              />
+            </label>
+            <label className="form-field" title={t('tooltipLoginEmail')}>
+              <span>{t('email')}</span>
+              <input
+                autoComplete="email"
+                disabled={loading || passwordStep}
+                onChange={(event) => setEmail(event.target.value)}
+                title={t('tooltipLoginEmail')}
+                type="email"
+                value={email}
+              />
+            </label>
+            {passwordStep && tenants.length > 1 ? (
+              <label className="form-field" title={t('tooltipLoginTenant')}>
+                <span>{t('tenant')}</span>
+                <select
+                  disabled={loading}
+                  onChange={(event) => setSelectedTenantId(event.target.value)}
+                  title={t('tooltipLoginTenant')}
+                  value={selectedTenantId}
+                >
+                  <option value="">{t('selectTenant')}</option>
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>{tenant.name} ({tenant.id})</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {passwordStep && tenants.length === 1 ? (
+              <div className="login-tenant-confirmation" title={t('tooltipLoginTenant')}>
+                <span>{t('tenant')}</span>
+                <strong>{tenants[0].name}</strong>
+              </div>
+            ) : null}
+            {passwordStep ? (
+              <label className="form-field" title={t('tooltipLoginPassword')}>
+                <span>{t('password')}</span>
+                <input
+                  autoComplete="current-password"
+                  disabled={loading}
+                  onChange={(event) => setPassword(event.target.value)}
+                  title={t('tooltipLoginPassword')}
+                  type="password"
+                  value={password}
+                />
+              </label>
+            ) : null}
+            {status ? <div className="form-status danger">{status}</div> : null}
+            <div className="button-row">
+              {passwordStep ? (
+                <button className="action-button secondary" disabled={loading} onClick={resetIdentity} title={t('tooltipLoginChangeIdentity')} type="button">
+                  {t('change')}
+                </button>
+              ) : null}
+              <button className="primary-button" disabled={loading || !canSubmit} title={t('tooltipLogin')} type="submit">
+                <Shield size={16} />
+                <span>{loading ? t('signingIn') : passwordStep ? t('login') : t('continue')}</span>
+              </button>
+            </div>
+          </form>
           <LanguageSelector />
           <div className="default-credentials">
             <span>{t('defaultCredentials')}</span>
@@ -961,6 +1146,55 @@ function AdvertisedModelsView() {
         title={t('advertisedModels')}
       />
       {selectedModel && <EditRecordModal title={t('modelDetails')} data={selectedModel} onClose={() => setSelectedModel(null)} />}
+    </div>
+  );
+}
+
+function RoutingPoliciesView() {
+  const { t } = useTranslation();
+  const policies = useResource('/api/v1/routingpolicies', []);
+  const [selected, setSelected] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const policyCount = policies.data.length;
+  const defaultCount = policies.data.filter((policy) => value(policy, 'isDefault') === true).length;
+  const activeCount = policies.data.filter((policy) => value(policy, 'active') !== false).length;
+
+  async function saveRoutingPolicy(policyId, payload) {
+    const result = policyId
+      ? await api.put(`/api/v1/routingpolicies/${encodeURIComponent(policyId)}`, payload)
+      : await api.post('/api/v1/routingpolicies', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setSelected(result);
+    setCreating(false);
+    policies.refresh();
+  }
+
+  return (
+    <div className="view-stack">
+      <div className="metric-grid compact">
+        <MetricCard icon={<GitBranch size={18} />} label={t('routingPolicies')} value={formatNumber(policyCount)} />
+        <MetricCard icon={<ShieldCheck size={18} />} label={t('defaultPolicies')} value={formatNumber(defaultCount)} tone="info" />
+        <MetricCard icon={<Activity size={18} />} label={t('activePolicies')} value={formatNumber(activeCount)} tone="success" />
+      </div>
+      <DataTable
+        actions={<IconButton onClick={() => setCreating(true)} label={t('createRoutingPolicy')} tooltip={t('tooltipCreateRoutingPolicy')} icon={<Plus size={16} />} variant="primary" />}
+        canDelete={(row) => value(row, 'isDefault') !== true}
+        columns={['id', 'tenantId', 'name', 'modelName', 'clientName', 'loadBalancingMode', 'requestTimeoutMs', 'isDefault', 'active', 'lastUpdateUtc']}
+        deleteMessage={(row) => t('deleteRoutingPolicyMessage', { record: describeRow(row) })}
+        deleteTitle={t('deleteRoutingPolicyTitle')}
+        onDelete={(row) => {
+          if (recordId(selected) === recordId(row)) setSelected(null);
+          return deleteRecord('/api/v1/routingpolicies', row);
+        }}
+        onRefresh={policies.refresh}
+        onRowClick={setSelected}
+        rows={policies.data}
+        rowActionLabel={t('edit')}
+        subtitle={t('routingPoliciesTableSubtitle')}
+        title={t('routingPolicies')}
+      />
+      {creating && <RoutingPolicyEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveRoutingPolicy} />}
+      {selected && <RoutingPolicyEditModal data={selected} onClose={() => setSelected(null)} onSave={saveRoutingPolicy} />}
     </div>
   );
 }
@@ -1782,6 +2016,11 @@ function RequestDetailsModal({ data, onClose }) {
     { label: t('model', 'Model'), value: value(record, 'model') || value(routing, 'effectiveModel') },
     { label: t('sourceIp', 'Source IP'), value: value(record, 'sourceIp') },
     { label: t('outcome', 'Outcome'), value: value(routing, 'outcomeCode') },
+    { label: t('routingPolicy', 'Routing Policy'), value: value(routing, 'routingPolicyId'), copy: true },
+    { label: t('routingPolicyName', 'Routing Policy Name'), value: value(routing, 'routingPolicyName') },
+    { label: t('routingPolicyMatch', 'Routing Policy Match'), value: `${value(routing, 'routingPolicyModelName') || '*'} / ${value(routing, 'routingPolicyClientName') || '*'}` },
+    { label: t('routingPolicyReason', 'Routing Policy Reason'), value: value(routing, 'routingPolicyReason') },
+    { label: t('routingPolicyTimeout', 'Routing Policy Timeout'), value: formatDuration(value(routing, 'routingPolicyRequestTimeoutMs')) },
     { label: t('loadBalancingMode', 'Load-balancing mode'), value: value(routing, 'loadBalancingMode') },
     { label: t('candidateCount', 'Candidate count'), value: formatOptionalNumber(value(routing, 'candidateCount')) },
     { label: t('candidateClients', 'Candidate clients'), value: Array.isArray(candidateClientIds) ? candidateClientIds.join(', ') : candidateClientIds, copy: true },
@@ -2425,6 +2664,158 @@ function PermissionEditModal({ data, mode = 'edit', onClose, onSave }) {
             <span>{t('active')}</span>
           </label>
         </div>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function RoutingPolicyEditModal({ data, mode = 'edit', onClose, onSave }) {
+  const { t } = useTranslation();
+  const policyId = recordId(data);
+  const isCreate = mode === 'create';
+  const isDefault = value(data, 'isDefault') === true;
+  const sourceAdaptive = value(data, 'adaptive') || {};
+  const [draft, setDraft] = useState(() => ({
+    name: value(data, 'name') || '',
+    modelName: value(data, 'modelName') || '*',
+    clientName: value(data, 'clientName') || '*',
+    requestTimeoutMs: value(data, 'requestTimeoutMs') || 300000,
+    loadBalancingMode: value(data, 'loadBalancingMode') || 'LeastRecentlyUsed',
+    active: value(data, 'active') !== false,
+    adaptive: {
+      sampleCount: value(sourceAdaptive, 'sampleCount') || value(sourceAdaptive, 'SampleCount') || 3,
+      capacityWeight: value(sourceAdaptive, 'capacityWeight') || value(sourceAdaptive, 'CapacityWeight') || 40,
+      inFlightWeight: value(sourceAdaptive, 'inFlightWeight') || value(sourceAdaptive, 'InFlightWeight') || 30,
+      clientWeight: value(sourceAdaptive, 'clientWeight') || value(sourceAdaptive, 'ClientWeight') || 20,
+      heartbeatWeight: value(sourceAdaptive, 'heartbeatWeight') || value(sourceAdaptive, 'HeartbeatWeight') || 10
+    }
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+  const loadBalancingModes = ['LeastRecentlyUsed', 'RoundRobin', 'Random', 'FirstAvailable', 'Adaptive'];
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  function updateAdaptiveField(key, fieldValue) {
+    setDraft((current) => ({
+      ...current,
+      adaptive: {
+        ...current.adaptive,
+        [key]: Number(fieldValue)
+      }
+    }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if ((!isCreate && !policyId) || saving) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      const payload = {
+        name: draft.name,
+        modelName: isDefault ? '*' : draft.modelName,
+        clientName: isDefault ? '*' : draft.clientName,
+        requestTimeoutMs: Number(draft.requestTimeoutMs),
+        loadBalancingMode: draft.loadBalancingMode,
+        adaptive: {
+          sampleCount: Number(draft.adaptive.sampleCount),
+          capacityWeight: Number(draft.adaptive.capacityWeight),
+          inFlightWeight: Number(draft.adaptive.inFlightWeight),
+          clientWeight: Number(draft.adaptive.clientWeight),
+          heartbeatWeight: Number(draft.adaptive.heartbeatWeight)
+        },
+        active: isDefault ? true : draft.active
+      };
+      await onSave(isCreate ? null : policyId, payload);
+      setStatusTone('success');
+      setStatus(t('routingPolicySaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} title={t('tooltipFormSave')} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data || {})} />}
+      onClose={onClose}
+      open
+      subtitle={isCreate ? t('createRoutingPolicySubtitle') : t('editRoutingPolicySubtitle')}
+      title={isCreate ? t('createRoutingPolicy') : t('editRoutingPolicy')}
+    >
+      <div className="form-stack">
+        {!isCreate ? <RecordSummaryTable entries={[['id', policyId], ['tenantId', value(data, 'tenantId')], ['isDefault', isDefault]]} /> : null}
+        {isDefault ? <p className="form-status warning">{t('defaultRoutingPolicyNotice')}</p> : null}
+        <div className="form-grid two">
+          <label className="form-field">
+            <span>{t('name')}</span>
+            <input onChange={(event) => updateField('name', event.target.value)} title={t('tooltipRoutingPolicyName')} value={draft.name} />
+          </label>
+          <label className="form-field">
+            <span>{t('loadBalancingMode')}</span>
+            <select onChange={(event) => updateField('loadBalancingMode', event.target.value)} title={t('tooltipRoutingPolicyLoadBalancingMode')} value={draft.loadBalancingMode}>
+              {loadBalancingModes.map((modeName) => <option key={modeName} value={modeName}>{modeName}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="form-grid three">
+          <label className="form-field">
+            <span>{t('modelName')}</span>
+            <input disabled={isDefault} onChange={(event) => updateField('modelName', event.target.value)} title={t('tooltipRoutingPolicyModelName')} value={isDefault ? '*' : draft.modelName} />
+          </label>
+          <label className="form-field">
+            <span>{t('clientName')}</span>
+            <input disabled={isDefault} onChange={(event) => updateField('clientName', event.target.value)} title={t('tooltipRoutingPolicyClientName')} value={isDefault ? '*' : draft.clientName} />
+          </label>
+          <label className="form-field">
+            <span>{t('requestTimeoutMs')}</span>
+            <input min="1000" onChange={(event) => updateField('requestTimeoutMs', event.target.value)} title={t('tooltipRoutingPolicyTimeout')} type="number" value={draft.requestTimeoutMs} />
+          </label>
+        </div>
+        <div className="form-grid five">
+          <label className="form-field">
+            <span>{t('sampleCount')}</span>
+            <input min="1" onChange={(event) => updateAdaptiveField('sampleCount', event.target.value)} title={t('tooltipRoutingPolicySampleCount')} type="number" value={draft.adaptive.sampleCount} />
+          </label>
+          <label className="form-field">
+            <span>{t('capacityWeight')}</span>
+            <input min="0" onChange={(event) => updateAdaptiveField('capacityWeight', event.target.value)} title={t('tooltipRoutingPolicyCapacityWeight')} type="number" value={draft.adaptive.capacityWeight} />
+          </label>
+          <label className="form-field">
+            <span>{t('inFlightWeight')}</span>
+            <input min="0" onChange={(event) => updateAdaptiveField('inFlightWeight', event.target.value)} title={t('tooltipRoutingPolicyInFlightWeight')} type="number" value={draft.adaptive.inFlightWeight} />
+          </label>
+          <label className="form-field">
+            <span>{t('clientWeight')}</span>
+            <input min="0" onChange={(event) => updateAdaptiveField('clientWeight', event.target.value)} title={t('tooltipRoutingPolicyClientWeight')} type="number" value={draft.adaptive.clientWeight} />
+          </label>
+          <label className="form-field">
+            <span>{t('heartbeatWeight')}</span>
+            <input min="0" onChange={(event) => updateAdaptiveField('heartbeatWeight', event.target.value)} title={t('tooltipRoutingPolicyHeartbeatWeight')} type="number" value={draft.adaptive.heartbeatWeight} />
+          </label>
+        </div>
+        <label className="toggle-field">
+          <input checked={isDefault ? true : draft.active} disabled={isDefault} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+          <span>{t('active')}</span>
+        </label>
         {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
       </div>
     </Modal>
@@ -3484,6 +3875,14 @@ function isReactNode(input) {
 
 function AppRoutes() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('xeno.theme') || 'light');
+  const [session, setSession] = useState(() => {
+    const storedSession = readDashboardSession();
+    const configuredServerUrl = storedSession?.serverUrl || window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000';
+    api.setBaseUrl(configuredServerUrl);
+    if (storedSession) api.setAuth(storedSession);
+    else api.clearAuth();
+    return storedSession;
+  });
   useDashboardTooltipBackfill();
 
   useEffect(() => {
@@ -3491,18 +3890,37 @@ function AppRoutes() {
     window.localStorage.setItem('xeno.theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    const configuredServerUrl = session?.serverUrl || window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000';
+    api.setBaseUrl(configuredServerUrl);
+    if (session) api.setAuth(session);
+    else api.clearAuth();
+  }, [session]);
+
   function toggleTheme() {
     setTheme((current) => current === 'dark' ? 'light' : 'dark');
   }
 
-  function logout() {
-    window.location.href = '/';
+  function login(nextSession) {
+    writeDashboardSession(nextSession);
+    setSession(nextSession);
+  }
+
+  async function logout() {
+    try {
+      await api.post('/api/v1/auth/logout');
+    } catch {
+      // Local session cleanup should still happen if the server is unavailable.
+    }
+    writeDashboardSession(null);
+    api.clearAuth();
+    setSession(null);
   }
 
   return (
     <Routes>
-      <Route path="/" element={<LoginView onToggleTheme={toggleTheme} theme={theme} />} />
-      <Route path="/dashboard/*" element={<Shell onLogout={logout} onToggleTheme={toggleTheme} theme={theme} />} />
+      <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
+      <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} theme={theme} /> : <Navigate replace to="/" />} />
     </Routes>
   );
 }

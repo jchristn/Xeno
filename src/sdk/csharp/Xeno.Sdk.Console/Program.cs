@@ -60,6 +60,7 @@ namespace Xeno.Sdk.Console
                 else if (command.Equals("credentials", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListCredentialsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("roles", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRolesAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("permissions", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListPermissionsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("routing-policies", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRoutingPoliciesAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("history", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRequestHistoryAsync(token: token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("settings", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.GetSettingsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("metrics", StringComparison.OrdinalIgnoreCase)) System.Console.WriteLine(await client.GetMetricsAsync(token).ConfigureAwait(false));
@@ -122,6 +123,7 @@ namespace Xeno.Sdk.Console
             System.Console.WriteLine("  credentials     credentials");
             System.Console.WriteLine("  roles           roles");
             System.Console.WriteLine("  permissions     permissions");
+            System.Console.WriteLine("  routing-policies routing policies");
             System.Console.WriteLine("  history         request history");
             System.Console.WriteLine("  settings        server settings");
             System.Console.WriteLine("  metrics         Prometheus metrics");

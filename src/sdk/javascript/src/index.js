@@ -173,6 +173,22 @@ export class XenoClient {
     return this.#request('GET', '/v1.0/api/model-configurations');
   }
 
+  async listRoutingPolicies() {
+    return this.#request('GET', '/v1.0/api/routing-policies');
+  }
+
+  async createRoutingPolicy(policy = {}) {
+    return this.#request('POST', '/v1.0/api/routing-policies', policy);
+  }
+
+  async updateRoutingPolicy(id, policy = {}) {
+    return this.#request('PUT', `/v1.0/api/routing-policies/${encodeURIComponent(id)}`, policy);
+  }
+
+  async deleteRoutingPolicy(id) {
+    return this.#request('DELETE', `/v1.0/api/routing-policies/${encodeURIComponent(id)}`);
+  }
+
   async listOpenAiModels() {
     return this.#request('GET', '/v1/models');
   }

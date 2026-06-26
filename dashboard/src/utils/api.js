@@ -1,40 +1,56 @@
 export default class ApiClient {
   constructor(baseUrl = window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000') {
     this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.token = '';
+    this.tenantId = '';
   }
 
-  async get(path) {
-    const response = await fetch(`${this.baseUrl}${path}`, { headers: this.headers() });
-    return response.json();
+  setBaseUrl(baseUrl) {
+    this.baseUrl = String(baseUrl || 'http://localhost:9000').replace(/\/$/, '');
   }
 
-  async post(path, body) {
+  setAuth(session) {
+    this.token = session?.token || '';
+    this.tenantId = session?.tenantId || '';
+  }
+
+  clearAuth() {
+    this.token = '';
+    this.tenantId = '';
+  }
+
+  async get(path, options = {}) {
+    const response = await fetch(`${this.baseUrl}${path}`, { headers: this.headers(options) });
+    return readJsonResponse(response);
+  }
+
+  async post(path, body, options = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: this.headers(),
+      headers: this.headers(options),
       body: JSON.stringify(body ?? {})
     });
-    return response.json();
+    return readJsonResponse(response);
   }
 
-  async put(path, body) {
+  async put(path, body, options = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'PUT',
-      headers: this.headers(),
+      headers: this.headers(options),
       body: JSON.stringify(body ?? {})
     });
-    return response.json();
+    return readJsonResponse(response);
   }
 
-  async delete(path, body) {
-    const options = {
+  async delete(path, body, options = {}) {
+    const requestOptions = {
       method: 'DELETE',
-      headers: this.headers()
+      headers: this.headers(options)
     };
-    if (body !== undefined) options.body = JSON.stringify(body ?? {});
-    const response = await fetch(`${this.baseUrl}${path}`, options);
+    if (body !== undefined) requestOptions.body = JSON.stringify(body ?? {});
+    const response = await fetch(`${this.baseUrl}${path}`, requestOptions);
     if (response.status === 204) return {};
-    return response.json();
+    return readJsonResponse(response);
   }
 
   async request(path, { body, expectStream = false, method = 'GET', onProgress, signal } = {}) {
@@ -103,10 +119,32 @@ export default class ApiClient {
     return response.text();
   }
 
-  headers() {
-    return {
+  headers(options = {}) {
+    const headers = {
       'Content-Type': 'application/json',
       'Accept-Language': document.documentElement.lang || 'en'
+    };
+    if (!options.skipAuth && this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
+      headers['x-token'] = this.token;
+    }
+    if (!options.skipAuth && this.tenantId) {
+      headers['x-tenant-guid'] = this.tenantId;
+      headers['x-tenant-id'] = this.tenantId;
+    }
+    return headers;
+  }
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: response.ok ? 'InvalidJson' : 'RequestFailed',
+      message: text
     };
   }
 }

@@ -18,6 +18,7 @@ from xeno_client import XenoClient
 client = XenoClient("http://localhost:9000", tenant_id="ten_default")
 health = client.get_health()
 models = client.list_openai_models()
+policies = client.list_routing_policies()
 ```
 
 Authenticated servers can pass a bearer token:
@@ -36,7 +37,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, tenants, users, credentials, roles, permissions, clients, advertised models, OpenAI-compatible inference, request history, analytics, settings, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, tenants, users, credentials, roles, permissions, clients, advertised models, routing policies, OpenAI-compatible inference, request history, analytics, settings, backup, health, metrics, and OpenAPI.
 
 ## Alpha Notice
 

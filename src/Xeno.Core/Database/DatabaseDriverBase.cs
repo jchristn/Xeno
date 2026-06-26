@@ -53,6 +53,7 @@ namespace Xeno.Core.Database
             {
                 PlatformState? state = JsonUtil.Deserialize<PlatformState>(stateJson);
                 if (state != null) Platform.LoadState(state);
+                if (storageAvailable) await SaveAsync(token).ConfigureAwait(false);
             }
             else
             {

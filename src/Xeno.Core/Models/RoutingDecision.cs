@@ -91,6 +91,36 @@ namespace Xeno.Core.Models
         public string SelectionReason { get; set; } = String.Empty;
 
         /// <summary>
+        /// Effective routing policy ID.
+        /// </summary>
+        public string? RoutingPolicyId { get; set; } = null;
+
+        /// <summary>
+        /// Effective routing policy name.
+        /// </summary>
+        public string? RoutingPolicyName { get; set; } = null;
+
+        /// <summary>
+        /// Routing policy model match expression.
+        /// </summary>
+        public string? RoutingPolicyModelName { get; set; } = null;
+
+        /// <summary>
+        /// Routing policy client match expression.
+        /// </summary>
+        public string? RoutingPolicyClientName { get; set; } = null;
+
+        /// <summary>
+        /// Routing policy match reason.
+        /// </summary>
+        public string? RoutingPolicyReason { get; set; } = null;
+
+        /// <summary>
+        /// Effective request timeout from the routing policy.
+        /// </summary>
+        public int? RoutingPolicyRequestTimeoutMs { get; set; } = null;
+
+        /// <summary>
         /// Load-balancing mode used for selection.
         /// </summary>
         public LoadBalancingModeEnum LoadBalancingMode { get; set; } = LoadBalancingModeEnum.RoundRobin;

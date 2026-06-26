@@ -102,6 +102,14 @@ The clients response includes connection state, capacity fields, and each client
 
 `GET /v1.0/api/model-configurations`
 
+`GET /v1.0/api/routing-policies`
+
+`POST /v1.0/api/routing-policies`
+
+`PUT /v1.0/api/routing-policies/{id}`
+
+`DELETE /v1.0/api/routing-policies/{id}`
+
 `GET /v1.0/api/analytics/overview`
 
 `GET /v1.0/api/settings`
@@ -119,6 +127,7 @@ Create and update request bodies:
 - Credential create/update: `userId`, `accessKey`, `secretKey`, and `active`. Create generates access/secret keys when omitted and returns the secret once. List/update responses redact the secret key.
 - Role create/update: `name`, `permissionIds`, and `active`.
 - Permission create/update: `resourceType`, `operationType` (`Read`, `Write`, `Delete`, `Admin`), `permit`, and `active`.
+- Routing policy create/update: `name`, `modelName`, `clientName`, `requestTimeoutMs`, `loadBalancingMode`, `adaptive`, and `active`. Use `*` for `modelName` or `clientName` to match all values. Each tenant has an undeletable default `*/*` policy using `LeastRecentlyUsed`.
 
 Legacy dashboard aliases under `/api/v1/...` are also registered for administration, clients, token bootstrap, settings, request history, and OpenAI-compatible routes.
 
@@ -142,6 +151,7 @@ Routed OpenAI-compatible responses include Xeno trace headers for debugging mode
 - `X-Xeno-Model`: effective model used for routing.
 - `X-Xeno-Routing-Outcome`: routing outcome such as `Completed`, `ModelNotFound`, or `NoEligibleClients`.
 - `X-Xeno-Routing-Message`: human-readable routing result.
+- `X-Xeno-Routing-Policy-ID`, `X-Xeno-Routing-Policy-Name`, `X-Xeno-Routing-Policy-Match`, and `X-Xeno-Routing-Policy-Reason`: policy selected for this request and why it matched.
 - `X-Xeno-Routing-Candidate-Count` and `X-Xeno-Routing-Candidates`: eligible client count and IDs.
 - `X-Xeno-Load-Balancing-Mode`: configured selection strategy used for the request. Supported values match Conductor: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - `X-Xeno-Adaptive-Sample-Count` and `X-Xeno-Adaptive-Score`: adaptive scoring evidence when `Adaptive` mode is used.
