@@ -196,6 +196,68 @@ namespace Test.Shared
                             {
                                 if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
                             }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientStateRequiresRegistrationBeforeConnected",
+                        "Client state requires registration before connected",
+                        executeAsync: delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-state-" + Guid.NewGuid().ToString("N"));
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", clientHome);
+                            Directory.CreateDirectory(clientHome);
+
+                            try
+                            {
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_state_touchstone",
+                                    TenantId = Constants.DefaultTenantId,
+                                    Name = "state-touchstone"
+                                };
+                                settings.Server.Url = "ws://127.0.0.1:9000/ws/v1/clients";
+                                settings.Server.AccessKey = "default";
+                                settings.Server.SecretKey = "default";
+
+                                ClientConnectionState.MarkStarted(settings, false);
+                                ClientConnectionState started = ClientConnectionState.Load();
+                                if (started.IsConnected) throw new InvalidOperationException("Started state should not be connected.");
+                                if (started.IsRegistered) throw new InvalidOperationException("Started state should not be registered.");
+                                if (started.ProcessId != Environment.ProcessId) throw new InvalidOperationException("Started state did not record the current process.");
+
+                                ClientConnectionState.MarkWebSocketConnected(settings);
+                                ClientConnectionState socketConnected = ClientConnectionState.Load();
+                                if (socketConnected.IsConnected) throw new InvalidOperationException("WebSocket connection should not be reported as connected before registration.");
+                                if (socketConnected.IsRegistered) throw new InvalidOperationException("WebSocket connection should not be registered before acknowledgement.");
+                                if (socketConnected.WebSocketConnectedUtc == null) throw new InvalidOperationException("WebSocket connection timestamp was not recorded.");
+
+                                ClientConnectionState.MarkRegistered(settings);
+                                ClientConnectionState registered = ClientConnectionState.Load();
+                                if (!registered.IsConnected) throw new InvalidOperationException("Registered state should be connected.");
+                                if (!registered.IsRegistered) throw new InvalidOperationException("Registered state should be registered.");
+                                if (registered.ConnectedUtc == null) throw new InvalidOperationException("Connected timestamp was not recorded.");
+                                if (registered.RegisteredUtc == null) throw new InvalidOperationException("Registered timestamp was not recorded.");
+
+                                ClientConnectionState.MarkDisconnected(settings, "test complete");
+                                ClientConnectionState disconnected = ClientConnectionState.Load();
+                                if (disconnected.IsConnected) throw new InvalidOperationException("Disconnected state should not be connected.");
+                                if (disconnected.IsRegistered) throw new InvalidOperationException("Disconnected state should not be registered.");
+                                return Task.CompletedTask;
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientConnectStartsBackgroundWorkerAndLogs",
+                        "Client connect starts background worker and logs",
+                        executeAsync: async delegate
+                        {
+                            await RunClientBackgroundConnectSmokeAsync().ConfigureAwait(false);
                         })
                 });
         }
@@ -1353,6 +1415,87 @@ namespace Test.Shared
             }
         }
 
+        private static async Task RunClientBackgroundConnectSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-client-background-" + Guid.NewGuid().ToString("N") + ".db");
+            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-background-" + Guid.NewGuid().ToString("N"));
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    Directory.CreateDirectory(clientHome);
+                    ClientSettings clientSettings = new ClientSettings
+                    {
+                        TenantId = Constants.DefaultTenantId,
+                        Name = "background-touchstone"
+                    };
+                    clientSettings.Server.Url = "ws://127.0.0.1:" + port + settings.WebSocket.Path;
+                    clientSettings.Server.RestUrl = "http://127.0.0.1:" + port;
+                    clientSettings.Server.AccessKey = "default";
+                    clientSettings.Server.SecretKey = "default";
+                    File.WriteAllText(Path.Combine(clientHome, "client.json"), JsonUtil.Serialize(clientSettings, true));
+
+                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "--json", "connect", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                    if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("\"connected\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not report connected: " + connect.StandardOutput);
+
+                    string stateFile = Path.Combine(clientHome, "state.json");
+                    ClientConnectionState state = DeserializeRequired<ClientConnectionState>(File.ReadAllText(stateFile));
+                    if (!state.IsConnected) throw new InvalidOperationException("Background state is not connected.");
+                    if (!state.IsRegistered) throw new InvalidOperationException("Background state is not registered.");
+                    if (!state.IsBackground) throw new InvalidOperationException("Background state did not record background mode.");
+                    if (state.ProcessId == null || !IsProcessRunningForTest(state.ProcessId.Value)) throw new InvalidOperationException("Background worker process is not running.");
+                    if (state.WebSocketConnectedUtc == null) throw new InvalidOperationException("Background state did not record WebSocket connection time.");
+                    if (state.RegisteredUtc == null) throw new InvalidOperationException("Background state did not record registration time.");
+
+                    await WaitForRegisteredClientAsync(port, "background-touchstone").ConfigureAwait(false);
+
+                    ClientCommandResult secondConnect = await RunXenoClientAsync(new[] { "--json", "connect", "--timeout", "5000" }, clientHome).ConfigureAwait(false);
+                    if (secondConnect.ExitCode != 0) throw new InvalidOperationException("Second background connect failed: " + secondConnect.StandardError + secondConnect.StandardOutput);
+                    if (!secondConnect.StandardOutput.Contains("\"alreadyRunning\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Second connect did not detect existing worker: " + secondConnect.StandardOutput);
+
+                    ClientCommandResult status = await RunXenoClientAsync(new[] { "--json", "status" }, clientHome).ConfigureAwait(false);
+                    if (status.ExitCode != 0) throw new InvalidOperationException("Background status failed: " + status.StandardError + status.StandardOutput);
+                    if (!status.StandardOutput.Contains("\"registered\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Status did not report registered state: " + status.StandardOutput);
+
+                    ClientCommandResult logs = await RunXenoClientAsync(new[] { "logs", "--tail", "20" }, clientHome).ConfigureAwait(false);
+                    if (logs.ExitCode != 0) throw new InvalidOperationException("Logs command failed: " + logs.StandardError + logs.StandardOutput);
+                    if (!logs.StandardOutput.Contains("Client registered with Xeno server.", StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include registration output: " + logs.StandardOutput);
+
+                    ClientCommandResult stop = await RunXenoClientAsync(new[] { "--json", "stop" }, clientHome).ConfigureAwait(false);
+                    if (stop.ExitCode != 0) throw new InvalidOperationException("Stop command failed: " + stop.StandardError + stop.StandardOutput);
+                    if (!stop.StandardOutput.Contains("\"stopped\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Stop did not report success: " + stop.StandardOutput);
+                    if (state.ProcessId != null && IsProcessRunningForTest(state.ProcessId.Value)) throw new InvalidOperationException("Background worker still running after stop.");
+                }
+                finally
+                {
+                    await RunXenoClientAsync(new[] { "stop", "--force" }, clientHome).ConfigureAwait(false);
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                    if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                }
+            }
+        }
+
         private static async Task RunRelaySmokeAsync()
         {
             int port = GetFreePort();
@@ -1865,6 +2008,11 @@ namespace Test.Shared
 
         private static async Task WaitForRegisteredClientAsync(int port)
         {
+            await WaitForRegisteredClientAsync(port, "xcl_touchstone").ConfigureAwait(false);
+        }
+
+        private static async Task WaitForRegisteredClientAsync(int port, string expectedText)
+        {
             using (HttpClient httpClient = new HttpClient())
             {
                 for (int i = 0; i < 50; i++)
@@ -1872,14 +2020,33 @@ namespace Test.Shared
                     using (HttpResponseMessage response = await httpClient.GetAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false))
                     {
                         string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                        if (response.IsSuccessStatusCode && body.Contains("xcl_touchstone", StringComparison.Ordinal)) return;
+                        if (response.IsSuccessStatusCode && body.Contains(expectedText, StringComparison.Ordinal)) return;
                     }
 
                     await Task.Delay(100).ConfigureAwait(false);
                 }
             }
 
-            throw new InvalidOperationException("Fake client did not register.");
+            throw new InvalidOperationException("Client did not register: " + expectedText);
+        }
+
+        private static bool IsProcessRunningForTest(int processId)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(processId))
+                {
+                    return !process.HasExited;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
         }
 
         private static async Task SendWebSocketJsonAsync(ClientWebSocket socket, object value, CancellationToken token)

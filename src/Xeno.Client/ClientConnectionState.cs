@@ -22,14 +22,73 @@ namespace Xeno.Client
         }
 
         /// <summary>
-        /// Whether the client is currently connected.
+        /// Runtime stop request file path.
+        /// </summary>
+        public static string StopFile
+        {
+            get
+            {
+                return Path.Combine(ClientSettings.SettingsDirectory, "stop");
+            }
+        }
+
+        /// <summary>
+        /// Runtime log directory.
+        /// </summary>
+        public static string LogDirectory
+        {
+            get
+            {
+                return Path.Combine(ClientSettings.SettingsDirectory, "logs");
+            }
+        }
+
+        /// <summary>
+        /// Runtime standard output log path.
+        /// </summary>
+        public static string LogFile
+        {
+            get
+            {
+                return Path.Combine(LogDirectory, "xeno.log");
+            }
+        }
+
+        /// <summary>
+        /// Runtime standard error log path.
+        /// </summary>
+        public static string ErrorLogFile
+        {
+            get
+            {
+                return Path.Combine(LogDirectory, "xeno.err.log");
+            }
+        }
+
+        /// <summary>
+        /// Whether the client is currently connected and registered.
         /// </summary>
         public bool IsConnected { get; set; } = false;
+
+        /// <summary>
+        /// Whether the client has received server registration acknowledgement.
+        /// </summary>
+        public bool IsRegistered { get; set; } = false;
+
+        /// <summary>
+        /// Whether the process is running as a background worker.
+        /// </summary>
+        public bool IsBackground { get; set; } = false;
 
         /// <summary>
         /// Client process ID that last wrote a connected state.
         /// </summary>
         public int? ProcessId { get; set; } = null;
+
+        /// <summary>
+        /// Executable path that started the process.
+        /// </summary>
+        public string? ExecutablePath { get; set; } = null;
 
         /// <summary>
         /// Client ID.
@@ -52,6 +111,16 @@ namespace Xeno.Client
         public DateTime? ConnectedUtc { get; set; } = null;
 
         /// <summary>
+        /// Last WebSocket connection timestamp before registration.
+        /// </summary>
+        public DateTime? WebSocketConnectedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Last registration acknowledgement timestamp.
+        /// </summary>
+        public DateTime? RegisteredUtc { get; set; } = null;
+
+        /// <summary>
         /// Last disconnection timestamp.
         /// </summary>
         public DateTime? DisconnectedUtc { get; set; } = null;
@@ -72,9 +141,29 @@ namespace Xeno.Client
         public DateTime? LastUpdatedUtc { get; set; } = null;
 
         /// <summary>
+        /// Process start timestamp.
+        /// </summary>
+        public DateTime? StartedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Last stop request timestamp.
+        /// </summary>
+        public DateTime? StopRequestedUtc { get; set; } = null;
+
+        /// <summary>
         /// Last disconnection reason.
         /// </summary>
         public string? LastDisconnectReason { get; set; } = null;
+
+        /// <summary>
+        /// Standard output log path.
+        /// </summary>
+        public string? LogFilePath { get; set; } = null;
+
+        /// <summary>
+        /// Standard error log path.
+        /// </summary>
+        public string? ErrorLogFilePath { get; set; } = null;
 
         /// <summary>
         /// Load connection state from disk.
@@ -87,9 +176,10 @@ namespace Xeno.Client
             try
             {
                 ClientConnectionState state = JsonUtil.Deserialize<ClientConnectionState>(File.ReadAllText(StateFile)) ?? new ClientConnectionState();
-                if (state.IsConnected && !state.IsProcessRunning())
+                if ((state.IsConnected || state.IsRegistered) && !state.IsProcessRunning())
                 {
                     state.IsConnected = false;
+                    state.IsRegistered = false;
                     state.DisconnectedUtc = DateTime.UtcNow;
                     state.LastDisconnectReason = "Client process is no longer running.";
                     state.LastUpdatedUtc = state.DisconnectedUtc;
@@ -110,30 +200,90 @@ namespace Xeno.Client
         public void Save()
         {
             Directory.CreateDirectory(ClientSettings.SettingsDirectory);
-            File.WriteAllText(StateFile, JsonUtil.Serialize(this, true));
+            string tempFile = StateFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(tempFile, JsonUtil.Serialize(this, true));
+            File.Move(tempFile, StateFile, true);
         }
 
         /// <summary>
-        /// Mark the client connected.
+        /// Mark the client process as started.
         /// </summary>
         /// <param name="settings">Client settings.</param>
-        public static void MarkConnected(ClientSettings settings)
+        /// <param name="isBackground">Whether the process is a background worker.</param>
+        public static void MarkStarted(ClientSettings settings, bool isBackground)
         {
             DateTime now = DateTime.UtcNow;
             ClientConnectionState state = new ClientConnectionState
             {
-                IsConnected = true,
+                IsConnected = false,
+                IsRegistered = false,
+                IsBackground = isBackground,
                 ProcessId = Environment.ProcessId,
+                ExecutablePath = Environment.ProcessPath,
                 ClientId = settings.ClientId,
                 TenantId = settings.TenantId,
                 WebSocketUrl = settings.Server.Url,
-                ConnectedUtc = now,
+                StartedUtc = now,
+                ConnectedUtc = null,
                 DisconnectedUtc = null,
                 LastHeartbeatUtc = null,
                 LastServerMessageUtc = null,
                 LastUpdatedUtc = now,
+                LogFilePath = LogFile,
+                ErrorLogFilePath = ErrorLogFile,
                 LastDisconnectReason = null
             };
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark the WebSocket connected before registration is complete.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkWebSocketConnected(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            DateTime now = DateTime.UtcNow;
+            state.IsConnected = false;
+            state.IsRegistered = false;
+            state.ProcessId = Environment.ProcessId;
+            state.ExecutablePath = Environment.ProcessPath;
+            state.ClientId = settings.ClientId;
+            state.TenantId = settings.TenantId;
+            state.WebSocketUrl = settings.Server.Url;
+            if (state.StartedUtc == null) state.StartedUtc = now;
+            state.WebSocketConnectedUtc = now;
+            state.LastUpdatedUtc = now;
+            state.LastDisconnectReason = null;
+            state.LogFilePath = LogFile;
+            state.ErrorLogFilePath = ErrorLogFile;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark the client registered and fully connected.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkRegistered(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            DateTime now = DateTime.UtcNow;
+            state.IsConnected = true;
+            state.IsRegistered = true;
+            state.ProcessId = Environment.ProcessId;
+            state.ExecutablePath = Environment.ProcessPath;
+            state.ClientId = settings.ClientId;
+            state.TenantId = settings.TenantId;
+            state.WebSocketUrl = settings.Server.Url;
+            if (state.StartedUtc == null) state.StartedUtc = now;
+            if (state.WebSocketConnectedUtc == null) state.WebSocketConnectedUtc = now;
+            state.ConnectedUtc = now;
+            state.RegisteredUtc = now;
+            state.DisconnectedUtc = null;
+            state.LastUpdatedUtc = now;
+            state.LastDisconnectReason = null;
+            state.LogFilePath = LogFile;
+            state.ErrorLogFilePath = ErrorLogFile;
             state.Save();
         }
 
@@ -145,8 +295,9 @@ namespace Xeno.Client
         {
             ClientConnectionState state = Load();
             DateTime now = DateTime.UtcNow;
-            state.IsConnected = true;
+            if (state.IsRegistered) state.IsConnected = true;
             state.ProcessId = Environment.ProcessId;
+            state.ExecutablePath = Environment.ProcessPath;
             state.ClientId = settings.ClientId;
             state.TenantId = settings.TenantId;
             state.WebSocketUrl = settings.Server.Url;
@@ -165,8 +316,9 @@ namespace Xeno.Client
         {
             ClientConnectionState state = Load();
             DateTime now = DateTime.UtcNow;
-            state.IsConnected = true;
+            if (state.IsRegistered) state.IsConnected = true;
             state.ProcessId = Environment.ProcessId;
+            state.ExecutablePath = Environment.ProcessPath;
             state.ClientId = settings.ClientId;
             state.TenantId = settings.TenantId;
             state.WebSocketUrl = settings.Server.Url;
@@ -187,15 +339,55 @@ namespace Xeno.Client
             ClientConnectionState state = Load();
             DateTime now = DateTime.UtcNow;
             state.IsConnected = false;
+            state.IsRegistered = false;
             state.ProcessId = Environment.ProcessId;
+            state.ExecutablePath = Environment.ProcessPath;
             state.ClientId = settings.ClientId;
             state.TenantId = settings.TenantId;
             state.WebSocketUrl = settings.Server.Url;
-            if (state.ConnectedUtc == null) state.ConnectedUtc = now;
             state.DisconnectedUtc = now;
             state.LastUpdatedUtc = now;
             state.LastDisconnectReason = reason;
             state.Save();
+        }
+
+        /// <summary>
+        /// Request the background client to stop.
+        /// </summary>
+        public static void RequestStop()
+        {
+            Directory.CreateDirectory(ClientSettings.SettingsDirectory);
+            File.WriteAllText(StopFile, DateTime.UtcNow.ToString("O"));
+            ClientConnectionState state = Load();
+            state.StopRequestedUtc = DateTime.UtcNow;
+            state.LastUpdatedUtc = state.StopRequestedUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Clear a pending stop request.
+        /// </summary>
+        public static void ClearStopRequest()
+        {
+            if (File.Exists(StopFile)) File.Delete(StopFile);
+        }
+
+        /// <summary>
+        /// Determine whether a stop has been requested.
+        /// </summary>
+        /// <returns>True if a stop request is pending.</returns>
+        public static bool IsStopRequested()
+        {
+            return File.Exists(StopFile);
+        }
+
+        /// <summary>
+        /// Determine whether the recorded process is still running.
+        /// </summary>
+        /// <returns>True if the process is running.</returns>
+        public bool IsRecordedProcessRunning()
+        {
+            return IsProcessRunning();
         }
 
         private bool IsProcessRunning()

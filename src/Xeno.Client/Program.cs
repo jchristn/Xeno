@@ -22,8 +22,11 @@ namespace Xeno.Client
     {
         private const string ClientVersion = "0.1.0";
         private const int DefaultHeartbeatIntervalMs = 15000;
+        private const int DefaultConnectTimeoutMs = 30000;
+        private const int DefaultStopTimeoutMs = 10000;
         private static bool _UseColors = true;
         private static bool _UseJson = false;
+        private static bool _WorkerMode = false;
         private static readonly SemaphoreSlim _SendLock = new SemaphoreSlim(1, 1);
 
         /// <summary>
@@ -89,8 +92,12 @@ namespace Xeno.Client
                             PrintStatus(settings);
                             return 0;
                         case "connect":
-                            await ConnectAsync(settings, CancellationToken.None).ConfigureAwait(false);
-                            return 0;
+                            return await HandleConnectAsync(args, settings).ConfigureAwait(false);
+                        case "logs":
+                            return await HandleLogsAsync(args, CancellationToken.None).ConfigureAwait(false);
+                        case "stop":
+                        case "disconnect":
+                            return await HandleStopAsync(args).ConfigureAwait(false);
                         default:
                             WriteError("Unknown command '" + args[0] + "'.");
                             PrintHelp();
@@ -123,6 +130,184 @@ namespace Xeno.Client
                 WriteError(ex.Message);
                 return 1;
             }
+        }
+
+        private static async Task<int> HandleConnectAsync(string[] args, ClientSettings settings)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintConnectHelp();
+                return 0;
+            }
+
+            bool foreground = false;
+            bool worker = false;
+            int timeoutMs = DefaultConnectTimeoutMs;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (String.Equals(args[i], "--foreground", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreground = true;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "--worker", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreground = true;
+                    worker = true;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "--timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length || !Int32.TryParse(args[i + 1], out timeoutMs) || timeoutMs < 1000)
+                    {
+                        WriteError("--timeout requires a value in milliseconds greater than or equal to 1000.");
+                        return 1;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                WriteError("Unknown connect option: " + args[i]);
+                PrintConnectHelp();
+                return 1;
+            }
+
+            if (foreground)
+            {
+                _WorkerMode = worker;
+                if (_WorkerMode) ConfigureWorkerLogging();
+                await RunForegroundConnectAsync(settings, worker, CancellationToken.None).ConfigureAwait(false);
+                return 0;
+            }
+
+            return await StartBackgroundConnectAsync(settings, timeoutMs, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        private static async Task<int> HandleLogsAsync(string[] args, CancellationToken token)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintLogsHelp();
+                return 0;
+            }
+
+            bool follow = false;
+            int tailLines = 100;
+            string logFile = ClientConnectionState.LogFile;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (String.Equals(args[i], "-f", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(args[i], "--follow", StringComparison.OrdinalIgnoreCase))
+                {
+                    follow = true;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "--errors", StringComparison.OrdinalIgnoreCase))
+                {
+                    logFile = ClientConnectionState.ErrorLogFile;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "--tail", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length || !Int32.TryParse(args[i + 1], out tailLines) || tailLines < 0)
+                    {
+                        WriteError("--tail requires a non-negative line count.");
+                        return 1;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                WriteError("Unknown logs option: " + args[i]);
+                PrintLogsHelp();
+                return 1;
+            }
+
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    logFile,
+                    exists = File.Exists(logFile),
+                    follow,
+                    tailLines
+                });
+                return 0;
+            }
+
+            if (!File.Exists(logFile))
+            {
+                WriteInfo("No Xeno client log file exists yet: " + logFile);
+                return 0;
+            }
+
+            await PrintLogTailAsync(logFile, tailLines, token).ConfigureAwait(false);
+            if (follow) await FollowLogAsync(logFile, token).ConfigureAwait(false);
+            return 0;
+        }
+
+        private static async Task<int> HandleStopAsync(string[] args)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintStopHelp();
+                return 0;
+            }
+
+            bool force = false;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (String.Equals(args[i], "--force", StringComparison.OrdinalIgnoreCase))
+                {
+                    force = true;
+                    continue;
+                }
+
+                WriteError("Unknown stop option: " + args[i]);
+                PrintStopHelp();
+                return 1;
+            }
+
+            ClientConnectionState state = ClientConnectionState.Load();
+            if (state.ProcessId == null || !state.IsRecordedProcessRunning())
+            {
+                if (_UseJson) WriteJson(new { stopped = true, reason = "not-running" });
+                else WriteInfo("Xeno client is not running.");
+                return 0;
+            }
+
+            ClientConnectionState.RequestStop();
+            bool stopped = await WaitForProcessExitAsync(state.ProcessId.Value, DefaultStopTimeoutMs).ConfigureAwait(false);
+            if (!stopped && force)
+            {
+                stopped = KillProcess(state.ProcessId.Value);
+            }
+
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    stopped,
+                    processId = state.ProcessId.Value,
+                    force
+                });
+                return stopped ? 0 : 1;
+            }
+
+            if (stopped)
+            {
+                WriteSuccess("Stopped Xeno client process " + state.ProcessId.Value + ".");
+                return 0;
+            }
+
+            WriteWarning("Stop was requested, but process " + state.ProcessId.Value + " is still running. Use 'xeno stop --force' to terminate it.");
+            return 1;
         }
 
         private static int HandleReset(string[] args)
@@ -658,6 +843,107 @@ namespace Xeno.Client
             return 1;
         }
 
+        private static async Task<int> StartBackgroundConnectAsync(ClientSettings settings, int timeoutMs, CancellationToken token)
+        {
+            EnsureClientId(settings);
+            if (!HasWebSocketCredential(settings))
+            {
+                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key and secret key before connecting.");
+            }
+
+            ClientConnectionState existing = ClientConnectionState.Load();
+            if (existing.IsConnected && existing.IsRegistered && existing.IsRecordedProcessRunning())
+            {
+                if (_UseJson)
+                {
+                    WriteJson(new
+                    {
+                        connected = true,
+                        alreadyRunning = true,
+                        processId = existing.ProcessId ?? 0,
+                        logFile = existing.LogFilePath ?? ClientConnectionState.LogFile
+                    });
+                }
+                else
+                {
+                    WriteInfo("Xeno client is already connected.");
+                    Console.WriteLine("  Process ID: " + existing.ProcessId);
+                    Console.WriteLine("  Log file:   " + DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
+                }
+
+                return 0;
+            }
+
+            ClientConnectionState.ClearStopRequest();
+            ProcessStartInfo startInfo = CreateBackgroundStartInfo();
+            using (Process process = new Process { StartInfo = startInfo })
+            {
+                if (!process.Start()) throw new InvalidOperationException("Unable to start Xeno client background process.");
+                bool registered = await WaitForRegisteredStateAsync(process.Id, timeoutMs, token).ConfigureAwait(false);
+                ClientConnectionState state = ClientConnectionState.Load();
+                if (_UseJson)
+                {
+                    WriteJson(new
+                    {
+                        connected = registered,
+                        processId = process.Id,
+                        logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
+                        errorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
+                        reason = state.LastDisconnectReason ?? String.Empty
+                    });
+                }
+                else if (registered)
+                {
+                    WriteSuccess("Xeno client connected in the background.");
+                    Console.WriteLine("  Process ID: " + process.Id);
+                    Console.WriteLine("  Log file:   " + DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                }
+                else
+                {
+                    WriteError("Xeno client did not register within " + timeoutMs + "ms.");
+                    Console.WriteLine("  Process ID: " + process.Id);
+                    Console.WriteLine("  Log file:   " + DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                    Console.WriteLine("  Last reason: " + DisplayValue(state.LastDisconnectReason, "(none)"));
+                }
+
+                return registered ? 0 : 1;
+            }
+        }
+
+        private static async Task RunForegroundConnectAsync(ClientSettings settings, bool worker, CancellationToken token)
+        {
+            ClientConnectionState.ClearStopRequest();
+            using (CancellationTokenSource runtimeTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                ConsoleCancelEventHandler? cancelHandler = delegate(object? sender, ConsoleCancelEventArgs args)
+                {
+                    args.Cancel = true;
+                    runtimeTokenSource.Cancel();
+                };
+                Console.CancelKeyPress += cancelHandler;
+                Task stopMonitor = MonitorStopFileAsync(runtimeTokenSource, runtimeTokenSource.Token);
+                try
+                {
+                    ClientConnectionState.MarkStarted(settings, worker);
+                    await ConnectAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    runtimeTokenSource.Cancel();
+                    try
+                    {
+                        await stopMonitor.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+
+                    Console.CancelKeyPress -= cancelHandler;
+                    ClientConnectionState.ClearStopRequest();
+                }
+            }
+        }
+
         private static async Task ConnectAsync(ClientSettings settings, CancellationToken token)
         {
             EnsureClientId(settings);
@@ -674,7 +960,7 @@ namespace Xeno.Client
                     {
                         ApplyServerAuthentication(socket, settings);
                         await socket.ConnectAsync(new Uri(settings.Server.Url), token).ConfigureAwait(false);
-                        ClientConnectionState.MarkConnected(settings);
+                        ClientConnectionState.MarkWebSocketConnected(settings);
                         await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventory() }, token).ConfigureAwait(false);
                         await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
                         ClientConnectionState.MarkDisconnected(settings, "WebSocket closed.");
@@ -689,6 +975,12 @@ namespace Xeno.Client
                 {
                     ClientConnectionState.MarkDisconnected(settings, ex.Message);
                     WriteWarning("Disconnected from Xeno server: " + ex.Message);
+                }
+
+                if (ClientConnectionState.IsStopRequested())
+                {
+                    ClientConnectionState.MarkDisconnected(settings, "Client stopped.");
+                    return;
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
@@ -1176,6 +1468,205 @@ namespace Xeno.Client
             WriteInfo("Completed request " + requestId + " for " + requestorIp + ": " + method + " " + path + " via " + proxy + " (" + elapsed + "ms)");
         }
 
+        private static void ConfigureWorkerLogging()
+        {
+            Directory.CreateDirectory(ClientConnectionState.LogDirectory);
+            StreamWriter output = new StreamWriter(new FileStream(ClientConnectionState.LogFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            {
+                AutoFlush = true
+            };
+            StreamWriter error = new StreamWriter(new FileStream(ClientConnectionState.ErrorLogFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            {
+                AutoFlush = true
+            };
+            Console.SetOut(output);
+            Console.SetError(error);
+            _UseColors = false;
+        }
+
+        private static ProcessStartInfo CreateBackgroundStartInfo()
+        {
+            string? processPath = Environment.ProcessPath;
+            if (String.IsNullOrWhiteSpace(processPath))
+            {
+                using (Process process = Process.GetCurrentProcess())
+                {
+                    processPath = process.MainModule?.FileName;
+                }
+            }
+
+            if (String.IsNullOrWhiteSpace(processPath)) throw new InvalidOperationException("Unable to determine the current executable path.");
+            string processName = Path.GetFileNameWithoutExtension(processPath);
+            bool isDotnetHost = String.Equals(processName, "dotnet", StringComparison.OrdinalIgnoreCase);
+            bool isWindows = OperatingSystem.IsWindows();
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = processPath,
+                CreateNoWindow = true,
+                RedirectStandardError = !isWindows,
+                RedirectStandardOutput = !isWindows,
+                UseShellExecute = isWindows,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                WorkingDirectory = Environment.CurrentDirectory
+            };
+
+            if (isDotnetHost) startInfo.ArgumentList.Add(typeof(Program).Assembly.Location);
+            startInfo.ArgumentList.Add("--no-color");
+            startInfo.ArgumentList.Add("connect");
+            startInfo.ArgumentList.Add("--foreground");
+            startInfo.ArgumentList.Add("--worker");
+
+            if (!isWindows)
+            {
+                string? clientHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                if (!String.IsNullOrWhiteSpace(clientHome)) startInfo.Environment["XENO_CLIENT_HOME"] = clientHome;
+                startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+                startInfo.Environment["XENO_CLIENT_BACKGROUND"] = "1";
+            }
+
+            return startInfo;
+        }
+
+        private static async Task<bool> WaitForRegisteredStateAsync(int processId, int timeoutMs, CancellationToken token)
+        {
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
+            {
+                ClientConnectionState state = ClientConnectionState.Load();
+                if (state.ProcessId == processId && state.IsConnected && state.IsRegistered) return true;
+                if (!IsProcessRunning(processId)) return false;
+                await Task.Delay(250, token).ConfigureAwait(false);
+            }
+
+            return false;
+        }
+
+        private static async Task MonitorStopFileAsync(CancellationTokenSource target, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                if (ClientConnectionState.IsStopRequested())
+                {
+                    target.Cancel();
+                    return;
+                }
+
+                await Task.Delay(500, token).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task<bool> WaitForProcessExitAsync(int processId, int timeoutMs)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(processId))
+                {
+                    using (CancellationTokenSource timeout = new CancellationTokenSource(timeoutMs))
+                    {
+                        try
+                        {
+                            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                            return true;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            return process.HasExited;
+                        }
+                    }
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        }
+
+        private static bool KillProcess(int processId)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(processId))
+                {
+                    process.Kill(true);
+                    process.WaitForExit(DefaultStopTimeoutMs);
+                    return process.HasExited;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        }
+
+        private static bool IsProcessRunning(int processId)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(processId))
+                {
+                    return !process.HasExited;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private static async Task PrintLogTailAsync(string logFile, int tailLines, CancellationToken token)
+        {
+            if (tailLines == 0) return;
+            List<string> lines = new List<string>();
+            using (FileStream stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader reader = new StreamReader(stream))
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    string? line = await reader.ReadLineAsync(token).ConfigureAwait(false);
+                    if (line == null) break;
+                    lines.Add(line);
+                    if (lines.Count > tailLines) lines.RemoveAt(0);
+                }
+            }
+
+            foreach (string line in lines)
+            {
+                Console.WriteLine(line);
+            }
+        }
+
+        private static async Task FollowLogAsync(string logFile, CancellationToken token)
+        {
+            using (FileStream stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader reader = new StreamReader(stream))
+            {
+                stream.Seek(0, SeekOrigin.End);
+                while (!token.IsCancellationRequested)
+                {
+                    string? line = await reader.ReadLineAsync(token).ConfigureAwait(false);
+                    if (line != null)
+                    {
+                        Console.WriteLine(line);
+                        continue;
+                    }
+
+                    await Task.Delay(250, token).ConfigureAwait(false);
+                }
+            }
+        }
+
         private static string[] ApplyGlobalOptions(string[] args, ClientSettings? settings)
         {
             _UseColors = settings?.UseColors ?? true;
@@ -1239,35 +1730,49 @@ namespace Xeno.Client
 
         private static void PrintServerMessage(string message)
         {
-            if (_UseJson)
-            {
-                Console.WriteLine(message);
-                return;
-            }
-
             try
             {
                 WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
                 string? type = envelope?.Type;
                 if (String.Equals(type, "server.heartbeat", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (_UseJson) Console.WriteLine(message);
                     return;
                 }
 
                 if (String.Equals(type, "server.connected", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
                     WriteSuccess("Connected to Xeno server.");
                     return;
                 }
 
                 if (String.Equals(type, "server.registered", StringComparison.OrdinalIgnoreCase))
                 {
+                    ClientConnectionState.MarkRegistered(ClientSettings.Load());
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
                     WriteSuccess("Client registered with Xeno server.");
                     return;
                 }
 
                 if (String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
                     ServerRequestMessage? request = JsonUtil.Deserialize<ServerRequestMessage>(message);
                     string requestId = String.IsNullOrWhiteSpace(request?.RequestId) ? "(no request ID)" : request.RequestId;
                     string method = String.IsNullOrWhiteSpace(request?.Method) ? "POST" : request.Method;
@@ -1282,6 +1787,12 @@ namespace Xeno.Client
                 if (String.Equals(type, "server.error", StringComparison.OrdinalIgnoreCase) ||
                     String.Equals(type, "server.unauthorized", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
                     ClientErrorResponse? error = JsonUtil.Deserialize<ClientErrorResponse>(message);
                     WriteError(error?.Message ?? "The Xeno server rejected the client message.");
                     return;
@@ -1289,12 +1800,24 @@ namespace Xeno.Client
 
                 if (!String.IsNullOrWhiteSpace(type))
                 {
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
                     WriteInfo("Server message: " + type + ".");
                     return;
                 }
             }
             catch (InvalidDataException)
             {
+            }
+
+            if (_UseJson)
+            {
+                Console.WriteLine(message);
+                return;
             }
 
             WriteInfo("Received a server message.");
@@ -1319,12 +1842,20 @@ namespace Xeno.Client
                     connection = new
                     {
                         connected = connection.IsConnected,
+                        registered = connection.IsRegistered,
+                        background = connection.IsBackground,
+                        websocketConnectedUtc = FormatJsonUtc(connection.WebSocketConnectedUtc),
                         connectedUtc = FormatJsonUtc(connection.ConnectedUtc),
+                        registeredUtc = FormatJsonUtc(connection.RegisteredUtc),
                         disconnectedUtc = FormatJsonUtc(connection.DisconnectedUtc),
                         lastHeartbeatUtc = FormatJsonUtc(connection.LastHeartbeatUtc),
                         lastServerMessageUtc = FormatJsonUtc(connection.LastServerMessageUtc),
                         lastUpdatedUtc = FormatJsonUtc(connection.LastUpdatedUtc),
+                        startedUtc = FormatJsonUtc(connection.StartedUtc),
+                        stopRequestedUtc = FormatJsonUtc(connection.StopRequestedUtc),
                         processId = connection.ProcessId ?? 0,
+                        logFile = connection.LogFilePath ?? ClientConnectionState.LogFile,
+                        errorLogFile = connection.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
                         reason = connection.LastDisconnectReason ?? String.Empty
                     }
                 });
@@ -1342,12 +1873,20 @@ namespace Xeno.Client
             Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
             WritePlainHeading("Connection");
             Console.WriteLine("  Connected:           " + FormatTrueFalse(connection.IsConnected));
+            Console.WriteLine("  Registered:          " + FormatTrueFalse(connection.IsRegistered));
+            Console.WriteLine("  Background:          " + FormatTrueFalse(connection.IsBackground));
+            Console.WriteLine("  Started UTC:         " + FormatUtc(connection.StartedUtc));
+            Console.WriteLine("  WebSocket UTC:       " + FormatUtc(connection.WebSocketConnectedUtc));
             Console.WriteLine("  Connected UTC:       " + FormatUtc(connection.ConnectedUtc));
+            Console.WriteLine("  Registered UTC:      " + FormatUtc(connection.RegisteredUtc));
             Console.WriteLine("  Disconnected UTC:    " + FormatUtc(connection.DisconnectedUtc));
             Console.WriteLine("  Last heartbeat UTC:  " + FormatUtc(connection.LastHeartbeatUtc));
             Console.WriteLine("  Last server msg UTC: " + FormatUtc(connection.LastServerMessageUtc));
             Console.WriteLine("  Last updated UTC:    " + FormatUtc(connection.LastUpdatedUtc));
+            Console.WriteLine("  Stop requested UTC:  " + FormatUtc(connection.StopRequestedUtc));
             Console.WriteLine("  Process ID:          " + (connection.ProcessId == null ? "(none)" : connection.ProcessId.Value.ToString()));
+            Console.WriteLine("  Log file:            " + DisplayValue(connection.LogFilePath, ClientConnectionState.LogFile));
+            Console.WriteLine("  Error log file:      " + DisplayValue(connection.ErrorLogFilePath, ClientConnectionState.ErrorLogFile));
             Console.WriteLine("  Last reason:         " + DisplayValue(connection.LastDisconnectReason, "(none)"));
         }
 
@@ -1633,6 +2172,39 @@ namespace Xeno.Client
             Console.WriteLine("      Delete a model from one provider endpoint, or from all providers when omitted.");
         }
 
+        private static void PrintConnectHelp()
+        {
+            WriteInfoHeading("Connect commands");
+            Console.WriteLine("  xeno connect");
+            Console.WriteLine("      Start the client as a background process and return after registration succeeds.");
+            Console.WriteLine("  xeno connect --foreground");
+            Console.WriteLine("      Run the client WebSocket loop in the current terminal.");
+            Console.WriteLine("  xeno connect --timeout <milliseconds>");
+            Console.WriteLine("      Wait this long for background registration before returning an error.");
+        }
+
+        private static void PrintLogsHelp()
+        {
+            WriteInfoHeading("Log commands");
+            Console.WriteLine("  xeno logs");
+            Console.WriteLine("      Show the most recent Xeno client log lines.");
+            Console.WriteLine("  xeno logs -f");
+            Console.WriteLine("      Follow the Xeno client log file as new lines are written.");
+            Console.WriteLine("  xeno logs --tail <lines>");
+            Console.WriteLine("      Control how many previous lines are shown.");
+            Console.WriteLine("  xeno logs --errors");
+            Console.WriteLine("      Read the error log instead of the standard client log.");
+        }
+
+        private static void PrintStopHelp()
+        {
+            WriteInfoHeading("Stop commands");
+            Console.WriteLine("  xeno stop");
+            Console.WriteLine("      Request the background Xeno client process to stop.");
+            Console.WriteLine("  xeno stop --force");
+            Console.WriteLine("      Request stop, then terminate the recorded process if it does not exit.");
+        }
+
         private static void WriteSuccess(string message)
         {
             WriteColored(message, ConsoleColor.Green);
@@ -1707,6 +2279,9 @@ namespace Xeno.Client
             Console.WriteLine("  xeno status");
             Console.WriteLine("  xeno inventory");
             Console.WriteLine("  xeno connect");
+            Console.WriteLine("  xeno connect --foreground");
+            Console.WriteLine("  xeno logs -f");
+            Console.WriteLine("  xeno stop");
             WritePlainHeading("Configuration:");
             Console.WriteLine("  xeno config show");
             Console.WriteLine("  xeno config colors on");
@@ -1734,6 +2309,11 @@ namespace Xeno.Client
             Console.WriteLine("                 --name <model-name>");
             Console.WriteLine("  xeno model delete --name <model-name>");
             Console.WriteLine("                    [--provider <provider-name>]");
+            WritePlainHeading("Runtime:");
+            Console.WriteLine("  xeno connect");
+            Console.WriteLine("  xeno connect --foreground");
+            Console.WriteLine("  xeno logs [--tail <lines>] [-f]");
+            Console.WriteLine("  xeno stop [--force]");
             WritePlainHeading("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");
