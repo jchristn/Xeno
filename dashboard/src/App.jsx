@@ -52,6 +52,12 @@ import Pagination from './components/Pagination.jsx';
 const api = new ApiClient();
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
+const analyticsRanges = [
+  { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 5 },
+  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 60 },
+  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, bucketMinutes: 720 },
+  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, bucketMinutes: 1440 }
+];
 const defaultOpenAiPrompt = 'Hello! Can you give me a brief explanation of how an inverted index works?';
 const defaultOpenAiSystemPrompt = 'You are a helpful and concise assistant.';
 const defaultEmbeddingInputText = [
@@ -70,6 +76,15 @@ const interactiveRowClickSelector = [
   'label',
   '[role="button"]',
   '[data-row-click-ignore="true"]'
+].join(', ');
+
+const tooltipBackfillSelector = [
+  'button',
+  'a',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]'
 ].join(', ');
 
 const navGroups = [
@@ -115,6 +130,78 @@ const pageMeta = {
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
 
+function useDashboardTooltipBackfill() {
+  const { t, i18n } = useTranslation();
+
+  useEffect(() => {
+    function applyTooltips() {
+      document.querySelectorAll(tooltipBackfillSelector).forEach((element) => {
+        const existingTitle = element.getAttribute('title');
+        const generated = element.getAttribute('data-tooltip-generated') === 'true';
+        if (existingTitle && !generated) return;
+        if (element.closest('[aria-hidden="true"]')) return;
+        const label = interactiveElementLabel(element, t('control'));
+        element.setAttribute('title', describeInteractiveElement(t, element, label));
+        element.setAttribute('data-tooltip-generated', 'true');
+      });
+    }
+
+    applyTooltips();
+    const observer = new MutationObserver(applyTooltips);
+    observer.observe(document.body, {
+      attributeFilter: ['aria-label', 'placeholder', 'value'],
+      attributes: true,
+      childList: true,
+      characterData: true,
+      subtree: true
+    });
+    return () => observer.disconnect();
+  }, [i18n.language, t]);
+}
+
+function interactiveElementLabel(element, fallback) {
+  const explicit = element.getAttribute('aria-label') || element.getAttribute('placeholder') || element.getAttribute('data-tooltip-label');
+  if (explicit && explicit.trim()) return explicit.trim();
+
+  const label = element.closest('label');
+  if (label) {
+    const labelText = label.innerText?.replace(/\s+/g, ' ').trim();
+    if (labelText) return labelText;
+  }
+
+  const text = element.innerText?.replace(/\s+/g, ' ').trim();
+  if (text) return text;
+
+  return fallback;
+}
+
+function describeInteractiveElement(t, element, label) {
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === 'a') return t('tooltipGenericLink', { label });
+  if (tagName === 'select') return t('tooltipGenericSelect', { label });
+  if (tagName === 'textarea') return t('tooltipGenericTextarea', { label });
+  if (tagName === 'input') return t('tooltipGenericInput', { label });
+  if (tagName === 'button') return t('tooltipGenericButton', { label });
+  return t('tooltipGenericControl', { label });
+}
+
+function navTooltipKey(key) {
+  const mapped = {
+    advertisedModels: 'tooltipNavAdvertisedModels',
+    analytics: 'tooltipNavAnalytics',
+    clients: 'tooltipNavClients',
+    credentials: 'tooltipNavCredentials',
+    explorer: 'tooltipNavExplorer',
+    home: 'tooltipNavHome',
+    requests: 'tooltipNavRequests',
+    security: 'tooltipNavSecurity',
+    settings: 'tooltipNavSettings',
+    tenants: 'tooltipNavTenants',
+    users: 'tooltipNavUsers'
+  };
+  return mapped[key] || 'tooltipGenericLink';
+}
+
 function Shell({ onLogout, onToggleTheme, theme }) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -140,7 +227,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
               {group.links.map((link) => {
                 const Icon = link.icon;
                 return (
-                  <NavLink className={`sidebar-link ${link.nested ? 'nested' : ''}`.trim()} end key={link.to} to={link.to}>
+                  <NavLink className={`sidebar-link ${link.nested ? 'nested' : ''}`.trim()} end key={link.to} title={t(navTooltipKey(link.key), { label: t(link.key) })} to={link.to}>
                     <Icon size={17} />
                     <span>{t(link.key)}</span>
                     <ChevronRight className="sidebar-link-arrow" size={14} />
@@ -163,10 +250,10 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <p>{t(meta.description)}</p>
           </div>
           <div className="topbar-actions">
-            <span className="topbar-server-url" title={api.baseUrl}>
+            <span className="topbar-server-url" title={t('tooltipServerUrl')}>
               <Server size={15} />
               <span>{api.baseUrl}</span>
-              <CopyButton label={t('copyServerUrl')} value={api.baseUrl} />
+              <CopyButton label={t('copyServerUrl')} tooltip={t('tooltipCopyServerUrl')} value={api.baseUrl} />
             </span>
             <LanguageSelector />
             <a
@@ -175,14 +262,14 @@ function Shell({ onLogout, onToggleTheme, theme }) {
               href="https://github.com/jchristn/Xeno"
               rel="noreferrer"
               target="_blank"
-              title={t('github')}
+              title={t('tooltipGitHub')}
             >
               <GitHubMark size={17} />
             </a>
-            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('toggleTheme')} type="button">
+            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('tooltipToggleTheme')} type="button">
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            <button aria-label={t('logout')} className="icon-button danger" onClick={onLogout} title={t('logout')} type="button">
+            <button aria-label={t('logout')} className="icon-button danger" onClick={onLogout} title={t('tooltipLogout')} type="button">
               <LogOut size={17} />
             </button>
           </div>
@@ -230,10 +317,10 @@ function LoginView({ onToggleTheme, theme }) {
 
         <section className="login-card">
           <div className="login-card-actions">
-            <a aria-label={t('github')} className="icon-button" href="https://github.com/jchristn/Xeno" rel="noreferrer" target="_blank" title={t('github')}>
+            <a aria-label={t('github')} className="icon-button" href="https://github.com/jchristn/Xeno" rel="noreferrer" target="_blank" title={t('tooltipGitHub')}>
               <GitHubMark size={17} />
             </a>
-            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('toggleTheme')} type="button">
+            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('tooltipToggleTheme')} type="button">
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
           </div>
@@ -244,7 +331,7 @@ function LoginView({ onToggleTheme, theme }) {
               <h2>{t('signInToDashboard')}</h2>
             </div>
           </div>
-          <button className="primary-button" onClick={() => { window.location.href = '/dashboard/home'; }} type="button">
+          <button className="primary-button" onClick={() => { window.location.href = '/dashboard/home'; }} title={t('tooltipLogin')} type="button">
             <Shield size={16} />
             <span>{t('login')}</span>
           </button>
@@ -289,7 +376,7 @@ function HomeView() {
       </div>
 
       <Panel
-        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         className="chart-panel-card"
         title={t('requestActivity')}
       >
@@ -297,7 +384,7 @@ function HomeView() {
       </Panel>
 
       <Panel
-        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         className="chart-panel-card"
         title={t('connectedClients')}
       >
@@ -337,8 +424,8 @@ function RequestHistoryView() {
       <Panel
         actions={(
           <div className="button-row">
-            <IconButton iconOnly onClick={() => { history.refresh(); summary.refresh(); }} label={t('refresh')} icon={<RefreshCw size={16} />} />
-            <IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} icon={<Trash2 size={16} />} variant="danger" />
+            <IconButton iconOnly onClick={() => { history.refresh(); summary.refresh(); }} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+            <IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} tooltip={t('clearHistoryMessage')} icon={<Trash2 size={16} />} variant="danger" />
           </div>
         )}
         className="chart-panel-card"
@@ -358,7 +445,7 @@ function RequestHistoryView() {
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
       />
-      {selected && <EditRecordModal title={t('requestDetails')} data={selected} onClose={() => setSelected(null)} />}
+      {selected && <RequestDetailsModal data={selected} onClose={() => setSelected(null)} />}
       <ConfirmModal
         confirmLabel={t('clear')}
         destructive
@@ -494,8 +581,8 @@ function ApiExplorerView() {
       <Panel
         actions={(
           <div className="button-row">
-            <IconButton disabled={!selected || isSending} onClick={execute} label={isSending ? t('sending') : t('execute')} icon={<Play size={16} />} variant="primary" />
-            {isSending ? <IconButton onClick={stopRequest} label={t('stop')} icon={<Square size={16} />} variant="danger" /> : null}
+            <IconButton disabled={!selected || isSending} onClick={execute} label={isSending ? t('sending') : t('execute')} tooltip={t('tooltipExecuteRequest')} icon={<Play size={16} />} variant="primary" />
+            {isSending ? <IconButton onClick={stopRequest} label={t('stop')} tooltip={t('tooltipStopRequest')} icon={<Square size={16} />} variant="danger" /> : null}
           </div>
         )}
         title={t('requestBuilder')}
@@ -505,15 +592,15 @@ function ApiExplorerView() {
         ) : (
           <div className="form-stack">
             <div className="form-grid two">
-              <label className="form-field">
+              <label className="form-field" title={t('tooltipEndpointFilter')}>
                 <span>{t('endpoints')}</span>
-                <select value={tag} onChange={(event) => updateTag(event.target.value)}>
+                <select value={tag} onChange={(event) => updateTag(event.target.value)} title={t('tooltipEndpointFilter')}>
                   {tags.map((item) => <option key={item} value={item}>{item === 'all' ? t('allEndpoints') : item}</option>)}
                 </select>
               </label>
-              <label className="form-field">
+              <label className="form-field" title={t('tooltipOperationSelect')}>
                 <span>{t('operation')}</span>
-                <select className="explorer-operation-select" value={selected?.key || ''} onChange={(event) => updateOperation(event.target.value)}>
+                <select className="explorer-operation-select" value={selected?.key || ''} onChange={(event) => updateOperation(event.target.value)} title={t('tooltipOperationSelect')}>
                   {visibleOperations.map((item) => (
                     <option key={item.key} value={item.key}>
                       {item.method} {item.path} - {item.summary}
@@ -535,11 +622,12 @@ function ApiExplorerView() {
                 {pathParameters.length > 0 ? (
                   <div className="form-grid two">
                     {pathParameters.map((name) => (
-                      <label className="form-field" key={name}>
+                      <label className="form-field" key={name} title={t('tooltipPathParameter')}>
                         <span>{t('pathParameter')}: {name}</span>
                         <input
                           value={pathValues[name] || ''}
                           onChange={(event) => setPathValues((current) => ({ ...current, [name]: event.target.value }))}
+                          title={t('tooltipPathParameter')}
                         />
                       </label>
                     ))}
@@ -547,18 +635,25 @@ function ApiExplorerView() {
                 ) : null}
 
                 <div className="form-grid two">
-                  <label className="form-field">
-                    <span>{t('queryParameters')}</span>
-                    <textarea className="explorer-json-editor" rows={10} value={queryText} onChange={(event) => setQueryText(event.target.value)} />
+                  <label className="form-field" title={t('tooltipQueryJson')}>
+                    <span className="form-field-heading">
+                      <span>{t('queryParameters')}</span>
+                      <CopyButton label={t('copyJson')} value={queryText} />
+                    </span>
+                    <textarea className="explorer-json-editor" rows={10} value={queryText} onChange={(event) => setQueryText(event.target.value)} title={t('tooltipQueryJson')} />
                   </label>
-                  <label className="form-field">
-                    <span>{t('requestBody')}</span>
+                  <label className="form-field" title={t('tooltipRequestBodyJson')}>
+                    <span className="form-field-heading">
+                      <span>{t('requestBody')}</span>
+                      <CopyButton label={t('copyJson')} value={selected.method === 'GET' ? '' : bodyText} />
+                    </span>
                     <textarea
                       className="explorer-json-editor"
                       disabled={selected.method === 'GET'}
                       rows={10}
                       value={selected.method === 'GET' ? t('noRequestBody') : bodyText}
                       onChange={(event) => setBodyText(event.target.value)}
+                      title={t('tooltipRequestBodyJson')}
                     />
                   </label>
                 </div>
@@ -625,7 +720,7 @@ function SecurityView() {
         onRefresh={roles.refresh}
         onRowClick={setSelectedRole}
         rowActionLabel={t('edit')}
-        actions={<IconButton onClick={() => setCreatingRole(true)} label={t('createRole')} icon={<Plus size={16} />} variant="primary" />}
+        actions={<IconButton onClick={() => setCreatingRole(true)} label={t('createRole')} tooltip={t('tooltipCreateRole')} icon={<Plus size={16} />} variant="primary" />}
       />
       <DataTable
         title={t('permissions')}
@@ -638,7 +733,7 @@ function SecurityView() {
         onRefresh={permissions.refresh}
         onRowClick={setSelectedPermission}
         rowActionLabel={t('edit')}
-        actions={<IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} icon={<Plus size={16} />} variant="primary" />}
+        actions={<IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} tooltip={t('tooltipCreatePermission')} icon={<Plus size={16} />} variant="primary" />}
       />
       <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} onRefresh={effective.refresh} />
       <DataTable
@@ -687,7 +782,7 @@ function TenantsView() {
         rowActionLabel={t('edit')}
         subtitle={t('tenantsTableSubtitle')}
         title={t('tenants')}
-        actions={<IconButton onClick={() => setCreating(true)} label={t('createTenant')} icon={<Plus size={16} />} variant="primary" />}
+        actions={<IconButton onClick={() => setCreating(true)} label={t('createTenant')} tooltip={t('tooltipCreateTenant')} icon={<Plus size={16} />} variant="primary" />}
       />
       {creating && <TenantEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveTenant} />}
       {selected && <TenantEditModal data={selected} onClose={() => setSelected(null)} onSave={saveTenant} />}
@@ -725,7 +820,7 @@ function UsersView() {
         rowActionLabel={t('edit')}
         subtitle={t('usersTableSubtitle')}
         title={t('users')}
-        actions={<IconButton onClick={() => setCreating(true)} label={t('createUser')} icon={<Plus size={16} />} variant="primary" />}
+        actions={<IconButton onClick={() => setCreating(true)} label={t('createUser')} tooltip={t('tooltipCreateUser')} icon={<Plus size={16} />} variant="primary" />}
       />
       {creating && <UserEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveUser} />}
       {selected && <UserEditModal data={selected} onClose={() => setSelected(null)} onSave={saveUser} />}
@@ -757,7 +852,7 @@ function CredentialsView() {
   return (
     <div className="view-stack">
       <div className="toolbar align-end">
-        <IconButton onClick={() => setCreating(true)} label={t('createCredential')} icon={<KeyRound size={16} />} variant="primary" />
+        <IconButton onClick={() => setCreating(true)} label={t('createCredential')} tooltip={t('tooltipCreateCredential')} icon={<KeyRound size={16} />} variant="primary" />
       </div>
       {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
       <DataTable
@@ -839,7 +934,7 @@ function AdvertisedModelsView() {
       <div className="toolbar table-controls">
         <label className="form-field inline compact-field">
           <span>{t('clientFilter')}</span>
-          <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)}>
+          <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} title={t('tooltipNavAdvertisedModels')}>
             <option value="all">{t('allClients')}</option>
             {clients.data.map((client) => {
               const clientId = String(value(client, 'id') || '');
@@ -871,44 +966,79 @@ function AdvertisedModelsView() {
 
 function AnalyticsView() {
   const { t } = useTranslation();
-  const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
-  const summary = useResource(requestHistorySummaryEndpoint, { buckets: [] });
+  const [analyticsRange, setAnalyticsRange] = useState('lastDay');
+  const [rangeAnchor, setRangeAnchor] = useState(() => Date.now());
+  const analyticsWindow = useMemo(() => buildAnalyticsWindow(analyticsRange, rangeAnchor), [analyticsRange, rangeAnchor]);
+  const summary = useResource(requestHistorySummaryPath(analyticsWindow), { buckets: [] });
   const history = useResource(requestHistoryEndpoint, []);
   const metrics = useTextResource('/metrics', '');
-  const byModel = groupByCount(history.data, 'model');
-  const byPath = groupByCount(history.data, 'path');
+  const rangedHistory = useMemo(() => filterRowsByDateRange(history.data, analyticsWindow), [analyticsWindow, history.data]);
+  const analyticsTotals = summarizeHistoryRows(rangedHistory);
+  const byModel = groupByCount(rangedHistory, 'model');
+  const byPath = groupByCount(rangedHistory, 'path');
 
   function refreshAnalytics() {
-    analytics.refresh();
+    setRangeAnchor(Date.now());
     summary.refresh();
     history.refresh();
     metrics.refresh();
   }
 
+  function updateAnalyticsRange(nextRange) {
+    setAnalyticsRange(nextRange);
+    setRangeAnchor(Date.now());
+  }
+
   return (
     <div className="view-stack">
+      <div className="analytics-range-toolbar">
+        <div>
+          <span className="eyebrow">{t('timeRange')}</span>
+          <h2>{t('analyticsTimeRange')}</h2>
+        </div>
+        <TimeRangeSelector onChange={updateAnalyticsRange} range={analyticsRange} />
+      </div>
       <div className="metric-grid compact">
-        <MetricCard icon={<Activity size={18} />} label={t('total')} value={formatNumber(analytics.data.total)} />
-        <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analytics.data.success)} tone="success" />
-        <MetricCard icon={<Shield size={18} />} label={t('failed')} value={formatNumber(analytics.data.failures)} tone="danger" />
-        <MetricCard icon={<Gauge size={18} />} label={t('failureRate')} value={formatPercent(Number(analytics.data.failureRate || 0))} tone={Number(analytics.data.failureRate || 0) > 0 ? 'warning' : 'success'} />
+        <MetricCard icon={<Activity size={18} />} label={t('total')} value={formatNumber(analyticsTotals.total)} />
+        <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analyticsTotals.success)} tone="success" />
+        <MetricCard icon={<Shield size={18} />} label={t('failed')} value={formatNumber(analyticsTotals.failed)} tone="danger" />
+        <MetricCard icon={<Gauge size={18} />} label={t('failureRate')} value={formatPercent(analyticsTotals.failureRate)} tone={analyticsTotals.failureRate > 0 ? 'warning' : 'success'} />
       </div>
       <Panel
-        actions={<IconButton iconOnly onClick={refreshAnalytics} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        actions={<IconButton iconOnly onClick={refreshAnalytics} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         title={t('requestActivity')}
       >
-        <ActivityChart summary={summary.data} />
+        <ActivityChart onRangeChange={updateAnalyticsRange} range={analyticsRange} showControls={false} summary={summary.data} />
       </Panel>
       <div className="workspace-grid">
         <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
         <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
       </div>
       <Panel
-        actions={<IconButton iconOnly onClick={metrics.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />}
+        actions={<IconButton iconOnly onClick={metrics.refresh} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         title={t('prometheusMetrics')}
       >
         <pre className="metrics-output">{metrics.data || t('noData')}</pre>
       </Panel>
+    </div>
+  );
+}
+
+function TimeRangeSelector({ onChange, range }) {
+  const { t } = useTranslation();
+  return (
+    <div className="chart-controls analytics-range-controls" aria-label={t('chartRange')}>
+      {analyticsRanges.map((item) => (
+        <button
+          className={item.key === range ? 'active' : ''}
+          key={item.key}
+          onClick={() => onChange(item.key)}
+          title={t('tooltipChartRangeOption', { range: t(item.key) })}
+          type="button"
+        >
+          {t(item.key)}
+        </button>
+      ))}
     </div>
   );
 }
@@ -939,6 +1069,19 @@ function SettingsView() {
 
   function updateListSetting(section, key, inputValue) {
     updateSetting(section, key, inputValue.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean));
+  }
+
+  function updateNestedSetting(section, child, key, inputValue) {
+    setDraft((current) => ({
+      ...current,
+      [section]: {
+        ...current[section],
+        [child]: {
+          ...(current[section]?.[child] || {}),
+          [key]: inputValue
+        }
+      }
+    }));
   }
 
   async function saveSettings() {
@@ -974,8 +1117,8 @@ function SettingsView() {
     <div className="view-stack">
       <div className="toolbar align-end">
         <LanguageSelector />
-        <IconButton iconOnly onClick={settings.refresh} label={t('refresh')} icon={<RefreshCw size={16} />} />
-        <IconButton onClick={saveSettings} label={t('saveSettings')} icon={<Upload size={16} />} variant="primary" />
+        <IconButton iconOnly onClick={settings.refresh} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+        <IconButton onClick={saveSettings} label={t('saveSettings')} tooltip={t('tooltipSaveSettings')} icon={<Upload size={16} />} variant="primary" />
       </div>
       {status ? <p className="muted-copy">{status}</p> : null}
       <div className="settings-restart-banner">
@@ -986,23 +1129,23 @@ function SettingsView() {
         <Panel actions={<SettingImpactBadge type="mixed" />} title={t('restSettings')}>
           <SettingImpactNote live={t('restLiveNote')} restart={t('restRestartNote')} />
           <div className="form-grid two">
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsHostname')}>
               <span>{t('hostname')}</span>
-              <input value={draft.Rest.Hostname} onChange={(event) => updateSetting('Rest', 'Hostname', event.target.value)} />
+              <input value={draft.Rest.Hostname} onChange={(event) => updateSetting('Rest', 'Hostname', event.target.value)} title={t('tooltipSettingsHostname')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsPort')}>
               <span>{t('port')}</span>
-              <input min="1" type="number" value={draft.Rest.Port} onChange={(event) => updateSetting('Rest', 'Port', Number(event.target.value))} />
+              <input min="1" type="number" value={draft.Rest.Port} onChange={(event) => updateSetting('Rest', 'Port', Number(event.target.value))} title={t('tooltipSettingsPort')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="toggle-field">
-              <input checked={draft.Rest.Ssl} onChange={(event) => updateSetting('Rest', 'Ssl', event.target.checked)} type="checkbox" />
+            <label className="toggle-field" title={t('tooltipSettingsSsl')}>
+              <input checked={draft.Rest.Ssl} onChange={(event) => updateSetting('Rest', 'Ssl', event.target.checked)} title={t('tooltipSettingsSsl')} type="checkbox" />
               <span>{t('ssl')}</span>
               <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
-            <label className="toggle-field">
-              <input checked={draft.Rest.RequireAuthentication} onChange={(event) => updateSetting('Rest', 'RequireAuthentication', event.target.checked)} type="checkbox" />
+            <label className="toggle-field" title={t('tooltipSettingsRequireAuthentication')}>
+              <input checked={draft.Rest.RequireAuthentication} onChange={(event) => updateSetting('Rest', 'RequireAuthentication', event.target.checked)} title={t('tooltipSettingsRequireAuthentication')} type="checkbox" />
               <span>{t('requireAuthentication')}</span>
               <small className="setting-impact live inline">{t('appliesImmediately')}</small>
             </label>
@@ -1011,25 +1154,25 @@ function SettingsView() {
         <Panel actions={<SettingImpactBadge type="live" />} title={t('corsSettings')}>
           <SettingImpactNote live={t('corsLiveNote')} />
           <div className="form-stack">
-            <label className="toggle-field">
-              <input checked={draft.Cors.Enabled} onChange={(event) => updateSetting('Cors', 'Enabled', event.target.checked)} type="checkbox" />
+            <label className="toggle-field" title={t('tooltipSettingsCorsEnabled')}>
+              <input checked={draft.Cors.Enabled} onChange={(event) => updateSetting('Cors', 'Enabled', event.target.checked)} title={t('tooltipSettingsCorsEnabled')} type="checkbox" />
               <span>{t('enabled')}</span>
               <small className="setting-impact live inline">{t('appliesImmediately')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsAllowedOrigins')}>
               <span>{t('allowedOrigins')}</span>
-              <textarea rows={2} value={listToText(draft.Cors.AllowedOrigins)} onChange={(event) => updateListSetting('Cors', 'AllowedOrigins', event.target.value)} />
+              <textarea rows={2} value={listToText(draft.Cors.AllowedOrigins)} onChange={(event) => updateListSetting('Cors', 'AllowedOrigins', event.target.value)} title={t('tooltipSettingsAllowedOrigins')} />
               <small className="setting-impact live">{t('appliesImmediately')}</small>
             </label>
             <div className="form-grid two">
-              <label className="form-field">
+              <label className="form-field" title={t('tooltipSettingsAllowedHeaders')}>
                 <span>{t('allowedHeaders')}</span>
-                <textarea rows={2} value={listToText(draft.Cors.AllowedHeaders)} onChange={(event) => updateListSetting('Cors', 'AllowedHeaders', event.target.value)} />
+                <textarea rows={2} value={listToText(draft.Cors.AllowedHeaders)} onChange={(event) => updateListSetting('Cors', 'AllowedHeaders', event.target.value)} title={t('tooltipSettingsAllowedHeaders')} />
                 <small className="setting-impact live">{t('appliesImmediately')}</small>
               </label>
-              <label className="form-field">
+              <label className="form-field" title={t('tooltipSettingsAllowedMethods')}>
                 <span>{t('allowedMethods')}</span>
-                <textarea rows={2} value={listToText(draft.Cors.AllowedMethods)} onChange={(event) => updateListSetting('Cors', 'AllowedMethods', event.target.value)} />
+                <textarea rows={2} value={listToText(draft.Cors.AllowedMethods)} onChange={(event) => updateListSetting('Cors', 'AllowedMethods', event.target.value)} title={t('tooltipSettingsAllowedMethods')} />
                 <small className="setting-impact live">{t('appliesImmediately')}</small>
               </label>
             </div>
@@ -1038,24 +1181,66 @@ function SettingsView() {
         <Panel actions={<SettingImpactBadge type="mixed" />} title={t('webSocketSettings')}>
           <SettingImpactNote live={t('webSocketLiveNote')} restart={t('webSocketRestartNote')} />
           <div className="form-grid two">
-            <label className="toggle-field">
-              <input checked={draft.WebSocket.Enabled} onChange={(event) => updateSetting('WebSocket', 'Enabled', event.target.checked)} type="checkbox" />
+            <label className="toggle-field" title={t('tooltipSettingsWebSocketEnabled')}>
+              <input checked={draft.WebSocket.Enabled} onChange={(event) => updateSetting('WebSocket', 'Enabled', event.target.checked)} title={t('tooltipSettingsWebSocketEnabled')} type="checkbox" />
               <span>{t('enabled')}</span>
               <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsWebSocketPath')}>
               <span>{t('path')}</span>
-              <input value={draft.WebSocket.Path} onChange={(event) => updateSetting('WebSocket', 'Path', event.target.value)} />
+              <input value={draft.WebSocket.Path} onChange={(event) => updateSetting('WebSocket', 'Path', event.target.value)} title={t('tooltipSettingsWebSocketPath')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsHeartbeat')}>
               <span>{t('heartbeatIntervalMs')}</span>
-              <input min="1000" type="number" value={draft.WebSocket.HeartbeatIntervalMs} onChange={(event) => updateSetting('WebSocket', 'HeartbeatIntervalMs', Number(event.target.value))} />
+              <input min="1000" type="number" value={draft.WebSocket.HeartbeatIntervalMs} onChange={(event) => updateSetting('WebSocket', 'HeartbeatIntervalMs', Number(event.target.value))} title={t('tooltipSettingsHeartbeat')} />
               <small className="setting-impact live">{t('appliesToNewActivity')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsRequestTimeout')}>
               <span>{t('requestTimeoutMs')}</span>
-              <input min="1000" type="number" value={draft.WebSocket.RequestTimeoutMs} onChange={(event) => updateSetting('WebSocket', 'RequestTimeoutMs', Number(event.target.value))} />
+              <input min="1000" type="number" value={draft.WebSocket.RequestTimeoutMs} onChange={(event) => updateSetting('WebSocket', 'RequestTimeoutMs', Number(event.target.value))} title={t('tooltipSettingsRequestTimeout')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+          </div>
+        </Panel>
+        <Panel actions={<SettingImpactBadge type="live" />} title={t('routingSettings')}>
+          <SettingImpactNote live={t('routingLiveNote')} />
+          <div className="form-grid two">
+            <label className="form-field" title={t('tooltipSettingsLoadBalancingMode')}>
+              <span>{t('loadBalancingMode')}</span>
+              <select value={draft.Routing.LoadBalancingMode} onChange={(event) => updateSetting('Routing', 'LoadBalancingMode', event.target.value)} title={t('tooltipSettingsLoadBalancingMode')}>
+                {['RoundRobin', 'Random', 'FirstAvailable', 'LeastRecentlyUsed', 'Adaptive'].map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsRoutingTimeout')}>
+              <span>{t('defaultTimeoutMs')}</span>
+              <input min="1000" type="number" value={draft.Routing.DefaultTimeoutMs} onChange={(event) => updateSetting('Routing', 'DefaultTimeoutMs', Number(event.target.value))} title={t('tooltipSettingsRoutingTimeout')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsAdaptiveSampleCount')}>
+              <span>{t('adaptiveSampleCount')}</span>
+              <input min="1" max="8" type="number" value={draft.Routing.Adaptive.SampleCount} onChange={(event) => updateNestedSetting('Routing', 'Adaptive', 'SampleCount', Number(event.target.value))} title={t('tooltipSettingsAdaptiveSampleCount')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsAdaptiveCapacityWeight')}>
+              <span>{t('capacityWeight')}</span>
+              <input min="0" type="number" value={draft.Routing.Adaptive.CapacityWeight} onChange={(event) => updateNestedSetting('Routing', 'Adaptive', 'CapacityWeight', Number(event.target.value))} title={t('tooltipSettingsAdaptiveCapacityWeight')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsAdaptiveInFlightWeight')}>
+              <span>{t('inFlightWeight')}</span>
+              <input min="0" type="number" value={draft.Routing.Adaptive.InFlightWeight} onChange={(event) => updateNestedSetting('Routing', 'Adaptive', 'InFlightWeight', Number(event.target.value))} title={t('tooltipSettingsAdaptiveInFlightWeight')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsAdaptiveClientWeight')}>
+              <span>{t('clientWeight')}</span>
+              <input min="0" type="number" value={draft.Routing.Adaptive.ClientWeight} onChange={(event) => updateNestedSetting('Routing', 'Adaptive', 'ClientWeight', Number(event.target.value))} title={t('tooltipSettingsAdaptiveClientWeight')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsAdaptiveHeartbeatWeight')}>
+              <span>{t('heartbeatWeight')}</span>
+              <input min="0" type="number" value={draft.Routing.Adaptive.HeartbeatWeight} onChange={(event) => updateNestedSetting('Routing', 'Adaptive', 'HeartbeatWeight', Number(event.target.value))} title={t('tooltipSettingsAdaptiveHeartbeatWeight')} />
               <small className="setting-impact live">{t('appliesToNewActivity')}</small>
             </label>
           </div>
@@ -1063,46 +1248,46 @@ function SettingsView() {
         <Panel actions={<SettingImpactBadge type="restart" />} title={t('databaseSettings')}>
           <SettingImpactNote restart={t('databaseRestartNote')} />
           <div className="form-grid two">
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabaseType')}>
               <span>{t('provider')}</span>
-              <select value={draft.Database.Type} onChange={(event) => updateSetting('Database', 'Type', event.target.value)}>
+              <select value={draft.Database.Type} onChange={(event) => updateSetting('Database', 'Type', event.target.value)} title={t('tooltipSettingsDatabaseType')}>
                 {['Sqlite', 'Postgresql', 'SqlServer', 'Mysql'].map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabaseFilename')}>
               <span>{t('filename')}</span>
-              <input value={draft.Database.Filename} onChange={(event) => updateSetting('Database', 'Filename', event.target.value)} />
+              <input value={draft.Database.Filename} onChange={(event) => updateSetting('Database', 'Filename', event.target.value)} title={t('tooltipSettingsDatabaseFilename')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabaseServer')}>
               <span>{t('server')}</span>
-              <input value={draft.Database.Server || ''} onChange={(event) => updateSetting('Database', 'Server', event.target.value)} />
+              <input value={draft.Database.Server || ''} onChange={(event) => updateSetting('Database', 'Server', event.target.value)} title={t('tooltipSettingsDatabaseServer')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabasePort')}>
               <span>{t('port')}</span>
-              <input min="0" type="number" value={draft.Database.Port} onChange={(event) => updateSetting('Database', 'Port', Number(event.target.value))} />
+              <input min="0" type="number" value={draft.Database.Port} onChange={(event) => updateSetting('Database', 'Port', Number(event.target.value))} title={t('tooltipSettingsDatabasePort')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabaseName')}>
               <span>{t('databaseName')}</span>
-              <input value={draft.Database.DatabaseName || ''} onChange={(event) => updateSetting('Database', 'DatabaseName', event.target.value)} />
+              <input value={draft.Database.DatabaseName || ''} onChange={(event) => updateSetting('Database', 'DatabaseName', event.target.value)} title={t('tooltipSettingsDatabaseName')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabaseUsername')}>
               <span>{t('username')}</span>
-              <input value={draft.Database.Username || ''} onChange={(event) => updateSetting('Database', 'Username', event.target.value)} />
+              <input value={draft.Database.Username || ''} onChange={(event) => updateSetting('Database', 'Username', event.target.value)} title={t('tooltipSettingsDatabaseUsername')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsDatabasePassword')}>
               <span>{t('password')}</span>
-              <input type="password" value={draft.Database.Password || ''} onChange={(event) => updateSetting('Database', 'Password', event.target.value)} />
+              <input type="password" value={draft.Database.Password || ''} onChange={(event) => updateSetting('Database', 'Password', event.target.value)} title={t('tooltipSettingsDatabasePassword')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsConnectionString')}>
               <span>{t('connectionString')}</span>
-              <input value={draft.Database.ConnectionString || ''} onChange={(event) => updateSetting('Database', 'ConnectionString', event.target.value)} />
+              <input value={draft.Database.ConnectionString || ''} onChange={(event) => updateSetting('Database', 'ConnectionString', event.target.value)} title={t('tooltipSettingsConnectionString')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
           </div>
@@ -1110,42 +1295,48 @@ function SettingsView() {
         <Panel actions={<SettingImpactBadge type="restart" />} title={t('loggingSettings')}>
           <SettingImpactNote restart={t('loggingRestartNote')} />
           <div className="form-grid two">
-            <label className="toggle-field">
-              <input checked={draft.Logging.ConsoleLogging} onChange={(event) => updateSetting('Logging', 'ConsoleLogging', event.target.checked)} type="checkbox" />
+            <label className="toggle-field" title={t('tooltipSettingsConsoleLogging')}>
+              <input checked={draft.Logging.ConsoleLogging} onChange={(event) => updateSetting('Logging', 'ConsoleLogging', event.target.checked)} title={t('tooltipSettingsConsoleLogging')} type="checkbox" />
               <span>{t('consoleLogging')}</span>
               <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
-            <label className="toggle-field">
-              <input checked={draft.Logging.FileLogging} onChange={(event) => updateSetting('Logging', 'FileLogging', event.target.checked)} type="checkbox" />
+            <label className="toggle-field" title={t('tooltipSettingsFileLogging')}>
+              <input checked={draft.Logging.FileLogging} onChange={(event) => updateSetting('Logging', 'FileLogging', event.target.checked)} title={t('tooltipSettingsFileLogging')} type="checkbox" />
               <span>{t('fileLogging')}</span>
               <small className="setting-impact restart inline">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsLogDirectory')}>
               <span>{t('logDirectory')}</span>
-              <input value={draft.Logging.LogDirectory} onChange={(event) => updateSetting('Logging', 'LogDirectory', event.target.value)} />
+              <input value={draft.Logging.LogDirectory} onChange={(event) => updateSetting('Logging', 'LogDirectory', event.target.value)} title={t('tooltipSettingsLogDirectory')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
-            <label className="form-field">
+            <label className="form-field" title={t('tooltipSettingsLogFilename')}>
               <span>{t('logFilename')}</span>
-              <input value={draft.Logging.LogFilename} onChange={(event) => updateSetting('Logging', 'LogFilename', event.target.value)} />
+              <input value={draft.Logging.LogFilename} onChange={(event) => updateSetting('Logging', 'LogFilename', event.target.value)} title={t('tooltipSettingsLogFilename')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
           </div>
         </Panel>
         <Panel title={t('backupRestore')}>
           <div className="button-row">
-            <IconButton onClick={downloadBackup} label={t('backup')} icon={<Download size={16} />} />
-            <IconButton onClick={restoreBackup} label={t('restore')} icon={<Upload size={16} />} variant="primary" />
+            <IconButton onClick={downloadBackup} label={t('backup')} tooltip={t('tooltipBackupDownload')} icon={<Download size={16} />} />
+            <IconButton onClick={restoreBackup} label={t('restore')} tooltip={t('tooltipRestoreBackup')} icon={<Upload size={16} />} variant="primary" />
+            <CopyButton label={t('copyJson')} value={backup} />
           </div>
-          <textarea className="backup-editor" value={backup} onChange={(event) => setBackup(event.target.value)} aria-label={t('backup')} />
+          <textarea className="backup-editor" value={backup} onChange={(event) => setBackup(event.target.value)} aria-label={t('backup')} title={t('tooltipBackupEditor')} />
         </Panel>
       </div>
       <Panel
-        actions={<IconButton onClick={saveJsonSettings} label={t('saveJson')} icon={<Upload size={16} />} variant="primary" />}
+        actions={(
+          <div className="button-row">
+            <CopyButton label={t('copyJson')} value={configText} />
+            <IconButton onClick={saveJsonSettings} label={t('saveJson')} tooltip={t('tooltipSaveJson')} icon={<Upload size={16} />} variant="primary" />
+          </div>
+        )}
         title={t('rawConfigJson')}
       >
         <SettingImpactNote live={t('rawJsonLiveNote')} restart={t('rawJsonRestartNote')} />
-        <textarea className="backup-editor config-editor" value={configText} onChange={(event) => setConfigText(event.target.value)} aria-label={t('rawConfigJson')} />
+        <textarea className="backup-editor config-editor" value={configText} onChange={(event) => setConfigText(event.target.value)} aria-label={t('rawConfigJson')} title={t('tooltipRawConfigJson')} />
       </Panel>
     </div>
   );
@@ -1242,6 +1433,11 @@ function defaultServerSettings() {
       AllowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
     },
     WebSocket: { Enabled: true, Path: '/ws/v1/clients', HeartbeatIntervalMs: 15000, RequestTimeoutMs: 120000 },
+    Routing: {
+      DefaultTimeoutMs: 300000,
+      LoadBalancingMode: 'RoundRobin',
+      Adaptive: { SampleCount: 2, CapacityWeight: 45, InFlightWeight: 30, ClientWeight: 15, HeartbeatWeight: 10 }
+    },
     Database: { Type: 'Sqlite', Filename: 'data/xeno.db', Server: '', Port: 0, DatabaseName: '', Username: '', Password: '', ConnectionString: '' },
     Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' }
   };
@@ -1263,6 +1459,14 @@ function normalizeSettings(input) {
     Rest: { ...defaults.Rest, ...(source.Rest || source.rest || {}) },
     Cors: { ...defaults.Cors, ...(source.Cors || source.cors || {}) },
     WebSocket: { ...defaults.WebSocket, ...(source.WebSocket || source.webSocket || source.websocket || {}) },
+    Routing: {
+      ...defaults.Routing,
+      ...(source.Routing || source.routing || {}),
+      Adaptive: {
+        ...defaults.Routing.Adaptive,
+        ...((source.Routing || source.routing || {}).Adaptive || (source.Routing || source.routing || {}).adaptive || {})
+      }
+    },
     Database: { ...defaults.Database, ...(source.Database || source.database || {}) },
     Logging: { ...defaults.Logging, ...(source.Logging || source.logging || {}) }
   };
@@ -1300,9 +1504,9 @@ function Panel({ actions, children, className = '', eyebrow, title }) {
   );
 }
 
-function IconButton({ disabled = false, icon, iconOnly = false, label, onClick, variant = 'secondary' }) {
+function IconButton({ disabled = false, icon, iconOnly = false, label, onClick, tooltip, variant = 'secondary' }) {
   return (
-    <button className={`action-button ${variant} ${iconOnly ? 'icon-only' : ''}`} disabled={disabled} onClick={onClick} title={label} type="button">
+    <button className={`action-button ${variant} ${iconOnly ? 'icon-only' : ''}`} disabled={disabled} onClick={onClick} title={tooltip || label} type="button">
       {icon}
       <span className={iconOnly ? 'sr-only' : ''}>{label}</span>
     </button>
@@ -1401,6 +1605,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
         icon: <Pencil size={14} />,
         key: 'details',
         label: rowActionLabel || t('viewDetails'),
+        tooltip: t('tooltipEditRow'),
         onSelect: () => onRowClick(row)
       });
     }
@@ -1408,6 +1613,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
       icon: <FileJson size={14} />,
       key: 'view-json',
       label: t('viewJson'),
+      tooltip: t('tooltipViewJson'),
       onSelect: () => setJsonRow(row)
     });
     items.push({ divider: true, key: 'divider-delete' });
@@ -1417,6 +1623,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
       icon: <Trash2 size={14} />,
       key: 'delete',
       label: deleteAllowed ? t('delete') : t('deleteUnavailable'),
+      tooltip: t('tooltipDeleteRow'),
       onSelect: () => setDeleteRow(row)
     });
     return items;
@@ -1436,11 +1643,11 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
           {subtitle ? <p>{subtitle}</p> : null}
         </div>
         <div className="table-toolbar">
-          <label className="search-box">
+          <label className="search-box" title={t('tooltipSearchTable')}>
             <Search size={15} />
-            <input aria-label={t('search')} onChange={(event) => setQuery(event.target.value)} placeholder={t('search')} value={query} />
+            <input aria-label={t('search')} onChange={(event) => setQuery(event.target.value)} placeholder={t('search')} title={t('tooltipSearchTable')} value={query} />
           </label>
-          <span className="row-count">{filteredRows.length} {t('rows')}</span>
+          <span className="row-count" title={t('showingRange', { start: sortedRows.length === 0 ? 0 : 1, end: filteredRows.length, total: filteredRows.length })}>{filteredRows.length} {t('rows')}</span>
           {actions}
         </div>
       </div>
@@ -1457,7 +1664,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
           <thead>
             <tr>
               {normalizedColumns.map((column) => (
-                <th className={column.sortable === false ? '' : 'sortable'} key={column.key} onClick={() => handleSort(column)}>
+                <th className={column.sortable === false ? '' : 'sortable'} key={column.key} onClick={() => handleSort(column)} title={column.sortable === false ? undefined : t('tooltipSortColumn')}>
                   <span className="th-content">
                     <span>{t(column.label || column.key, column.label || column.key)}</span>
                     {renderSortIcon(column)}
@@ -1476,6 +1683,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
                         onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
                         onClick={(event) => event.stopPropagation()}
                         placeholder={t('filter')}
+                        title={t('tooltipColumnFilter')}
                         value={columnFilters[column.key] || ''}
                       />
                     )}
@@ -1529,9 +1737,15 @@ function CellValue({ columnKey, value: cell }) {
   if (isIdentifierColumn(columnKey)) return <CopyableValue label={t('copyValue')} value={cell} />;
   if (typeof cell === 'boolean') return <StatusChip tone={cell ? 'success' : 'danger'} value={cell ? t('yes') : t('no')} />;
   if (isStatusColumn(columnKey)) return <StatusChip tone={toneForValue(cell)} value={String(cell)} />;
-  if (Array.isArray(cell)) return <span className="array-cell">{cell.join(', ')}</span>;
-  if (typeof cell === 'object') return <code className="code-cell">{JSON.stringify(cell)}</code>;
-  return <span>{String(cell)}</span>;
+  if (Array.isArray(cell)) {
+    const arrayText = cell.join(', ');
+    return <span className="array-cell" title={arrayText}>{arrayText}</span>;
+  }
+  if (typeof cell === 'object') {
+    const objectText = JSON.stringify(cell);
+    return <code className="code-cell" title={objectText}>{objectText}</code>;
+  }
+  return <span title={String(cell)}>{String(cell)}</span>;
 }
 
 function StatusRow({ label, tone = 'neutral', value }) {
@@ -1547,6 +1761,187 @@ function StatusChip({ tone = 'neutral', value }) {
   return <span className={`status-chip ${tone}`}>{value}</span>;
 }
 
+function RequestDetailsModal({ data, onClose }) {
+  const { t } = useTranslation();
+  const record = data || {};
+  const telemetry = value(record, 'telemetry') || {};
+  const routing = value(record, 'routingDecision') || {};
+  const timeline = Array.isArray(value(record, 'timeline')) ? value(record, 'timeline') : [];
+  const requestHeaders = value(record, 'requestHeaders') || {};
+  const responseHeaders = value(record, 'responseHeaders') || {};
+  const requestBody = value(record, 'requestBody');
+  const responseBody = value(record, 'responseBody');
+  const statusCode = value(record, 'statusCode');
+  const id = recordId(record);
+  const candidateClientIds = value(routing, 'candidateClientIds');
+  const routingRows = [
+    { label: t('tenant', 'Tenant'), value: value(record, 'tenantId'), copy: true },
+    { label: t('client', 'Client'), value: value(record, 'selectedClientId') || value(routing, 'selectedClientId'), copy: true },
+    { label: t('selectedClientName', 'Selected client name'), value: value(routing, 'selectedClientName') },
+    { label: t('model', 'Model'), value: value(record, 'model') || value(routing, 'effectiveModel') },
+    { label: t('sourceIp', 'Source IP'), value: value(record, 'sourceIp') },
+    { label: t('outcome', 'Outcome'), value: value(routing, 'outcomeCode') },
+    { label: t('loadBalancingMode', 'Load-balancing mode'), value: value(routing, 'loadBalancingMode') },
+    { label: t('candidateCount', 'Candidate count'), value: formatOptionalNumber(value(routing, 'candidateCount')) },
+    { label: t('candidateClients', 'Candidate clients'), value: Array.isArray(candidateClientIds) ? candidateClientIds.join(', ') : candidateClientIds, copy: true },
+    { label: t('selectedProvider', 'Selected provider'), value: value(routing, 'selectedProvider') },
+    { label: t('selectedSource', 'Selected source'), value: value(routing, 'selectedSource') },
+    { label: t('selectedInFlight', 'Selected in-flight'), value: formatOptionalNumber(value(routing, 'selectedClientInFlightRequests')) },
+    { label: t('selectedMaxParallel', 'Selected max parallel'), value: formatOptionalNumber(value(routing, 'selectedClientMaxParallelRequests')) },
+    { label: t('selectedWeight', 'Selected weight'), value: formatOptionalNumber(value(routing, 'selectedClientWeight')) },
+    { label: t('lastHeartbeatUtc', 'Last heartbeat UTC'), value: formatDateTime(value(routing, 'selectedClientLastHeartbeatUtc')) },
+    { label: t('adaptiveSampleCount', 'Adaptive sample count'), value: formatOptionalNumber(value(routing, 'adaptiveSampleCount')) },
+    { label: t('adaptiveScore', 'Adaptive score'), value: value(routing, 'adaptiveScore') },
+    { label: t('selectionReason', 'Selection reason'), value: value(routing, 'selectionReason') },
+    { label: t('createdUtc', 'Created UTC'), value: formatDateTime(value(record, 'createdUtc')) },
+    { label: t('completedUtc', 'Completed UTC'), value: formatDateTime(value(record, 'completedUtc')) }
+  ];
+  const telemetryRows = [
+    { label: t('status', 'Status'), value: statusCode ? String(statusCode) : '-' },
+    { label: t('totalTime', 'Total time'), value: formatDuration(value(record, 'durationMs') ?? value(telemetry, 'totalTimeMs')) },
+    { label: t('timeToFirstToken', 'Time to first token'), value: formatDuration(value(telemetry, 'timeToFirstTokenMs')) },
+    { label: t('streamingTime', 'Streaming time'), value: formatDuration(value(telemetry, 'totalStreamingTimeMs')) },
+    { label: t('clientRoundTrip', 'Client round trip'), value: formatDuration(value(telemetry, 'clientRoundTripMs') ?? value(routing, 'clientRoundTripMs')) },
+    { label: t('upstreamTotal', 'Upstream total'), value: formatDuration(value(telemetry, 'upstreamTotalMs')) },
+    { label: t('requestToHeaders', 'Request to headers'), value: formatDuration(value(telemetry, 'requestToHeadersMs')) },
+    { label: t('transferMode', 'Transfer mode'), value: value(telemetry, 'transferMode') },
+    { label: t('promptTokens', 'Prompt tokens'), value: formatOptionalNumber(value(telemetry, 'promptTokens')) },
+    { label: t('completionTokens', 'Completion tokens'), value: formatOptionalNumber(value(telemetry, 'completionTokens')) },
+    { label: t('totalTokens', 'Total tokens'), value: formatOptionalNumber(value(telemetry, 'totalTokens')) },
+    { label: t('chunks', 'Chunks'), value: formatOptionalNumber(value(telemetry, 'streamChunkCount')) },
+    { label: t('streamEvents', 'Stream events'), value: formatOptionalNumber(value(telemetry, 'streamEventCount')) },
+    { label: t('providerRequest', 'Provider request'), value: value(telemetry, 'providerRequestId'), copy: true },
+    { label: t('requestBytes', 'Request bytes'), value: formatBytes(value(telemetry, 'requestBytes') ?? value(record, 'requestBodyLength')) },
+    { label: t('responseBytes', 'Response bytes'), value: formatBytes(value(telemetry, 'responseBytes') ?? value(record, 'responseBodyLength')) }
+  ];
+
+  return (
+    <Modal
+      actions={<button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(record)} />}
+      onClose={onClose}
+      open
+      size="request-details"
+      subtitle={t('requestDetailsSubtitle', 'Captured routing, telemetry, headers, and payloads for this request.')}
+      title={t('requestDetails')}
+    >
+      <div className="request-detail-layout">
+        <section className="request-detail-summary">
+          <div className="request-detail-titleline">
+            <span className={`method-pill ${methodTone(value(record, 'method'))}`}>{value(record, 'method') || '-'}</span>
+            <code>{value(record, 'path') || '-'}</code>
+          </div>
+          <div className="request-detail-id">
+            <span>{t('id', 'ID')}</span>
+            <CopyableValue label={t('copyValue')} value={id || '-'} />
+          </div>
+        </section>
+
+        <section className="request-detail-section">
+          <h3>{t('routing', 'Routing')}</h3>
+          <DetailTable rows={routingRows} />
+        </section>
+
+        <section className="request-detail-section">
+          <h3>{t('telemetry', 'Telemetry')}</h3>
+          <DetailTable rows={telemetryRows} />
+        </section>
+
+        <section className="request-detail-section">
+          <h3>{t('timeline', 'Timeline')}</h3>
+          <div className="request-timeline">
+            {timeline.length > 0 ? timeline.map((item, index) => (
+              <div className="request-timeline-item" key={`${value(item, 'stage') || index}-${index}`}>
+                <div className="request-timeline-marker" />
+                <div className="request-timeline-content">
+                  <div className="request-timeline-heading">
+                    <strong>{value(item, 'stage') || '-'}</strong>
+                    <span>{formatDateTime(value(item, 'timestampUtc'))} · {formatDuration(value(item, 'elapsedMs'))}</span>
+                  </div>
+                  <p>{value(item, 'message') || '-'}</p>
+                </div>
+              </div>
+            )) : <p className="muted-copy">{t('noTimeline', 'No timeline events were captured.')}</p>}
+          </div>
+        </section>
+
+        <div className="request-payload-grid">
+          <PayloadPanel title={t('requestHeadersTitle', 'Request Headers')} value={requestHeaders} />
+          <PayloadPanel title={t('requestBodyTitle', 'Request Body')} meta={bodyMeta(record, 'request')} value={requestBody} />
+          <PayloadPanel title={t('responseHeadersTitle', 'Response Headers')} value={responseHeaders} />
+          <PayloadPanel title={t('responseBodyTitle', 'Response Body')} meta={bodyMeta(record, 'response')} value={responseBody} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DetailTable({ rows }) {
+  return (
+    <div className="request-detail-table-wrap">
+      <table className="request-detail-table">
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <th scope="row">{row.label}</th>
+              <td><DetailTableValue row={row} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DetailTableValue({ row }) {
+  const display = row.value === undefined || row.value === null || row.value === '' ? '-' : row.value;
+  if (row.copy && display !== '-') return <CopyableValue value={display} />;
+  return <span title={String(display)}>{String(display)}</span>;
+}
+
+function PayloadPanel({ meta, title, value: fieldValue }) {
+  const { t } = useTranslation();
+  const text = formatPayload(fieldValue);
+  return (
+    <section className="request-payload-panel">
+      <div className="request-payload-header">
+        <div>
+          <h3>{title}</h3>
+          {meta ? <span>{meta}</span> : null}
+        </div>
+        <CopyButton label={t('copy')} value={text} />
+      </div>
+      <pre className="request-detail-code">{text || '(empty)'}</pre>
+    </section>
+  );
+}
+
+function formatPayload(input) {
+  if (input === undefined || input === null || input === '') return '';
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        return input;
+      }
+    }
+    return input;
+  }
+
+  return JSON.stringify(input, null, 2);
+}
+
+function bodyMeta(record, prefix) {
+  const length = value(record, `${prefix}BodyLength`);
+  const truncated = value(record, `${prefix}BodyTruncated`) === true;
+  const parts = [];
+  if (length !== undefined && length !== null) parts.push(formatBytes(length));
+  if (truncated) parts.push('truncated');
+  return parts.join(' · ');
+}
+
 function EditRecordModal({ title, data, onClose }) {
   const { t } = useTranslation();
   const record = data || {};
@@ -1556,7 +1951,7 @@ function EditRecordModal({ title, data, onClose }) {
 
   return (
     <Modal
-      actions={<button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>}
+      actions={<button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>}
       headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(record)} />}
       onClose={onClose}
       open
@@ -1626,8 +2021,8 @@ function UserEditModal({ data, mode = 'edit', onClose, onSave }) {
     <Modal
       actions={(
         <>
-          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
-          <button className="action-button primary" disabled={saving || !draft.username.trim() || (isCreate && !draft.password.trim())} onClick={save} type="button">
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.username.trim() || (isCreate && !draft.password.trim())} onClick={save} title={t('tooltipFormSave')} type="button">
             {saving ? t('saving') : t('save')}
           </button>
         </>
@@ -1718,8 +2113,8 @@ function TenantEditModal({ data, mode = 'edit', onClose, onSave }) {
     <Modal
       actions={(
         <>
-          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
-          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} type="button">
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} title={t('tooltipFormSave')} type="button">
             {saving ? t('saving') : t('save')}
           </button>
         </>
@@ -1793,8 +2188,8 @@ function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
     <Modal
       actions={(
         <>
-          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
-          <button className="action-button primary" disabled={saving || (!isCreate && !draft.accessKey.trim())} onClick={save} type="button">
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || (!isCreate && !draft.accessKey.trim())} onClick={save} title={t('tooltipFormSave')} type="button">
             {saving ? t('saving') : t('save')}
           </button>
         </>
@@ -1892,8 +2287,8 @@ function RoleEditModal({ data, mode = 'edit', onClose, onSave, permissions }) {
     <Modal
       actions={(
         <>
-          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
-          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} type="button">
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.name.trim()} onClick={save} title={t('tooltipFormSave')} type="button">
             {saving ? t('saving') : t('save')}
           </button>
         </>
@@ -1983,8 +2378,8 @@ function PermissionEditModal({ data, mode = 'edit', onClose, onSave }) {
     <Modal
       actions={(
         <>
-          <button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>
-          <button className="action-button primary" disabled={saving || !draft.resourceType.trim()} onClick={save} type="button">
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.resourceType.trim()} onClick={save} title={t('tooltipFormSave')} type="button">
             {saving ? t('saving') : t('save')}
           </button>
         </>
@@ -2029,7 +2424,7 @@ function JsonRecordModal({ data, onClose, title }) {
   const { t } = useTranslation();
   return (
     <Modal
-      actions={<button className="action-button secondary" onClick={onClose} type="button">{t('close')}</button>}
+      actions={<button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>}
       headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(data)} />}
       onClose={onClose}
       open
@@ -2186,7 +2581,7 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
   ];
   const bodyText = explorerResponseBodyText(normalized);
   const headersText = formatExplorerValue(normalized.headers);
-  const previewText = normalized.preview || extractExplorerPreview(normalized.body) || bodyText;
+  const previewText = normalized.preview || extractExplorerPreview(normalized.body) || (normalized.streamed ? '' : bodyText);
   const hasHeaders = Object.keys(normalized.headers || {}).length > 0;
   const hasStatus = normalized.status !== null || normalized.error;
 
@@ -2202,6 +2597,7 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               role="tab"
+              title={t('tooltipResponseTab')}
               type="button"
             >
               {tab.label}
@@ -2210,7 +2606,7 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
         </div>
         <div className="api-explorer-response-actions">
           {renderExplorerStatusBadge(normalized, t)}
-          {response ? <IconButton iconOnly onClick={onClear} label={t('clear')} icon={<Trash2 size={16} />} /> : null}
+          {response ? <IconButton iconOnly onClick={onClear} label={t('clear')} tooltip={t('tooltipClearResponse')} icon={<Trash2 size={16} />} /> : null}
         </div>
       </div>
       <div className="api-explorer-response-body">
@@ -2307,12 +2703,12 @@ function JsonPanelInline({ title, data }) {
 function JsonBlock({ data }) {
   return (
     <div className="json-viewer">
-      <JsonNode data={data} />
+      <JsonTreeNode data={data} />
     </div>
   );
 }
 
-function JsonNode({ data, fieldKey = '' }) {
+function JsonTreeNode({ data, fieldKey = '' }) {
   if (data === null || data === undefined) return <span className="json-null">null</span>;
   if (Array.isArray(data)) {
     return (
@@ -2320,7 +2716,7 @@ function JsonNode({ data, fieldKey = '' }) {
         {data.length === 0 ? <span className="json-null">[]</span> : data.map((item, index) => (
           <div className="json-row" key={index}>
             <span className="json-key">{index}</span>
-            <JsonNode data={item} fieldKey={fieldKey} />
+            <JsonTreeNode data={item} fieldKey={fieldKey} />
           </div>
         ))}
       </div>
@@ -2333,7 +2729,7 @@ function JsonNode({ data, fieldKey = '' }) {
         {entries.length === 0 ? <span className="json-null">{'{}'}</span> : entries.map(([key, value]) => (
           <div className="json-row" key={key}>
             <span className="json-key">{key}</span>
-            <JsonNode data={value} fieldKey={key} />
+            <JsonTreeNode data={value} fieldKey={key} />
           </div>
         ))}
       </div>
@@ -2464,6 +2860,26 @@ function formatDuration(value) {
   return `${(number / 1000).toFixed(2)} s`;
 }
 
+function formatOptionalNumber(input) {
+  const number = Number(input);
+  return Number.isFinite(number) ? number.toLocaleString() : '-';
+}
+
+function formatBytes(input) {
+  const number = Number(input);
+  if (!Number.isFinite(number)) return '-';
+  if (number < 1024) return `${number.toLocaleString()} B`;
+  if (number < 1024 * 1024) return `${(number / 1024).toFixed(1)} KB`;
+  return `${(number / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatDateTime(input) {
+  if (!input) return '-';
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return String(input);
+  return date.toLocaleString();
+}
+
 function buildApiOperations(openApi) {
   const paths = openApi?.paths && typeof openApi.paths === 'object' ? openApi.paths : {};
   const methods = ['get', 'post', 'put', 'delete', 'patch'];
@@ -2542,6 +2958,8 @@ function operationKind(operation) {
   const path = normalizeOperationPath(operation.path);
   if (operationId === 'createchatcompletion' || path.endsWith('/v1/chat/completions')) return 'createChatCompletion';
   if (operationId === 'createcompletion' || path.endsWith('/v1/completions')) return 'createCompletion';
+  if (operationId === 'createresponse' || path.endsWith('/v1/responses')) return 'createResponse';
+  if (operationId === 'creategeneration' || operationId === 'generate' || operationId.includes('generation') || path.endsWith('/v1/generations') || path.endsWith('/v1/generate')) return 'createGeneration';
   if (operationId === 'createembedding' || path.endsWith('/v1/embeddings')) return 'createEmbedding';
   if (operationId) {
     const known = {
@@ -2606,7 +3024,7 @@ function normalizeOperationPath(path) {
 }
 
 function operationUsesModel(operation) {
-  return ['createChatCompletion', 'createCompletion', 'createEmbedding'].includes(operationKind(operation));
+  return ['createChatCompletion', 'createCompletion', 'createGeneration', 'createResponse', 'createEmbedding'].includes(operationKind(operation));
 }
 
 function modelForOperation(operation, model) {
@@ -2616,7 +3034,7 @@ function modelForOperation(operation, model) {
     return !current || current === 'gpt-oss:120b' ? 'all-minilm' : current;
   }
 
-  if (kind === 'createChatCompletion' || kind === 'createCompletion') {
+  if (kind === 'createChatCompletion' || kind === 'createCompletion' || kind === 'createGeneration' || kind === 'createResponse') {
     return !current || current === 'all-minilm' ? 'gpt-oss:120b' : current;
   }
 
@@ -2740,14 +3158,33 @@ function exampleBodyForOperation(operation, model) {
         model: selectedModel || 'gpt-oss:120b',
         messages: openAiChatMessages(),
         temperature: 0.7,
-        max_tokens: 150
+        max_output_tokens: 2000,
+        stream: true
       };
     case 'createCompletion':
       return {
         model: selectedModel || 'gpt-oss:120b',
         prompt: 'Write a concise explanation of how an inverted index works in search engines.',
         temperature: 0.7,
-        max_tokens: 150
+        max_output_tokens: 2000,
+        stream: true
+      };
+    case 'createGeneration':
+      return {
+        model: selectedModel || 'gpt-oss:120b',
+        prompt: 'Write a concise explanation of how an inverted index works in search engines.',
+        temperature: 0.7,
+        max_output_tokens: 2000,
+        stream: true
+      };
+    case 'createResponse':
+      return {
+        model: selectedModel || 'gpt-oss:120b',
+        instructions: defaultOpenAiSystemPrompt,
+        input: defaultOpenAiPrompt,
+        temperature: 0.7,
+        max_output_tokens: 2000,
+        stream: true
       };
     case 'createEmbedding':
       return {
@@ -2880,6 +3317,62 @@ function summarizeBuckets(buckets) {
   }, { failed: 0, success: 0, total: 0 });
 }
 
+function analyticsRangeConfig(rangeKey) {
+  return analyticsRanges.find((item) => item.key === rangeKey) || analyticsRanges[1];
+}
+
+function buildAnalyticsWindow(rangeKey, anchorMs) {
+  const config = analyticsRangeConfig(rangeKey);
+  const toMs = Number.isFinite(Number(anchorMs)) ? Number(anchorMs) : Date.now();
+  const fromMs = toMs - config.durationMs;
+  return {
+    bucketMinutes: config.bucketMinutes,
+    fromMs,
+    fromUtc: new Date(fromMs).toISOString(),
+    key: config.key,
+    toMs,
+    toUtc: new Date(toMs).toISOString()
+  };
+}
+
+function requestHistorySummaryPath(window) {
+  const parameters = new URLSearchParams({
+    bucketMinutes: String(window.bucketMinutes),
+    fromUtc: window.fromUtc,
+    toUtc: window.toUtc
+  });
+  return `${requestHistorySummaryEndpoint}?${parameters.toString()}`;
+}
+
+function filterRowsByDateRange(rows, window) {
+  return collectionRows(rows).filter((row) => {
+    const timestamp = requestHistoryTimestampMs(row);
+    return timestamp >= window.fromMs && timestamp <= window.toMs;
+  });
+}
+
+function requestHistoryTimestampMs(row) {
+  const timestamp = value(row, 'completedUtc') || value(row, 'createdUtc');
+  const parsed = Date.parse(String(timestamp || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function summarizeHistoryRows(rows) {
+  return collectionRows(rows).reduce((summary, row) => {
+    const statusCode = Number(value(row, 'statusCode') || 0);
+    const success = statusCode >= 200 && statusCode < 400;
+    const nextSuccess = summary.success + (success ? 1 : 0);
+    const nextFailed = summary.failed + (success ? 0 : 1);
+    const total = nextSuccess + nextFailed;
+    return {
+      failed: nextFailed,
+      failureRate: total === 0 ? 0 : nextFailed / total,
+      success: nextSuccess,
+      total
+    };
+  }, { failed: 0, failureRate: 0, success: 0, total: 0 });
+}
+
 function groupByCount(rows, key) {
   const groups = new Map();
   collectionRows(rows).forEach((row) => {
@@ -2980,6 +3473,7 @@ function isReactNode(input) {
 
 function AppRoutes() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('xeno.theme') || 'light');
+  useDashboardTooltipBackfill();
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

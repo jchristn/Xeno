@@ -8,10 +8,11 @@ namespace Xeno.Client
     using System.Net.Http;
     using System.Net.WebSockets;
     using System.Text;
-    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
+    using Xeno.Core.Models;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -101,7 +102,7 @@ namespace Xeno.Client
                     WriteError("Could not reach the Xeno server: " + ex.Message);
                     return 1;
                 }
-                catch (JsonException ex)
+                catch (InvalidDataException ex)
                 {
                     WriteError("Could not parse the server response: " + ex.Message);
                     return 1;
@@ -112,7 +113,7 @@ namespace Xeno.Client
                     return 1;
                 }
             }
-            catch (JsonException ex)
+            catch (InvalidDataException ex)
             {
                 WriteError("Could not read " + ClientSettings.SettingsFile + ": " + ex.Message);
                 return 1;
@@ -418,24 +419,21 @@ namespace Xeno.Client
                         return 1;
                     }
 
-                    using (JsonDocument document = JsonDocument.Parse(responseBody))
+                    LoginCredentialResponse? credential = JsonUtil.Deserialize<LoginCredentialResponse>(responseBody);
+                    string? accessKey = credential?.AccessKey;
+                    string? secretKey = credential?.SecretKey;
+                    string? returnedTenantId = credential?.TenantId;
+                    if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey))
                     {
-                        JsonElement root = document.RootElement;
-                        string? accessKey = TryGetString(root, "accessKey");
-                        string? secretKey = TryGetString(root, "secretKey");
-                        string? returnedTenantId = TryGetString(root, "tenantId");
-                        if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey))
-                        {
-                            WriteError("Login response did not include a client credential.");
-                            return 1;
-                        }
-
-                        settings.TenantId = String.IsNullOrWhiteSpace(returnedTenantId) ? tenantId : returnedTenantId;
-                        settings.Server.AccessKey = accessKey;
-                        settings.Server.SecretKey = secretKey;
-                        settings.Server.Token = null;
-                        settings.Save();
+                        WriteError("Login response did not include a client credential.");
+                        return 1;
                     }
+
+                    settings.TenantId = String.IsNullOrWhiteSpace(returnedTenantId) ? tenantId : returnedTenantId;
+                    settings.Server.AccessKey = accessKey;
+                    settings.Server.SecretKey = secretKey;
+                    settings.Server.Token = null;
+                    settings.Save();
                 }
             }
 
@@ -755,81 +753,278 @@ namespace Xeno.Client
         {
             if (message.IndexOf("\"server.request\"", StringComparison.OrdinalIgnoreCase) < 0) return;
 
-            object response = await ExecuteServerRequestAsync(settings, message, token).ConfigureAwait(false);
-            await SendMessageAsync(socket, response, token).ConfigureAwait(false);
+            object? response = await ExecuteServerRequestAsync(socket, settings, message, token).ConfigureAwait(false);
+            if (response != null) await SendMessageAsync(socket, response, token).ConfigureAwait(false);
         }
 
-        private static async Task<object> ExecuteServerRequestAsync(ClientSettings settings, string message, CancellationToken token)
+        private static async Task<object?> ExecuteServerRequestAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
         {
-            using (JsonDocument document = JsonDocument.Parse(message))
+            ServerRequestMessage? serverRequest = JsonUtil.Deserialize<ServerRequestMessage>(message);
+            if (serverRequest == null) return null;
+
+            string requestId = String.IsNullOrWhiteSpace(serverRequest.RequestId) ? Guid.NewGuid().ToString("N") : serverRequest.RequestId;
+            string? sourceName = String.IsNullOrWhiteSpace(serverRequest.Source) ? serverRequest.RunnerName : serverRequest.Source;
+            string proxy = String.IsNullOrWhiteSpace(sourceName) ? "(default provider)" : sourceName;
+            string relativePath = String.IsNullOrWhiteSpace(serverRequest.RelativePath) ? serverRequest.Path ?? "/v1/chat/completions" : serverRequest.RelativePath;
+            string method = String.IsNullOrWhiteSpace(serverRequest.Method) ? "POST" : serverRequest.Method;
+            string requestorIp = RequestorIpFromServerRequest(serverRequest);
+            string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
+            bool stream = serverRequest.Stream;
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            ClientRunnerSettings? runner = String.IsNullOrWhiteSpace(sourceName)
+                ? (settings.Runners.Count > 0 ? settings.Runners[0] : null)
+                : settings.Runners.Find(item => String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
+
+            if (runner == null)
             {
-                JsonElement root = document.RootElement;
-                string requestId = TryGetString(root, "requestId") ?? Guid.NewGuid().ToString("N");
-                string? sourceName = TryGetString(root, "source") ?? TryGetString(root, "runnerName");
-                string proxy = String.IsNullOrWhiteSpace(sourceName) ? "(default provider)" : sourceName;
-                string relativePath = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
-                string method = TryGetString(root, "method") ?? "POST";
-                string requestorIp = RequestorIpFromServerRequest(root);
-                string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                ClientRunnerSettings? runner = String.IsNullOrWhiteSpace(sourceName)
-                    ? (settings.Runners.Count > 0 ? settings.Runners[0] : null)
-                    : settings.Runners.Find(item => String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
-
-                if (runner == null)
+                stopwatch.Stop();
+                WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
+                return new ClientResponseMessage
                 {
-                    stopwatch.Stop();
-                    WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
-                    return new { type = "client.response", requestId, clientId = settings.ClientId, tenantId = settings.TenantId, success = false, error = "No configured provider endpoint is available." };
-                }
-
-                Dictionary<string, string> forwardedHeaders = TryGetStringMap(root, "headers");
-                string body = "{}";
-                if (root.TryGetProperty("body", out JsonElement bodyElement))
-                {
-                    body = bodyElement.ValueKind == JsonValueKind.String ? bodyElement.GetString() ?? "{}" : bodyElement.GetRawText();
-                }
-
-                string endpoint = runner.Endpoint.TrimEnd('/') + "/" + relativePath.TrimStart('/');
-                using (HttpClient httpClient = new HttpClient())
-                using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
-                {
-                    httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
-                    if (!String.IsNullOrWhiteSpace(runner.Credential))
-                    {
-                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
-                    }
-
-                    if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
-                    {
-                        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-                    }
-
-                    foreach (KeyValuePair<string, string> header in forwardedHeaders)
-                    {
-                        if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content != null)
-                        {
-                            request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                        }
-                    }
-
-                    HttpResponseMessage result = await httpClient.SendAsync(request, token).ConfigureAwait(false);
-                    string content = await result.Content.ReadAsStringAsync(token).ConfigureAwait(false);
-                    stopwatch.Stop();
-                    WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
-                    return new
-                    {
-                        type = "client.response",
-                        requestId,
-                        clientId = settings.ClientId,
-                        tenantId = settings.TenantId,
-                        success = result.IsSuccessStatusCode,
-                        statusCode = (int)result.StatusCode,
-                        contentType = result.Content.Headers.ContentType?.ToString(),
-                        body = content
-                    };
-                }
+                    Type = "client.response",
+                    RequestId = requestId,
+                    ClientId = settings.ClientId,
+                    TenantId = settings.TenantId,
+                    Success = false,
+                    Error = "No configured provider endpoint is available."
+                };
             }
+
+            Dictionary<string, string> forwardedHeaders = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string body = String.IsNullOrWhiteSpace(serverRequest.Body) ? "{}" : serverRequest.Body;
+            string endpoint = runner.Endpoint.TrimEnd('/') + "/" + relativePath.TrimStart('/');
+            using (HttpClient httpClient = new HttpClient())
+            using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
+            {
+                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
+                if (!String.IsNullOrWhiteSpace(runner.Credential))
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
+                }
+
+                if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                }
+
+                foreach (KeyValuePair<string, string> header in forwardedHeaders)
+                {
+                    if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content != null)
+                    {
+                        request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                    }
+                }
+
+                HttpCompletionOption completionOption = stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead;
+                HttpResponseMessage result = await httpClient.SendAsync(request, completionOption, token).ConfigureAwait(false);
+                if (stream)
+                {
+                    await StreamUpstreamResponseAsync(socket, settings, requestId, requestorLabel, method, relativePath, proxy, result, body, stopwatch, token).ConfigureAwait(false);
+                    return null;
+                }
+
+                string content = await result.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                stopwatch.Stop();
+                WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
+                Dictionary<string, string> responseHeaders = ExtractResponseHeaders(result);
+                return new ClientResponseMessage
+                {
+                    Type = "client.response",
+                    RequestId = requestId,
+                    ClientId = settings.ClientId,
+                    TenantId = settings.TenantId,
+                    Success = result.IsSuccessStatusCode,
+                    StatusCode = (int)result.StatusCode,
+                    ContentType = result.Content.Headers.ContentType?.ToString(),
+                    Headers = responseHeaders,
+                    Telemetry = BuildTelemetry(body, content, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, null, null, 0, 0, false),
+                    Body = content
+                };
+            }
+        }
+
+        private static async Task StreamUpstreamResponseAsync(
+            ClientWebSocket socket,
+            ClientSettings settings,
+            string requestId,
+            string requestorIp,
+            string method,
+            string relativePath,
+            string proxy,
+            HttpResponseMessage result,
+            string requestBody,
+            Stopwatch stopwatch,
+            CancellationToken token)
+        {
+            Dictionary<string, string> responseHeaders = ExtractResponseHeaders(result);
+            double requestToHeadersMs = stopwatch.Elapsed.TotalMilliseconds;
+            await SendMessageAsync(socket, new ClientResponseMessage
+            {
+                Type = "client.response.start",
+                RequestId = requestId,
+                ClientId = settings.ClientId,
+                TenantId = settings.TenantId,
+                Success = result.IsSuccessStatusCode,
+                StatusCode = (int)result.StatusCode,
+                ContentType = result.Content.Headers.ContentType?.ToString(),
+                Headers = responseHeaders,
+                Telemetry = BuildTelemetry(requestBody, String.Empty, responseHeaders, requestToHeadersMs, requestToHeadersMs, null, 0, 0, true)
+            }, token).ConfigureAwait(false);
+
+            using (Stream responseStream = await result.Content.ReadAsStreamAsync(token).ConfigureAwait(false))
+            using (MemoryStream captured = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192];
+                int sequence = 0;
+                double? firstByteMs = null;
+
+                while (true)
+                {
+                    int read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), token).ConfigureAwait(false);
+                    if (read < 1) break;
+
+                    if (!firstByteMs.HasValue) firstByteMs = stopwatch.Elapsed.TotalMilliseconds;
+                    byte[] chunk = new byte[read];
+                    Buffer.BlockCopy(buffer, 0, chunk, 0, read);
+                    await captured.WriteAsync(chunk.AsMemory(0, chunk.Length), token).ConfigureAwait(false);
+                    sequence++;
+                    await SendMessageAsync(socket, new ClientResponseChunkMessage
+                    {
+                        Type = "client.response.chunk",
+                        RequestId = requestId,
+                        ClientId = settings.ClientId,
+                        TenantId = settings.TenantId,
+                        Sequence = sequence,
+                        Encoding = "base64",
+                        ByteCount = read,
+                        ContentBase64 = Convert.ToBase64String(chunk),
+                        SentUtc = DateTime.UtcNow
+                    }, token).ConfigureAwait(false);
+                }
+
+                stopwatch.Stop();
+                string body = Encoding.UTF8.GetString(captured.ToArray());
+                int streamEvents = CountStreamEvents(result.Content.Headers.ContentType?.ToString(), body, sequence);
+                await SendMessageAsync(socket, new ClientResponseMessage
+                {
+                    Type = "client.response.complete",
+                    RequestId = requestId,
+                    ClientId = settings.ClientId,
+                    TenantId = settings.TenantId,
+                    Success = result.IsSuccessStatusCode,
+                    StatusCode = (int)result.StatusCode,
+                    ContentType = result.Content.Headers.ContentType?.ToString(),
+                    Headers = responseHeaders,
+                    Telemetry = BuildTelemetry(requestBody, body, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, requestToHeadersMs, firstByteMs, sequence, streamEvents, true),
+                    Body = body
+                }, token).ConfigureAwait(false);
+                WriteRequestCompleted(requestId, requestorIp, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
+            }
+        }
+
+        private static Dictionary<string, string> ExtractResponseHeaders(HttpResponseMessage result)
+        {
+            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, IEnumerable<string>> header in result.Headers)
+            {
+                headers[header.Key] = String.Join(", ", header.Value);
+            }
+
+            foreach (KeyValuePair<string, IEnumerable<string>> header in result.Content.Headers)
+            {
+                headers[header.Key] = String.Join(", ", header.Value);
+            }
+
+            return headers;
+        }
+
+        private static RequestHistoryTelemetry BuildTelemetry(
+            string requestBody,
+            string responseBody,
+            Dictionary<string, string> responseHeaders,
+            double totalMs,
+            double? requestToHeadersMs,
+            double? firstByteMs,
+            int streamChunkCount,
+            int streamEventCount,
+            bool streaming)
+        {
+            OpenAiUsage usage = ExtractTokenUsage(responseBody);
+            double? streamingMs = firstByteMs.HasValue ? Math.Max(0, totalMs - firstByteMs.Value) : null;
+            double? timeToFirst = firstByteMs.HasValue ? Math.Round(firstByteMs.Value) : (streaming ? null : Math.Round(totalMs));
+            return new RequestHistoryTelemetry
+            {
+                TotalTimeMs = (long)Math.Round(totalMs),
+                UpstreamTotalMs = (long)Math.Round(totalMs),
+                RequestToHeadersMs = requestToHeadersMs.HasValue ? (long)Math.Round(requestToHeadersMs.Value) : null,
+                TimeToFirstTokenMs = timeToFirst.HasValue ? (long)timeToFirst.Value : null,
+                TotalStreamingTimeMs = streamingMs.HasValue ? (long)Math.Round(streamingMs.Value) : null,
+                PromptTokens = usage.PromptTokens,
+                CompletionTokens = usage.CompletionTokens,
+                TotalTokens = usage.TotalTokens,
+                StreamChunkCount = streamChunkCount,
+                StreamEventCount = streamEventCount,
+                RequestBytes = Encoding.UTF8.GetByteCount(requestBody ?? String.Empty),
+                ResponseBytes = Encoding.UTF8.GetByteCount(responseBody ?? String.Empty),
+                TransferMode = streaming ? RequestTransferModeEnum.Stream : RequestTransferModeEnum.Standard,
+                ProviderRequestId = ExtractProviderRequestId(responseHeaders),
+                Metadata = new Dictionary<string, string>
+                {
+                    ["telemetrySource"] = "xeno.client",
+                    ["streaming"] = streaming ? "true" : "false"
+                }
+            };
+        }
+
+        private static string? ExtractProviderRequestId(Dictionary<string, string> headers)
+        {
+            string? value;
+            if (headers.TryGetValue("x-request-id", out value)) return value;
+            if (headers.TryGetValue("request-id", out value)) return value;
+            if (headers.TryGetValue("x-openai-request-id", out value)) return value;
+            if (headers.TryGetValue("x-amzn-requestid", out value)) return value;
+            return null;
+        }
+
+        private static int CountStreamEvents(string? contentType, string body, int fallback)
+        {
+            if (String.IsNullOrWhiteSpace(body)) return 0;
+            string normalized = (contentType ?? String.Empty).ToLowerInvariant();
+            if (normalized.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) || body.Contains("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                return body.Split(new[] { "data:" }, StringSplitOptions.None).Length - 1;
+            }
+
+            if (normalized.Contains("ndjson", StringComparison.OrdinalIgnoreCase))
+            {
+                return body.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries).Length;
+            }
+
+            return fallback;
+        }
+
+        private static OpenAiUsage ExtractTokenUsage(string responseBody)
+        {
+            if (String.IsNullOrWhiteSpace(responseBody)) return new OpenAiUsage();
+            OpenAiUsage usage = ExtractTokenUsageFromJson(responseBody);
+            if (usage.HasAny) return usage;
+
+            foreach (string line in responseBody.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) trimmed = trimmed.Substring(5).Trim();
+                if (trimmed.Length < 1 || String.Equals(trimmed, "[DONE]", StringComparison.OrdinalIgnoreCase)) continue;
+                usage = ExtractTokenUsageFromJson(trimmed);
+                if (usage.HasAny) return usage;
+            }
+
+            return new OpenAiUsage();
+        }
+
+        private static OpenAiUsage ExtractTokenUsageFromJson(string json)
+        {
+            if (!JsonUtil.TryDeserialize<OpenAiUsageEnvelope>(json, out OpenAiUsageEnvelope? envelope)) return new OpenAiUsage();
+            return envelope?.Usage ?? new OpenAiUsage();
         }
 
         private static void ApplyServerAuthentication(ClientWebSocket socket, ClientSettings settings)
@@ -956,35 +1151,12 @@ namespace Xeno.Client
             Console.WriteLine(JsonUtil.Serialize(value, true));
         }
 
-        private static string? TryGetString(JsonElement element, string propertyName)
+        private static string RequestorIpFromServerRequest(ServerRequestMessage request)
         {
-            if (!element.TryGetProperty(propertyName, out JsonElement property)) return null;
-            if (property.ValueKind == JsonValueKind.Null || property.ValueKind == JsonValueKind.Undefined) return null;
-            return property.ToString();
-        }
-
-        private static Dictionary<string, string> TryGetStringMap(JsonElement element, string propertyName)
-        {
-            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (!element.TryGetProperty(propertyName, out JsonElement property) || property.ValueKind != JsonValueKind.Object) return values;
-
-            foreach (JsonProperty header in property.EnumerateObject())
-            {
-                if (header.Value.ValueKind == JsonValueKind.Null || header.Value.ValueKind == JsonValueKind.Undefined) continue;
-                string value = header.Value.ToString();
-                if (String.IsNullOrWhiteSpace(header.Name) || String.IsNullOrWhiteSpace(value)) continue;
-                values[header.Name] = value;
-            }
-
-            return values;
-        }
-
-        private static string RequestorIpFromServerRequest(JsonElement root)
-        {
-            string requestorIp = TryGetString(root, "requestorIp") ?? String.Empty;
+            string requestorIp = request.RequestorIp ?? String.Empty;
             if (!String.IsNullOrWhiteSpace(requestorIp)) return requestorIp;
 
-            Dictionary<string, string> headers = TryGetStringMap(root, "headers");
+            Dictionary<string, string> headers = request.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string? headerValue;
             if (!headers.TryGetValue("X-Xeno-Requestor-IP", out headerValue) &&
                 !headers.TryGetValue("X-Real-IP", out headerValue) &&
@@ -1075,54 +1247,53 @@ namespace Xeno.Client
 
             try
             {
-                using (JsonDocument document = JsonDocument.Parse(message))
+                WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+                string? type = envelope?.Type;
+                if (String.Equals(type, "server.heartbeat", StringComparison.OrdinalIgnoreCase))
                 {
-                    JsonElement root = document.RootElement;
-                    string? type = TryGetString(root, "type");
-                    if (String.Equals(type, "server.heartbeat", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return;
-                    }
+                    return;
+                }
 
-                    if (String.Equals(type, "server.connected", StringComparison.OrdinalIgnoreCase))
-                    {
-                        WriteSuccess("Connected to Xeno server.");
-                        return;
-                    }
+                if (String.Equals(type, "server.connected", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteSuccess("Connected to Xeno server.");
+                    return;
+                }
 
-                    if (String.Equals(type, "server.registered", StringComparison.OrdinalIgnoreCase))
-                    {
-                        WriteSuccess("Client registered with Xeno server.");
-                        return;
-                    }
+                if (String.Equals(type, "server.registered", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteSuccess("Client registered with Xeno server.");
+                    return;
+                }
 
-                    if (String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string requestId = TryGetString(root, "requestId") ?? "(no request ID)";
-                        string method = TryGetString(root, "method") ?? "POST";
-                        string path = TryGetString(root, "relativePath") ?? TryGetString(root, "path") ?? "/v1/chat/completions";
-                        string source = TryGetString(root, "source") ?? TryGetString(root, "runnerName") ?? "(default provider)";
-                        string requestorIp = RequestorIpFromServerRequest(root);
-                        string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
-                        WriteInfo("Request " + requestId + " received from " + requestorLabel + ": " + method + " " + path + " via " + source);
-                        return;
-                    }
+                if (String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase))
+                {
+                    ServerRequestMessage? request = JsonUtil.Deserialize<ServerRequestMessage>(message);
+                    string requestId = String.IsNullOrWhiteSpace(request?.RequestId) ? "(no request ID)" : request.RequestId;
+                    string method = String.IsNullOrWhiteSpace(request?.Method) ? "POST" : request.Method;
+                    string path = String.IsNullOrWhiteSpace(request?.RelativePath) ? request?.Path ?? "/v1/chat/completions" : request.RelativePath;
+                    string source = String.IsNullOrWhiteSpace(request?.Source) ? request?.RunnerName ?? "(default provider)" : request.Source;
+                    string requestorIp = request == null ? String.Empty : RequestorIpFromServerRequest(request);
+                    string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
+                    WriteInfo("Request " + requestId + " received from " + requestorLabel + ": " + method + " " + path + " via " + source);
+                    return;
+                }
 
-                    if (String.Equals(type, "server.error", StringComparison.OrdinalIgnoreCase) ||
-                        String.Equals(type, "server.unauthorized", StringComparison.OrdinalIgnoreCase))
-                    {
-                        WriteError(TryGetString(root, "message") ?? "The Xeno server rejected the client message.");
-                        return;
-                    }
+                if (String.Equals(type, "server.error", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(type, "server.unauthorized", StringComparison.OrdinalIgnoreCase))
+                {
+                    ClientErrorResponse? error = JsonUtil.Deserialize<ClientErrorResponse>(message);
+                    WriteError(error?.Message ?? "The Xeno server rejected the client message.");
+                    return;
+                }
 
-                    if (!String.IsNullOrWhiteSpace(type))
-                    {
-                        WriteInfo("Server message: " + type + ".");
-                        return;
-                    }
+                if (!String.IsNullOrWhiteSpace(type))
+                {
+                    WriteInfo("Server message: " + type + ".");
+                    return;
                 }
             }
-            catch (JsonException)
+            catch (InvalidDataException)
             {
             }
 
@@ -1360,16 +1531,13 @@ namespace Xeno.Client
             if (String.IsNullOrWhiteSpace(responseBody)) return null;
             try
             {
-                using (JsonDocument document = JsonDocument.Parse(responseBody))
-                {
-                    JsonElement root = document.RootElement;
-                    return TryGetString(root, "message")
-                        ?? TryGetString(root, "error")
-                        ?? TryGetString(root, "title")
-                        ?? TryGetString(root, "detail");
-                }
+                ClientErrorResponse? error = JsonUtil.Deserialize<ClientErrorResponse>(responseBody);
+                return error?.Message
+                    ?? error?.Error
+                    ?? error?.Title
+                    ?? error?.Detail;
             }
-            catch (JsonException)
+            catch (InvalidDataException)
             {
                 return null;
             }

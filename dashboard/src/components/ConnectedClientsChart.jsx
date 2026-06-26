@@ -85,6 +85,7 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
             className={item.key === range ? 'active' : ''}
             key={item.key}
             onClick={() => setRange(item.key)}
+            title={t('tooltipChartRangeOption', { range: t(item.key) })}
             type="button"
           >
             {t(item.key)}
@@ -115,12 +116,12 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
               <g
                 key={`${bucket.start}-${index}`}
                 onBlur={() => setHovered(null)}
-                onFocus={() => setHovered({ bucket, x: x + barWidth / 2, y })}
+                onFocus={() => setHovered({ bucket, ...tooltipFromChartPoint(x + barWidth / 2, y + height / 2, chart, canvasRef.current) })}
                 onMouseLeave={() => setHovered(null)}
-                onMouseMove={() => setHovered({ bucket, x: x + barWidth / 2, y })}
+                onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}
                 tabIndex={0}
               >
-                <title>{`${bucket.label}: ${bucket.connected}`}</title>
+                <title>{`${bucket.label}: ${t('connectedClients')} ${bucket.connected}. ${t('tooltipChartRange')}`}</title>
                 <rect x={x} y={chart.top} width={barWidth} height={chart.plotHeight} fill="transparent" />
                 <rect x={x} y={y} width={barWidth} height={height} rx="3" fill="var(--color-info)" />
                 {showTick ? <text className="axis-label" x={x + barWidth / 2} y={chart.baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
@@ -129,7 +130,7 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
           })}
         </svg>
         {hovered ? (
-          <div className="chart-tooltip" style={{ left: `${(hovered.x / chart.width) * 100}%`, top: `${(hovered.y / chart.height) * 100}%` }}>
+          <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
             <strong>{hovered.bucket.label}</strong>
             <span>{t('connectedClients')}: {hovered.bucket.connected}</span>
             <span>{t('clients')}: {hovered.bucket.total}</span>
@@ -211,4 +212,28 @@ function shouldShowTick(index, count) {
   if (count <= 12) return true;
   if (count <= 24) return index % 4 === 0 || index === count - 1;
   return index % 5 === 0 || index === count - 1;
+}
+
+function tooltipFromPointer(event, element) {
+  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
+
+  const bounds = element.getBoundingClientRect();
+  return tooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
+}
+
+function tooltipFromChartPoint(x, y, chart, element) {
+  const width = element?.clientWidth || chart.width;
+  const height = element?.clientHeight || chart.height;
+  return tooltipPosition((x / chart.width) * width, (y / chart.height) * height, width, height);
+}
+
+function tooltipPosition(x, y, width, height) {
+  const horizontalPadding = 18;
+  const verticalPadding = 48;
+  const tooltipWidth = 188;
+  const clampedX = Math.min(Math.max(x, horizontalPadding), Math.max(horizontalPadding, width - horizontalPadding));
+  const clampedY = Math.min(Math.max(y, verticalPadding), Math.max(verticalPadding, height - verticalPadding));
+  const transform = clampedX > width - tooltipWidth ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
+
+  return { x: clampedX, y: clampedY, transform };
 }

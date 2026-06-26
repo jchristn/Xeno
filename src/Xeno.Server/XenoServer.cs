@@ -8,7 +8,6 @@ namespace Xeno.Server
     using System.Net.WebSockets;
     using System.Security.Cryptography;
     using System.Text;
-    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using WatsonWebserver;
@@ -29,7 +28,8 @@ namespace Xeno.Server
     /// </summary>
     public sealed class XenoServer : IDisposable
     {
-        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline";
+        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
+        private const int MaxCapturedBodyChars = 131072;
 
         private readonly XenoSettings _Settings;
         private readonly string _SettingsFile;
@@ -37,7 +37,7 @@ namespace Xeno.Server
         private readonly object _ClientConnectionsLock = new object();
         private readonly object _PendingResponsesLock = new object();
         private readonly Dictionary<string, ClientConnection> _ClientConnections = new Dictionary<string, ClientConnection>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, TaskCompletionSource<string>> _PendingClientResponses = new Dictionary<string, TaskCompletionSource<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, PendingClientResponse> _PendingClientResponses = new Dictionary<string, PendingClientResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly AuthenticationService _Authentication = new AuthenticationService();
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
@@ -76,7 +76,7 @@ namespace Xeno.Server
             token.ThrowIfCancellationRequested();
             _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, token).ConfigureAwait(false);
             MarkClientsDisconnected();
-            _Routing = new RoutingService(_Database.Platform);
+            _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
 
             _Webserver.Start();
 
@@ -1303,7 +1303,8 @@ namespace Xeno.Server
             if (method == "POST" && IsPath(path, "/api/v1/requesthistory/bulk", "/v1.0/api/request-history/bulk"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = DeleteRequestHistory(requestContext, ReadJsonObject(context));
+                RequestHistoryDeleteRequest body = ReadJsonBody<RequestHistoryDeleteRequest>(context);
+                int removed = DeleteRequestHistory(requestContext, body);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
                 return;
@@ -1369,8 +1370,10 @@ namespace Xeno.Server
 
         private async Task HandleCompletionAsync(HttpContextBase context, RequestContext requestContext, string path, bool stream, CancellationToken token)
         {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? model = body.TryGetValue("model", out object? modelValue) ? modelValue?.ToString() : null;
+            string requestBodyJson = ReadBodyJson(context);
+            OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
+            bool requestedStream = stream || body.Stream.GetValueOrDefault();
+            string? model = body.Model;
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, false, token).ConfigureAwait(false);
 
             if (!decision.Success)
@@ -1381,13 +1384,14 @@ namespace Xeno.Server
                 return;
             }
 
-            await RelayClientRequestAsync(context, requestContext, path, decision, body, false, stream, token).ConfigureAwait(false);
+            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, false, requestedStream, token).ConfigureAwait(false);
         }
 
         private async Task HandleEmbeddingAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
         {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? model = body.TryGetValue("model", out object? modelValue) ? modelValue?.ToString() : null;
+            string requestBodyJson = ReadBodyJson(context);
+            OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
+            string? model = body.Model;
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, true, token).ConfigureAwait(false);
 
             if (!decision.Success)
@@ -1398,7 +1402,7 @@ namespace Xeno.Server
                 return;
             }
 
-            await RelayClientRequestAsync(context, requestContext, path, decision, body, true, false, token).ConfigureAwait(false);
+            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, true, false, token).ConfigureAwait(false);
         }
 
         private async Task RelayClientRequestAsync(
@@ -1406,7 +1410,7 @@ namespace Xeno.Server
             RequestContext requestContext,
             string path,
             RoutingDecision decision,
-            Dictionary<string, object?> body,
+            string requestBodyJson,
             bool embeddings,
             bool stream,
             CancellationToken token)
@@ -1440,10 +1444,10 @@ namespace Xeno.Server
             }
 
             string requestId = requestContext.RequestId;
-            TaskCompletionSource<string> completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            PendingClientResponse pending = new PendingClientResponse();
             lock (_PendingResponsesLock)
             {
-                _PendingClientResponses[requestId] = completion;
+                _PendingClientResponses[requestId] = pending;
             }
 
             XenoClientModel? selectedModel = client.Models.FirstOrDefault(item => String.Equals(item.Name, decision.EffectiveModel, StringComparison.OrdinalIgnoreCase));
@@ -1454,32 +1458,50 @@ namespace Xeno.Server
                 string relativePath = NormalizeOpenAiPath(path);
                 string requestorIp = GetRequestorIp(context, requestContext);
                 Dictionary<string, string> forwardedHeaders = BuildForwardedHeaders(context, requestContext, requestorIp);
-                string payload = JsonUtil.Serialize(new
+                Dictionary<string, string> capturedRequestHeaders = CaptureRequestHeaders(context, forwardedHeaders);
+                ServerRequestMessage payload = new ServerRequestMessage
                 {
-                    type = "server.request",
-                    requestId,
-                    tenantId = requestContext.TenantId,
-                    clientId = client.Id,
-                    clientName = client.Name,
-                    provider = selectedModel?.Provider.ToString(),
-                    source = selectedModel?.Source,
-                    method = context.Request.Method.ToString().ToUpperInvariant(),
-                    relativePath,
-                    model = decision.EffectiveModel,
-                    embeddings,
-                    stream,
-                    requestorIp,
-                    headers = forwardedHeaders,
-                    body = JsonUtil.Serialize(body)
-                });
+                    Type = "server.request",
+                    RequestId = requestId,
+                    TenantId = requestContext.TenantId,
+                    ClientId = client.Id,
+                    ClientName = client.Name,
+                    Provider = selectedModel?.Provider.ToString(),
+                    Source = selectedModel?.Source,
+                    Method = context.Request.Method.ToString().ToUpperInvariant(),
+                    RelativePath = relativePath,
+                    Model = decision.EffectiveModel,
+                    Embeddings = embeddings,
+                    Stream = stream,
+                    RequestorIp = requestorIp,
+                    Headers = forwardedHeaders,
+                    Body = requestBodyJson
+                };
 
                 clientRequestStartedUtc = DateTime.UtcNow;
                 decision.Timeline.Add("ClientDispatch");
-                await SendToClientAsync(connection, payload, token).ConfigureAwait(false);
-                string responseJson = await WaitForClientResponseAsync(requestId, completion, token).ConfigureAwait(false);
-                decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
-                decision.Timeline.Add("ClientResponse");
-                await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, responseJson, token).ConfigureAwait(false);
+                await SendToClientAsync(connection, JsonUtil.Serialize(payload), token).ConfigureAwait(false);
+                if (stream)
+                {
+                    ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, token).ConfigureAwait(false);
+                    if (IsClientResponseStart(firstResponse))
+                    {
+                        await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
+                        decision.Timeline.Add("ClientResponse");
+                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, firstResponse, requestBodyJson, capturedRequestHeaders, token).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    ClientResponseMessage response = await WaitForClientResponseAsync(requestId, pending, token).ConfigureAwait(false);
+                    decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
+                    decision.Timeline.Add("ClientResponse");
+                    await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, token).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1511,36 +1533,106 @@ namespace Xeno.Server
             RoutingDecision decision,
             XenoClientRecord client,
             XenoClientModel? selectedModel,
-            string responseJson,
+            ClientResponseMessage response,
+            string requestBodyJson,
+            Dictionary<string, string> requestHeaders,
             CancellationToken token)
         {
-            using (JsonDocument document = JsonDocument.Parse(responseJson))
+            bool success = response.Success;
+            int statusCode = response.StatusCode ?? (success ? 200 : 502);
+
+            decision.Success = success;
+            decision.HttpStatusCode = statusCode;
+            decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
+            decision.Message = success ? "Client completed the routed request." : response.Error ?? "Client request failed.";
+
+            context.Response.StatusCode = statusCode;
+            string contentType = response.ContentType ?? "application/json";
+            context.Response.ContentType = contentType;
+            Dictionary<string, string> responseHeaders = ExtractHeaders(response);
+            ApplyClientResponseHeaders(context, responseHeaders);
+            string body = response.Body ?? "{}";
+            RequestHistoryEntry history = await RecordAndSaveHistoryAsync(
+                requestContext,
+                context.Request.Method.ToString().ToUpperInvariant(),
+                path,
+                decision,
+                token,
+                entry => PopulateRequestHistory(entry, requestContext, requestBodyJson, requestHeaders, body, responseHeaders, response, decision)).ConfigureAwait(false);
+            ApplyRoutingTraceHeaders(context, requestContext, decision, client, selectedModel, history);
+            await context.Response.Send(body, context.Token).ConfigureAwait(false);
+        }
+
+        private async Task StreamClientResponseAsync(
+            HttpContextBase context,
+            RequestContext requestContext,
+            string path,
+            RoutingDecision decision,
+            XenoClientRecord client,
+            XenoClientModel? selectedModel,
+            PendingClientResponse pending,
+            ClientResponseMessage startMessage,
+            string requestBodyJson,
+            Dictionary<string, string> requestHeaders,
+            DateTime clientRequestStartedUtc,
+            CancellationToken token)
+        {
+            bool success = startMessage.Success;
+            int statusCode = startMessage.StatusCode ?? (success ? 200 : 502);
+
+            decision.Success = success;
+            decision.HttpStatusCode = statusCode;
+            decision.OutcomeCode = success ? "Streaming" : "ClientRequestFailed";
+            decision.Message = success ? "Client started streaming the routed request." : startMessage.Error ?? "Client request failed.";
+            decision.Timeline.Add("ClientResponseStart");
+
+            Dictionary<string, string> responseHeaders = ExtractHeaders(startMessage);
+            RequestHistoryEntry history = RequireRouting().RecordHistory(requestContext, path, context.Request.Method.ToString().ToUpperInvariant(), decision);
+            PopulateRequestHistory(history, requestContext, requestBodyJson, requestHeaders, null, responseHeaders, startMessage, decision);
+
+            context.Response.StatusCode = statusCode;
+            string contentType = startMessage.ContentType ?? "application/json";
+            context.Response.ContentType = contentType;
+            context.Response.ChunkedTransfer = true;
+            ApplyClientResponseHeaders(context, responseHeaders);
+            ApplyRoutingTraceHeaders(context, requestContext, decision, client, selectedModel, history);
+
+            using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                JsonElement root = document.RootElement;
-                bool success = root.TryGetProperty("success", out JsonElement successElement) && successElement.ValueKind == JsonValueKind.True;
-                int statusCode = 200;
-                if (root.TryGetProperty("statusCode", out JsonElement statusElement) && statusElement.TryGetInt32(out int parsedStatusCode))
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, _Settings.WebSocket.RequestTimeoutMs)));
+                using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
                 {
-                    statusCode = parsedStatusCode;
-                }
-                else if (!success)
-                {
-                    statusCode = 502;
-                }
+                    while (await pending.Chunks.Reader.WaitToReadAsync(timeout.Token).ConfigureAwait(false))
+                    {
+                        while (pending.Chunks.Reader.TryRead(out ClientResponseChunkMessage? chunk))
+                        {
+                            if (chunk == null) continue;
+                            byte[] chunkBytes = chunk.Decode();
+                            if (chunkBytes.Length < 1) continue;
+                            await context.Response.SendChunk(chunkBytes, false, context.Token).ConfigureAwait(false);
+                        }
+                    }
 
-                decision.Success = success;
-                decision.HttpStatusCode = statusCode;
-                decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
-                decision.Message = success ? "Client completed the routed request." : TryGetString(root, "error") ?? "Client request failed.";
-                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                    ClientResponseMessage finalMessage = await pending.Final.Task.ConfigureAwait(false);
+                    decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc).TotalMilliseconds);
+                    decision.Timeline.Add("ClientResponseComplete");
 
-                context.Response.StatusCode = statusCode;
-                string contentType = TryGetString(root, "contentType") ?? "application/json";
-                context.Response.ContentType = contentType;
-                ApplyRoutingTraceHeaders(context, requestContext, decision, client, selectedModel, history);
-                string body = TryGetString(root, "body") ?? "{}";
-                await context.Response.Send(body, context.Token).ConfigureAwait(false);
+                    bool finalSuccess = finalMessage.Success;
+                    if (finalMessage.StatusCode.HasValue) statusCode = finalMessage.StatusCode.Value;
+
+                    decision.Success = finalSuccess;
+                    decision.HttpStatusCode = statusCode;
+                    decision.OutcomeCode = finalSuccess ? "Completed" : "ClientRequestFailed";
+                    decision.Message = finalSuccess ? "Client completed the streamed routed request." : finalMessage.Error ?? "Client request failed.";
+                    string body = finalMessage.Body ?? String.Empty;
+                    Dictionary<string, string> finalResponseHeaders = ExtractHeaders(finalMessage);
+                    if (finalResponseHeaders.Count > 0) responseHeaders = finalResponseHeaders;
+                    PopulateRequestHistory(history, requestContext, requestBodyJson, requestHeaders, body, responseHeaders, finalMessage, decision);
+                }
             }
+
+            await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            await context.Response.SendChunk(Array.Empty<byte>(), true, context.Token).ConfigureAwait(false);
         }
 
         private async Task SendToClientAsync(ClientConnection connection, string payload, CancellationToken token)
@@ -1556,14 +1648,27 @@ namespace Xeno.Server
             }
         }
 
-        private async Task<string> WaitForClientResponseAsync(string requestId, TaskCompletionSource<string> completion, CancellationToken token)
+        private async Task<ClientResponseMessage> WaitForClientFirstResponseAsync(string requestId, PendingClientResponse pending, CancellationToken token)
         {
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, _Settings.WebSocket.RequestTimeoutMs)));
-                using (timeout.Token.Register(delegate { completion.TrySetCanceled(timeout.Token); }))
+                using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
                 {
-                    return await completion.Task.ConfigureAwait(false);
+                    Task<ClientResponseMessage> completed = await Task.WhenAny(pending.Start.Task, pending.Final.Task).ConfigureAwait(false);
+                    return await completed.ConfigureAwait(false);
+                }
+            }
+        }
+
+        private async Task<ClientResponseMessage> WaitForClientResponseAsync(string requestId, PendingClientResponse pending, CancellationToken token)
+        {
+            using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, _Settings.WebSocket.RequestTimeoutMs)));
+                using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
+                {
+                    return await pending.Final.Task.ConfigureAwait(false);
                 }
             }
         }
@@ -1618,7 +1723,7 @@ namespace Xeno.Server
                     {
                         responseType = await HandleClientMessageAsync(session, text, requestContext, delegate(string clientId) { registeredClientId = clientId; }, context.Token).ConfigureAwait(false);
                     }
-                    catch (JsonException)
+                    catch (InvalidDataException)
                     {
                         responseType = "server.invalid-json";
                     }
@@ -1655,46 +1760,62 @@ namespace Xeno.Server
         {
             if (String.IsNullOrWhiteSpace(json)) return "server.empty";
 
-            using (JsonDocument document = JsonDocument.Parse(json))
+            WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(json);
+            string type = envelope?.Type ?? String.Empty;
+            if (String.Equals(type, "client.register", StringComparison.OrdinalIgnoreCase))
             {
-                JsonElement root = document.RootElement;
-                string type = TryGetString(root, "type") ?? String.Empty;
-                if (String.Equals(type, "client.register", StringComparison.OrdinalIgnoreCase))
-                {
-                    string clientId = RegisterClient(root, session, requestContext);
-                    registeredClientCallback(clientId);
-                    await SavePlatformAsync(token).ConfigureAwait(false);
-                    return "server.registered";
-                }
+                ClientRegisterMessage? message = JsonUtil.Deserialize<ClientRegisterMessage>(json);
+                if (message == null) throw new ArgumentException("Client registration message is invalid.", nameof(json));
+                string clientId = RegisterClient(message, session, requestContext);
+                registeredClientCallback(clientId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                return "server.registered";
+            }
 
-                if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
-                {
-                    UpdateClientHeartbeat(TryGetString(root, "clientId"), requestContext);
-                    await SavePlatformAsync(token).ConfigureAwait(false);
-                    return "server.heartbeat";
-                }
+            if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientHeartbeatMessage? message = JsonUtil.Deserialize<ClientHeartbeatMessage>(json);
+                UpdateClientHeartbeat(message?.ClientId, requestContext);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                return "server.heartbeat";
+            }
 
-                if (String.Equals(type, "client.response", StringComparison.OrdinalIgnoreCase))
-                {
-                    CompleteClientResponse(root, json);
-                    return null;
-                }
+            if (String.Equals(type, "client.response.start", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientResponseMessage? message = JsonUtil.Deserialize<ClientResponseMessage>(json);
+                if (message != null) StartClientResponse(message);
+                return null;
+            }
+
+            if (String.Equals(type, "client.response.chunk", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientResponseChunkMessage? message = JsonUtil.Deserialize<ClientResponseChunkMessage>(json);
+                if (message != null) AddClientResponseChunk(message);
+                return null;
+            }
+
+            if (String.Equals(type, "client.response.complete", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(type, "client.response", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientResponseMessage? message = JsonUtil.Deserialize<ClientResponseMessage>(json);
+                if (message != null) CompleteClientResponse(message);
+                return null;
             }
 
             return "server.ack";
         }
 
-        private string RegisterClient(JsonElement root, WebSocketSession session, RequestContext requestContext)
+        private string RegisterClient(ClientRegisterMessage message, WebSocketSession session, RequestContext requestContext)
         {
             XenoPlatform platform = RequirePlatform();
-            string tenantId = TryGetString(root, "tenantId") ?? requestContext.TenantId;
+            string tenantId = message.TenantId ?? requestContext.TenantId;
             if (!String.Equals(tenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
             {
                 throw new UnauthorizedAccessException("Client tenant does not match authenticated tenant.");
             }
 
-            string clientId = TryGetString(root, "clientId") ?? IdGenerator.NewId("xcl_");
-            string name = TryGetString(root, "name") ?? clientId;
+            string clientId = message.ClientId ?? IdGenerator.NewId("xcl_");
+            string name = message.Name ?? clientId;
 
             XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
             if (client != null && !String.Equals(client.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
@@ -1722,55 +1843,55 @@ namespace Xeno.Server
                 _ClientConnections[clientId] = new ClientConnection(clientId, tenantId, session);
             }
 
-            if (TryGetProperty(root, "inventory", out JsonElement inventory)) RegisterClientInventory(platform, client, inventory);
+            if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
 
             return clientId;
         }
 
-        private static void RegisterClientInventory(XenoPlatform platform, XenoClientRecord client, JsonElement inventory)
+        private static void RegisterClientInventory(XenoPlatform platform, XenoClientRecord client, ClientInventoryMessage inventory)
         {
             client.ServiceState = ClientServiceStateEnum.Normal;
             client.Models.Clear();
 
-            if (TryGetProperty(inventory, "models", out JsonElement directModels) && directModels.ValueKind == JsonValueKind.Array)
+            if (inventory.Models.Count > 0)
             {
-                RegisterClientModels(platform, client, "client", ApiProviderTypeEnum.OpenAICompatible, directModels);
+                RegisterClientModels(platform, client, "client", ApiProviderTypeEnum.OpenAICompatible, inventory.Models);
             }
 
-            if (TryGetProperty(inventory, "providers", out JsonElement providers) && providers.ValueKind == JsonValueKind.Array)
+            if (inventory.Providers.Count > 0)
             {
-                RegisterClientSources(platform, client, providers);
+                RegisterClientSources(platform, client, inventory.Providers);
             }
 
-            if (TryGetProperty(inventory, "runners", out JsonElement runners) && runners.ValueKind == JsonValueKind.Array)
+            if (inventory.Runners.Count > 0)
             {
-                RegisterClientSources(platform, client, runners);
+                RegisterClientSources(platform, client, inventory.Runners);
             }
         }
 
-        private static void RegisterClientSources(XenoPlatform platform, XenoClientRecord client, JsonElement sources)
+        private static void RegisterClientSources(XenoPlatform platform, XenoClientRecord client, List<ClientInventorySourceMessage> sources)
         {
-            foreach (JsonElement source in sources.EnumerateArray())
+            foreach (ClientInventorySourceMessage source in sources)
             {
-                string sourceName = TryGetString(source, "name") ?? "local";
-                string providerName = TryGetString(source, "provider") ?? "Ollama";
+                string sourceName = String.IsNullOrWhiteSpace(source.Name) ? "local" : source.Name;
+                string providerName = String.IsNullOrWhiteSpace(source.Provider) ? "Ollama" : source.Provider;
                 ApiProviderTypeEnum provider = Enum.TryParse(providerName, true, out ApiProviderTypeEnum parsedProvider) ? parsedProvider : ApiProviderTypeEnum.OpenAICompatible;
-                if (TryGetProperty(source, "models", out JsonElement sourceModels) && sourceModels.ValueKind == JsonValueKind.Array)
+                if (source.Models.Count > 0)
                 {
-                    RegisterClientModels(platform, client, sourceName, provider, sourceModels);
+                    RegisterClientModels(platform, client, sourceName, provider, source.Models);
                 }
             }
         }
 
-        private static void RegisterClientModels(XenoPlatform platform, XenoClientRecord client, string sourceName, ApiProviderTypeEnum provider, JsonElement models)
+        private static void RegisterClientModels(XenoPlatform platform, XenoClientRecord client, string sourceName, ApiProviderTypeEnum provider, List<ClientInventoryModelMessage> models)
         {
-            foreach (JsonElement model in models.EnumerateArray())
+            foreach (ClientInventoryModelMessage model in models)
             {
-                string? modelName = TryGetString(model, "name");
+                string? modelName = model.Name;
                 if (String.IsNullOrWhiteSpace(modelName)) continue;
 
-                bool supportsCompletions = TryGetBoolean(model, "supportsCompletions", true);
-                bool supportsEmbeddings = TryGetBoolean(model, "supportsEmbeddings", false);
+                bool supportsCompletions = model.SupportsCompletions;
+                bool supportsEmbeddings = model.SupportsEmbeddings;
                 client.Models.Add(new XenoClientModel
                 {
                     Name = modelName,
@@ -1809,21 +1930,46 @@ namespace Xeno.Server
             client.LastHeartbeatUtc = DateTime.UtcNow;
         }
 
-        private void CompleteClientResponse(JsonElement root, string json)
+        private void StartClientResponse(ClientResponseMessage message)
         {
-            string? requestId = TryGetString(root, "requestId");
+            string? requestId = message.RequestId;
             if (String.IsNullOrWhiteSpace(requestId)) return;
 
-            TaskCompletionSource<string>? completion = null;
+            PendingClientResponse? pending = null;
             lock (_PendingResponsesLock)
             {
-                if (_PendingClientResponses.TryGetValue(requestId, out completion))
-                {
-                    _PendingClientResponses.Remove(requestId);
-                }
+                _PendingClientResponses.TryGetValue(requestId, out pending);
             }
 
-            completion?.TrySetResult(json);
+            pending?.SetStart(message);
+        }
+
+        private void AddClientResponseChunk(ClientResponseChunkMessage message)
+        {
+            string? requestId = message.RequestId;
+            if (String.IsNullOrWhiteSpace(requestId)) return;
+
+            PendingClientResponse? pending = null;
+            lock (_PendingResponsesLock)
+            {
+                _PendingClientResponses.TryGetValue(requestId, out pending);
+            }
+
+            pending?.AddChunk(message);
+        }
+
+        private void CompleteClientResponse(ClientResponseMessage message)
+        {
+            string? requestId = message.RequestId;
+            if (String.IsNullOrWhiteSpace(requestId)) return;
+
+            PendingClientResponse? pending = null;
+            lock (_PendingResponsesLock)
+            {
+                _PendingClientResponses.TryGetValue(requestId, out pending);
+            }
+
+            pending?.SetFinal(message);
         }
 
         private ClientConnection? GetClientConnection(string? clientId)
@@ -1872,11 +2018,270 @@ namespace Xeno.Server
             }
         }
 
-        private async Task<RequestHistoryEntry> RecordAndSaveHistoryAsync(RequestContext requestContext, string method, string path, RoutingDecision decision, CancellationToken token)
+        private async Task<RequestHistoryEntry> RecordAndSaveHistoryAsync(
+            RequestContext requestContext,
+            string method,
+            string path,
+            RoutingDecision decision,
+            CancellationToken token,
+            Action<RequestHistoryEntry>? configure = null)
         {
             RequestHistoryEntry entry = RequireRouting().RecordHistory(requestContext, path, method, decision);
+            configure?.Invoke(entry);
             await SavePlatformAsync(token).ConfigureAwait(false);
             return entry;
+        }
+
+        private static bool IsClientResponseStart(ClientResponseMessage message)
+        {
+            return String.Equals(message.Type, "client.response.start", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void PopulateRequestHistory(
+            RequestHistoryEntry entry,
+            RequestContext requestContext,
+            string requestBodyJson,
+            Dictionary<string, string> requestHeaders,
+            string? responseBody,
+            Dictionary<string, string> responseHeaders,
+            ClientResponseMessage response,
+            RoutingDecision decision)
+        {
+            DateTime completedUtc = DateTime.UtcNow;
+            entry.UserId = requestContext.UserId;
+            entry.CredentialId = requestContext.CredentialId;
+            entry.SourceIp = requestContext.SourceIp;
+            entry.CompletedUtc = completedUtc;
+            entry.DurationMs = Math.Max(0, (long)(completedUtc - requestContext.StartedUtc).TotalMilliseconds);
+            entry.RequestHeaders = RedactHeaders(requestHeaders);
+            entry.ResponseHeaders = RedactHeaders(responseHeaders);
+            entry.RequestBodyLength = Encoding.UTF8.GetByteCount(requestBodyJson ?? String.Empty);
+            entry.ResponseBodyLength = Encoding.UTF8.GetByteCount(responseBody ?? String.Empty);
+            entry.RequestBody = TruncateBody(requestBodyJson, out bool requestTruncated);
+            entry.ResponseBody = TruncateBody(responseBody, out bool responseTruncated);
+            entry.RequestBodyTruncated = requestTruncated;
+            entry.ResponseBodyTruncated = responseTruncated;
+            entry.Telemetry = ExtractTelemetry(response, decision, entry);
+            entry.Timeline = BuildTimeline(requestContext, decision, entry.Telemetry, completedUtc);
+        }
+
+        private static RequestHistoryTelemetry ExtractTelemetry(ClientResponseMessage response, RoutingDecision decision, RequestHistoryEntry entry)
+        {
+            RequestHistoryTelemetry telemetry = new RequestHistoryTelemetry
+            {
+                TotalTimeMs = entry.DurationMs,
+                ClientRoundTripMs = decision.ClientRoundTripMs,
+                RequestBytes = entry.RequestBodyLength,
+                ResponseBytes = entry.ResponseBodyLength
+            };
+
+            if (response.Telemetry != null)
+            {
+                RequestHistoryTelemetry source = response.Telemetry;
+                telemetry.TotalTimeMs = source.TotalTimeMs ?? telemetry.TotalTimeMs;
+                telemetry.ClientRoundTripMs = source.ClientRoundTripMs ?? telemetry.ClientRoundTripMs;
+                telemetry.UpstreamTotalMs = source.UpstreamTotalMs ?? telemetry.UpstreamTotalMs;
+                telemetry.RequestToHeadersMs = source.RequestToHeadersMs ?? telemetry.RequestToHeadersMs;
+                telemetry.TimeToFirstTokenMs = source.TimeToFirstTokenMs ?? telemetry.TimeToFirstTokenMs;
+                telemetry.TotalStreamingTimeMs = source.TotalStreamingTimeMs ?? telemetry.TotalStreamingTimeMs;
+                telemetry.PromptTokens = source.PromptTokens ?? telemetry.PromptTokens;
+                telemetry.CompletionTokens = source.CompletionTokens ?? telemetry.CompletionTokens;
+                telemetry.TotalTokens = source.TotalTokens ?? telemetry.TotalTokens;
+                telemetry.StreamChunkCount = source.StreamChunkCount ?? telemetry.StreamChunkCount;
+                telemetry.StreamEventCount = source.StreamEventCount ?? telemetry.StreamEventCount;
+                telemetry.RequestBytes = source.RequestBytes ?? telemetry.RequestBytes;
+                telemetry.ResponseBytes = source.ResponseBytes ?? telemetry.ResponseBytes;
+                telemetry.TransferMode = source.TransferMode == RequestTransferModeEnum.Unknown ? telemetry.TransferMode : source.TransferMode;
+                telemetry.ProviderRequestId = source.ProviderRequestId ?? telemetry.ProviderRequestId;
+                telemetry.Metadata = new Dictionary<string, string>(source.Metadata, StringComparer.OrdinalIgnoreCase);
+            }
+
+            if (!telemetry.TotalTokens.HasValue)
+            {
+                OpenAiUsage usage = ExtractUsage(response.Body);
+                telemetry.TotalTokens = usage.TotalTokens;
+            }
+
+            return telemetry;
+        }
+
+        private static OpenAiUsage ExtractUsage(string? body)
+        {
+            if (String.IsNullOrWhiteSpace(body)) return new OpenAiUsage();
+            if (!JsonUtil.TryDeserialize<OpenAiUsageEnvelope>(body, out OpenAiUsageEnvelope? envelope)) return new OpenAiUsage();
+            return envelope?.Usage ?? new OpenAiUsage();
+        }
+
+        private static List<RequestHistoryTimelineEvent> BuildTimeline(RequestContext requestContext, RoutingDecision decision, RequestHistoryTelemetry telemetry, DateTime completedUtc)
+        {
+            List<RequestHistoryTimelineEvent> events = new List<RequestHistoryTimelineEvent>();
+            AddTimelineEvent(events, requestContext, RequestHistoryTimelineStageEnum.Received, "Xeno server received the API request.", requestContext.StartedUtc, true);
+
+            int index = 0;
+            foreach (string stage in decision.Timeline)
+            {
+                DateTime timestamp = requestContext.StartedUtc.AddMilliseconds(Math.Min(Math.Max(1, index + 1), Math.Max(1, (completedUtc - requestContext.StartedUtc).TotalMilliseconds)));
+                RequestHistoryTimelineStageEnum timelineStage = ParseTimelineStage(stage);
+                AddTimelineEvent(events, requestContext, timelineStage, DescribeTimelineStage(timelineStage, stage), timestamp, true);
+                index++;
+            }
+
+            if (telemetry.RequestToHeadersMs.HasValue)
+            {
+                AddTimelineEvent(events, requestContext, RequestHistoryTimelineStageEnum.ResponseHeaders, "Selected client received upstream response headers.", requestContext.StartedUtc.AddMilliseconds(telemetry.RequestToHeadersMs.Value), true);
+            }
+
+            if (telemetry.TimeToFirstTokenMs.HasValue)
+            {
+                AddTimelineEvent(events, requestContext, RequestHistoryTimelineStageEnum.FirstToken, "First response byte or token was received from the upstream provider.", requestContext.StartedUtc.AddMilliseconds(telemetry.TimeToFirstTokenMs.Value), true);
+            }
+
+            AddTimelineEvent(events, requestContext, decision.Success ? RequestHistoryTimelineStageEnum.Completed : RequestHistoryTimelineStageEnum.Failed, decision.Message, completedUtc, decision.Success);
+            return events;
+        }
+
+        private static RequestHistoryTimelineStageEnum ParseTimelineStage(string stage)
+        {
+            if (String.IsNullOrWhiteSpace(stage)) return RequestHistoryTimelineStageEnum.Unknown;
+            return Enum.TryParse(stage, true, out RequestHistoryTimelineStageEnum parsed) ? parsed : RequestHistoryTimelineStageEnum.Unknown;
+        }
+
+        private static string DescribeTimelineStage(RequestHistoryTimelineStageEnum stage, string fallback)
+        {
+            switch (stage)
+            {
+                case RequestHistoryTimelineStageEnum.ModelResolution:
+                    return "Xeno resolved the requested model.";
+                case RequestHistoryTimelineStageEnum.ClientInventory:
+                    return "Xeno evaluated connected client inventory.";
+                case RequestHistoryTimelineStageEnum.ClientSelection:
+                    return "Xeno selected the connected client for this request.";
+                case RequestHistoryTimelineStageEnum.ClientMissing:
+                    return "Selected client record was missing.";
+                case RequestHistoryTimelineStageEnum.ClientNotConnected:
+                    return "Selected client was not connected.";
+                case RequestHistoryTimelineStageEnum.ClientDispatch:
+                    return "Xeno dispatched the request to the selected client.";
+                case RequestHistoryTimelineStageEnum.ClientResponseStart:
+                    return "Selected client started a streamed response.";
+                case RequestHistoryTimelineStageEnum.ClientResponse:
+                    return "Selected client returned a response.";
+                case RequestHistoryTimelineStageEnum.ClientResponseComplete:
+                    return "Selected client completed the streamed response.";
+                case RequestHistoryTimelineStageEnum.ClientTimeout:
+                    return "Selected client timed out.";
+                case RequestHistoryTimelineStageEnum.Streaming:
+                    return "Selected client streamed response content.";
+                default:
+                    return String.IsNullOrWhiteSpace(fallback) ? "Timeline stage was recorded." : fallback;
+            }
+        }
+
+        private static void AddTimelineEvent(List<RequestHistoryTimelineEvent> events, RequestContext requestContext, RequestHistoryTimelineStageEnum stage, string message, DateTime timestampUtc, bool success)
+        {
+            events.Add(new RequestHistoryTimelineEvent
+            {
+                Stage = stage,
+                Message = message,
+                TimestampUtc = timestampUtc,
+                ElapsedMs = Math.Max(0, (long)(timestampUtc - requestContext.StartedUtc).TotalMilliseconds),
+                Success = success
+            });
+        }
+
+        private static string? TruncateBody(string? body, out bool truncated)
+        {
+            truncated = false;
+            if (body == null) return null;
+            if (body.Length <= MaxCapturedBodyChars) return body;
+            truncated = true;
+            return body.Substring(0, MaxCapturedBodyChars);
+        }
+
+        private static Dictionary<string, string> CaptureRequestHeaders(HttpContextBase context, Dictionary<string, string> forwardedHeaders)
+        {
+            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string? key in context.Request.Headers.AllKeys)
+            {
+                if (String.IsNullOrWhiteSpace(key)) continue;
+                headers[key] = context.Request.Headers.Get(key) ?? String.Empty;
+            }
+
+            foreach (KeyValuePair<string, string> forwarded in forwardedHeaders)
+            {
+                if (!headers.ContainsKey(forwarded.Key)) headers[forwarded.Key] = forwarded.Value;
+            }
+
+            return headers;
+        }
+
+        private static Dictionary<string, string> ExtractHeaders(ClientResponseMessage message)
+        {
+            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (message.Headers == null) return headers;
+            foreach (KeyValuePair<string, string> header in message.Headers)
+            {
+                if (String.IsNullOrWhiteSpace(header.Key) || String.IsNullOrWhiteSpace(header.Value)) continue;
+                headers[header.Key] = SanitizeHeaderValue(header.Value);
+            }
+
+            return headers;
+        }
+
+        private static Dictionary<string, string> RedactHeaders(Dictionary<string, string> headers)
+        {
+            Dictionary<string, string> redacted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                if (IsSensitiveHeader(header.Key))
+                {
+                    redacted[header.Key] = "(redacted)";
+                }
+                else
+                {
+                    redacted[header.Key] = SanitizeHeaderValue(header.Value);
+                }
+            }
+
+            return redacted;
+        }
+
+        private static bool IsSensitiveHeader(string name)
+        {
+            return name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Cookie", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("x-secret-key", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("x-token", StringComparison.OrdinalIgnoreCase) ||
+                   name.EndsWith("-key", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ApplyClientResponseHeaders(HttpContextBase context, Dictionary<string, string> headers)
+        {
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                if (IsHopByHopHeader(header.Key)) continue;
+                if (header.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.ContentType = header.Value;
+                    continue;
+                }
+
+                if (header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
+                context.Response.Headers.Add(header.Key, header.Value);
+            }
+        }
+
+        private static bool IsHopByHopHeader(string name)
+        {
+            return name.Equals("Connection", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Keep-Alive", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Proxy-Authenticate", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("TE", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Trailer", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Upgrade", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ApplyRoutingTraceHeaders(
@@ -1896,6 +2301,9 @@ namespace Xeno.Server
             AddTraceHeader(context, "X-Xeno-Routing-Message", decision.Message);
             AddTraceHeader(context, "X-Xeno-Routing-Candidate-Count", decision.CandidateCount.ToString(CultureInfo.InvariantCulture));
             AddTraceHeader(context, "X-Xeno-Routing-Candidates", String.Join(",", decision.CandidateClientIds));
+            AddTraceHeader(context, "X-Xeno-Load-Balancing-Mode", decision.LoadBalancingMode.ToString());
+            AddTraceHeader(context, "X-Xeno-Adaptive-Sample-Count", decision.AdaptiveSampleCount?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Adaptive-Score", decision.AdaptiveScore);
             AddTraceHeader(context, "X-Xeno-Selection-Reason", decision.SelectionReason);
             AddTraceHeader(context, "X-Xeno-Selected-Client-Name", FirstNonEmpty(decision.SelectedClientName, client?.Name));
             AddTraceHeader(context, "X-Xeno-Selected-Provider", FirstNonEmpty(decision.SelectedProvider, selectedModel?.Provider.ToString()));
@@ -1908,6 +2316,9 @@ namespace Xeno.Server
             AddTraceHeader(context, "X-Xeno-Request-Duration-Ms", Math.Max(0, (long)(DateTime.UtcNow - requestContext.StartedUtc).TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
             AddTraceHeader(context, "X-Xeno-Request-History-ID", history?.Id);
             AddTraceHeader(context, "X-Xeno-Routing-Timeline", String.Join(",", decision.Timeline));
+            AddTraceHeader(context, "X-Xeno-Time-To-First-Token-Ms", history?.Telemetry.TimeToFirstTokenMs?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Total-Tokens", history?.Telemetry.TotalTokens?.ToString(CultureInfo.InvariantCulture));
+            AddTraceHeader(context, "X-Xeno-Stream-Chunks", history?.Telemetry.StreamChunkCount?.ToString(CultureInfo.InvariantCulture));
         }
 
         private static Dictionary<string, string> BuildForwardedHeaders(HttpContextBase context, RequestContext requestContext, string requestorIp)
@@ -1992,6 +2403,7 @@ namespace Xeno.Server
             _Settings.Auth = incoming.Auth ?? new AuthSettings();
             _Settings.RequestHistory = incoming.RequestHistory ?? new RequestHistorySettings();
             _Settings.Routing = incoming.Routing ?? new RoutingSettings();
+            if (_Database != null) _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
         }
 
         private static string NormalizeOpenAiPath(string path)
@@ -2007,9 +2419,9 @@ namespace Xeno.Server
 
         private async Task HandleCreateTokenAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
         {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), context.Request.Headers.Get("x-access-key"));
-            string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), context.Request.Headers.Get("x-secret-key"));
+            AuthTokenRequest body = ReadJsonBody<AuthTokenRequest>(context);
+            string accessKey = FirstNonEmpty(body.AccessKey, context.Request.Headers.Get("x-access-key"));
+            string secretKey = FirstNonEmpty(body.SecretKey, context.Request.Headers.Get("x-secret-key"));
 
             XenoPlatform platform = RequirePlatform();
             Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey, secretKey);
@@ -2034,10 +2446,10 @@ namespace Xeno.Server
 
         private async Task HandleLoginAsync(HttpContextBase context, CancellationToken token)
         {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string tenantId = ResolveTenantId(context, GetBodyString(body, "tenantId"));
-            string username = FirstNonEmpty(GetBodyString(body, "username"), GetBodyString(body, "email"));
-            string password = FirstNonEmpty(GetBodyString(body, "password"));
+            AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
+            string tenantId = ResolveTenantId(context, body.TenantId);
+            string username = FirstNonEmpty(body.Username, body.Email);
+            string password = FirstNonEmpty(body.Password);
             if (String.IsNullOrWhiteSpace(username) || String.IsNullOrWhiteSpace(password))
             {
                 throw new ArgumentException("Username and password are required.");
@@ -2110,9 +2522,9 @@ namespace Xeno.Server
         private Tenant CreateTenant(HttpContextBase context)
         {
             XenoPlatform platform = RequirePlatform();
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string id = FirstNonEmpty(GetBodyString(body, "id"), IdGenerator.NewId("ten_"));
-            string name = FirstNonEmpty(GetBodyString(body, "name"));
+            TenantSaveRequest body = ReadJsonBody<TenantSaveRequest>(context);
+            string id = FirstNonEmpty(body.Id, IdGenerator.NewId("ten_"));
+            string name = FirstNonEmpty(body.Name);
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Tenant name is required.");
             if (platform.Tenants.Any(item => String.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Tenant ID already exists.");
 
@@ -2124,37 +2536,37 @@ namespace Xeno.Server
                 CreatedUtc = DateTime.UtcNow,
                 LastUpdateUtc = DateTime.UtcNow
             };
-            if (TryGetBodyBoolean(body, "active", out bool active)) tenant.Active = active;
+            if (body.Active.HasValue) tenant.Active = body.Active.Value;
             return tenant;
         }
 
         private User CreateUser(RequestContext requestContext, HttpContextBase context)
         {
             XenoPlatform platform = RequirePlatform();
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string tenantId = FirstNonEmpty(GetBodyString(body, "tenantId"), requestContext.TenantId);
+            UserSaveRequest body = ReadJsonBody<UserSaveRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
             if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
             if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
 
-            string username = FirstNonEmpty(GetBodyString(body, "username"), GetBodyString(body, "email"));
+            string username = FirstNonEmpty(body.Username, body.Email);
             if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
             if (platform.Users.Any(item => item.TenantId == tenantId && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Username already exists in the tenant.");
 
-            string password = FirstNonEmpty(GetBodyString(body, "password"));
+            string password = FirstNonEmpty(body.Password);
             if (String.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password is required.");
 
             User user = new User
             {
                 TenantId = tenantId,
                 Username = username.Trim(),
-                Email = FirstNonEmpty(GetBodyString(body, "email"), username).Trim(),
+                Email = FirstNonEmpty(body.Email, username).Trim(),
                 IsAdmin = false,
                 IsTenantAdmin = false,
                 Active = true
             };
-            if (TryGetBodyBoolean(body, "isAdmin", out bool isAdmin)) user.IsAdmin = isAdmin;
-            if (TryGetBodyBoolean(body, "isTenantAdmin", out bool isTenantAdmin)) user.IsTenantAdmin = isTenantAdmin;
-            if (TryGetBodyBoolean(body, "active", out bool active)) user.Active = active;
+            if (body.IsAdmin.HasValue) user.IsAdmin = body.IsAdmin.Value;
+            if (body.IsTenantAdmin.HasValue) user.IsTenantAdmin = body.IsTenantAdmin.Value;
+            if (body.Active.HasValue) user.Active = body.Active.Value;
             _Authentication.SetUserPassword(user, password);
             return user;
         }
@@ -2162,10 +2574,10 @@ namespace Xeno.Server
         private Credential CreateCredential(RequestContext requestContext, HttpContextBase context)
         {
             XenoPlatform platform = RequirePlatform();
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string tenantId = FirstNonEmpty(GetBodyString(body, "tenantId"), requestContext.TenantId);
+            CredentialSaveRequest body = ReadJsonBody<CredentialSaveRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
             if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
-            string userId = FirstNonEmpty(GetBodyString(body, "userId"), requestContext.UserId);
+            string userId = FirstNonEmpty(body.UserId, requestContext.UserId);
             if (String.IsNullOrWhiteSpace(userId))
             {
                 User? user = platform.Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active);
@@ -2175,9 +2587,9 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.");
             if (!platform.Users.Any(item => item.Id == userId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("Credential user does not exist or is inactive.");
 
-            string accessKey = FirstNonEmpty(GetBodyString(body, "accessKey"), IdGenerator.NewId("xeno_"));
+            string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
             if (platform.Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
-            string secretKey = FirstNonEmpty(GetBodyString(body, "secretKey"), _Authentication.GenerateSecret());
+            string secretKey = FirstNonEmpty(body.SecretKey, _Authentication.GenerateSecret());
             Credential credential = new Credential
             {
                 TenantId = tenantId,
@@ -2186,15 +2598,15 @@ namespace Xeno.Server
                 SecretKey = secretKey,
                 Active = true
             };
-            if (TryGetBodyBoolean(body, "active", out bool active)) credential.Active = active;
+            if (body.Active.HasValue) credential.Active = body.Active.Value;
             return credential;
         }
 
         private Role CreateRole(RequestContext requestContext, HttpContextBase context)
         {
             XenoPlatform platform = RequirePlatform();
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string name = FirstNonEmpty(GetBodyString(body, "name"));
+            RoleSaveRequest body = ReadJsonBody<RoleSaveRequest>(context);
+            string name = FirstNonEmpty(body.Name);
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Role name is required.");
             if (platform.Roles.Any(item => item.TenantId == requestContext.TenantId && String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Role name already exists in the tenant.");
 
@@ -2203,23 +2615,23 @@ namespace Xeno.Server
                 TenantId = requestContext.TenantId,
                 Name = name.Trim(),
                 BuiltIn = false,
-                PermissionIds = GetBodyStringSet(body, "permissionIds").Where(permissionId => platform.Permissions.Any(permission => permission.Id == permissionId && permission.TenantId == requestContext.TenantId)).ToList(),
+                PermissionIds = GetStringSet(body.PermissionIds).Where(permissionId => platform.Permissions.Any(permission => permission.Id == permissionId && permission.TenantId == requestContext.TenantId)).ToList(),
                 CreatedUtc = DateTime.UtcNow,
                 LastUpdateUtc = DateTime.UtcNow,
                 Active = true
             };
-            if (TryGetBodyBoolean(body, "active", out bool active)) role.Active = active;
+            if (body.Active.HasValue) role.Active = body.Active.Value;
             return role;
         }
 
         private Permission CreatePermission(RequestContext requestContext, HttpContextBase context)
         {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string resourceType = FirstNonEmpty(GetBodyString(body, "resourceType"));
+            PermissionSaveRequest body = ReadJsonBody<PermissionSaveRequest>(context);
+            string resourceType = FirstNonEmpty(body.ResourceType);
             if (String.IsNullOrWhiteSpace(resourceType)) throw new ArgumentException("Resource type is required.");
 
             OperationTypeEnum operationType = OperationTypeEnum.Read;
-            string? operationTypeText = GetBodyString(body, "operationType");
+            string? operationTypeText = body.OperationType;
             if (!String.IsNullOrWhiteSpace(operationTypeText) && !Enum.TryParse(operationTypeText, true, out operationType)) throw new ArgumentException("Operation type is invalid.");
 
             Permission permission = new Permission
@@ -2232,8 +2644,8 @@ namespace Xeno.Server
                 LastUpdateUtc = DateTime.UtcNow,
                 Active = true
             };
-            if (TryGetBodyBoolean(body, "permit", out bool permit)) permission.Permit = permit;
-            if (TryGetBodyBoolean(body, "active", out bool active)) permission.Active = active;
+            if (body.Permit.HasValue) permission.Permit = body.Permit.Value;
+            if (body.Active.HasValue) permission.Active = body.Active.Value;
             return permission;
         }
 
@@ -2269,15 +2681,15 @@ namespace Xeno.Server
             Tenant? tenant = RequirePlatform().Tenants.FirstOrDefault(item => item.Id == tenantId);
             if (tenant == null) throw new KeyNotFoundException("Tenant not found.");
 
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? name = GetBodyString(body, "name");
+            TenantSaveRequest body = ReadJsonBody<TenantSaveRequest>(context);
+            string? name = body.Name;
             if (name != null)
             {
                 if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Tenant name is required.");
                 tenant.Name = name.Trim();
             }
 
-            if (TryGetBodyBoolean(body, "active", out bool active)) tenant.Active = active;
+            if (body.Active.HasValue) tenant.Active = body.Active.Value;
             tenant.LastUpdateUtc = DateTime.UtcNow;
             return tenant;
         }
@@ -2307,22 +2719,22 @@ namespace Xeno.Server
             User? user = platform.Users.FirstOrDefault(item => item.Id == userId && IsTenantVisible(requestContext, item.TenantId));
             if (user == null) throw new KeyNotFoundException("User not found.");
 
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? username = GetBodyString(body, "username");
+            UserSaveRequest body = ReadJsonBody<UserSaveRequest>(context);
+            string? username = body.Username;
             if (username != null)
             {
                 if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
                 user.Username = username.Trim();
             }
 
-            string? email = GetBodyString(body, "email");
+            string? email = body.Email;
             if (email != null) user.Email = email.Trim();
 
-            if (TryGetBodyBoolean(body, "isAdmin", out bool isAdmin)) user.IsAdmin = isAdmin;
-            if (TryGetBodyBoolean(body, "isTenantAdmin", out bool isTenantAdmin)) user.IsTenantAdmin = isTenantAdmin;
-            if (TryGetBodyBoolean(body, "active", out bool active)) user.Active = active;
+            if (body.IsAdmin.HasValue) user.IsAdmin = body.IsAdmin.Value;
+            if (body.IsTenantAdmin.HasValue) user.IsTenantAdmin = body.IsTenantAdmin.Value;
+            if (body.Active.HasValue) user.Active = body.Active.Value;
 
-            string? password = GetBodyString(body, "password");
+            string? password = body.Password;
             if (!String.IsNullOrWhiteSpace(password)) _Authentication.SetUserPassword(user, password);
 
             return user;
@@ -2333,20 +2745,20 @@ namespace Xeno.Server
             Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
             if (credential == null) throw new KeyNotFoundException("Credential not found.");
 
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? userId = GetBodyString(body, "userId");
+            CredentialSaveRequest body = ReadJsonBody<CredentialSaveRequest>(context);
+            string? userId = body.UserId;
             if (userId != null) credential.UserId = userId.Trim();
 
-            string? accessKey = GetBodyString(body, "accessKey");
+            string? accessKey = body.AccessKey;
             if (accessKey != null)
             {
                 if (String.IsNullOrWhiteSpace(accessKey)) throw new ArgumentException("Access key is required.");
                 credential.AccessKey = accessKey.Trim();
             }
 
-            string? secretKey = GetBodyString(body, "secretKey");
+            string? secretKey = body.SecretKey;
             if (!String.IsNullOrWhiteSpace(secretKey)) credential.SecretKey = secretKey;
-            if (TryGetBodyBoolean(body, "active", out bool active)) credential.Active = active;
+            if (body.Active.HasValue) credential.Active = body.Active.Value;
             return credential;
         }
 
@@ -2367,16 +2779,16 @@ namespace Xeno.Server
             Role? role = RequirePlatform().Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
             if (role == null) throw new KeyNotFoundException("Role not found.");
 
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? name = GetBodyString(body, "name");
+            RoleSaveRequest body = ReadJsonBody<RoleSaveRequest>(context);
+            string? name = body.Name;
             if (name != null)
             {
                 if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Role name is required.");
                 role.Name = name.Trim();
             }
 
-            if (body.ContainsKey("permissionIds")) role.PermissionIds = GetBodyStringSet(body, "permissionIds").ToList();
-            if (TryGetBodyBoolean(body, "active", out bool active)) role.Active = active;
+            if (body.PermissionIds != null) role.PermissionIds = GetStringSet(body.PermissionIds).ToList();
+            if (body.Active.HasValue) role.Active = body.Active.Value;
             role.LastUpdateUtc = DateTime.UtcNow;
             return role;
         }
@@ -2394,23 +2806,23 @@ namespace Xeno.Server
             Permission? permission = RequirePlatform().Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
             if (permission == null) throw new KeyNotFoundException("Permission not found.");
 
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string? resourceType = GetBodyString(body, "resourceType");
+            PermissionSaveRequest body = ReadJsonBody<PermissionSaveRequest>(context);
+            string? resourceType = body.ResourceType;
             if (resourceType != null)
             {
                 if (String.IsNullOrWhiteSpace(resourceType)) throw new ArgumentException("Resource type is required.");
                 permission.ResourceType = resourceType.Trim();
             }
 
-            string? operationType = GetBodyString(body, "operationType");
+            string? operationType = body.OperationType;
             if (!String.IsNullOrWhiteSpace(operationType))
             {
                 if (!Enum.TryParse(operationType, true, out OperationTypeEnum parsedOperation)) throw new ArgumentException("Operation type is invalid.");
                 permission.OperationType = parsedOperation;
             }
 
-            if (TryGetBodyBoolean(body, "permit", out bool permit)) permission.Permit = permit;
-            if (TryGetBodyBoolean(body, "active", out bool active)) permission.Active = active;
+            if (body.Permit.HasValue) permission.Permit = body.Permit.Value;
+            if (body.Active.HasValue) permission.Active = body.Active.Value;
             permission.LastUpdateUtc = DateTime.UtcNow;
             return permission;
         }
@@ -2444,10 +2856,10 @@ namespace Xeno.Server
 
         private int DeleteClientModel(RequestContext requestContext, HttpContextBase context)
         {
-            Dictionary<string, object?> body = ReadJsonObject(context);
-            string clientId = GetBodyString(body, "clientId") ?? String.Empty;
-            string modelName = GetBodyString(body, "name") ?? String.Empty;
-            string source = GetBodyString(body, "source") ?? String.Empty;
+            ClientModelDeleteRequest body = ReadJsonBody<ClientModelDeleteRequest>(context);
+            string clientId = body.ClientId ?? String.Empty;
+            string modelName = body.Name ?? String.Empty;
+            string source = body.Source ?? String.Empty;
             if (String.IsNullOrWhiteSpace(clientId)) throw new ArgumentException("Client ID is required.");
             if (String.IsNullOrWhiteSpace(modelName)) throw new ArgumentException("Model name is required.");
 
@@ -2459,14 +2871,14 @@ namespace Xeno.Server
                 && (String.IsNullOrWhiteSpace(source) || String.Equals(item.Source, source, StringComparison.OrdinalIgnoreCase)));
         }
 
-        private int DeleteRequestHistory(RequestContext requestContext, Dictionary<string, object?> body)
+        private int DeleteRequestHistory(RequestContext requestContext, RequestHistoryDeleteRequest body)
         {
-            HashSet<string> ids = GetBodyStringSet(body, "ids");
-            string? singleId = GetBodyString(body, "id");
+            HashSet<string> ids = GetStringSet(body.Ids);
+            string? singleId = body.Id;
             if (!String.IsNullOrWhiteSpace(singleId)) ids.Add(singleId);
-            string? model = GetBodyString(body, "model");
-            string? path = GetBodyString(body, "path");
-            string? selectedClientId = GetBodyString(body, "selectedClientId");
+            string? model = body.Model;
+            string? path = body.Path;
+            string? selectedClientId = body.SelectedClientId;
 
             return RequirePlatform().RequestHistory.RemoveAll(item =>
                 item.TenantId == requestContext.TenantId
@@ -2591,60 +3003,16 @@ namespace Xeno.Server
             return tenantId;
         }
 
-        private static string? GetBodyString(Dictionary<string, object?> body, string key)
-        {
-            return body.TryGetValue(key, out object? value) ? value?.ToString() : null;
-        }
-
-        private static bool TryGetBodyBoolean(Dictionary<string, object?> body, string key, out bool result)
-        {
-            result = false;
-            if (!body.TryGetValue(key, out object? value) || value == null) return false;
-            if (value is JsonElement element)
-            {
-                if (element.ValueKind == JsonValueKind.True)
-                {
-                    result = true;
-                    return true;
-                }
-
-                if (element.ValueKind == JsonValueKind.False)
-                {
-                    result = false;
-                    return true;
-                }
-            }
-
-            return Boolean.TryParse(value.ToString(), out result);
-        }
-
-        private static HashSet<string> GetBodyStringSet(Dictionary<string, object?> body, string key)
+        private static HashSet<string> GetStringSet(List<string>? source)
         {
             HashSet<string> values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!body.TryGetValue(key, out object? value) || value == null) return values;
+            if (source == null) return values;
 
-            if (value is JsonElement element)
+            foreach (string item in source)
             {
-                if (element.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (JsonElement item in element.EnumerateArray())
-                    {
-                        string? text = item.ToString();
-                        if (!String.IsNullOrWhiteSpace(text)) values.Add(text);
-                    }
-                    return values;
-                }
-
-                if (element.ValueKind == JsonValueKind.String)
-                {
-                    string? text = element.GetString();
-                    if (!String.IsNullOrWhiteSpace(text)) values.Add(text);
-                    return values;
-                }
+                if (!String.IsNullOrWhiteSpace(item)) values.Add(item);
             }
 
-            string? single = value.ToString();
-            if (!String.IsNullOrWhiteSpace(single)) values.Add(single);
             return values;
         }
 
@@ -2659,13 +3027,6 @@ namespace Xeno.Server
         {
             return String.Equals(context.TenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase)
                 || String.Equals(context.TenantId, tenantId, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool GetBodyBoolean(Dictionary<string, object?> body, string key)
-        {
-            if (!body.TryGetValue(key, out object? value)) return false;
-            if (value == null) return false;
-            return Boolean.TryParse(value.ToString(), out bool result) && result;
         }
 
         private static bool FixedTimeEquals(string left, string right)
@@ -2792,15 +3153,17 @@ namespace Xeno.Server
             return new { fromUtc, toUtc, bucketMinutes, buckets };
         }
 
-        private static Dictionary<string, object?> ReadJsonObject(HttpContextBase context)
+        private static string ReadBodyJson(HttpContextBase context)
         {
             string json = context.Request.DataAsString ?? String.Empty;
-            if (String.IsNullOrWhiteSpace(json)) return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            return String.IsNullOrWhiteSpace(json) ? "{}" : json;
+        }
 
-            Dictionary<string, object?>? values = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonUtil.Options);
-            return values == null
-                ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, object?>(values, StringComparer.OrdinalIgnoreCase);
+        private static T ReadJsonBody<T>(HttpContextBase context) where T : class, new()
+        {
+            string json = ReadBodyJson(context);
+            T? body = JsonUtil.Deserialize<T>(json);
+            return body ?? new T();
         }
 
         private async Task SendJsonAsync(HttpContextBase context, object value)
@@ -2873,37 +3236,6 @@ namespace Xeno.Server
         private static void AddNonEmpty(List<string> values, string? value)
         {
             if (!String.IsNullOrWhiteSpace(value)) values.Add(value);
-        }
-
-        private static string? TryGetString(JsonElement element, string propertyName)
-        {
-            if (!TryGetProperty(element, propertyName, out JsonElement property)) return null;
-            if (property.ValueKind == JsonValueKind.Null || property.ValueKind == JsonValueKind.Undefined) return null;
-            return property.ToString();
-        }
-
-        private static bool TryGetBoolean(JsonElement element, string propertyName, bool defaultValue)
-        {
-            if (!TryGetProperty(element, propertyName, out JsonElement property)) return defaultValue;
-            if (property.ValueKind == JsonValueKind.True) return true;
-            if (property.ValueKind == JsonValueKind.False) return false;
-            if (Boolean.TryParse(property.ToString(), out bool parsed)) return parsed;
-            return defaultValue;
-        }
-
-        private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
-        {
-            property = default;
-            if (element.ValueKind != JsonValueKind.Object) return false;
-            if (element.TryGetProperty(propertyName, out property)) return true;
-            foreach (JsonProperty candidate in element.EnumerateObject())
-            {
-                if (!String.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
-                property = candidate.Value;
-                return true;
-            }
-
-            return false;
         }
 
         private object BuildOpenApi()
@@ -3000,7 +3332,28 @@ namespace Xeno.Server
                         ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ModelDefinition"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelConfiguration"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["RequestHistoryEntry"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("path", StringSchema()), Property("statusCode", IntegerSchema()))
+                        ["RequestHistoryEntry"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("path", StringSchema()),
+                            Property("method", StringSchema()),
+                            Property("model", StringSchema()),
+                            Property("selectedClientId", StringSchema()),
+                            Property("statusCode", IntegerSchema()),
+                            Property("durationMs", IntegerSchema()),
+                            Property("createdUtc", StringSchema("date-time")),
+                            Property("completedUtc", StringSchema("date-time")),
+                            Property("requestHeaders", ObjectSchema()),
+                            Property("responseHeaders", ObjectSchema()),
+                            Property("requestBody", StringSchema()),
+                            Property("responseBody", StringSchema()),
+                            Property("requestBodyLength", IntegerSchema()),
+                            Property("responseBodyLength", IntegerSchema()),
+                            Property("requestBodyTruncated", BooleanSchema()),
+                            Property("responseBodyTruncated", BooleanSchema()),
+                            Property("telemetry", ObjectSchema()),
+                            Property("timeline", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }),
+                            Property("routingDecision", ObjectSchema()))
                     }
                 }
             };

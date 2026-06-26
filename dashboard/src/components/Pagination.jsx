@@ -33,20 +33,21 @@ export default function Pagination({ currentPage, onPageChange, onPageSizeChange
     <div className="pagination-bar">
       <div className="pagination-summary">
         <span>{t('showingRange', { start, end, total: totalItems })}</span>
-        <label>
+        <label title={t('tooltipPageSize')}>
           <span>{t('perPage')}</span>
-          <select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>
+          <select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} title={t('tooltipPageSize')}>
             {pageSizes.map((size) => <option key={size} value={size}>{size}</option>)}
           </select>
         </label>
       </div>
       <div className="pagination-controls">
-        <label className="pagination-refresh">
+        <label className="pagination-refresh" title={t('tooltipAutoRefresh')}>
           <span>{t('autoRefresh')}</span>
           <select
             disabled={!onRefresh}
             value={autoRefreshSeconds}
             onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
+            title={t('tooltipAutoRefresh')}
           >
             {refreshIntervals.map((seconds) => (
               <option key={seconds} value={seconds}>
@@ -56,21 +57,21 @@ export default function Pagination({ currentPage, onPageChange, onPageSizeChange
           </select>
         </label>
         {onRefresh ? (
-          <button className="pagination-button" onClick={onRefresh} title={t('refresh')} type="button">
+          <button className="pagination-button" onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
             <RefreshCw size={14} />
           </button>
         ) : null}
-        <button className="pagination-button" disabled={currentPage <= 1} onClick={() => goTo(1)} title={t('firstPage')} type="button">
+        <button className="pagination-button" disabled={currentPage <= 1} onClick={() => goTo(1)} title={t('tooltipFirstPage')} type="button">
           <ChevronsLeft size={14} />
         </button>
-        <button className="pagination-button" disabled={currentPage <= 1} onClick={() => goTo(currentPage - 1)} title={t('previousPage')} type="button">
+        <button className="pagination-button" disabled={currentPage <= 1} onClick={() => goTo(currentPage - 1)} title={t('tooltipPreviousPage')} type="button">
           <ChevronLeft size={14} />
         </button>
         <span className="pagination-page">{t('pageOf', { page: currentPage, total: totalPages })}</span>
-        <button className="pagination-button" disabled={currentPage >= totalPages} onClick={() => goTo(currentPage + 1)} title={t('nextPage')} type="button">
+        <button className="pagination-button" disabled={currentPage >= totalPages} onClick={() => goTo(currentPage + 1)} title={t('tooltipNextPage')} type="button">
           <ChevronRight size={14} />
         </button>
-        <button className="pagination-button" disabled={currentPage >= totalPages} onClick={() => goTo(totalPages)} title={t('lastPage')} type="button">
+        <button className="pagination-button" disabled={currentPage >= totalPages} onClick={() => goTo(totalPages)} title={t('tooltipLastPage')} type="button">
           <ChevronsRight size={14} />
         </button>
       </div>

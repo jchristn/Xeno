@@ -44,7 +44,7 @@ export default function Modal({ actions, children, headerActions, onClose, open,
           </div>
           <div className="modal-heading-actions">
             {headerActions}
-            <button aria-label={t('closeDialog')} className="icon-button" onClick={onClose} title={t('closeDialog')} type="button">
+            <button aria-label={t('closeDialog')} className="icon-button" onClick={onClose} title={t('tooltipFormClose')} type="button">
               <X size={17} />
             </button>
           </div>

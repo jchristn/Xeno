@@ -15,15 +15,20 @@ dotnet add <your-project>.csproj reference .\src\sdk\csharp\Xeno.Sdk\Xeno.Sdk.cs
 ```csharp
 using Xeno.Sdk;
 
-using XenoClient client = new XenoClient("http://localhost:9000", tenantId: "ten_default");
-using JsonDocument health = await client.GetHealthAsync();
-using JsonDocument models = await client.ListOpenAiModelsAsync();
+using (XenoClient client = new XenoClient("http://localhost:9000", tenantId: "ten_default"))
+{
+    XenoApiResponse health = await client.GetHealthAsync();
+    XenoApiResponse models = await client.ListOpenAiModelsAsync();
+}
 ```
 
 Authenticated servers can use bearer tokens:
 
 ```csharp
-using XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token);
+using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token))
+{
+    XenoApiResponse health = await client.GetHealthAsync();
+}
 ```
 
 ## Interactive Console

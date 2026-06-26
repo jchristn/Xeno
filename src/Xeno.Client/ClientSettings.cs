@@ -3,7 +3,6 @@ namespace Xeno.Client
     using System;
     using System.Collections.Generic;
     using System.IO;
-    using System.Text.Json;
     using System.Text.Json.Serialization;
     using Xeno.Core.Serialization;
 
@@ -101,13 +100,8 @@ namespace Xeno.Client
             ClientSettings settings = JsonUtil.Deserialize<ClientSettings>(json) ?? new ClientSettings();
             if (settings.Providers.Count == 0)
             {
-                using (JsonDocument document = JsonDocument.Parse(json))
-                {
-                    if (document.RootElement.TryGetProperty("Runners", out JsonElement legacyRunners) && legacyRunners.ValueKind == JsonValueKind.Array)
-                    {
-                        settings.Providers = JsonSerializer.Deserialize<List<ClientRunnerSettings>>(legacyRunners.GetRawText(), JsonUtil.Options) ?? new List<ClientRunnerSettings>();
-                    }
-                }
+                ClientSettingsLegacyRunners? legacy = JsonUtil.Deserialize<ClientSettingsLegacyRunners>(json);
+                settings.Providers = legacy?.Runners ?? new List<ClientRunnerSettings>();
             }
 
             return settings;

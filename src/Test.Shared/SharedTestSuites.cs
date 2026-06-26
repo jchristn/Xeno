@@ -9,10 +9,10 @@ namespace Test.Shared
     using System.Net.Sockets;
     using System.Net.WebSockets;
     using System.Text;
-    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using Touchstone.Core;
+    using Xeno.Client;
     using Xeno.Core;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
@@ -137,18 +137,18 @@ namespace Test.Shared
                             {
                                 File.WriteAllText(settingsFile, "{\"TenantId\":\"custom\",\"UseColors\":false,\"Providers\":[]}");
                                 File.WriteAllText(stateFile, "{\"IsConnected\":true}");
-                                (int ExitCode, string StandardOutput, string StandardError) cancelled = await RunXenoClientAsync(new[] { "reset" }, clientHome, "NO" + Environment.NewLine).ConfigureAwait(false);
+                                ClientCommandResult cancelled = await RunXenoClientAsync(new[] { "reset" }, clientHome, "NO" + Environment.NewLine).ConfigureAwait(false);
                                 if (cancelled.ExitCode != 0) throw new InvalidOperationException("Reset cancel failed: " + cancelled.StandardError + cancelled.StandardOutput);
                                 if (!File.ReadAllText(settingsFile).Contains("\"custom\"", StringComparison.Ordinal)) throw new InvalidOperationException("Cancelled reset changed client settings.");
                                 if (!File.Exists(stateFile)) throw new InvalidOperationException("Cancelled reset removed runtime state.");
 
-                                (int ExitCode, string StandardOutput, string StandardError) confirmed = await RunXenoClientAsync(new[] { "reset" }, clientHome, "RESET" + Environment.NewLine).ConfigureAwait(false);
+                                ClientCommandResult confirmed = await RunXenoClientAsync(new[] { "reset" }, clientHome, "RESET" + Environment.NewLine).ConfigureAwait(false);
                                 if (confirmed.ExitCode != 0) throw new InvalidOperationException("Confirmed reset failed: " + confirmed.StandardError + confirmed.StandardOutput);
                                 AssertFactoryDefaultClientSettings(settingsFile, stateFile);
 
                                 File.WriteAllText(settingsFile, "{broken json");
                                 File.WriteAllText(stateFile, "{\"IsConnected\":true}");
-                                (int ExitCode, string StandardOutput, string StandardError) forced = await RunXenoClientAsync(new[] { "--json", "reset", "--force" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult forced = await RunXenoClientAsync(new[] { "--json", "reset", "--force" }, clientHome).ConfigureAwait(false);
                                 if (forced.ExitCode != 0) throw new InvalidOperationException("Forced reset failed: " + forced.StandardError + forced.StandardOutput);
                                 if (!forced.StandardOutput.Contains("\"reset\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Forced reset JSON output did not report success.");
                                 AssertFactoryDefaultClientSettings(settingsFile, stateFile);
@@ -169,29 +169,27 @@ namespace Test.Shared
 
                             try
                             {
-                                (int ExitCode, string StandardOutput, string StandardError) initial = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult initial = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
                                 if (initial.ExitCode != 0) throw new InvalidOperationException("Initial model list failed: " + initial.StandardError + initial.StandardOutput);
                                 if (!initial.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Default model was not listed before delete.");
 
-                                (int ExitCode, string StandardOutput, string StandardError) deleted = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult deleted = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
                                 if (deleted.ExitCode != 0) throw new InvalidOperationException("Model delete failed: " + deleted.StandardError + deleted.StandardOutput);
                                 if (!deleted.StandardOutput.Contains("Deleted model", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model delete did not report success.");
 
-                                (int ExitCode, string StandardOutput, string StandardError) emptyList = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult emptyList = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
                                 if (emptyList.ExitCode != 0) throw new InvalidOperationException("Model list after delete failed: " + emptyList.StandardError + emptyList.StandardOutput);
-                                using (JsonDocument document = JsonDocument.Parse(emptyList.StandardOutput))
-                                {
-                                    if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() != 0) throw new InvalidOperationException("Model delete did not remove the configured model.");
-                                }
+                                List<TestCliModelRecord> modelList = DeserializeRequired<List<TestCliModelRecord>>(emptyList.StandardOutput);
+                                if (modelList.Count != 0) throw new InvalidOperationException("Model delete did not remove the configured model.");
 
-                                (int ExitCode, string StandardOutput, string StandardError) missing = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult missing = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
                                 if (missing.ExitCode == 0) throw new InvalidOperationException("Deleting a missing model should fail.");
                                 if (!missing.StandardOutput.Contains("Model not found", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Missing model delete did not print a useful error.");
 
-                                (int ExitCode, string StandardOutput, string StandardError) added = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult added = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
                                 if (added.ExitCode != 0) throw new InvalidOperationException("Model add before scoped delete failed: " + added.StandardError + added.StandardOutput);
 
-                                (int ExitCode, string StandardOutput, string StandardError) scopedDelete = await RunXenoClientAsync(new[] { "model", "delete", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult scopedDelete = await RunXenoClientAsync(new[] { "model", "delete", "--provider", "local-ollama", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
                                 if (scopedDelete.ExitCode != 0) throw new InvalidOperationException("Provider-scoped model delete failed: " + scopedDelete.StandardError + scopedDelete.StandardOutput);
                             }
                             finally
@@ -413,8 +411,8 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Routing",
-                        "LeastInFlightSelectsLowerLoad",
-                        "Direct routing selects the lower-load client",
+                        "AdaptiveSelectsLowerLoad",
+                        "Adaptive routing selects the lower-load client",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
@@ -430,10 +428,63 @@ namespace Test.Shared
                             };
                             client.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
                             platform.Clients.Add(client);
-                            RoutingService routing = new RoutingService(platform);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Adaptive });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
-                            if (decision.SelectedClientId != client.Id) throw new InvalidOperationException("Least in-flight client was not selected.");
+                            if (decision.SelectedClientId != client.Id) throw new InvalidOperationException("Adaptive lower-load client was not selected.");
+                            if (decision.LoadBalancingMode != LoadBalancingModeEnum.Adaptive) throw new InvalidOperationException("Adaptive mode was not recorded.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "RoundRobinRotatesAcrossEligibleClients",
+                        "Round-robin routing rotates across eligible clients",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.RoundRobin });
+                            RoutingDecision first = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            RoutingDecision second = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!first.Success || !second.Success) throw new InvalidOperationException("Round-robin routing failed.");
+                            if (first.SelectedClientId == second.SelectedClientId) throw new InvalidOperationException("Round-robin did not rotate across eligible clients.");
+                            if (first.LoadBalancingMode != LoadBalancingModeEnum.RoundRobin) throw new InvalidOperationException("Round-robin mode was not recorded.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "FirstAvailableSelectsDeterministicFirstClient",
+                        "First-available routing selects deterministic first client",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.FirstAvailable });
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException(decision.Message);
+                            if (decision.SelectedClientName != "alpha-client") throw new InvalidOperationException("First-available did not select the deterministic first client.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "LeastRecentlyUsedRotatesByRouteScope",
+                        "Least-recently-used routing rotates by route scope",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
+                            RoutingDecision first = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            RoutingDecision second = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!first.Success || !second.Success) throw new InvalidOperationException("Least-recently-used routing failed.");
+                            if (first.SelectedClientId == second.SelectedClientId) throw new InvalidOperationException("Least-recently-used did not rotate by route scope.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "RandomSelectsEligibleClientAndRecordsMode",
+                        "Random routing selects an eligible client and records mode",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Random });
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException(decision.Message);
+                            if (decision.LoadBalancingMode != LoadBalancingModeEnum.Random) throw new InvalidOperationException("Random mode was not recorded.");
+                            if (!decision.CandidateClientIds.Contains(decision.SelectedClientId ?? String.Empty)) throw new InvalidOperationException("Random selected a non-candidate client.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
@@ -508,6 +559,11 @@ namespace Test.Shared
                         "OpenAiCompletionRelaysThroughClient",
                         "OpenAI-compatible completions relay through a connected Xeno client",
                         executeAsync: delegate { return RunRelaySmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "OpenAiStreamingCompletionRelaysThroughClient",
+                        "Streaming OpenAI-compatible completions relay through WebSocket chunks and persist telemetry",
+                        executeAsync: delegate { return RunRelayStreamingSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "Relay",
                         "WebSocketRequiresCredential",
@@ -677,22 +733,54 @@ namespace Test.Shared
                         string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
                         if (!openApi.Contains("client-model", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("clientmodels", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing client model delete route.");
                         if (!openApi.Contains("request-history", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("requesthistory", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing request history delete route.");
-                        foreach ((string Scheme, string Header) scheme in new[] { ("xTokenAuth", "x-token"), ("accessKeyAuth", "x-access-key"), ("secretKeyAuth", "x-secret-key"), ("tenantHeader", "x-tenant-guid"), ("tenantIdHeader", "x-tenant-id") })
+                        foreach (OpenApiSecuritySchemeExpectation scheme in new List<OpenApiSecuritySchemeExpectation>
+                        {
+                            new OpenApiSecuritySchemeExpectation { Scheme = "xTokenAuth", Header = "x-token" },
+                            new OpenApiSecuritySchemeExpectation { Scheme = "accessKeyAuth", Header = "x-access-key" },
+                            new OpenApiSecuritySchemeExpectation { Scheme = "secretKeyAuth", Header = "x-secret-key" },
+                            new OpenApiSecuritySchemeExpectation { Scheme = "tenantHeader", Header = "x-tenant-guid" },
+                            new OpenApiSecuritySchemeExpectation { Scheme = "tenantIdHeader", Header = "x-tenant-id" }
+                        })
                         {
                             if (!OpenApiHasSecurityScheme(openApi, scheme.Scheme, scheme.Header)) throw new InvalidOperationException("OpenAPI missing security scheme " + scheme.Scheme + ".");
                         }
 
-                        foreach ((string Route, string Method) route in new[] { ("/metrics", "get"), ("/openapi.json", "get"), ("/v1.0/api/auth/token/details", "get"), ("/v1.0/api/auth/token/refresh", "post"), ("/v1.0/api/auth/logout", "post") })
+                        foreach (OpenApiRouteExpectation route in new List<OpenApiRouteExpectation>
+                        {
+                            new OpenApiRouteExpectation { Route = "/metrics", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/openapi.json", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token/details", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token/refresh", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/logout", Method = "post" }
+                        })
                         {
                             if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
                         }
 
-                        foreach ((string Route, string Method, string Name, string Location) parameter in new[] { ("/v1.0/api/users/{id}", "put", "id", "path"), ("/v1.0/api/request-history/summary", "get", "fromUtc", "query"), ("/v1.0/api/request-history/summary", "get", "toUtc", "query"), ("/v1.0/api/request-history/summary", "get", "bucketMinutes", "query") })
+                        foreach (OpenApiParameterExpectation parameter in new List<OpenApiParameterExpectation>
+                        {
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/users/{id}", Method = "put", Name = "id", Location = "path" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "fromUtc", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "toUtc", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "bucketMinutes", Location = "query" }
+                        })
                         {
                             if (!OpenApiHasParameter(openApi, parameter.Route, parameter.Method, parameter.Name, parameter.Location)) throw new InvalidOperationException("OpenAPI missing " + parameter.Location + " parameter " + parameter.Name + " on " + parameter.Method.ToUpperInvariant() + " " + parameter.Route + ".");
                         }
 
-                        foreach ((string Route, string Method) route in new[] { ("/v1.0/api/auth/login", "post"), ("/v1.0/api/auth/token", "post"), ("/v1.0/api/users", "post"), ("/v1.0/api/users/{id}", "put"), ("/v1.0/api/client-models", "delete"), ("/v1.0/api/request-history/bulk", "post"), ("/v1.0/api/settings", "post"), ("/v1/chat/completions", "post"), ("/v1/completions", "post"), ("/v1/embeddings", "post") })
+                        foreach (OpenApiRouteExpectation route in new List<OpenApiRouteExpectation>
+                        {
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/login", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/users", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/users/{id}", Method = "put" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-models", Method = "delete" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/request-history/bulk", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/settings", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1/chat/completions", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1/completions", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1/embeddings", Method = "post" }
+                        })
                         {
                             if (!OpenApiHasRequestBody(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing editable request body on " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
                         }
@@ -708,60 +796,53 @@ namespace Test.Shared
                             _ = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                         }
                         string historyJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history").ConfigureAwait(false);
-                        using (JsonDocument historyDocument = JsonDocument.Parse(historyJson))
+                        List<RequestHistoryEntry> historyRecords = DeserializeRequired<List<RequestHistoryEntry>>(historyJson);
+                        RequestHistoryEntry? history = historyRecords.FirstOrDefault();
+                        string historyId = history?.Id ?? String.Empty;
+                        if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("No request history entry was created.");
+                        using (HttpResponseMessage deleteHistory = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/request-history/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
                         {
-                            JsonElement history = historyDocument.RootElement.EnumerateArray().FirstOrDefault();
-                            string historyId = TryGetString(history, "id") ?? String.Empty;
-                            if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("No request history entry was created.");
-                            using (HttpResponseMessage deleteHistory = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/request-history/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
-                            {
-                                if (!deleteHistory.IsSuccessStatusCode) throw new InvalidOperationException("Request history delete failed: " + (int)deleteHistory.StatusCode);
-                            }
+                            if (!deleteHistory.IsSuccessStatusCode) throw new InvalidOperationException("Request history delete failed: " + (int)deleteHistory.StatusCode);
                         }
 
                         using (HttpResponseMessage credentialResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials", "{}").ConfigureAwait(false))
                         {
                             string credentialJson = await credentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!credentialResponse.IsSuccessStatusCode) throw new InvalidOperationException("Credential create failed: " + credentialJson);
-                            using (JsonDocument credentialDocument = JsonDocument.Parse(credentialJson))
+                            TestIdRecord credential = DeserializeRequired<TestIdRecord>(credentialJson);
+                            string credentialId = credential.Id ?? String.Empty;
+                            if (String.IsNullOrWhiteSpace(credentialId)) throw new InvalidOperationException("Created credential did not include an ID.");
+                            using (HttpResponseMessage deleteCredential = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials/" + Uri.EscapeDataString(credentialId)).ConfigureAwait(false))
                             {
-                                string credentialId = TryGetString(credentialDocument.RootElement, "id") ?? String.Empty;
-                                if (String.IsNullOrWhiteSpace(credentialId)) throw new InvalidOperationException("Created credential did not include an ID.");
-                                using (HttpResponseMessage deleteCredential = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials/" + Uri.EscapeDataString(credentialId)).ConfigureAwait(false))
-                                {
-                                    if (!deleteCredential.IsSuccessStatusCode) throw new InvalidOperationException("Credential delete failed: " + (int)deleteCredential.StatusCode);
-                                }
+                                if (!deleteCredential.IsSuccessStatusCode) throw new InvalidOperationException("Credential delete failed: " + (int)deleteCredential.StatusCode);
                             }
                         }
 
                         string clientsJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
-                        using (JsonDocument clientsDocument = JsonDocument.Parse(clientsJson))
+                        List<XenoClientRecord> clients = DeserializeRequired<List<XenoClientRecord>>(clientsJson);
+                        XenoClientRecord? client = clients.FirstOrDefault();
+                        string clientId = client?.Id ?? String.Empty;
+                        if (String.IsNullOrWhiteSpace(clientId)) throw new InvalidOperationException("Seed client not found.");
+
+                        XenoClientModel? model = client?.Models.FirstOrDefault();
+                        string modelName = model?.Name ?? String.Empty;
+                        string source = model?.Source ?? String.Empty;
+                        if (String.IsNullOrWhiteSpace(modelName)) throw new InvalidOperationException("Seed client model not found.");
+
+                        string deleteModelBody = JsonUtil.Serialize(new { clientId, name = modelName, source });
+                        using (HttpResponseMessage deleteModel = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models", deleteModelBody).ConfigureAwait(false))
                         {
-                            JsonElement client = clientsDocument.RootElement.EnumerateArray().FirstOrDefault();
-                            string clientId = TryGetString(client, "id") ?? String.Empty;
-                            if (String.IsNullOrWhiteSpace(clientId)) throw new InvalidOperationException("Seed client not found.");
-
-                            JsonElement models = TryGetProperty(client, "models", out JsonElement modelsElement) ? modelsElement : default;
-                            JsonElement model = models.ValueKind == JsonValueKind.Array ? models.EnumerateArray().FirstOrDefault() : default;
-                            string modelName = TryGetString(model, "name") ?? String.Empty;
-                            string source = TryGetString(model, "source") ?? String.Empty;
-                            if (String.IsNullOrWhiteSpace(modelName)) throw new InvalidOperationException("Seed client model not found.");
-
-                            string deleteModelBody = JsonUtil.Serialize(new { clientId, name = modelName, source });
-                            using (HttpResponseMessage deleteModel = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models", deleteModelBody).ConfigureAwait(false))
-                            {
-                                string deleteModelJson = await deleteModel.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                if (!deleteModel.IsSuccessStatusCode || !deleteModelJson.Contains("\"removed\": 1", StringComparison.Ordinal)) throw new InvalidOperationException("Client model delete failed: " + deleteModelJson);
-                            }
-
-                            using (HttpResponseMessage deleteClient = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(clientId)).ConfigureAwait(false))
-                            {
-                                if (!deleteClient.IsSuccessStatusCode) throw new InvalidOperationException("Client delete failed: " + (int)deleteClient.StatusCode);
-                            }
-
-                            string clientsAfterDelete = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
-                            if (clientsAfterDelete.Contains(clientId, StringComparison.Ordinal)) throw new InvalidOperationException("Deleted client was still returned.");
+                            string deleteModelJson = await deleteModel.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!deleteModel.IsSuccessStatusCode || !deleteModelJson.Contains("\"removed\": 1", StringComparison.Ordinal)) throw new InvalidOperationException("Client model delete failed: " + deleteModelJson);
                         }
+
+                        using (HttpResponseMessage deleteClient = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(clientId)).ConfigureAwait(false))
+                        {
+                            if (!deleteClient.IsSuccessStatusCode) throw new InvalidOperationException("Client delete failed: " + (int)deleteClient.StatusCode);
+                        }
+
+                        string clientsAfterDelete = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
+                        if (clientsAfterDelete.Contains(clientId, StringComparison.Ordinal)) throw new InvalidOperationException("Deleted client was still returned.");
                     }
                 }
                 finally
@@ -769,6 +850,38 @@ namespace Test.Shared
                     await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
+        }
+
+        private static async Task<XenoPlatform> BuildRoutingPlatformWithTwoClientsAsync()
+        {
+            XenoPlatform platform = new XenoPlatform();
+            await platform.InitializeAsync().ConfigureAwait(false);
+            platform.Clients.Clear();
+
+            XenoClientRecord first = new XenoClientRecord
+            {
+                TenantId = Constants.DefaultTenantId,
+                Name = "alpha-client",
+                Connected = true,
+                Weight = 1,
+                MaxParallelRequests = 4,
+                InFlightRequests = 0
+            };
+            first.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
+            platform.Clients.Add(first);
+
+            XenoClientRecord second = new XenoClientRecord
+            {
+                TenantId = Constants.DefaultTenantId,
+                Name = "beta-client",
+                Connected = true,
+                Weight = 1,
+                MaxParallelRequests = 4,
+                InFlightRequests = 0
+            };
+            second.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
+            platform.Clients.Add(second);
+            return platform;
         }
 
         private static async Task RunManagementUpdateSmokeAsync()
@@ -1117,7 +1230,8 @@ namespace Test.Shared
                                 if (HeaderValue(response, "X-Xeno-Selected-Provider") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include selected provider header.");
                                 if (HeaderValue(response, "X-Xeno-Selected-Source") != "touchstone-runner") throw new InvalidOperationException("Relay response did not include selected source header.");
                                 if (HeaderValue(response, "X-Xeno-Routing-Candidate-Count") != "1") throw new InvalidOperationException("Relay response did not include candidate count header.");
-                                if (!HeaderValue(response, "X-Xeno-Selection-Reason").Contains("lowest in-flight", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Relay response did not include selection reason header.");
+                                if (HeaderValue(response, "X-Xeno-Load-Balancing-Mode") != "RoundRobin") throw new InvalidOperationException("Relay response did not include load-balancing mode header.");
+                                if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Selection-Reason"))) throw new InvalidOperationException("Relay response did not include selection reason header.");
                                 if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Request-History-ID"))) throw new InvalidOperationException("Relay response did not include request history trace header.");
                                 if (HeaderLong(response, "X-Xeno-Client-Roundtrip-Ms") < 0) throw new InvalidOperationException("Relay response included invalid client roundtrip header.");
                                 if (HeaderLong(response, "X-Xeno-Request-Duration-Ms") < 0) throw new InvalidOperationException("Relay response included invalid request duration header.");
@@ -1212,6 +1326,122 @@ namespace Test.Shared
             }
         }
 
+        private static async Task RunRelayStreamingSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-relay-stream-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+
+                    using (ClientWebSocket socket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(socket);
+                        await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        Task clientTask = FakeClientLoopAsync(socket, clientTokenSource.Token);
+
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_touchstone",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "touchstone-client",
+                            inventory = new
+                            {
+                                runners = new[]
+                                {
+                                    new
+                                    {
+                                        name = "touchstone-runner",
+                                        provider = "OpenAICompatible",
+                                        endpoint = "http://127.0.0.1:1",
+                                        models = new[]
+                                        {
+                                            new { name = "llama3.2:latest", supportsCompletions = true, supportsEmbeddings = false }
+                                        }
+                                    }
+                                }
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+
+                        await WaitForRegisteredClientAsync(port).ConfigureAwait(false);
+
+                        using (HttpClient httpClient = new HttpClient())
+                        using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/v1/chat/completions"))
+                        {
+                            request.Content = new StringContent(
+                                "{\"model\":\"llama3.2:latest\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
+                                Encoding.UTF8,
+                                "application/json");
+
+                            using (HttpResponseMessage response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+                            {
+                                string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Streaming relay returned " + (int)response.StatusCode + ": " + body);
+                                if (!body.Contains("stream-", StringComparison.Ordinal) || !body.Contains("\"ok\"", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming relay body mismatch: " + body);
+                                if (!((response.Content.Headers.ContentType?.ToString() ?? String.Empty).Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Streaming relay did not preserve event-stream content type.");
+                                if (HeaderValue(response, "X-Client-ID") != "xcl_touchstone") throw new InvalidOperationException("Streaming relay response did not include selected client header.");
+                                if (HeaderValue(response, "X-Xeno-Routing-Outcome") != "Streaming") throw new InvalidOperationException("Streaming relay initial routing outcome header mismatch.");
+
+                                string historyId = HeaderValue(response, "X-Xeno-Request-History-ID");
+                                if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("Streaming relay response did not include request history trace header.");
+
+                                using (HttpResponseMessage historyResponse = await httpClient.GetAsync("http://127.0.0.1:" + port + "/api/v1/requesthistory/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
+                                {
+                                    string historyJson = await historyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    if (!historyResponse.IsSuccessStatusCode) throw new InvalidOperationException("Streaming request history lookup failed: " + historyJson);
+                                    RequestHistoryEntry root = DeserializeRequired<RequestHistoryEntry>(historyJson);
+                                    if (!(root.RequestBody ?? String.Empty).Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming request body was not captured.");
+                                    string responseBody = root.ResponseBody ?? String.Empty;
+                                    if (!responseBody.Contains("stream-", StringComparison.OrdinalIgnoreCase) || !responseBody.Contains("\"ok\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming response body was not captured.");
+                                    if (root.RequestHeaders.Count == 0) throw new InvalidOperationException("Streaming request headers were not captured.");
+                                    if (root.ResponseHeaders.Count == 0) throw new InvalidOperationException("Streaming response headers were not captured.");
+                                    if (root.Telemetry == null) throw new InvalidOperationException("Streaming telemetry was not captured.");
+                                    if (root.Telemetry.TotalTokens != 7) throw new InvalidOperationException("Streaming total tokens were not persisted.");
+                                    if (root.Telemetry.StreamChunkCount != 2) throw new InvalidOperationException("Streaming chunk count was not persisted.");
+                                    if (root.Timeline.Count < 3) throw new InvalidOperationException("Streaming timeline was not captured.");
+                                }
+                            }
+                        }
+
+                        clientTokenSource.Cancel();
+                        try
+                        {
+                            await clientTask.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
         private static async Task RunLoginCredentialConnectSmokeAsync()
         {
             int port = GetFreePort();
@@ -1247,11 +1477,11 @@ namespace Test.Shared
                         string responseBody = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                         if (!loginResponse.IsSuccessStatusCode) throw new InvalidOperationException("Login failed: " + responseBody);
 
-                        using (JsonDocument document = JsonDocument.Parse(responseBody))
+                        TestLoginCredentialResponse login = DeserializeRequired<TestLoginCredentialResponse>(responseBody);
                         using (ClientWebSocket socket = new ClientWebSocket())
                         {
-                            string accessKey = TryGetString(document.RootElement, "accessKey") ?? String.Empty;
-                            string secretKey = TryGetString(document.RootElement, "secretKey") ?? String.Empty;
+                            string accessKey = login.AccessKey ?? String.Empty;
+                            string secretKey = login.SecretKey ?? String.Empty;
                             if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey)) throw new InvalidOperationException("Login did not return a credential.");
 
                             ApplyCredentialHeaders(socket, accessKey, secretKey);
@@ -1290,17 +1520,104 @@ namespace Test.Shared
                 if (String.IsNullOrWhiteSpace(message)) continue;
                 if (!message.Contains("\"server.request\"", StringComparison.OrdinalIgnoreCase)) continue;
 
-                using (JsonDocument document = JsonDocument.Parse(message))
-                {
-                    string requestId = TryGetString(document.RootElement, "requestId") ?? Guid.NewGuid().ToString("N");
-                    string requestorIp = TryGetString(document.RootElement, "requestorIp") ?? String.Empty;
-                    if (String.IsNullOrWhiteSpace(requestorIp)) throw new InvalidOperationException("Server request did not include requestorIp.");
-                    if (!TryGetProperty(document.RootElement, "headers", out JsonElement headers) || headers.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Server request did not include forwarded headers.");
-                    string forwardedFor = TryGetString(headers, "X-Forwarded-For") ?? String.Empty;
-                    if (!forwardedFor.Contains(requestorIp, StringComparison.Ordinal)) throw new InvalidOperationException("X-Forwarded-For did not include requestor IP.");
-                    if (TryGetString(headers, "X-Real-IP") != requestorIp) throw new InvalidOperationException("X-Real-IP did not match requestor IP.");
-                    if (TryGetString(headers, "X-Xeno-Requestor-IP") != requestorIp) throw new InvalidOperationException("X-Xeno-Requestor-IP did not match requestor IP.");
-                    if (TryGetString(headers, "X-Xeno-Request-ID") != requestId) throw new InvalidOperationException("Forwarded request ID did not match server request ID.");
+                ServerRequestMessage? serverRequest = JsonUtil.Deserialize<ServerRequestMessage>(message);
+                if (serverRequest == null) throw new InvalidOperationException("Server request could not be deserialized.");
+                string requestId = String.IsNullOrWhiteSpace(serverRequest.RequestId) ? Guid.NewGuid().ToString("N") : serverRequest.RequestId;
+                string requestorIp = serverRequest.RequestorIp ?? String.Empty;
+                if (String.IsNullOrWhiteSpace(requestorIp)) throw new InvalidOperationException("Server request did not include requestorIp.");
+                Dictionary<string, string> headers = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                string forwardedFor = headers.TryGetValue("X-Forwarded-For", out string? forwardedForValue) ? forwardedForValue : String.Empty;
+                if (!forwardedFor.Contains(requestorIp, StringComparison.Ordinal)) throw new InvalidOperationException("X-Forwarded-For did not include requestor IP.");
+                string realIp = headers.TryGetValue("X-Real-IP", out string? realIpValue) ? realIpValue : String.Empty;
+                string xenoRequestorIp = headers.TryGetValue("X-Xeno-Requestor-IP", out string? requestorIpValue) ? requestorIpValue : String.Empty;
+                string xenoRequestId = headers.TryGetValue("X-Xeno-Request-ID", out string? requestIdValue) ? requestIdValue : String.Empty;
+                if (realIp != requestorIp) throw new InvalidOperationException("X-Real-IP did not match requestor IP.");
+                if (xenoRequestorIp != requestorIp) throw new InvalidOperationException("X-Xeno-Requestor-IP did not match requestor IP.");
+                if (xenoRequestId != requestId) throw new InvalidOperationException("Forwarded request ID did not match server request ID.");
+                if (serverRequest.Stream)
+                    {
+                        string first = "data: {\"choices\":[{\"delta\":{\"content\":\"stream-\"}}]}\n\n";
+                        string second = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4,\"total_tokens\":7}}\n\ndata: [DONE]\n\n";
+                        string fullBody = first + second;
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.response.start",
+                            requestId,
+                            clientId = "xcl_touchstone",
+                            tenantId = Constants.DefaultTenantId,
+                            success = true,
+                            statusCode = 200,
+                            contentType = "text/event-stream",
+                            headers = new Dictionary<string, string>
+                            {
+                                ["Content-Type"] = "text/event-stream",
+                                ["x-request-id"] = "provider_touchstone"
+                            },
+                            telemetry = new
+                            {
+                                requestToHeadersMs = 4,
+                                transferMode = "stream"
+                            }
+                        }, token).ConfigureAwait(false);
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.response.chunk",
+                            requestId,
+                            clientId = "xcl_touchstone",
+                            tenantId = Constants.DefaultTenantId,
+                            sequence = 1,
+                            encoding = "base64",
+                            byteCount = Encoding.UTF8.GetByteCount(first),
+                            contentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(first))
+                        }, token).ConfigureAwait(false);
+                        await Task.Delay(25, token).ConfigureAwait(false);
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.response.chunk",
+                            requestId,
+                            clientId = "xcl_touchstone",
+                            tenantId = Constants.DefaultTenantId,
+                            sequence = 2,
+                            encoding = "base64",
+                            byteCount = Encoding.UTF8.GetByteCount(second),
+                            contentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(second))
+                        }, token).ConfigureAwait(false);
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.response.complete",
+                            requestId,
+                            clientId = "xcl_touchstone",
+                            tenantId = Constants.DefaultTenantId,
+                            success = true,
+                            statusCode = 200,
+                            contentType = "text/event-stream",
+                            headers = new Dictionary<string, string>
+                            {
+                                ["Content-Type"] = "text/event-stream",
+                                ["x-request-id"] = "provider_touchstone"
+                            },
+                            telemetry = new
+                            {
+                                totalTimeMs = 42,
+                                upstreamTotalMs = 42,
+                                requestToHeadersMs = 4,
+                                timeToFirstTokenMs = 8,
+                                totalStreamingTimeMs = 34,
+                                promptTokens = 3,
+                                completionTokens = 4,
+                                totalTokens = 7,
+                                streamChunkCount = 2,
+                                streamEventCount = 3,
+                                requestBytes = 82,
+                                responseBytes = Encoding.UTF8.GetByteCount(fullBody),
+                                transferMode = "stream",
+                                providerRequestId = "provider_touchstone"
+                            },
+                            body = fullBody
+                        }, token).ConfigureAwait(false);
+                        continue;
+                    }
+
                     string completion = "{\"id\":\"chatcmpl_touchstone\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"relay-ok\"},\"finish_reason\":\"stop\"}]}";
                     await SendWebSocketJsonAsync(socket, new
                     {
@@ -1313,7 +1630,6 @@ namespace Test.Shared
                         contentType = "application/json",
                         body = completion
                     }, token).ConfigureAwait(false);
-                }
             }
         }
 
@@ -1425,73 +1741,56 @@ namespace Test.Shared
 
         private static string FirstRecordId(string json)
         {
-            using (JsonDocument document = JsonDocument.Parse(json))
-            {
-                if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("Expected an array response.");
-                JsonElement record = document.RootElement.EnumerateArray().FirstOrDefault();
-                string id = TryGetString(record, "id") ?? String.Empty;
-                if (String.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("Response did not include a record ID.");
-                return id;
-            }
+            List<TestIdRecord> records = DeserializeRequired<List<TestIdRecord>>(json);
+            TestIdRecord? record = records.FirstOrDefault();
+            string id = record?.Id ?? String.Empty;
+            if (String.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("Response did not include a record ID.");
+            return id;
         }
 
         private static bool OpenApiHasMethod(string json, string path, string method)
         {
-            using (JsonDocument document = JsonDocument.Parse(json))
-            {
-                if (!TryGetProperty(document.RootElement, "paths", out JsonElement paths)) return false;
-                if (!TryGetProperty(paths, path, out JsonElement pathItem)) return false;
-                return TryGetProperty(pathItem, method, out _);
-            }
+            TestOpenApiDocument document = DeserializeRequired<TestOpenApiDocument>(json);
+            if (!document.Paths.TryGetValue(path, out Dictionary<string, TestOpenApiOperation>? pathItem)) return false;
+            return pathItem.ContainsKey(method);
         }
 
         private static bool OpenApiHasSecurityScheme(string json, string schemeName, string headerName)
         {
-            using (JsonDocument document = JsonDocument.Parse(json))
-            {
-                if (!TryGetProperty(document.RootElement, "components", out JsonElement components)) return false;
-                if (!TryGetProperty(components, "securitySchemes", out JsonElement securitySchemes)) return false;
-                if (!TryGetProperty(securitySchemes, schemeName, out JsonElement scheme)) return false;
-                string actualHeader = TryGetString(scheme, "name") ?? String.Empty;
-                return String.Equals(actualHeader, headerName, StringComparison.OrdinalIgnoreCase);
-            }
+            TestOpenApiDocument document = DeserializeRequired<TestOpenApiDocument>(json);
+            if (!document.Components.SecuritySchemes.TryGetValue(schemeName, out TestOpenApiSecurityScheme? scheme)) return false;
+            string actualHeader = scheme.Name ?? String.Empty;
+            return String.Equals(actualHeader, headerName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool OpenApiHasParameter(string json, string path, string method, string name, string location)
         {
-            using (JsonDocument document = JsonDocument.Parse(json))
+            TestOpenApiOperation? operation = GetOpenApiOperation(json, path, method);
+            if (operation == null) return false;
+            foreach (TestOpenApiParameter parameter in operation.Parameters)
             {
-                if (!TryGetOpenApiOperation(document.RootElement, path, method, out JsonElement operation)) return false;
-                if (!TryGetProperty(operation, "parameters", out JsonElement parameters) || parameters.ValueKind != JsonValueKind.Array) return false;
-                foreach (JsonElement parameter in parameters.EnumerateArray())
-                {
-                    string actualName = TryGetString(parameter, "name") ?? String.Empty;
-                    string actualLocation = TryGetString(parameter, "in") ?? String.Empty;
-                    if (String.Equals(actualName, name, StringComparison.OrdinalIgnoreCase) && String.Equals(actualLocation, location, StringComparison.OrdinalIgnoreCase)) return true;
-                }
-
-                return false;
+                string actualName = parameter.Name ?? String.Empty;
+                string actualLocation = parameter.In ?? String.Empty;
+                if (String.Equals(actualName, name, StringComparison.OrdinalIgnoreCase) && String.Equals(actualLocation, location, StringComparison.OrdinalIgnoreCase)) return true;
             }
+
+            return false;
         }
 
         private static bool OpenApiHasRequestBody(string json, string path, string method)
         {
-            using (JsonDocument document = JsonDocument.Parse(json))
-            {
-                if (!TryGetOpenApiOperation(document.RootElement, path, method, out JsonElement operation)) return false;
-                if (!TryGetProperty(operation, "requestBody", out JsonElement requestBody) || requestBody.ValueKind != JsonValueKind.Object) return false;
-                if (!TryGetProperty(requestBody, "content", out JsonElement content) || content.ValueKind != JsonValueKind.Object) return false;
-                if (!TryGetProperty(content, "application/json", out JsonElement mediaType) || mediaType.ValueKind != JsonValueKind.Object) return false;
-                return TryGetProperty(mediaType, "schema", out JsonElement schema) && schema.ValueKind == JsonValueKind.Object;
-            }
+            TestOpenApiOperation? operation = GetOpenApiOperation(json, path, method);
+            if (operation?.RequestBody == null) return false;
+            if (!operation.RequestBody.Content.TryGetValue("application/json", out TestOpenApiMediaType? mediaType)) return false;
+            return mediaType.Schema != null;
         }
 
-        private static bool TryGetOpenApiOperation(JsonElement root, string path, string method, out JsonElement operation)
+        private static TestOpenApiOperation? GetOpenApiOperation(string json, string path, string method)
         {
-            operation = default;
-            if (!TryGetProperty(root, "paths", out JsonElement paths)) return false;
-            if (!TryGetProperty(paths, path, out JsonElement pathItem)) return false;
-            return TryGetProperty(pathItem, method, out operation);
+            TestOpenApiDocument document = DeserializeRequired<TestOpenApiDocument>(json);
+            if (!document.Paths.TryGetValue(path, out Dictionary<string, TestOpenApiOperation>? pathItem)) return null;
+            if (!pathItem.TryGetValue(method, out TestOpenApiOperation? operation)) return null;
+            return operation;
         }
 
         private static async Task<string?> ReceiveWebSocketTextAsync(ClientWebSocket socket, CancellationToken token)
@@ -1532,19 +1831,15 @@ namespace Test.Shared
             if (!File.Exists(settingsFile)) throw new InvalidOperationException("Reset did not recreate client settings.");
             if (File.Exists(stateFile)) throw new InvalidOperationException("Reset did not remove runtime state.");
 
-            using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(settingsFile)))
+            ClientSettings settings = DeserializeRequired<ClientSettings>(File.ReadAllText(settingsFile));
+            if (!String.Equals(settings.TenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default tenant.");
+            if (settings.Providers.Count == 0)
             {
-                JsonElement root = document.RootElement;
-                string tenantId = TryGetString(root, "TenantId") ?? String.Empty;
-                if (!String.Equals(tenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default tenant.");
-                if (!TryGetProperty(root, "Providers", out JsonElement providers) || providers.ValueKind != JsonValueKind.Array || providers.GetArrayLength() == 0)
-                {
-                    throw new InvalidOperationException("Reset did not restore the default provider endpoint.");
-                }
+                throw new InvalidOperationException("Reset did not restore the default provider endpoint.");
             }
         }
 
-        private static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunXenoClientAsync(string[] args, string clientHome, string? standardInput = null)
+        private static async Task<ClientCommandResult> RunXenoClientAsync(string[] args, string clientHome, string? standardInput = null)
         {
             ProcessStartInfo startInfo = new ProcessStartInfo
             {
@@ -1576,7 +1871,12 @@ namespace Test.Shared
                 string standardOutput = await process.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
                 string standardError = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
                 await process.WaitForExitAsync().ConfigureAwait(false);
-                return (process.ExitCode, standardOutput, standardError);
+                return new ClientCommandResult
+                {
+                    ExitCode = process.ExitCode,
+                    StandardOutput = standardOutput,
+                    StandardError = standardError
+                };
             }
         }
 
@@ -1610,26 +1910,11 @@ namespace Test.Shared
             }
         }
 
-        private static string? TryGetString(JsonElement element, string propertyName)
+        private static T DeserializeRequired<T>(string json) where T : class
         {
-            if (!TryGetProperty(element, propertyName, out JsonElement property)) return null;
-            if (property.ValueKind == JsonValueKind.Null || property.ValueKind == JsonValueKind.Undefined) return null;
-            return property.ToString();
-        }
-
-        private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
-        {
-            property = default;
-            if (element.ValueKind != JsonValueKind.Object) return false;
-            if (element.TryGetProperty(propertyName, out property)) return true;
-            foreach (JsonProperty candidate in element.EnumerateObject())
-            {
-                if (!String.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase)) continue;
-                property = candidate.Value;
-                return true;
-            }
-
-            return false;
+            T? value = JsonUtil.Deserialize<T>(json);
+            if (value == null) throw new InvalidOperationException("JSON payload could not be deserialized as " + typeof(T).Name + ".");
+            return value;
         }
     }
 }

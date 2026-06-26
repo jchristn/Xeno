@@ -3,7 +3,7 @@ import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { copyToClipboard } from '../utils/clipboard.js';
 
-export default function CopyButton({ className = '', label, value }) {
+export default function CopyButton({ className = '', label, tooltip, value }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
@@ -19,7 +19,7 @@ export default function CopyButton({ className = '', label, value }) {
     if (success) setCopied(true);
   }
 
-  const title = copied ? t('copied') : (label || t('copy'));
+  const title = copied ? t('copied') : (tooltip || copyTooltip(t, label));
 
   return (
     <button
@@ -32,4 +32,12 @@ export default function CopyButton({ className = '', label, value }) {
       {copied ? <Check size={14} /> : <Copy size={14} />}
     </button>
   );
+}
+
+function copyTooltip(t, label) {
+  const normalized = String(label || '').toLowerCase();
+  if (normalized.includes('json')) return t('tooltipCopyJson');
+  if (normalized.includes('server')) return t('tooltipCopyServerUrl');
+  if (normalized.includes('value')) return t('tooltipCopyValue');
+  return t('tooltipCopyGeneric');
 }

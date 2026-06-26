@@ -151,7 +151,7 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
       onProgress?.({
         ...base,
         body: null,
-        preview: preview || rawBody,
+        preview,
         rawBody,
         timing: {
           requestTimeMs: null,
@@ -169,7 +169,7 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
     const endedAt = performance.now();
     const preview = extractStreamingPreview(rawBody, streamType);
     return {
-      preview: preview || extractPreview(parseBody(rawBody)) || rawBody,
+      preview: preview || finalStreamPreview(rawBody, streamType),
       rawBody,
       timing: {
         requestTimeMs: null,
@@ -180,6 +180,11 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
   } finally {
     reader.releaseLock();
   }
+}
+
+function finalStreamPreview(rawBody, streamType) {
+  if (streamType === 'sse' || streamType === 'ndjson') return '';
+  return extractPreview(parseBody(rawBody)) || String(rawBody || '');
 }
 
 function extractStreamingPreview(rawBody, streamType) {

@@ -1,5 +1,7 @@
 namespace Xeno.Core.Serialization
 {
+    using System;
+    using System.IO;
     using System.Text.Json;
     using System.Text.Json.Serialization;
 
@@ -8,10 +10,7 @@ namespace Xeno.Core.Serialization
     /// </summary>
     public static class JsonUtil
     {
-        /// <summary>
-        /// Shared JSON serializer options.
-        /// </summary>
-        public static JsonSerializerOptions Options { get; } = CreateOptions();
+        private static readonly JsonSerializerOptions _Options = CreateOptions();
 
         /// <summary>
         /// Serialize an object to JSON.
@@ -34,7 +33,35 @@ namespace Xeno.Core.Serialization
         /// <returns>Deserialized value.</returns>
         public static T? Deserialize<T>(string json)
         {
-            return JsonSerializer.Deserialize<T>(json, Options);
+            try
+            {
+                return JsonSerializer.Deserialize<T>(json, _Options);
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidDataException("JSON could not be deserialized as " + typeof(T).Name + ".", ex);
+            }
+        }
+
+        /// <summary>
+        /// Try to deserialize JSON.
+        /// </summary>
+        /// <typeparam name="T">Target type.</typeparam>
+        /// <param name="json">JSON string.</param>
+        /// <param name="value">Deserialized value.</param>
+        /// <returns>True if the payload deserialized into a value.</returns>
+        public static bool TryDeserialize<T>(string json, out T? value)
+        {
+            try
+            {
+                value = Deserialize<T>(json);
+                return value != null;
+            }
+            catch (InvalidDataException)
+            {
+                value = default;
+                return false;
+            }
         }
 
         private static JsonSerializerOptions CreateOptions()

@@ -51,9 +51,79 @@ namespace Xeno.Core.Models
         public long DurationMs { get; set; } = 0;
 
         /// <summary>
+        /// Request source IP address.
+        /// </summary>
+        public string? SourceIp { get; set; } = null;
+
+        /// <summary>
+        /// Authenticated user ID.
+        /// </summary>
+        public string? UserId { get; set; } = null;
+
+        /// <summary>
+        /// Authenticated credential ID.
+        /// </summary>
+        public string? CredentialId { get; set; } = null;
+
+        /// <summary>
         /// Created timestamp.
         /// </summary>
         public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Completed timestamp.
+        /// </summary>
+        public DateTime? CompletedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Captured request headers.
+        /// </summary>
+        public Dictionary<string, string> RequestHeaders { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Captured response headers.
+        /// </summary>
+        public Dictionary<string, string> ResponseHeaders { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Captured request body.
+        /// </summary>
+        public string? RequestBody { get; set; } = null;
+
+        /// <summary>
+        /// Captured response body.
+        /// </summary>
+        public string? ResponseBody { get; set; } = null;
+
+        /// <summary>
+        /// Request body size in bytes.
+        /// </summary>
+        public long RequestBodyLength { get; set; } = 0;
+
+        /// <summary>
+        /// Response body size in bytes.
+        /// </summary>
+        public long ResponseBodyLength { get; set; } = 0;
+
+        /// <summary>
+        /// Whether the captured request body was truncated.
+        /// </summary>
+        public bool RequestBodyTruncated { get; set; } = false;
+
+        /// <summary>
+        /// Whether the captured response body was truncated.
+        /// </summary>
+        public bool ResponseBodyTruncated { get; set; } = false;
+
+        /// <summary>
+        /// Captured relay and provider telemetry.
+        /// </summary>
+        public RequestHistoryTelemetry Telemetry { get; set; } = new RequestHistoryTelemetry();
+
+        /// <summary>
+        /// Timestamped request timeline.
+        /// </summary>
+        public List<RequestHistoryTimelineEvent> Timeline { get; set; } = new List<RequestHistoryTimelineEvent>();
 
         /// <summary>
         /// Routing decision.

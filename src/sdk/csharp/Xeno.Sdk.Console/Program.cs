@@ -1,7 +1,6 @@
 namespace Xeno.Sdk.Console
 {
     using System;
-    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Sdk;
@@ -40,7 +39,7 @@ namespace Xeno.Sdk.Console
                 {
                     WriteError("API " + (int)ex.StatusCode + " at " + ex.Endpoint + ": " + ex.Message);
                 }
-                catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is JsonException)
+                catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
                 {
                     WriteError(ex.Message);
                 }
@@ -51,29 +50,30 @@ namespace Xeno.Sdk.Console
 
         private static async Task RunCommandAsync(string command, CancellationToken token)
         {
-            using XenoClient client = new XenoClient(_BaseUrl, _BearerToken, _TenantId);
-
-            if (command.Equals("health", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.GetHealthAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("models", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListOpenAiModelsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("clients", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListClientsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("tenants", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListTenantsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("users", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListUsersAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("credentials", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListCredentialsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("roles", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRolesAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("permissions", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListPermissionsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("history", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRequestHistoryAsync(token: token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("settings", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.GetSettingsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
-            else if (command.Equals("metrics", StringComparison.OrdinalIgnoreCase)) System.Console.WriteLine(await client.GetMetricsAsync(token).ConfigureAwait(false));
-            else if (command.Equals("login", StringComparison.OrdinalIgnoreCase)) await LoginAsync(client, token).ConfigureAwait(false);
-            else if (command.Equals("chat", StringComparison.OrdinalIgnoreCase)) await ChatAsync(client, token).ConfigureAwait(false);
-            else WriteError("Unknown command. Type ? for help.");
+            using (XenoClient client = new XenoClient(_BaseUrl, _BearerToken, _TenantId))
+            {
+                if (command.Equals("health", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.GetHealthAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("models", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListOpenAiModelsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("clients", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListClientsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("tenants", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListTenantsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("users", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListUsersAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("credentials", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListCredentialsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("roles", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRolesAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("permissions", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListPermissionsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("history", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListRequestHistoryAsync(token: token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("settings", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.GetSettingsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("metrics", StringComparison.OrdinalIgnoreCase)) System.Console.WriteLine(await client.GetMetricsAsync(token).ConfigureAwait(false));
+                else if (command.Equals("login", StringComparison.OrdinalIgnoreCase)) await LoginAsync(client, token).ConfigureAwait(false);
+                else if (command.Equals("chat", StringComparison.OrdinalIgnoreCase)) await ChatAsync(client, token).ConfigureAwait(false);
+                else WriteError("Unknown command. Type ? for help.");
+            }
         }
 
         private static async Task LoginAsync(XenoClient client, CancellationToken token)
         {
             string username = Prompt("Username", "admin@xeno");
             string password = Prompt("Password", "password");
-            using JsonDocument response = await client.LoginAsync(username, password, _TenantId, token).ConfigureAwait(false);
+            XenoApiResponse response = await client.LoginAsync(username, password, _TenantId, token).ConfigureAwait(false);
             await PrintJsonAsync(response).ConfigureAwait(false);
         }
 
@@ -81,7 +81,7 @@ namespace Xeno.Sdk.Console
         {
             string model = Prompt("Model", "llama3.2:latest");
             string prompt = Prompt("Prompt", "hello");
-            using JsonDocument response = await client.CreateChatCompletionAsync(new
+            XenoApiResponse response = await client.CreateChatCompletionAsync(new
             {
                 model,
                 messages = new[]
@@ -99,15 +99,10 @@ namespace Xeno.Sdk.Console
             return String.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim();
         }
 
-        private static async Task PrintJsonAsync(JsonDocument document)
+        private static Task PrintJsonAsync(XenoApiResponse response)
         {
-            using System.IO.MemoryStream stream = new System.IO.MemoryStream();
-            await using (Utf8JsonWriter writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
-            {
-                document.RootElement.WriteTo(writer);
-            }
-
-            System.Console.WriteLine(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            System.Console.WriteLine(response.Body);
+            return Task.CompletedTask;
         }
 
         private static void PrintHelp()

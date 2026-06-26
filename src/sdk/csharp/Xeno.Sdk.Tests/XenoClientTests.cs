@@ -5,7 +5,6 @@ namespace Xeno.Sdk.Tests
     using System.Net;
     using System.Net.Http;
     using System.Text;
-    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using Xunit;
@@ -16,17 +15,19 @@ namespace Xeno.Sdk.Tests
         public async Task ListTenantsAsync_SendsTenantAndBearerHeaders()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("[]"));
-            using HttpClient httpClient = new HttpClient(handler);
-            using XenoClient client = new XenoClient("https://xeno.local", "token-123", "ten_123", httpClient);
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", "token-123", "ten_123", httpClient))
+            {
+                XenoApiResponse response = await client.ListTenantsAsync();
+                Assert.Equal("[]", response.Body);
 
-            using JsonDocument response = await client.ListTenantsAsync();
-
-            RecordedRequest request = Assert.Single(handler.Requests);
-            Assert.Equal(HttpMethod.Get, request.Method);
-            Assert.Equal("https://xeno.local/v1.0/api/tenants", request.Uri?.ToString());
-            Assert.Equal("Bearer", request.AuthorizationScheme);
-            Assert.Equal("token-123", request.AuthorizationParameter);
-            Assert.Equal("ten_123", request.TenantId);
+                RecordedRequest request = Assert.Single(handler.Requests);
+                Assert.Equal(HttpMethod.Get, request.Method);
+                Assert.Equal("https://xeno.local/v1.0/api/tenants", request.Uri?.ToString());
+                Assert.Equal("Bearer", request.AuthorizationScheme);
+                Assert.Equal("token-123", request.AuthorizationParameter);
+                Assert.Equal("ten_123", request.TenantId);
+            }
         }
 
         [Fact]
@@ -37,64 +38,66 @@ namespace Xeno.Sdk.Tests
                 if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.NoContent);
                 return JsonResponse("{}");
             });
-            using HttpClient httpClient = new HttpClient(handler);
-            using XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient);
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                await client.CreateTenantAsync(new { name = "Tenant" });
+                await client.UpdateTenantAsync("ten_1", new { name = "Tenant 2" });
+                await client.DeleteTenantAsync("ten_1");
+                await client.CreateUserAsync(new { username = "user@xeno", password = "password" });
+                await client.UpdateUserAsync("usr_1", new { active = false });
+                await client.DeleteUserAsync("usr_1");
+                await client.CreateCredentialAsync(new { userId = "usr_1" });
+                await client.UpdateCredentialAsync("cred_1", new { active = true });
+                await client.DeleteCredentialAsync("cred_1");
+                await client.CreateRoleAsync(new { name = "Operator" });
+                await client.UpdateRoleAsync("role_1", new { permissionIds = new[] { "perm_1" } });
+                await client.DeleteRoleAsync("role_1");
+                await client.CreatePermissionAsync(new { resourceType = "Clients", operationType = "Read" });
+                await client.UpdatePermissionAsync("perm_1", new { permit = false });
+                await client.DeletePermissionAsync("perm_1");
 
-            using JsonDocument createTenant = await client.CreateTenantAsync(new { name = "Tenant" });
-            using JsonDocument updateTenant = await client.UpdateTenantAsync("ten_1", new { name = "Tenant 2" });
-            await client.DeleteTenantAsync("ten_1");
-            using JsonDocument createUser = await client.CreateUserAsync(new { username = "user@xeno", password = "password" });
-            using JsonDocument updateUser = await client.UpdateUserAsync("usr_1", new { active = false });
-            await client.DeleteUserAsync("usr_1");
-            using JsonDocument createCredential = await client.CreateCredentialAsync(new { userId = "usr_1" });
-            using JsonDocument updateCredential = await client.UpdateCredentialAsync("cred_1", new { active = true });
-            await client.DeleteCredentialAsync("cred_1");
-            using JsonDocument createRole = await client.CreateRoleAsync(new { name = "Operator" });
-            using JsonDocument updateRole = await client.UpdateRoleAsync("role_1", new { permissionIds = new[] { "perm_1" } });
-            await client.DeleteRoleAsync("role_1");
-            using JsonDocument createPermission = await client.CreatePermissionAsync(new { resourceType = "Clients", operationType = "Read" });
-            using JsonDocument updatePermission = await client.UpdatePermissionAsync("perm_1", new { permit = false });
-            await client.DeletePermissionAsync("perm_1");
-
-            Assert.Collection(
-                handler.Requests,
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/tenants", "\"name\":\"Tenant\""),
-                request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/tenants/ten_1", "\"name\":\"Tenant 2\""),
-                request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/tenants/ten_1"),
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/users", "\"username\":\"user@xeno\""),
-                request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/users/usr_1", "\"active\":false"),
-                request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/users/usr_1"),
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/credentials", "\"userId\":\"usr_1\""),
-                request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/credentials/cred_1", "\"active\":true"),
-                request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/credentials/cred_1"),
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/roles", "\"name\":\"Operator\""),
-                request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/roles/role_1", "\"permissionIds\":[\"perm_1\"]"),
-                request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/roles/role_1"),
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/permissions", "\"resourceType\":\"Clients\""),
-                request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/permissions/perm_1", "\"permit\":false"),
-                request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/permissions/perm_1"));
+                Assert.Collection(
+                    handler.Requests,
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/tenants", "\"name\":\"Tenant\""),
+                    request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/tenants/ten_1", "\"name\":\"Tenant 2\""),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/tenants/ten_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/users", "\"username\":\"user@xeno\""),
+                    request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/users/usr_1", "\"active\":false"),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/users/usr_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/credentials", "\"userId\":\"usr_1\""),
+                    request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/credentials/cred_1", "\"active\":true"),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/credentials/cred_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/roles", "\"name\":\"Operator\""),
+                    request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/roles/role_1", "\"permissionIds\":[\"perm_1\"]"),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/roles/role_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/permissions", "\"resourceType\":\"Clients\""),
+                    request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/permissions/perm_1", "\"permit\":false"),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/permissions/perm_1"));
+            }
         }
 
         [Fact]
         public async Task OpenAiAndHistoryMethods_UseExpectedRoutes()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
-            using HttpClient httpClient = new HttpClient(handler);
-            using XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient);
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                await client.ListOpenAiModelsAsync();
+                await client.CreateChatCompletionAsync(new { model = "llama3.2:latest" });
+                await client.CreateEmbeddingAsync(new { model = "text-embedding-3-small", input = "hello" });
+                await client.ListRequestHistoryAsync(new Dictionary<string, string> { ["model"] = "llama3.2:latest", ["empty"] = "" });
+                await client.GetRequestHistorySummaryAsync(new Dictionary<string, string> { ["bucketMinutes"] = "60" });
 
-            using JsonDocument models = await client.ListOpenAiModelsAsync();
-            using JsonDocument chat = await client.CreateChatCompletionAsync(new { model = "llama3.2:latest" });
-            using JsonDocument embeddings = await client.CreateEmbeddingAsync(new { model = "text-embedding-3-small", input = "hello" });
-            using JsonDocument history = await client.ListRequestHistoryAsync(new Dictionary<string, string> { ["model"] = "llama3.2:latest", ["empty"] = "" });
-            using JsonDocument summary = await client.GetRequestHistorySummaryAsync(new Dictionary<string, string> { ["bucketMinutes"] = "60" });
-
-            Assert.Collection(
-                handler.Requests,
-                request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1/models"),
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/chat/completions", "\"model\":\"llama3.2:latest\""),
-                request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/embeddings", "\"input\":\"hello\""),
-                request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
-                request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"));
+                Assert.Collection(
+                    handler.Requests,
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1/models"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/chat/completions", "\"model\":\"llama3.2:latest\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/embeddings", "\"input\":\"hello\""),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"));
+            }
         }
 
         [Fact]
@@ -104,13 +107,14 @@ namespace Xeno.Sdk.Tests
             {
                 Content = new StringContent("xeno_connected_clients 1", Encoding.UTF8, "text/plain")
             });
-            using HttpClient httpClient = new HttpClient(handler);
-            using XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient);
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                string metrics = await client.GetMetricsAsync();
 
-            string metrics = await client.GetMetricsAsync();
-
-            Assert.Contains("xeno_connected_clients", metrics);
-            Assert.Equal("https://xeno.local/metrics", handler.Requests[0].Uri?.ToString());
+                Assert.Contains("xeno_connected_clients", metrics);
+                Assert.Equal("https://xeno.local/metrics", handler.Requests[0].Uri?.ToString());
+            }
         }
 
         [Fact]
@@ -120,28 +124,31 @@ namespace Xeno.Sdk.Tests
             {
                 Content = new StringContent("{\"message\":\"denied\"}", Encoding.UTF8, "application/json")
             });
-            using HttpClient httpClient = new HttpClient(handler);
-            using XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient);
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                XenoApiException exception = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await client.ListClientsAsync());
 
-            XenoApiException exception = await Assert.ThrowsAsync<XenoApiException>(
-                async () => await client.ListClientsAsync());
-
-            Assert.Equal(HttpStatusCode.Forbidden, exception.StatusCode);
-            Assert.Equal("/v1.0/api/clients", exception.Endpoint);
-            Assert.Contains("denied", exception.Message);
+                Assert.Equal(HttpStatusCode.Forbidden, exception.StatusCode);
+                Assert.Equal("/v1.0/api/clients", exception.Endpoint);
+                Assert.Contains("denied", exception.Message);
+            }
         }
 
         [Fact]
         public async Task Request_PropagatesCancellationToken()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
-            using HttpClient httpClient = new HttpClient(handler);
-            using XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient);
-            using CancellationTokenSource source = new CancellationTokenSource();
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            using (CancellationTokenSource source = new CancellationTokenSource())
+            {
+                XenoApiResponse response = await client.GetSettingsAsync(source.Token);
+                Assert.Equal("{}", response.Body);
 
-            using JsonDocument response = await client.GetSettingsAsync(source.Token);
-
-            Assert.True(handler.Requests[0].CancellationToken.CanBeCanceled);
+                Assert.True(handler.Requests[0].CancellationToken.CanBeCanceled);
+            }
         }
 
         private static HttpResponseMessage JsonResponse(string json)

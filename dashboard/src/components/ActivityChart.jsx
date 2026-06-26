@@ -8,15 +8,21 @@ const ranges = [
   { key: 'lastMonth', buckets: 30 }
 ];
 
-export default function ActivityChart({ summary }) {
+export default function ActivityChart({ onRangeChange, range, showControls = true, summary }) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(760);
-  const [range, setRange] = useState('lastDay');
+  const [localRange, setLocalRange] = useState('lastDay');
   const [hovered, setHovered] = useState(null);
-  const selectedRange = ranges.find((item) => item.key === range) || ranges[1];
+  const activeRange = range || localRange;
+  const selectedRange = ranges.find((item) => item.key === activeRange) || ranges[1];
   const buckets = useMemo(() => buildBuckets(summary?.buckets, selectedRange), [summary?.buckets, selectedRange]);
   const max = Math.max(1, ...buckets.map((bucket) => bucket.success + bucket.failed));
+
+  function updateRange(nextRange) {
+    if (!range) setLocalRange(nextRange);
+    onRangeChange?.(nextRange);
+  }
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -49,18 +55,21 @@ export default function ActivityChart({ summary }) {
 
   return (
     <div className="activity-chart-panel">
-      <div className="chart-controls" aria-label={t('chartRange')}>
-        {ranges.map((item) => (
-          <button
-            className={item.key === range ? 'active' : ''}
-            key={item.key}
-            onClick={() => setRange(item.key)}
-            type="button"
-          >
-            {t(item.key)}
-          </button>
-        ))}
-      </div>
+      {showControls ? (
+        <div className="chart-controls" aria-label={t('chartRange')}>
+          {ranges.map((item) => (
+            <button
+              className={item.key === activeRange ? 'active' : ''}
+              key={item.key}
+              onClick={() => updateRange(item.key)}
+              title={t('tooltipChartRangeOption', { range: t(item.key) })}
+              type="button"
+            >
+              {t(item.key)}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="chart-canvas" ref={canvasRef}>
         <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={t('requests')}>
           <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.baseY} stroke="var(--color-border)" />
@@ -83,16 +92,17 @@ export default function ActivityChart({ summary }) {
             const failedY = chart.baseY - failedHeight;
             const successY = chart.baseY - failedHeight - successHeight;
             const showTick = shouldShowTick(index, buckets.length);
+            const tooltipY = Math.min(successY, failedY) + (successHeight + failedHeight) / 2;
             return (
               <g
                 key={`${bucket.label}-${index}`}
                 onBlur={() => setHovered(null)}
-                onFocus={() => setHovered({ bucket, x: x + barWidth / 2, y: Math.min(successY, failedY) })}
+                onFocus={() => setHovered({ bucket, ...tooltipFromChartPoint(x + barWidth / 2, tooltipY, chart, canvasRef.current) })}
                 onMouseLeave={() => setHovered(null)}
-                onMouseMove={() => setHovered({ bucket, x: x + barWidth / 2, y: Math.min(successY, failedY) })}
+                onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}
                 tabIndex={0}
               >
-                <title>{`${bucket.label}: ${t('success')} ${bucket.success}, ${t('failed')} ${bucket.failed}`}</title>
+                <title>{`${bucket.label}: ${t('success')} ${bucket.success}, ${t('failed')} ${bucket.failed}. ${t('tooltipChartRange')}`}</title>
                 <rect x={x} y={failedY} width={barWidth} height={failedHeight} rx="3" fill="var(--color-danger)" />
                 <rect x={x} y={successY} width={barWidth} height={successHeight} rx="3" fill="var(--color-success)" />
                 {showTick ? <text className="axis-label" x={x + barWidth / 2} y={chart.baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
@@ -101,7 +111,7 @@ export default function ActivityChart({ summary }) {
           })}
         </svg>
         {hovered ? (
-          <div className="chart-tooltip" style={{ left: `${(hovered.x / chart.width) * 100}%`, top: `${(hovered.y / chart.height) * 100}%` }}>
+          <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
             <strong>{hovered.bucket.label}</strong>
             <span>{t('success')}: {hovered.bucket.success}</span>
             <span>{t('failed')}: {hovered.bucket.failed}</span>
@@ -178,4 +188,28 @@ function shouldShowTick(index, count) {
   if (count <= 12) return true;
   if (count <= 24) return index % 4 === 0 || index === count - 1;
   return index % 5 === 0 || index === count - 1;
+}
+
+function tooltipFromPointer(event, element) {
+  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
+
+  const bounds = element.getBoundingClientRect();
+  return tooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
+}
+
+function tooltipFromChartPoint(x, y, chart, element) {
+  const width = element?.clientWidth || chart.width;
+  const height = element?.clientHeight || chart.height;
+  return tooltipPosition((x / chart.width) * width, (y / chart.height) * height, width, height);
+}
+
+function tooltipPosition(x, y, width, height) {
+  const horizontalPadding = 18;
+  const verticalPadding = 48;
+  const tooltipWidth = 188;
+  const clampedX = Math.min(Math.max(x, horizontalPadding), Math.max(horizontalPadding, width - horizontalPadding));
+  const clampedY = Math.min(Math.max(y, verticalPadding), Math.max(verticalPadding, height - verticalPadding));
+  const transform = clampedX > width - tooltipWidth ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
+
+  return { x: clampedX, y: clampedY, transform };
 }

@@ -2,6 +2,7 @@ namespace Xeno.Core.Models
 {
     using System;
     using System.Collections.Generic;
+    using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
 
     /// <summary>
@@ -88,6 +89,21 @@ namespace Xeno.Core.Models
         /// Human-readable selection reason.
         /// </summary>
         public string SelectionReason { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Load-balancing mode used for selection.
+        /// </summary>
+        public LoadBalancingModeEnum LoadBalancingMode { get; set; } = LoadBalancingModeEnum.RoundRobin;
+
+        /// <summary>
+        /// Adaptive sample count when adaptive routing is used.
+        /// </summary>
+        public int? AdaptiveSampleCount { get; set; } = null;
+
+        /// <summary>
+        /// Adaptive selected score when adaptive routing is used.
+        /// </summary>
+        public string? AdaptiveScore { get; set; } = null;
 
         /// <summary>
         /// Server-to-client round-trip duration in milliseconds.

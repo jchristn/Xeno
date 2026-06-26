@@ -65,7 +65,7 @@ export default function ActionMenu({ items = [] }) {
 
   return (
     <div className="action-menu" data-row-click-ignore="true" ref={menuRef}>
-      <button aria-label={t('rowActions')} className="action-menu-trigger" onClick={toggle} ref={triggerRef} title={t('rowActions')} type="button">
+      <button aria-label={t('rowActions')} className="action-menu-trigger" onClick={toggle} ref={triggerRef} title={t('tooltipRowActions')} type="button">
         <MoreVertical size={16} />
       </button>
       {open ? createPortal(
@@ -78,6 +78,7 @@ export default function ActionMenu({ items = [] }) {
               disabled={item.disabled}
               key={item.key}
               onClick={(event) => select(event, item)}
+              title={item.tooltip || t('tooltipGenericButton', { label: item.label })}
               type="button"
             >
               {item.icon ? <span>{item.icon}</span> : null}

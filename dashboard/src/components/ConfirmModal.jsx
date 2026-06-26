@@ -17,8 +17,8 @@ export default function ConfirmModal({
     <Modal
       actions={(
         <>
-          <button className="action-button secondary" onClick={onCancel} type="button">{t('cancel')}</button>
-          <button className={`action-button ${destructive ? 'danger' : 'primary'}`} onClick={onConfirm} type="button">
+          <button className="action-button secondary" onClick={onCancel} title={t('tooltipFormClose')} type="button">{t('cancel')}</button>
+          <button className={`action-button ${destructive ? 'danger' : 'primary'}`} onClick={onConfirm} title={destructive ? t('tooltipDeleteRow') : t('tooltipGenericButton', { label: confirmLabel || t('confirm') })} type="button">
             {confirmLabel || t('confirm')}
           </button>
         </>

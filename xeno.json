@@ -43,6 +43,14 @@
     "Mode": "Monitor"
   },
   "Routing": {
-    "DefaultTimeoutMs": 300000
+    "DefaultTimeoutMs": 300000,
+    "LoadBalancingMode": "RoundRobin",
+    "Adaptive": {
+      "SampleCount": 2,
+      "CapacityWeight": 45,
+      "InFlightWeight": 30,
+      "ClientWeight": 15,
+      "HeartbeatWeight": 10
+    }
   }
 }
