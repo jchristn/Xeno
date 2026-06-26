@@ -17,7 +17,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Exposes OpenAI-compatible routes for chat completions, completions, embeddings, model listing, and related workflows.
 - Connects remote machines through the cross-platform `xeno` client.
 - Lets clients advertise hardware, provider endpoints, and available models.
-- Routes requests to connected clients using Conductor-compatible load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
+- Routes requests to connected clients using configurable load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
