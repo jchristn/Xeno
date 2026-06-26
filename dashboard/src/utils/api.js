@@ -53,7 +53,7 @@ export default class ApiClient {
     response.headers.forEach((value, key) => { headers[key] = value; });
     const contentType = response.headers.get('content-type') || '';
     const transferEncoding = response.headers.get('transfer-encoding') || '';
-    const streamType = detectStreamType(contentType, transferEncoding, expectStream);
+    const streamType = response.ok ? detectStreamType(contentType, transferEncoding, expectStream) : 'standard';
     const base = {
       headers,
       ok: response.ok,
@@ -127,7 +127,7 @@ function detectStreamType(contentType, transferEncoding, expectStream) {
   if (normalizedContentType.includes('application/x-ndjson') || normalizedContentType.includes('application/json-seq')) return 'ndjson';
   if (normalizedTransferEncoding.includes('chunked') && expectStream) return 'chunked';
   if (normalizedTransferEncoding.includes('chunked') && !normalizedContentType.includes('application/json')) return 'chunked';
-  if (expectStream && !normalizedContentType.includes('application/json')) return 'sse';
+  if (expectStream) return 'sse';
   return 'standard';
 }
 
@@ -135,8 +135,6 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let rawBody = '';
-  let preview = '';
-  let buffer = '';
   let firstByteAt = null;
 
   try {
@@ -148,17 +146,7 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
       if (firstByteAt === null) firstByteAt = now;
       const chunk = decoder.decode(value, { stream: true });
       rawBody += chunk;
-
-      if (streamType === 'sse' || streamType === 'ndjson') {
-        buffer += chunk;
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          preview += extractStreamLinePreview(line, streamType);
-        }
-      } else {
-        preview += chunk;
-      }
+      const preview = extractStreamingPreview(rawBody, streamType);
 
       onProgress?.({
         ...base,
@@ -176,14 +164,10 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
     const tail = decoder.decode();
     if (tail) {
       rawBody += tail;
-      buffer += tail;
-    }
-
-    if (buffer.trim()) {
-      preview += extractStreamLinePreview(buffer, streamType);
     }
 
     const endedAt = performance.now();
+    const preview = extractStreamingPreview(rawBody, streamType);
     return {
       preview: preview || extractPreview(parseBody(rawBody)) || rawBody,
       rawBody,
@@ -198,26 +182,75 @@ async function readStream(body, streamType, startedAt, onProgress, base) {
   }
 }
 
-function extractStreamLinePreview(line, streamType) {
-  const trimmed = String(line || '').trim();
-  if (!trimmed) return '';
-
+function extractStreamingPreview(rawBody, streamType) {
+  const text = String(rawBody || '');
+  if (!text) return '';
   if (streamType === 'sse') {
-    if (!trimmed.startsWith('data:')) return '';
-    const data = trimmed.slice(5).trim();
-    if (!data || data === '[DONE]') return '';
-    return extractDataPreview(data);
+    const ssePreview = extractServerSentEventPreview(text);
+    if (ssePreview) return ssePreview;
+    if (text.includes('data:')) return '';
+    return extractJsonLinesPreview(text) || extractPreview(parseBody(text)) || '';
   }
-
-  return extractDataPreview(trimmed);
+  if (streamType === 'ndjson') return extractJsonLinesPreview(text);
+  return extractChunkedPreview(text);
 }
 
-function extractDataPreview(data) {
+function extractChunkedPreview(text) {
+  const ssePreview = extractServerSentEventPreview(text);
+  if (ssePreview) return ssePreview;
+  const jsonLinesPreview = extractJsonLinesPreview(text);
+  if (jsonLinesPreview) return jsonLinesPreview;
+  return extractPreview(parseBody(text)) || text;
+}
+
+function extractServerSentEventPreview(text) {
+  const chunks = [];
+  for (const eventText of String(text || '').split(/\r?\n\r?\n/)) {
+    const dataLines = eventText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .filter((line) => line && line !== '[DONE]');
+
+    if (dataLines.length === 0) continue;
+    const data = dataLines.join('\n');
+    const preview = extractEventDataPreview(data);
+    if (preview) chunks.push(preview);
+  }
+
+  if (chunks.length > 0) return chunks.join('');
+
+  const inlineDataMatches = [...String(text || '').matchAll(/data:\s*([^\r\n]+)/g)];
+  return inlineDataMatches
+    .map((match) => match[1].trim())
+    .filter((data) => data && data !== '[DONE]')
+    .map(extractEventDataPreview)
+    .filter(Boolean)
+    .join('');
+}
+
+function extractJsonLinesPreview(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(extractEventDataPreview)
+    .filter(Boolean)
+    .join('');
+}
+
+function extractEventDataPreview(data) {
   try {
     return extractPreview(JSON.parse(data)) || '';
   } catch {
-    return data ? `${data}\n` : '';
+    return looksLikeIncompleteJson(data) ? '' : `${data}\n`;
   }
+}
+
+function looksLikeIncompleteJson(text) {
+  const trimmed = String(text || '').trim();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
 }
 
 function extractPreview(data) {
@@ -229,12 +262,17 @@ function extractPreview(data) {
   const choice = Array.isArray(data.choices) ? data.choices[0] : null;
   const delta = choice?.delta;
   const message = choice?.message;
+  if (typeof data.delta === 'string') return data.delta;
   if (typeof delta?.content === 'string') return delta.content;
   if (typeof message?.content === 'string') return message.content;
   if (typeof choice?.text === 'string') return choice.text;
+  if (typeof data.message?.content === 'string') return data.message.content;
   if (typeof data.response === 'string') return data.response;
   if (typeof data.content === 'string') return data.content;
   if (typeof data.output_text === 'string') return data.output_text;
+  if (Array.isArray(data.candidates) && typeof data.candidates[0]?.content?.parts?.[0]?.text === 'string') {
+    return data.candidates[0].content.parts[0].text;
+  }
   if (Array.isArray(data.data) && data.data.length > 0 && data.data[0]?.embedding) {
     return JSON.stringify(data, null, 2);
   }
