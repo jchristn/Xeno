@@ -85,7 +85,8 @@ xeno config show
 ```
 
 The formatted configuration includes server settings, credential status,
-configured provider endpoints, and each model advertised by those providers.
+local dashboard settings, configured provider endpoints, and each model
+advertised by those providers.
 
 Use JSON only when scripting:
 
@@ -99,6 +100,89 @@ Enable or disable colored output:
 xeno config colors on
 xeno config colors off
 ```
+
+## Optional Local Dashboard
+
+The background client can host a local web dashboard for the machine running
+`xeno`. It shows connection state, provider endpoints, advertised models, local
+request history, request details, request activity charts, and local statistics.
+The Providers and Models pages let you create, edit, and delete local provider
+endpoints and model advertisements without opening `client.json`. The Requests
+page persists local request history in SQLite, including headers, bounded bodies,
+telemetry, and timeline data for requests handled by this client.
+
+Enable it in `~/.xeno/client.json`:
+
+```json
+{
+  "LocalDashboard": {
+    "Enabled": true,
+    "Host": "127.0.0.1",
+    "Port": 9343,
+    "OpenBrowserOnStart": false,
+    "RequireLocalToken": true,
+    "Database": {
+      "Filename": "~/.xeno/local-dashboard.db",
+      "ConnectionString": null
+    },
+    "HistoryRetention": {
+      "MaxEntries": 1000,
+      "MaxBodyBytes": 65536,
+      "PersistBodies": true
+    }
+  }
+}
+```
+
+`Host` defaults to `127.0.0.1`. Setting it to `0.0.0.0` is allowed, but that is
+an intentional all-interface bind and may expose the dashboard beyond the local
+machine depending on firewall and network policy. When `0.0.0.0` is used, the
+CLI and dashboard display a warning.
+
+The local dashboard stores request history in SQLite so it can support analytics
+over requests processed by this client. Change `LocalDashboard.Database.Filename`
+to move the database. `ConnectionString`, when supplied, overrides `Filename`.
+
+These settings require restarting the background client:
+
+- `Enabled`
+- `Host`
+- `Port`
+- `Database.Filename`
+- `Database.ConnectionString`
+
+Start the client:
+
+```powershell
+xeno connect
+```
+
+When the local dashboard is enabled and listening, `xeno connect` prints:
+
+```text
+Local dashboard: http://127.0.0.1:9343
+```
+
+You can also inspect or open it later:
+
+```powershell
+xeno status
+xeno dashboard
+xeno dashboard open
+```
+
+Startup errors and the dashboard URL are written to `xeno logs`. Use this when
+the dashboard does not start, the port is already in use, or the browser shows a
+blank page:
+
+```powershell
+xeno logs --tail 50
+```
+
+The local dashboard API uses a per-process local token injected into the page.
+Provider credentials, server secret keys, REST tokens, authorization headers,
+cookies, and credential-like headers are redacted from API responses and stored
+history.
 
 ## Point the Client at a Server
 

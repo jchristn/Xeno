@@ -4,6 +4,7 @@ namespace Xeno.Client
     using System.Collections.Generic;
     using System.IO;
     using System.Text.Json.Serialization;
+    using Xeno.Core.Models;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -60,6 +61,11 @@ namespace Xeno.Client
         /// Server settings.
         /// </summary>
         public ClientServerSettings Server { get; set; } = new ClientServerSettings();
+
+        /// <summary>
+        /// Local dashboard settings.
+        /// </summary>
+        public ClientLocalDashboardSettings LocalDashboard { get; set; } = new ClientLocalDashboardSettings();
 
         /// <summary>
         /// Provider endpoint settings.
@@ -144,6 +150,36 @@ namespace Xeno.Client
                     })
                 })
             };
+        }
+
+        /// <summary>
+        /// Build typed inventory protocol message.
+        /// </summary>
+        /// <returns>Inventory message.</returns>
+        public ClientInventoryMessage BuildInventoryMessage()
+        {
+            ClientInventoryMessage inventory = new ClientInventoryMessage();
+            foreach (ClientRunnerSettings runner in Runners)
+            {
+                ClientInventorySourceMessage source = new ClientInventorySourceMessage
+                {
+                    Name = runner.Name,
+                    ApiType = runner.ApiType
+                };
+                foreach (ClientModelSettings model in runner.Models)
+                {
+                    source.Models.Add(new ClientInventoryModelMessage
+                    {
+                        Name = model.Name,
+                        SupportsCompletions = model.SupportsCompletions,
+                        SupportsEmbeddings = model.SupportsEmbeddings
+                    });
+                }
+
+                inventory.Providers.Add(source);
+            }
+
+            return inventory;
         }
     }
 }

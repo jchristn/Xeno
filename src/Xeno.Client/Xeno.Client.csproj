@@ -4,6 +4,12 @@
     <ProjectReference Include="..\Xeno.Core\Xeno.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Watson" Version="7.0.11" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>xeno</AssemblyName>
@@ -26,6 +32,7 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\assets\logo.png" Pack="true" PackagePath="\" />
+    <EmbeddedResource Include="..\..\dashboard\dist-local\**\*" LogicalName="local-dashboard/%(RecursiveDir)%(Filename)%(Extension)" Condition="Exists('..\..\dashboard\dist-local')" />
   </ItemGroup>
 
 </Project>

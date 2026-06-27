@@ -13,6 +13,9 @@ namespace Test.Shared
     using System.Threading.Tasks;
     using Touchstone.Core;
     using Xeno.Client;
+    using Xeno.Client.LocalDashboard;
+    using Xeno.Client.LocalDashboard.Database;
+    using Xeno.Client.LocalDashboard.Models;
     using Xeno.Core;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
@@ -180,6 +183,9 @@ namespace Test.Shared
                                 if (configShow.ExitCode != 0) throw new InvalidOperationException("Config show failed: " + configShow.StandardError + configShow.StandardOutput);
                                 if (!configShow.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include configured models.");
                                 if (!configShow.StandardOutput.Contains("Completions:", StringComparison.Ordinal) || !configShow.StandardOutput.Contains("Embeddings:", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include model capabilities.");
+                                ClientCommandResult disabledStatus = await RunXenoClientAsync(new[] { "status" }, clientHome).ConfigureAwait(false);
+                                if (disabledStatus.ExitCode != 0) throw new InvalidOperationException("Disabled local dashboard status failed: " + disabledStatus.StandardError + disabledStatus.StandardOutput);
+                                if (!disabledStatus.StandardOutput.Contains("Local Dashboard: disabled", StringComparison.Ordinal)) throw new InvalidOperationException("Disabled local dashboard status was not compact: " + disabledStatus.StandardOutput);
                                 ClientCommandResult providerAdd = await RunXenoClientAsync(new[] { "provider", "add", "--name", "openai-compatible", "--type", "OpenAICompatible", "--endpoint", "http://127.0.0.1:11435" }, clientHome).ConfigureAwait(false);
                                 if (providerAdd.ExitCode != 0) throw new InvalidOperationException("Provider add with API type failed: " + providerAdd.StandardError + providerAdd.StandardOutput);
                                 ClientCommandResult startHelp = await RunXenoClientAsync(new[] { "start", "--help" }, clientHome).ConfigureAwait(false);
@@ -278,6 +284,349 @@ namespace Test.Shared
                             {
                                 Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
                                 if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientLocalDashboardSettingsPersist",
+                        "Client local dashboard settings persist and state reports URL",
+                        executeAsync: delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-local-settings-" + Guid.NewGuid().ToString("N"));
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", clientHome);
+                            Directory.CreateDirectory(clientHome);
+
+                            try
+                            {
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_local_settings",
+                                    TenantId = Constants.DefaultTenantId,
+                                    Name = "local-settings"
+                                };
+                                settings.LocalDashboard.Enabled = true;
+                                settings.LocalDashboard.Host = "0.0.0.0";
+                                settings.LocalDashboard.Port = 9343;
+                                settings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
+                                settings.Save();
+
+                                ClientSettings loaded = ClientSettings.Load();
+                                if (!loaded.LocalDashboard.Enabled) throw new InvalidOperationException("Local dashboard enabled setting did not persist.");
+                                if (!String.Equals(loaded.LocalDashboard.Host, "0.0.0.0", StringComparison.Ordinal)) throw new InvalidOperationException("Local dashboard host did not persist.");
+                                if (!String.Equals(loaded.LocalDashboard.Database.ResolveFilename(), Path.Combine(clientHome, "local-dashboard.db"), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard database filename did not resolve correctly.");
+
+                                ClientConnectionState.MarkLocalDashboardListening(loaded, "http://127.0.0.1:9343");
+                                ClientConnectionState state = ClientConnectionState.Load();
+                                if (!state.LocalDashboardEnabled) throw new InvalidOperationException("Local dashboard state should be enabled.");
+                                if (!state.LocalDashboardListening) throw new InvalidOperationException("Local dashboard state should be listening.");
+                                if (!String.Equals(state.LocalDashboardUrl, "http://127.0.0.1:9343", StringComparison.Ordinal)) throw new InvalidOperationException("Local dashboard URL was not recorded.");
+                                return Task.CompletedTask;
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientLocalDashboardSqliteHistory",
+                        "Client local dashboard SQLite history migrates, writes, summarizes, prunes, and redacts",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-local-db-" + Guid.NewGuid().ToString("N"));
+                            string filename = Path.Combine(clientHome, "history", "local-dashboard.db");
+                            Directory.CreateDirectory(clientHome);
+
+                            try
+                            {
+                                ClientLocalDatabaseSettings databaseSettings = new ClientLocalDatabaseSettings { Filename = filename };
+                                SqliteLocalRequestHistoryMethods history = new SqliteLocalRequestHistoryMethods(databaseSettings);
+                                await history.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                                await history.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                                if (!File.Exists(filename)) throw new InvalidOperationException("SQLite history database was not created.");
+
+                                Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                                {
+                                    ["Authorization"] = "Bearer secret",
+                                    ["X-Test"] = "visible"
+                                };
+                                Dictionary<string, string> redacted = LocalSecretRedactor.RedactHeaders(headers);
+                                if (!String.Equals(redacted["Authorization"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Authorization header was not redacted.");
+                                if (!String.Equals(redacted["X-Test"], "visible", StringComparison.Ordinal)) throw new InvalidOperationException("Non-sensitive header should not be redacted.");
+                                bool rejectedTable = false;
+                                try
+                                {
+                                    Xeno.Client.LocalDashboard.Database.Sqlite.Sanitizer.Table("local_request_headers;DROP TABLE local_request_history");
+                                }
+                                catch (ArgumentException)
+                                {
+                                    rejectedTable = true;
+                                }
+
+                                if (!rejectedTable) throw new InvalidOperationException("SQLite local dashboard sanitizer did not reject a dynamic table name.");
+
+                                ClientLocalHistorySettings retention = new ClientLocalHistorySettings { MaxEntries = 1, MaxBodyBytes = 8, PersistBodies = true };
+                                LocalRequestHistoryEntry first = new LocalRequestHistoryEntry
+                                {
+                                    Id = "req_local_1",
+                                    TenantId = Constants.DefaultTenantId,
+                                    ClientId = "xcl_local",
+                                    ReceivedUtc = DateTime.UtcNow.AddMinutes(-1),
+                                    CompletedUtc = DateTime.UtcNow,
+                                    Method = "POST",
+                                    Path = "/v1/chat/completions?x='test'",
+                                    RequestorIp = "127.0.0.1",
+                                    ProviderName = "local-ollama",
+                                    ApiType = "Ollama",
+                                    ModelName = "llama3.2:latest",
+                                    StatusCode = 200,
+                                    Outcome = LocalRequestOutcomeEnum.Success,
+                                    RequestHeaders = redacted,
+                                    ResponseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Content-Type"] = "application/json" },
+                                    RequestBody = "0123456789abcdef",
+                                    ResponseBody = "{\"ok\":true}",
+                                    Telemetry = new LocalRequestTelemetry { DurationMs = 12, StreamChunkCount = 0, StreamEventCount = 0 }
+                                };
+                                first.Timeline.Add(new LocalRequestTimelineEvent { Stage = LocalRequestTimelineStageEnum.Received, TimestampUtc = first.ReceivedUtc, Message = "received" });
+                                await history.UpsertAsync(first, retention, CancellationToken.None).ConfigureAwait(false);
+
+                                LocalRequestHistoryEntry? loaded = await history.GetAsync("req_local_1", CancellationToken.None).ConfigureAwait(false);
+                                if (loaded == null) throw new InvalidOperationException("History entry was not loaded.");
+                                if (!String.Equals(loaded.RequestHeaders["Authorization"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Redacted header was not persisted.");
+                                if (loaded.RequestBody == null || loaded.RequestBody.Length > 8) throw new InvalidOperationException("Request body was not truncated according to retention settings.");
+
+                                IReadOnlyList<LocalRequestHistorySummaryBucket> buckets = await history.SummarizeAsync(DateTime.UtcNow.AddHours(-1), DateTime.UtcNow.AddMinutes(1), 5, CancellationToken.None).ConfigureAwait(false);
+                                if (!buckets.Any(item => item.Total > 0)) throw new InvalidOperationException("Summary did not include written history.");
+
+                                LocalRequestHistoryEntry second = new LocalRequestHistoryEntry
+                                {
+                                    Id = "req_local_2",
+                                    ReceivedUtc = DateTime.UtcNow,
+                                    Method = "POST",
+                                    Path = "/v1/embeddings",
+                                    Outcome = LocalRequestOutcomeEnum.Failure,
+                                    Error = "test"
+                                };
+                                await history.UpsertAsync(second, retention, CancellationToken.None).ConfigureAwait(false);
+                                IReadOnlyList<LocalRequestHistoryEntry> entries = await history.ListAsync(10, CancellationToken.None).ConfigureAwait(false);
+                                if (entries.Count != 1) throw new InvalidOperationException("History pruning by MaxEntries failed.");
+                                if (!String.Equals(entries[0].Id, "req_local_2", StringComparison.Ordinal)) throw new InvalidOperationException("History pruning retained the wrong entry.");
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientLocalDashboardApiRequiresTokenAndManagesProvidersAndModels",
+                        "Client local dashboard API requires token and manages providers and models",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-local-api-" + Guid.NewGuid().ToString("N"));
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", clientHome);
+                            Directory.CreateDirectory(clientHome);
+
+                            try
+                            {
+                                int port = GetFreePort();
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_local_api",
+                                    TenantId = Constants.DefaultTenantId,
+                                    Name = "local-api"
+                                };
+                                settings.LocalDashboard.Enabled = true;
+                                settings.LocalDashboard.Host = "127.0.0.1";
+                                settings.LocalDashboard.Port = port;
+                                settings.LocalDashboard.RequireLocalToken = true;
+                                settings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
+                                settings.Runners.Clear();
+                                settings.Save();
+
+                                SqliteLocalRequestHistoryMethods history = new SqliteLocalRequestHistoryMethods(settings.LocalDashboard.Database);
+                                await history.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                                ClientSettings invalidHostSettings = new ClientSettings();
+                                invalidHostSettings.LocalDashboard.Host = "+";
+                                invalidHostSettings.LocalDashboard.Port = port;
+                                bool invalidHostRejected = false;
+                                try
+                                {
+                                    using (LocalDashboardService invalidHostService = new LocalDashboardService(invalidHostSettings, history))
+                                    {
+                                    }
+                                }
+                                catch (ArgumentException)
+                                {
+                                    invalidHostRejected = true;
+                                }
+
+                                if (!invalidHostRejected) throw new InvalidOperationException("Wildcard local dashboard host was not rejected.");
+
+                                using (LocalDashboardService service = new LocalDashboardService(settings, history))
+                                using (HttpClient httpClient = new HttpClient())
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    string baseUrl = "http://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                                    HttpResponseMessage unauthorized = await httpClient.GetAsync(baseUrl + "/api/v1/state").ConfigureAwait(false);
+                                    if ((int)unauthorized.StatusCode != 401) throw new InvalidOperationException("Local dashboard API should require the local token.");
+
+                                    string html = await httpClient.GetStringAsync(baseUrl + "/").ConfigureAwait(false);
+                                    string token = ExtractLocalDashboardToken(html);
+                                    httpClient.DefaultRequestHeaders.Add("X-Xeno-Local-Token", token);
+
+                                    HttpResponseMessage stateResponse = await httpClient.GetAsync(baseUrl + "/api/v1/state").ConfigureAwait(false);
+                                    if (!stateResponse.IsSuccessStatusCode) throw new InvalidOperationException("Authorized local dashboard state request failed.");
+                                    LocalDashboardDatabaseResponse database = DeserializeRequired<LocalDashboardDatabaseResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/database").ConfigureAwait(false));
+                                    if (!database.Exists) throw new InvalidOperationException("Local dashboard database status did not report an existing database.");
+                                    if (!String.Equals(database.Status.ToString(), LocalDashboardDatabaseStatusEnum.Ready.ToString(), StringComparison.Ordinal)) throw new InvalidOperationException("Local dashboard database status was not ready.");
+
+                                    string providerJson = JsonUtil.Serialize(new LocalProviderUpsertRequest
+                                    {
+                                        Name = "touchstone",
+                                        ApiType = "Ollama",
+                                        Endpoint = baseUrl,
+                                        TimeoutMs = 300000
+                                    });
+                                    HttpResponseMessage providerCreate = await PostJsonAsync(httpClient, baseUrl + "/api/v1/providers", providerJson).ConfigureAwait(false);
+                                    if (!providerCreate.IsSuccessStatusCode) throw new InvalidOperationException("Provider create failed: " + await providerCreate.Content.ReadAsStringAsync().ConfigureAwait(false));
+
+                                    LocalProviderListResponse providers = DeserializeRequired<LocalProviderListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/providers").ConfigureAwait(false));
+                                    if (!providers.Providers.Any(item => String.Equals(item.Name, "touchstone", StringComparison.Ordinal))) throw new InvalidOperationException("Created provider was not listed.");
+                                    if (!ClientConnectionState.IsInventoryUpdatePending()) throw new InvalidOperationException("Provider create did not request inventory re-advertisement.");
+                                    string? snapshotUtc = await history.GetMetadataAsync("last_configuration_snapshot_utc", CancellationToken.None).ConfigureAwait(false);
+                                    if (String.IsNullOrWhiteSpace(snapshotUtc)) throw new InvalidOperationException("Provider create did not write local configuration snapshot metadata.");
+
+                                    HttpResponseMessage providerTest = await PostJsonAsync(httpClient, baseUrl + "/api/v1/providers/touchstone/test", "{}").ConfigureAwait(false);
+                                    if (!providerTest.IsSuccessStatusCode) throw new InvalidOperationException("Provider test failed: " + await providerTest.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    LocalProviderTestResponse providerTestResponse = DeserializeRequired<LocalProviderTestResponse>(await providerTest.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    if (!providerTestResponse.Success) throw new InvalidOperationException("Provider test did not report success.");
+
+                                    string providerUpdateJson = JsonUtil.Serialize(new LocalProviderUpsertRequest
+                                    {
+                                        Name = "touchstone",
+                                        ApiType = "OpenAICompatible",
+                                        Endpoint = "http://127.0.0.1:11435",
+                                        TimeoutMs = 120000
+                                    });
+                                    HttpResponseMessage providerUpdate = await PutJsonAsync(httpClient, baseUrl + "/api/v1/providers/touchstone", providerUpdateJson).ConfigureAwait(false);
+                                    if (!providerUpdate.IsSuccessStatusCode) throw new InvalidOperationException("Provider update failed: " + await providerUpdate.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    providers = DeserializeRequired<LocalProviderListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/providers").ConfigureAwait(false));
+                                    ClientRunnerSettings? updatedProvider = providers.Providers.FirstOrDefault(item => String.Equals(item.Name, "touchstone", StringComparison.Ordinal));
+                                    if (updatedProvider == null || !String.Equals(updatedProvider.ApiType, "OpenAICompatible", StringComparison.Ordinal)) throw new InvalidOperationException("Provider update was not persisted.");
+
+                                    string modelJson = JsonUtil.Serialize(new LocalModelUpsertRequest
+                                    {
+                                        Provider = "touchstone",
+                                        Name = "touchstone-model",
+                                        SupportsCompletions = false,
+                                        SupportsEmbeddings = true
+                                    });
+                                    HttpResponseMessage modelCreate = await PostJsonAsync(httpClient, baseUrl + "/api/v1/models", modelJson).ConfigureAwait(false);
+                                    if (!modelCreate.IsSuccessStatusCode) throw new InvalidOperationException("Model create failed: " + await modelCreate.Content.ReadAsStringAsync().ConfigureAwait(false));
+
+                                    LocalModelListResponse models = DeserializeRequired<LocalModelListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/models").ConfigureAwait(false));
+                                    LocalModelEntry? model = models.Models.FirstOrDefault(item => String.Equals(item.Name, "touchstone-model", StringComparison.Ordinal));
+                                    if (model == null) throw new InvalidOperationException("Created model was not listed.");
+                                    if (model.SupportsCompletions || !model.SupportsEmbeddings) throw new InvalidOperationException("Created model capability flags were not persisted.");
+
+                                    string modelUpdateJson = JsonUtil.Serialize(new LocalModelUpsertRequest
+                                    {
+                                        Provider = "touchstone",
+                                        Name = "touchstone-model",
+                                        SupportsCompletions = true,
+                                        SupportsEmbeddings = true
+                                    });
+                                    HttpResponseMessage modelUpdate = await PutJsonAsync(httpClient, baseUrl + "/api/v1/models/touchstone/touchstone-model", modelUpdateJson).ConfigureAwait(false);
+                                    if (!modelUpdate.IsSuccessStatusCode) throw new InvalidOperationException("Model update failed: " + await modelUpdate.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    models = DeserializeRequired<LocalModelListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/models").ConfigureAwait(false));
+                                    model = models.Models.FirstOrDefault(item => String.Equals(item.Name, "touchstone-model", StringComparison.Ordinal));
+                                    if (model == null || !model.SupportsCompletions || !model.SupportsEmbeddings) throw new InvalidOperationException("Model update capability flags were not persisted.");
+
+                                    HttpResponseMessage modelDelete = await httpClient.DeleteAsync(baseUrl + "/api/v1/models/touchstone/touchstone-model").ConfigureAwait(false);
+                                    if (!modelDelete.IsSuccessStatusCode) throw new InvalidOperationException("Model delete failed.");
+                                    LocalDashboardMutationResponse modelDeleteResponse = DeserializeRequired<LocalDashboardMutationResponse>(await modelDelete.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    if (!modelDeleteResponse.RemovedOne) throw new InvalidOperationException("Model delete did not report removal.");
+
+                                    HttpResponseMessage providerDelete = await httpClient.DeleteAsync(baseUrl + "/api/v1/providers/touchstone").ConfigureAwait(false);
+                                    if (!providerDelete.IsSuccessStatusCode) throw new InvalidOperationException("Provider delete failed.");
+                                    LocalDashboardMutationResponse providerDeleteResponse = DeserializeRequired<LocalDashboardMutationResponse>(await providerDelete.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    if (!providerDeleteResponse.RemovedOne) throw new InvalidOperationException("Provider delete did not report removal.");
+                                }
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientLocalDashboardFailureDoesNotBlockRegistration",
+                        "Client local dashboard startup failure does not block registration",
+                        executeAsync: async delegate
+                        {
+                            int port = GetFreePort();
+                            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-client-dashboard-fail-" + Guid.NewGuid().ToString("N") + ".db");
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-dashboard-fail-" + Guid.NewGuid().ToString("N"));
+                            XenoSettings settings = new XenoSettings
+                            {
+                                Rest = new RestSettings
+                                {
+                                    Hostname = "127.0.0.1",
+                                    Port = port,
+                                    Ssl = false
+                                },
+                                Database = new DatabaseSettings
+                                {
+                                    Type = DatabaseTypeEnum.Sqlite,
+                                    Filename = dbFile
+                                }
+                            };
+
+                            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+                            {
+                                XenoServer server = new XenoServer(settings);
+                                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                                try
+                                {
+                                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                                    Directory.CreateDirectory(clientHome);
+                                    ClientSettings clientSettings = new ClientSettings
+                                    {
+                                        TenantId = Constants.DefaultTenantId,
+                                        Name = "dashboard-fail-touchstone"
+                                    };
+                                    clientSettings.Server.Url = "ws://127.0.0.1:" + port + settings.WebSocket.Path;
+                                    clientSettings.Server.RestUrl = "http://127.0.0.1:" + port;
+                                    clientSettings.Server.AccessKey = "default";
+                                    clientSettings.Server.SecretKey = "default";
+                                    clientSettings.LocalDashboard.Enabled = true;
+                                    clientSettings.LocalDashboard.Host = "127.0.0.1";
+                                    clientSettings.LocalDashboard.Port = port;
+                                    clientSettings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
+                                    File.WriteAllText(Path.Combine(clientHome, "client.json"), JsonUtil.Serialize(clientSettings, true));
+
+                                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "--json", "connect", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                                    if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed despite dashboard startup failure: " + connect.StandardError + connect.StandardOutput);
+                                    if (!connect.StandardOutput.Contains("\"connected\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client did not register when local dashboard failed: " + connect.StandardOutput);
+                                    if (!connect.StandardOutput.Contains("\"listening\": false", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard failure was not reported: " + connect.StandardOutput);
+
+                                    ClientConnectionState state = DeserializeRequired<ClientConnectionState>(File.ReadAllText(Path.Combine(clientHome, "state.json")));
+                                    if (!state.IsRegistered) throw new InvalidOperationException("Registered state was not recorded after dashboard failure.");
+                                    if (state.LocalDashboardListening) throw new InvalidOperationException("Dashboard should not be listening after port conflict.");
+                                    if (String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) throw new InvalidOperationException("Dashboard failure reason was not recorded.");
+                                }
+                                finally
+                                {
+                                    await RunXenoClientAsync(new[] { "stop", "--force" }, clientHome).ConfigureAwait(false);
+                                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                                    if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                                }
                             }
                         }),
                     new TestCaseDescriptor(
@@ -1426,15 +1775,41 @@ namespace Test.Shared
 
                         string? registered = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
                         if (String.IsNullOrWhiteSpace(registered) || !registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client did not register: " + registered);
+
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.inventory.update",
+                            clientId = "xcl_pascal_inventory",
+                            tenantId = Constants.DefaultTenantId,
+                            sentUtc = DateTime.UtcNow,
+                            inventory = new
+                            {
+                                providers = new[]
+                                {
+                                    new
+                                    {
+                                        name = "updated-provider",
+                                        apiType = "OpenAICompatible",
+                                        models = new[]
+                                        {
+                                            new { name = "touchstone-updated-model", supportsCompletions = true, supportsEmbeddings = false }
+                                        }
+                                    }
+                                }
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+
+                        string? updated = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(updated) || !updated.Contains("server.inventory.updated", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client inventory update was not acknowledged: " + updated);
                     }
 
                     using (HttpClient httpClient = new HttpClient())
                     {
                         string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
-                        if (!clients.Contains("touchstone-pascal-model", StringComparison.Ordinal)) throw new InvalidOperationException("Registered client models did not include PascalCase inventory model: " + clients);
+                        if (!clients.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("Updated client models did not include inventory update model: " + clients);
 
                         string models = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1/models").ConfigureAwait(false);
-                        if (!models.Contains("touchstone-pascal-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include PascalCase inventory model: " + models);
+                        if (!models.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include inventory update model: " + models);
                     }
                 }
                 finally
@@ -1447,6 +1822,7 @@ namespace Test.Shared
         private static async Task RunClientBackgroundConnectSmokeAsync()
         {
             int port = GetFreePort();
+            int dashboardPort = GetFreePort();
             string dbFile = Path.Combine(Path.GetTempPath(), "xeno-client-background-" + Guid.NewGuid().ToString("N") + ".db");
             string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-background-" + Guid.NewGuid().ToString("N"));
             XenoSettings settings = new XenoSettings
@@ -1482,11 +1858,17 @@ namespace Test.Shared
                     clientSettings.Server.RestUrl = "http://127.0.0.1:" + port;
                     clientSettings.Server.AccessKey = "default";
                     clientSettings.Server.SecretKey = "default";
+                    clientSettings.LocalDashboard.Enabled = true;
+                    clientSettings.LocalDashboard.Host = "127.0.0.1";
+                    clientSettings.LocalDashboard.Port = dashboardPort;
+                    clientSettings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
                     File.WriteAllText(Path.Combine(clientHome, "client.json"), JsonUtil.Serialize(clientSettings, true));
 
                     ClientCommandResult connect = await RunXenoClientAsync(new[] { "--json", "connect", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
                     if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
                     if (!connect.StandardOutput.Contains("\"connected\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not report connected: " + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("\"listening\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not report local dashboard listening: " + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not include local dashboard URL: " + connect.StandardOutput);
 
                     string stateFile = Path.Combine(clientHome, "state.json");
                     ClientConnectionState state = DeserializeRequired<ClientConnectionState>(File.ReadAllText(stateFile));
@@ -1496,6 +1878,8 @@ namespace Test.Shared
                     if (state.ProcessId == null || !IsProcessRunningForTest(state.ProcessId.Value)) throw new InvalidOperationException("Background worker process is not running.");
                     if (state.WebSocketConnectedUtc == null) throw new InvalidOperationException("Background state did not record WebSocket connection time.");
                     if (state.RegisteredUtc == null) throw new InvalidOperationException("Background state did not record registration time.");
+                    if (!state.LocalDashboardListening) throw new InvalidOperationException("Background local dashboard was not listening.");
+                    if (!String.Equals(state.LocalDashboardUrl, "http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background local dashboard URL mismatch.");
 
                     await WaitForRegisteredClientAsync(port, "background-touchstone").ConfigureAwait(false);
 
@@ -1506,11 +1890,17 @@ namespace Test.Shared
                     ClientCommandResult status = await RunXenoClientAsync(new[] { "--json", "status" }, clientHome).ConfigureAwait(false);
                     if (status.ExitCode != 0) throw new InvalidOperationException("Background status failed: " + status.StandardError + status.StandardOutput);
                     if (!status.StandardOutput.Contains("\"registered\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Status did not report registered state: " + status.StandardOutput);
+                    if (!status.StandardOutput.Contains("\"localDashboard\"", StringComparison.OrdinalIgnoreCase) || !status.StandardOutput.Contains("\"listening\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Status did not report local dashboard state: " + status.StandardOutput);
+
+                    ClientCommandResult configShow = await RunXenoClientAsync(new[] { "config", "show" }, clientHome).ConfigureAwait(false);
+                    if (configShow.ExitCode != 0) throw new InvalidOperationException("Config show failed: " + configShow.StandardError + configShow.StandardOutput);
+                    if (!configShow.StandardOutput.Contains("Local Dashboard", StringComparison.Ordinal) || !configShow.StandardOutput.Contains("http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include local dashboard settings: " + configShow.StandardOutput);
 
                     ClientCommandResult logs = await RunXenoClientAsync(new[] { "logs", "--tail", "20" }, clientHome).ConfigureAwait(false);
                     if (logs.ExitCode != 0) throw new InvalidOperationException("Logs command failed: " + logs.StandardError + logs.StandardOutput);
                     if (!logs.StandardOutput.Contains("Attempting connection to server at ws://127.0.0.1:" + port, StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include connection attempt output: " + logs.StandardOutput);
                     if (!logs.StandardOutput.Contains("Client registered with Xeno server.", StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include registration output: " + logs.StandardOutput);
+                    if (!logs.StandardOutput.Contains("Local dashboard listening at http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include local dashboard startup output: " + logs.StandardOutput);
 
                     ClientCommandResult stop = await RunXenoClientAsync(new[] { "--json", "stop" }, clientHome).ConfigureAwait(false);
                     if (stop.ExitCode != 0) throw new InvalidOperationException("Stop command failed: " + stop.StandardError + stop.StandardOutput);
@@ -2150,6 +2540,17 @@ namespace Test.Shared
             string id = record?.Id ?? String.Empty;
             if (String.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("Response did not include a record ID.");
             return id;
+        }
+
+        private static string ExtractLocalDashboardToken(string html)
+        {
+            string marker = "window.__XENO_LOCAL_TOKEN__='";
+            int start = html.IndexOf(marker, StringComparison.Ordinal);
+            if (start < 0) throw new InvalidOperationException("Local dashboard token bootstrap marker was not found.");
+            start += marker.Length;
+            int end = html.IndexOf("'", start, StringComparison.Ordinal);
+            if (end <= start) throw new InvalidOperationException("Local dashboard token bootstrap value was not found.");
+            return html.Substring(start, end - start);
         }
 
         private static bool OpenApiHasMethod(string json, string path, string method)

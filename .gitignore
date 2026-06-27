@@ -2,11 +2,17 @@ bin/
 obj/
 node_modules/
 dist/
+dist-local/
+dashboard/dist-local/
+dashboard/test-results/
+dashboard/playwright-report/
 __pycache__/
 *.pyc
 .env
 *.user
 *.suo
+.vs/
+src/.vs/
 *.db
 *.db-shm
 *.db-wal

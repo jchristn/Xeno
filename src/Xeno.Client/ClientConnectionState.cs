@@ -166,6 +166,56 @@ namespace Xeno.Client
         public string? ErrorLogFilePath { get; set; } = null;
 
         /// <summary>
+        /// Whether the local dashboard is enabled.
+        /// </summary>
+        public bool LocalDashboardEnabled { get; set; } = false;
+
+        /// <summary>
+        /// Whether the local dashboard is listening.
+        /// </summary>
+        public bool LocalDashboardListening { get; set; } = false;
+
+        /// <summary>
+        /// Local dashboard URL.
+        /// </summary>
+        public string? LocalDashboardUrl { get; set; } = null;
+
+        /// <summary>
+        /// Local dashboard host.
+        /// </summary>
+        public string? LocalDashboardHost { get; set; } = null;
+
+        /// <summary>
+        /// Local dashboard port.
+        /// </summary>
+        public int? LocalDashboardPort { get; set; } = null;
+
+        /// <summary>
+        /// Local dashboard last started timestamp.
+        /// </summary>
+        public DateTime? LocalDashboardStartedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Local dashboard last stopped timestamp.
+        /// </summary>
+        public DateTime? LocalDashboardStoppedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Local dashboard last error.
+        /// </summary>
+        public string? LocalDashboardLastError { get; set; } = null;
+
+        /// <summary>
+        /// Last inventory update request timestamp.
+        /// </summary>
+        public DateTime? InventoryUpdateRequestedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Last inventory update sent timestamp.
+        /// </summary>
+        public DateTime? InventoryUpdateSentUtc { get; set; } = null;
+
+        /// <summary>
         /// Load connection state from disk.
         /// </summary>
         /// <returns>Connection state.</returns>
@@ -373,12 +423,132 @@ namespace Xeno.Client
         }
 
         /// <summary>
+        /// Mark local dashboard disabled.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalDashboardDisabled(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalDashboardSettings(state, settings);
+            state.LocalDashboardEnabled = false;
+            state.LocalDashboardListening = false;
+            state.LocalDashboardUrl = null;
+            state.LocalDashboardLastError = null;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local dashboard starting.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalDashboardStarting(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalDashboardSettings(state, settings);
+            state.LocalDashboardEnabled = true;
+            state.LocalDashboardListening = false;
+            state.LocalDashboardLastError = null;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local dashboard listening.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        /// <param name="url">Dashboard URL.</param>
+        public static void MarkLocalDashboardListening(ClientSettings settings, string url)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalDashboardSettings(state, settings);
+            state.LocalDashboardEnabled = true;
+            state.LocalDashboardListening = true;
+            state.LocalDashboardUrl = url;
+            state.LocalDashboardStartedUtc = DateTime.UtcNow;
+            state.LocalDashboardLastError = null;
+            state.LastUpdatedUtc = state.LocalDashboardStartedUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local dashboard error.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        /// <param name="error">Error.</param>
+        public static void MarkLocalDashboardError(ClientSettings settings, string error)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalDashboardSettings(state, settings);
+            state.LocalDashboardEnabled = settings.LocalDashboard.Enabled;
+            state.LocalDashboardListening = false;
+            state.LocalDashboardLastError = error;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local dashboard stopped.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalDashboardStopped(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalDashboardSettings(state, settings);
+            state.LocalDashboardEnabled = settings.LocalDashboard.Enabled;
+            state.LocalDashboardListening = false;
+            state.LocalDashboardStoppedUtc = DateTime.UtcNow;
+            state.LastUpdatedUtc = state.LocalDashboardStoppedUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark inventory update requested.
+        /// </summary>
+        public static void MarkInventoryUpdateRequested()
+        {
+            ClientConnectionState state = Load();
+            state.InventoryUpdateRequestedUtc = DateTime.UtcNow;
+            state.LastUpdatedUtc = state.InventoryUpdateRequestedUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark inventory update sent.
+        /// </summary>
+        public static void MarkInventoryUpdateSent()
+        {
+            ClientConnectionState state = Load();
+            state.InventoryUpdateSentUtc = DateTime.UtcNow;
+            state.LastUpdatedUtc = state.InventoryUpdateSentUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Determine if inventory update is pending.
+        /// </summary>
+        /// <returns>True if pending.</returns>
+        public static bool IsInventoryUpdatePending()
+        {
+            ClientConnectionState state = Load();
+            if (state.InventoryUpdateRequestedUtc == null) return false;
+            if (state.InventoryUpdateSentUtc == null) return true;
+            return state.InventoryUpdateRequestedUtc > state.InventoryUpdateSentUtc;
+        }
+
+        /// <summary>
         /// Determine whether a stop has been requested.
         /// </summary>
         /// <returns>True if a stop request is pending.</returns>
         public static bool IsStopRequested()
         {
             return File.Exists(StopFile);
+        }
+
+        private static void ApplyLocalDashboardSettings(ClientConnectionState state, ClientSettings settings)
+        {
+            state.LocalDashboardHost = settings.LocalDashboard.Host;
+            state.LocalDashboardPort = settings.LocalDashboard.Port;
         }
 
         /// <summary>

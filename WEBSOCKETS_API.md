@@ -87,11 +87,14 @@ Invalid authentication frame:
 5. Server persists the connected client record and sends `server.registered`.
 6. Client sends periodic `client.heartbeat` messages.
 7. Server sends `server.heartbeat` acknowledgements.
-8. Server sends `server.request` whenever an API request is routed to the client.
-9. Client answers with `client.response` for buffered responses or
+8. If local provider or model configuration changes while connected, the client
+   sends `client.inventory.update` and the server acknowledges with
+   `server.inventory.updated`.
+9. Server sends `server.request` whenever an API request is routed to the client.
+10. Client answers with `client.response` for buffered responses or
    `client.response.start`, `client.response.chunk`, and
    `client.response.complete` for streamed responses.
-10. On disconnect, the server marks the client disconnected and clears in-flight
+11. On disconnect, the server marks the client disconnected and clears in-flight
     connection state.
 
 ## Common Message Rules
@@ -170,6 +173,19 @@ Schema:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `type` | string | yes | Always `server.heartbeat`. |
+| `receivedUtc` | string | yes | Server receive timestamp. |
+| `heartbeatIntervalMs` | number | yes | Server heartbeat expectation. |
+
+### `server.inventory.updated`
+
+Acknowledges a client inventory update sent after local provider or model
+configuration changes.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `server.inventory.updated`. |
 | `receivedUtc` | string | yes | Server receive timestamp. |
 | `heartbeatIntervalMs` | number | yes | Server heartbeat expectation. |
 
@@ -360,6 +376,48 @@ Example:
   "clientId": "xcl_mqty9z4a_7jJS1gNtyq7m",
   "tenantId": "ten_default",
   "sentUtc": "2026-06-25T18:22:31.274Z"
+}
+```
+
+### `client.inventory.update`
+
+Refreshes a connected client's advertised inventory without restarting the
+WebSocket connection. The Xeno client sends this after local provider or model
+configuration changes, including changes made through the local client dashboard.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.inventory.update`. |
+| `clientId` | string | yes | Registered client ID. |
+| `tenantId` | string | yes | Tenant ID. |
+| `sentUtc` | string | no | Client send timestamp. |
+| `inventory` | object | yes | Updated provider/model inventory using the same schema as `client.register.inventory`. |
+
+Example:
+
+```json
+{
+  "type": "client.inventory.update",
+  "clientId": "xcl_mqty9z4a_7jJS1gNtyq7m",
+  "tenantId": "ten_default",
+  "sentUtc": "2026-06-25T18:22:41.274Z",
+  "inventory": {
+    "providers": [
+      {
+        "name": "local-ollama",
+        "apiType": "Ollama",
+        "models": [
+          {
+            "name": "llama3.2:latest",
+            "supportsCompletions": true,
+            "supportsEmbeddings": false
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 

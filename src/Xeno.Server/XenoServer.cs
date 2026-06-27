@@ -1915,6 +1915,14 @@ namespace Xeno.Server
                 return "server.heartbeat";
             }
 
+            if (String.Equals(type, "client.inventory.update", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientInventoryUpdateMessage? message = JsonUtil.Deserialize<ClientInventoryUpdateMessage>(json);
+                UpdateClientInventory(message, requestContext);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                return "server.inventory.updated";
+            }
+
             if (String.Equals(type, "client.response.start", StringComparison.OrdinalIgnoreCase))
             {
                 ClientResponseMessage? message = JsonUtil.Deserialize<ClientResponseMessage>(json);
@@ -1981,6 +1989,23 @@ namespace Xeno.Server
             if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
 
             return clientId;
+        }
+
+        private void UpdateClientInventory(ClientInventoryUpdateMessage? message, RequestContext requestContext)
+        {
+            if (message == null || String.IsNullOrWhiteSpace(message.ClientId)) throw new ArgumentException("Client inventory update message is invalid.");
+            XenoPlatform platform = RequirePlatform();
+            string tenantId = message.TenantId ?? requestContext.TenantId;
+            if (!String.Equals(tenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException("Client tenant does not match authenticated tenant.");
+            }
+
+            XenoClientRecord client = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, message.ClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException("Client is not registered.");
+
+            client.LastHeartbeatUtc = DateTime.UtcNow;
+            if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
         }
 
         private static void RegisterClientInventory(XenoPlatform platform, XenoClientRecord client, ClientInventoryMessage inventory)

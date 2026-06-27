@@ -19,6 +19,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Lets clients advertise hardware, provider endpoints, and available models.
 - Routes requests to connected clients through tenant-scoped routing policies with model/client match rules and load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
+- Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, and client-side request history.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
 - Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
@@ -45,6 +46,7 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 6. The server resolves the tenant's effective routing policy, then selects a connected client that advertises the requested model.
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
 8. The server returns the model response to the caller and persists request history for dashboard inspection.
+9. When enabled, the client also writes local request history to SQLite and exposes a local dashboard for inspecting what that specific machine processed.
 
 ## Getting Started With Docker
 
@@ -154,6 +156,8 @@ Useful client commands:
 xeno config show
 xeno status
 xeno logs -f
+xeno dashboard
+xeno dashboard open
 xeno stop
 xeno disconnect
 xeno provider list
@@ -173,6 +177,35 @@ Provider endpoint URLs and upstream API types are configured with
 `xeno provider add`; `xeno model add` takes the configured provider name and a
 model name. For the full walkthrough, see
 [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md).
+
+### Local Client Dashboard
+
+The `xeno` background process can host a local dashboard for the machine running
+the client. It defaults to `http://127.0.0.1:9343`, uses a local per-process API
+token, and stores request history in SQLite at `~/.xeno/local-dashboard.db`.
+The dashboard shows local connectedness, request activity, client logs, configured
+provider endpoints, advertised models, and request details for work processed by
+that machine. Providers and advertised models can be created, edited, and deleted
+from the browser without hand-editing `client.json`.
+
+Enable it in `~/.xeno/client.json`:
+
+```json
+{
+  "LocalDashboard": {
+    "Enabled": true,
+    "Host": "127.0.0.1",
+    "Port": 9343
+  }
+}
+```
+
+`xeno connect` and `xeno status` print the dashboard URL when it is enabled and
+listening. `xeno dashboard open` opens it in the default browser. Binding to
+`0.0.0.0` is supported only when explicitly configured and may expose the local
+dashboard beyond the client machine depending on firewall and network policy.
+Host, port, token, and database filename changes are saved to the settings file
+but take effect after restarting the client.
 
 ## Calling The API
 

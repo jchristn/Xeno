@@ -10,6 +10,7 @@ namespace Xeno.Client
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Client.LocalDashboard;
     using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
     using Xeno.Core.Models;
@@ -96,6 +97,8 @@ namespace Xeno.Client
                             return await HandleConnectAsync(args, settings).ConfigureAwait(false);
                         case "logs":
                             return await HandleLogsAsync(args, CancellationToken.None).ConfigureAwait(false);
+                        case "dashboard":
+                            return HandleDashboard(args, settings);
                         case "stop":
                         case "disconnect":
                             return await HandleStopAsync(args).ConfigureAwait(false);
@@ -309,6 +312,45 @@ namespace Xeno.Client
 
             WriteWarning("Stop was requested, but process " + state.ProcessId.Value + " is still running. Use 'xeno stop --force' to terminate it.");
             return 1;
+        }
+
+        private static int HandleDashboard(string[] args, ClientSettings settings)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintDashboardHelp();
+                return 0;
+            }
+
+            bool open = args.Length > 1 && String.Equals(args[1], "open", StringComparison.OrdinalIgnoreCase);
+            if (args.Length > 1 && !open)
+            {
+                WriteError("Unknown dashboard command: " + args[1]);
+                PrintDashboardHelp();
+                return 1;
+            }
+
+            ClientConnectionState state = ClientConnectionState.Load();
+            if (!settings.LocalDashboard.Enabled && !state.LocalDashboardEnabled)
+            {
+                WriteInfo("Local dashboard is disabled. Enable LocalDashboard.Enabled in " + ClientSettings.SettingsFile + ".");
+                return 1;
+            }
+
+            if (!state.LocalDashboardListening || String.IsNullOrWhiteSpace(state.LocalDashboardUrl))
+            {
+                WriteInfo("Local dashboard is enabled but not currently listening. Run 'xeno connect' or 'xeno start'.");
+                if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Last error: " + state.LocalDashboardLastError);
+                return 1;
+            }
+
+            WriteSuccess("Local dashboard: " + state.LocalDashboardUrl);
+            if (open)
+            {
+                OpenBrowser(state.LocalDashboardUrl);
+            }
+
+            return 0;
         }
 
         private static int HandleReset(string[] args)
@@ -1010,7 +1052,8 @@ namespace Xeno.Client
                         connected = true,
                         alreadyRunning = true,
                         processId = existing.ProcessId ?? 0,
-                        logFile = existing.LogFilePath ?? ClientConnectionState.LogFile
+                        logFile = existing.LogFilePath ?? ClientConnectionState.LogFile,
+                        localDashboard = BuildLocalDashboardJson(existing)
                     });
                 }
                 else
@@ -1018,6 +1061,7 @@ namespace Xeno.Client
                     WriteInfo("Xeno client is already connected.");
                     Console.WriteLine("  Process ID: " + existing.ProcessId);
                     Console.WriteLine("  Log file:   " + DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
+                    PrintLocalDashboardAccess(existing);
                 }
 
                 return 0;
@@ -1039,7 +1083,8 @@ namespace Xeno.Client
                         processId = process.Id,
                         logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
                         errorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
-                        reason = state.LastDisconnectReason ?? String.Empty
+                        reason = state.LastDisconnectReason ?? String.Empty,
+                        localDashboard = BuildLocalDashboardJson(state)
                     });
                 }
                 else if (registered)
@@ -1047,12 +1092,14 @@ namespace Xeno.Client
                     WriteSuccess("Xeno client connected in the background.");
                     Console.WriteLine("  Process ID: " + process.Id);
                     Console.WriteLine("  Log file:   " + DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                    PrintLocalDashboardAccess(state);
                 }
                 else
                 {
                     WriteError("Xeno client did not register within " + timeoutMs + "ms.");
                     Console.WriteLine("  Process ID: " + process.Id);
                     Console.WriteLine("  Log file:   " + DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                    PrintLocalDashboardAccess(state);
                     Console.WriteLine("  Last reason: " + DisplayValue(state.LastDisconnectReason, "(none)"));
                 }
 
@@ -1075,10 +1122,13 @@ namespace Xeno.Client
                 try
                 {
                     ClientConnectionState.MarkStarted(settings, worker);
+                    await LocalDashboardRuntime.StartAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
                     await ConnectAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
                 }
                 finally
                 {
+                    LocalDashboardRuntime.Stop();
+                    ClientConnectionState.MarkLocalDashboardStopped(settings);
                     runtimeTokenSource.Cancel();
                     try
                     {
@@ -1118,7 +1168,7 @@ namespace Xeno.Client
                         ApplyServerAuthentication(socket, settings);
                         await socket.ConnectAsync(new Uri(settings.Server.Url), token).ConfigureAwait(false);
                         ClientConnectionState.MarkWebSocketConnected(settings);
-                        await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventory() }, token).ConfigureAwait(false);
+                        await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventoryMessage() }, token).ConfigureAwait(false);
                         await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
                         ClientConnectionState.MarkDisconnected(settings, "WebSocket closed.");
                     }
@@ -1182,6 +1232,20 @@ namespace Xeno.Client
 
                     await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow }, token).ConfigureAwait(false);
                     ClientConnectionState.MarkHeartbeat(settings);
+                    if (ClientConnectionState.IsInventoryUpdatePending())
+                    {
+                        ClientSettings latestSettings = ClientSettings.Load();
+                        EnsureClientId(latestSettings);
+                        await SendMessageAsync(socket, new ClientInventoryUpdateMessage
+                        {
+                            Type = "client.inventory.update",
+                            ClientId = latestSettings.ClientId,
+                            TenantId = latestSettings.TenantId,
+                            SentUtc = DateTime.UtcNow,
+                            Inventory = latestSettings.BuildInventoryMessage()
+                        }, token).ConfigureAwait(false);
+                        ClientConnectionState.MarkInventoryUpdateSent();
+                    }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
@@ -1224,11 +1288,13 @@ namespace Xeno.Client
                 ? (settings.Runners.Count > 0 ? settings.Runners[0] : null)
                 : settings.Runners.Find(item => String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
 
+            await LocalDashboardRuntime.RecordReceivedAsync(serverRequest, runner, requestId, method, relativePath, requestorLabel, token).ConfigureAwait(false);
+
             if (runner == null)
             {
                 stopwatch.Stop();
                 WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
-                return new ClientResponseMessage
+                ClientResponseMessage response = new ClientResponseMessage
                 {
                     Type = "client.response",
                     RequestId = requestId,
@@ -1237,6 +1303,8 @@ namespace Xeno.Client
                     Success = false,
                     Error = "No configured provider endpoint is available."
                 };
+                await LocalDashboardRuntime.RecordCompletedAsync(requestId, response, false, token).ConfigureAwait(false);
+                return response;
             }
 
             Dictionary<string, string> forwardedHeaders = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1276,7 +1344,7 @@ namespace Xeno.Client
                 stopwatch.Stop();
                 WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
                 Dictionary<string, string> responseHeaders = ExtractResponseHeaders(result);
-                return new ClientResponseMessage
+                ClientResponseMessage response = new ClientResponseMessage
                 {
                     Type = "client.response",
                     RequestId = requestId,
@@ -1289,6 +1357,8 @@ namespace Xeno.Client
                     Telemetry = BuildTelemetry(body, content, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, null, null, 0, 0, false),
                     Body = content
                 };
+                await LocalDashboardRuntime.RecordCompletedAsync(requestId, response, false, token).ConfigureAwait(false);
+                return response;
             }
         }
 
@@ -1307,7 +1377,7 @@ namespace Xeno.Client
         {
             Dictionary<string, string> responseHeaders = ExtractResponseHeaders(result);
             double requestToHeadersMs = stopwatch.Elapsed.TotalMilliseconds;
-            await SendMessageAsync(socket, new ClientResponseMessage
+            ClientResponseMessage startResponse = new ClientResponseMessage
             {
                 Type = "client.response.start",
                 RequestId = requestId,
@@ -1318,7 +1388,9 @@ namespace Xeno.Client
                 ContentType = result.Content.Headers.ContentType?.ToString(),
                 Headers = responseHeaders,
                 Telemetry = BuildTelemetry(requestBody, String.Empty, responseHeaders, requestToHeadersMs, requestToHeadersMs, null, 0, 0, true)
-            }, token).ConfigureAwait(false);
+            };
+            await SendMessageAsync(socket, startResponse, token).ConfigureAwait(false);
+            await LocalDashboardRuntime.RecordResponseStartedAsync(requestId, startResponse, token).ConfigureAwait(false);
 
             using (Stream responseStream = await result.Content.ReadAsStreamAsync(token).ConfigureAwait(false))
             using (MemoryStream captured = new MemoryStream())
@@ -1349,12 +1421,13 @@ namespace Xeno.Client
                         ContentBase64 = Convert.ToBase64String(chunk),
                         SentUtc = DateTime.UtcNow
                     }, token).ConfigureAwait(false);
+                    await LocalDashboardRuntime.RecordStreamChunkAsync(requestId, sequence, firstByteMs, token).ConfigureAwait(false);
                 }
 
                 stopwatch.Stop();
                 string body = Encoding.UTF8.GetString(captured.ToArray());
                 int streamEvents = CountStreamEvents(result.Content.Headers.ContentType?.ToString(), body, sequence);
-                await SendMessageAsync(socket, new ClientResponseMessage
+                ClientResponseMessage finalResponse = new ClientResponseMessage
                 {
                     Type = "client.response.complete",
                     RequestId = requestId,
@@ -1366,7 +1439,9 @@ namespace Xeno.Client
                     Headers = responseHeaders,
                     Telemetry = BuildTelemetry(requestBody, body, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, requestToHeadersMs, firstByteMs, sequence, streamEvents, true),
                     Body = body
-                }, token).ConfigureAwait(false);
+                };
+                await SendMessageAsync(socket, finalResponse, token).ConfigureAwait(false);
+                await LocalDashboardRuntime.RecordCompletedAsync(requestId, finalResponse, true, token).ConfigureAwait(false);
                 WriteRequestCompleted(requestId, requestorIp, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
             }
         }
@@ -1889,6 +1964,23 @@ namespace Xeno.Client
             }
         }
 
+        private static void OpenBrowser(string url)
+        {
+            try
+            {
+                ProcessStartInfo startInfo = new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                };
+                Process.Start(startInfo);
+            }
+            catch (Exception ex)
+            {
+                WriteWarning("Unable to open browser: " + ex.Message);
+            }
+        }
+
         private static bool IsProcessRunning(int processId)
         {
             try
@@ -1995,7 +2087,20 @@ namespace Xeno.Client
             Console.WriteLine("  Access key: " + DisplayValue(settings.Server.AccessKey, "(not set)"));
             Console.WriteLine("  Secret key: " + MaskSecret(settings.Server.SecretKey));
             Console.WriteLine("  REST token: " + MaskSecret(settings.Server.Token));
+            WritePlainHeading("Local Dashboard");
+            Console.WriteLine("  Enabled:    " + FormatBool(settings.LocalDashboard.Enabled));
+            Console.WriteLine("  URL:        " + (settings.LocalDashboard.Enabled ? LocalDashboardUrl(settings) : "(disabled)"));
+            Console.WriteLine("  Host:       " + settings.LocalDashboard.Host);
+            Console.WriteLine("  Port:       " + settings.LocalDashboard.Port.ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("  Database:   " + settings.LocalDashboard.Database.ResolveFilename());
+            Console.WriteLine("  Token:      " + (settings.LocalDashboard.RequireLocalToken ? "required" : "not required"));
             PrintProviders(settings, true);
+        }
+
+        private static string LocalDashboardUrl(ClientSettings settings)
+        {
+            string host = String.Equals(settings.LocalDashboard.Host, "0.0.0.0", StringComparison.OrdinalIgnoreCase) ? "127.0.0.1" : settings.LocalDashboard.Host;
+            return "http://" + host + ":" + settings.LocalDashboard.Port.ToString(CultureInfo.InvariantCulture);
         }
 
         private static void PrintInventory(ClientSettings settings)
@@ -2140,6 +2245,17 @@ namespace Xeno.Client
                         logFile = connection.LogFilePath ?? ClientConnectionState.LogFile,
                         errorLogFile = connection.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
                         reason = connection.LastDisconnectReason ?? String.Empty
+                    },
+                    localDashboard = new
+                    {
+                        enabled = connection.LocalDashboardEnabled,
+                        listening = connection.LocalDashboardListening,
+                        url = connection.LocalDashboardUrl ?? String.Empty,
+                        host = connection.LocalDashboardHost ?? settings.LocalDashboard.Host,
+                        port = connection.LocalDashboardPort ?? settings.LocalDashboard.Port,
+                        startedUtc = FormatJsonUtc(connection.LocalDashboardStartedUtc),
+                        stoppedUtc = FormatJsonUtc(connection.LocalDashboardStoppedUtc),
+                        error = connection.LocalDashboardLastError ?? String.Empty
                     }
                 });
                 return;
@@ -2171,6 +2287,59 @@ namespace Xeno.Client
             Console.WriteLine("  Log file:            " + DisplayValue(connection.LogFilePath, ClientConnectionState.LogFile));
             Console.WriteLine("  Error log file:      " + DisplayValue(connection.ErrorLogFilePath, ClientConnectionState.ErrorLogFile));
             Console.WriteLine("  Last reason:         " + DisplayValue(connection.LastDisconnectReason, "(none)"));
+            PrintLocalDashboardStatus(connection, settings);
+        }
+
+        private static object BuildLocalDashboardJson(ClientConnectionState state)
+        {
+            return new
+            {
+                enabled = state.LocalDashboardEnabled,
+                listening = state.LocalDashboardListening,
+                url = state.LocalDashboardUrl ?? String.Empty,
+                host = state.LocalDashboardHost ?? String.Empty,
+                port = state.LocalDashboardPort ?? 0,
+                startedUtc = FormatJsonUtc(state.LocalDashboardStartedUtc),
+                stoppedUtc = FormatJsonUtc(state.LocalDashboardStoppedUtc),
+                error = state.LocalDashboardLastError ?? String.Empty
+            };
+        }
+
+        private static void PrintLocalDashboardAccess(ClientConnectionState state)
+        {
+            if (!state.LocalDashboardEnabled) return;
+            if (state.LocalDashboardListening && !String.IsNullOrWhiteSpace(state.LocalDashboardUrl))
+            {
+                Console.WriteLine("  Local dashboard: " + state.LocalDashboardUrl);
+                if (String.Equals(state.LocalDashboardHost, "0.0.0.0", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("  Dashboard bind:  0.0.0.0 (may be reachable from other machines depending on firewall and network policy)");
+                }
+
+                return;
+            }
+
+            Console.WriteLine("  Local dashboard: enabled, not listening");
+            if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Dashboard error: " + state.LocalDashboardLastError);
+        }
+
+        private static void PrintLocalDashboardStatus(ClientConnectionState connection, ClientSettings settings)
+        {
+            if (!settings.LocalDashboard.Enabled && !connection.LocalDashboardEnabled)
+            {
+                Console.WriteLine("  Local Dashboard: disabled");
+                return;
+            }
+
+            WritePlainHeading("Local Dashboard");
+            Console.WriteLine("  Enabled:          " + FormatTrueFalse(settings.LocalDashboard.Enabled || connection.LocalDashboardEnabled));
+            Console.WriteLine("  Listening:        " + FormatTrueFalse(connection.LocalDashboardListening));
+            Console.WriteLine("  URL:              " + DisplayValue(connection.LocalDashboardUrl, "(not listening)"));
+            Console.WriteLine("  Host:             " + DisplayValue(connection.LocalDashboardHost, settings.LocalDashboard.Host));
+            Console.WriteLine("  Port:             " + (connection.LocalDashboardPort ?? settings.LocalDashboard.Port).ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("  Started UTC:      " + FormatUtc(connection.LocalDashboardStartedUtc));
+            Console.WriteLine("  Stopped UTC:      " + FormatUtc(connection.LocalDashboardStoppedUtc));
+            Console.WriteLine("  Last error:       " + DisplayValue(connection.LocalDashboardLastError, "(none)"));
         }
 
         private static void PrintProviders(ClientSettings settings)
@@ -2427,7 +2596,7 @@ namespace Xeno.Client
         {
             WriteInfoHeading("Configuration commands");
             Console.WriteLine("  xeno config show");
-            Console.WriteLine("      Show the client configuration in formatted text.");
+            Console.WriteLine("      Show the client configuration, including the local dashboard URL when enabled.");
             Console.WriteLine("  xeno config colors on");
             Console.WriteLine("      Enable colored command output.");
             Console.WriteLine("  xeno config colors off");
@@ -2506,9 +2675,9 @@ namespace Xeno.Client
             WriteInfoHeading("Connect commands");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
-            Console.WriteLine("      Start the client as a background process and return after registration succeeds.");
+            Console.WriteLine("      Start the client as a background process and return after registration succeeds. Prints the local dashboard URL when enabled.");
             Console.WriteLine("  xeno connect --foreground");
-            Console.WriteLine("      Run the client WebSocket loop in the current terminal.");
+            Console.WriteLine("      Run the client WebSocket loop in the current terminal. Prints the local dashboard URL when enabled.");
             Console.WriteLine("  xeno connect --timeout <milliseconds>");
             Console.WriteLine("      Wait this long for background registration before returning an error.");
         }
@@ -2524,6 +2693,15 @@ namespace Xeno.Client
             Console.WriteLine("      Control how many previous lines are shown.");
             Console.WriteLine("  xeno logs --errors");
             Console.WriteLine("      Read the error log instead of the standard client log.");
+        }
+
+        private static void PrintDashboardHelp()
+        {
+            WriteInfoHeading("Dashboard commands");
+            Console.WriteLine("  xeno dashboard");
+            Console.WriteLine("      Show the local dashboard URL when LocalDashboard.Enabled is true and the worker is listening.");
+            Console.WriteLine("  xeno dashboard open");
+            Console.WriteLine("      Open the local dashboard in the default browser.");
         }
 
         private static void PrintStopHelp()
@@ -2613,6 +2791,8 @@ namespace Xeno.Client
             Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs -f");
+            Console.WriteLine("  xeno dashboard");
+            Console.WriteLine("  xeno dashboard open");
             Console.WriteLine("  xeno stop");
             Console.WriteLine("  xeno disconnect");
             WritePlainHeading("Configuration:");
@@ -2641,8 +2821,11 @@ namespace Xeno.Client
             Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs [--tail <lines>] [-f]");
+            Console.WriteLine("  xeno dashboard [open]");
             Console.WriteLine("  xeno stop [--force]");
             Console.WriteLine("  xeno disconnect");
+            Console.WriteLine();
+            Console.WriteLine("When LocalDashboard.Enabled is true, 'xeno connect', 'xeno status', and 'xeno dashboard' show the local dashboard URL.");
             WritePlainHeading("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");
