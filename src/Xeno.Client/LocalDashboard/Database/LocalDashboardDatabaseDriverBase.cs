@@ -15,6 +15,11 @@ namespace Xeno.Client.LocalDashboard.Database
         public abstract ILocalRequestHistoryMethods RequestHistory { get; }
 
         /// <summary>
+        /// Telemetry history methods.
+        /// </summary>
+        public abstract IClientTelemetryHistoryMethods TelemetryHistory { get; }
+
+        /// <summary>
         /// Initialize database storage.
         /// </summary>
         /// <param name="token">Cancellation token.</param>

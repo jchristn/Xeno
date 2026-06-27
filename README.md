@@ -19,8 +19,9 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Lets clients advertise hardware, provider endpoints, and available models.
 - Routes requests to connected clients through tenant-scoped routing policies with model/client match rules and load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
-- Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, and client-side request history.
+- Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, client-side request history, and machine telemetry.
 - Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
+- Collects local CPU, memory, disk, and GPU telemetry on the client at a configurable interval, persists it in SQLite, and exposes live and historical telemetry dashboard pages.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
 - Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
@@ -184,10 +185,11 @@ model name. For the full walkthrough, see
 The `xeno` background process hosts a local dashboard for the machine running
 the client by default. It defaults to `http://127.0.0.1:9343`, uses a local per-process API
 token, and stores request history in SQLite at `~/.xeno/local-dashboard.db`.
-The dashboard shows local connectedness, request activity, client logs, configured
-provider endpoints, advertised models, and request details for work processed by
-that machine. Providers and advertised models can be created, edited, and deleted
-from the browser without hand-editing `client.json`.
+The dashboard shows local connectedness, request activity, CPU/memory/disk/GPU
+telemetry, telemetry analytics, client logs, configured provider endpoints,
+advertised models, and request details for work processed by that machine.
+Providers and advertised models can be created, edited, and deleted from the
+browser without hand-editing `client.json`.
 
 The default settings in `~/.xeno/client.json` are:
 
@@ -197,6 +199,11 @@ The default settings in `~/.xeno/client.json` are:
     "Enabled": true,
     "Host": "127.0.0.1",
     "Port": 9343
+  },
+  "Telemetry": {
+    "Enabled": true,
+    "CollectionIntervalMs": 15000,
+    "RetentionDays": 30
   }
 }
 ```
@@ -211,8 +218,9 @@ but take effect after restarting the client.
 
 The local dashboard API is intentionally localhost-oriented and separate from
 the Xeno server management API. It exposes client state, provider and model
-management, local request history, request summaries, logs, settings, and local
-database status under `http://127.0.0.1:9343/api/v1/...` when enabled.
+management, local request history, telemetry history, request summaries, logs,
+settings, and local database status under `http://127.0.0.1:9343/api/v1/...`
+when enabled.
 
 ## Calling The API
 

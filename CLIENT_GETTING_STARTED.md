@@ -149,12 +149,13 @@ The local dashboard currently exposes these client-local pages:
 - Provider Endpoints: create, edit, test, and delete configured provider endpoints.
 - Advertised Models: create, edit, filter, and delete local model advertisements.
 - Requests: inspect local request history, timing, headers, bodies, stream counters, and failures.
+- Telemetry: inspect current CPU, memory, disk, and GPU telemetry collected by this client.
 - Logs: read recent client log lines by severity and tail length.
+- Telemetry Analytics: analyze persisted telemetry over Last Hour, Last Day, Last Week, and Last Month.
 - Settings: edit local dashboard listener, token, SQLite database, and retention settings.
 
-The client telemetry plan for CPU, memory, disk, GPU, Telemetry, and Telemetry
-Analytics pages is documented in [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md).
-That plan is not yet released behavior.
+The client telemetry implementation plan and remaining future server-upload
+considerations are tracked in [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md).
 
 These settings require restarting the background client:
 
@@ -199,6 +200,35 @@ history.
 
 Set `LocalDashboard.Enabled` to `false` to disable the local dashboard.
 
+## Local Telemetry
+
+The background client collects machine telemetry when `Telemetry.Enabled` is
+true. Telemetry is stored in the same local SQLite database used by the local
+dashboard and is retained according to `Telemetry.RetentionDays`.
+
+Default settings:
+
+```json
+{
+  "Telemetry": {
+    "Enabled": true,
+    "CollectionIntervalMs": 15000,
+    "RetentionDays": 30,
+    "PruneIntervalMinutes": 60,
+    "PersistRawSnapshot": true,
+    "Gpu": {
+      "Enabled": true,
+      "NvidiaDcgmExporterUrl": null,
+      "CommandTimeoutMs": 5000
+    }
+  }
+}
+```
+
+`CollectionIntervalMs` is clamped to at least 5000 ms. `RetentionDays` is
+clamped from 1 to 365 days. GPU telemetry tries a configured NVIDIA DCGM
+exporter first, then falls back to `nvidia-smi` when it is available.
+
 ### Local Dashboard API
 
 The local dashboard is served by the `xeno` background process. Its API is
@@ -226,6 +256,14 @@ GET    /api/v1/requests/analytics/overview
 GET    /api/v1/requests/{id}
 DELETE /api/v1/requests/{id}
 POST   /api/v1/requests/bulk
+GET    /api/v1/telemetry/status
+GET    /api/v1/telemetry/latest
+POST   /api/v1/telemetry/collect
+POST   /api/v1/telemetry/history/search
+POST   /api/v1/telemetry/history/rollups
+GET    /api/v1/telemetry/history/{id}
+DELETE /api/v1/telemetry/history/{id}
+POST   /api/v1/telemetry/history/delete
 GET    /api/v1/logs
 GET    /api/v1/settings
 PUT    /api/v1/settings

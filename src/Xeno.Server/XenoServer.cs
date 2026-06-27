@@ -3468,7 +3468,7 @@ namespace Xeno.Server
         {
             DateTime toUtc = DateTime.UtcNow;
             DateTime fromUtc = toUtc.AddHours(-24);
-            int bucketMinutes = 60;
+            int bucketMinutes = 15;
 
             string? fromValue = context.Request.Query.Elements.Get("fromUtc");
             string? toValue = context.Request.Query.Elements.Get("toUtc");
@@ -3476,6 +3476,7 @@ namespace Xeno.Server
 
             if (DateTime.TryParse(fromValue, out DateTime parsedFrom)) fromUtc = parsedFrom.ToUniversalTime();
             if (DateTime.TryParse(toValue, out DateTime parsedTo)) toUtc = parsedTo.ToUniversalTime();
+            bucketMinutes = DefaultRequestHistoryBucketMinutes(fromUtc, toUtc);
             if (Int32.TryParse(bucketValue, out int parsedBucket) && parsedBucket > 0) bucketMinutes = parsedBucket;
 
             List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext);
@@ -3491,6 +3492,15 @@ namespace Xeno.Server
             }
 
             return new { fromUtc, toUtc, bucketMinutes, buckets };
+        }
+
+        private static int DefaultRequestHistoryBucketMinutes(DateTime fromUtc, DateTime toUtc)
+        {
+            double minutes = Math.Max(1, (toUtc - fromUtc).TotalMinutes);
+            if (minutes <= 60) return 1;
+            if (minutes <= 24 * 60) return 15;
+            if (minutes <= 7 * 24 * 60) return 120;
+            return 480;
         }
 
         private static string ReadBodyJson(HttpContextBase context)

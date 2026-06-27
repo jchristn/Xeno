@@ -55,10 +55,10 @@ const dashboardSessionKey = 'xeno.dashboard.session';
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
 const analyticsRanges = [
-  { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 5 },
-  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 60 },
-  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, bucketMinutes: 720 },
-  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, bucketMinutes: 1440 }
+  { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 1 },
+  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 15 },
+  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, bucketMinutes: 120 },
+  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, bucketMinutes: 480 }
 ];
 const defaultOpenAiPrompt = 'Hello! Can you give me a brief explanation of how an inverted index works?';
 const defaultOpenAiSystemPrompt = 'You are a helpful and concise assistant.';
@@ -538,8 +538,11 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
 
 function HomeView() {
   const { t } = useTranslation();
+  const [activityRange, setActivityRange] = useState('lastDay');
+  const [rangeAnchor, setRangeAnchor] = useState(Date.now());
+  const activityWindow = useMemo(() => buildAnalyticsWindow(activityRange, rangeAnchor), [activityRange, rangeAnchor]);
   const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
-  const summary = useResource(requestHistorySummaryEndpoint, { buckets: [] });
+  const summary = useResource(requestHistorySummaryPath(activityWindow), { buckets: [] });
   const clients = useResource('/api/v1/clients', []);
   const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
@@ -547,9 +550,15 @@ function HomeView() {
   const completionModels = clientModels.filter((model) => value(model, 'supportsCompletions') === true).length;
 
   function refreshAll() {
+    setRangeAnchor(Date.now());
     analytics.refresh();
     summary.refresh();
     clients.refresh();
+  }
+
+  function updateActivityRange(nextRange) {
+    setActivityRange(nextRange);
+    setRangeAnchor(Date.now());
   }
 
   return (
@@ -568,7 +577,7 @@ function HomeView() {
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart summary={summary.data} />
+        <ActivityChart onRangeChange={updateActivityRange} range={activityRange} summary={summary.data} />
       </Panel>
 
       <Panel
@@ -589,17 +598,32 @@ function HomeView() {
 
 function RequestHistoryView() {
   const { t } = useTranslation();
+  const [activityRange, setActivityRange] = useState('lastDay');
+  const [rangeAnchor, setRangeAnchor] = useState(Date.now());
+  const activityWindow = useMemo(() => buildAnalyticsWindow(activityRange, rangeAnchor), [activityRange, rangeAnchor]);
   const history = useResource(requestHistoryEndpoint, []);
-  const summary = useResource(requestHistorySummaryEndpoint, { buckets: [] });
+  const summary = useResource(requestHistorySummaryPath(activityWindow), { buckets: [] });
   const [selected, setSelected] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const bucketTotals = summarizeBuckets(summary.data.buckets || []);
 
   async function clearHistory() {
     await api.post(`${requestHistoryEndpoint}/bulk`, {});
+    setRangeAnchor(Date.now());
     history.refresh();
     summary.refresh();
     setConfirmClear(false);
+  }
+
+  function refreshAll() {
+    setRangeAnchor(Date.now());
+    history.refresh();
+    summary.refresh();
+  }
+
+  function updateActivityRange(nextRange) {
+    setActivityRange(nextRange);
+    setRangeAnchor(Date.now());
   }
 
   return (
@@ -612,14 +636,14 @@ function RequestHistoryView() {
       <Panel
         actions={(
           <div className="button-row">
-            <IconButton iconOnly onClick={() => { history.refresh(); summary.refresh(); }} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+            <IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
             <IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} tooltip={t('clearHistoryMessage')} icon={<Trash2 size={16} />} variant="danger" />
           </div>
         )}
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart summary={summary.data} />
+        <ActivityChart onRangeChange={updateActivityRange} range={activityRange} summary={summary.data} />
       </Panel>
       <DataTable
         columns={['statusCode', 'method', 'path', 'model', 'selectedClientId', 'durationMs', 'createdUtc']}
@@ -628,7 +652,7 @@ function RequestHistoryView() {
           return deleteRecord(requestHistoryEndpoint, row);
         }}
         onRowClick={setSelected}
-        onRefresh={() => { history.refresh(); summary.refresh(); }}
+        onRefresh={refreshAll}
         rows={history.data}
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
@@ -3528,7 +3552,7 @@ function modelForOperation(operation, model) {
 
 function defaultQueryForOperation(operation) {
   if (!operation) return {};
-  if (operation.operationId === 'summarizeRequestHistory') return { bucketMinutes: 60 };
+  if (operation.operationId === 'summarizeRequestHistory') return { bucketMinutes: 15 };
   return {};
 }
 

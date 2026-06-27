@@ -240,15 +240,29 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `POST /api/v1/requests/bulk`
 
+`GET /api/v1/telemetry/status`
+
+`GET /api/v1/telemetry/latest`
+
+`POST /api/v1/telemetry/collect`
+
+`POST /api/v1/telemetry/history/search`
+
+`POST /api/v1/telemetry/history/rollups`
+
+`GET /api/v1/telemetry/history/{id}`
+
+`DELETE /api/v1/telemetry/history/{id}`
+
+`POST /api/v1/telemetry/history/delete`
+
 `GET /api/v1/logs`
 
 `GET /api/v1/settings`
 
 `PUT /api/v1/settings`
 
-Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Local settings updates modify `LocalDashboard` settings in `~/.xeno/client.json`; listener host, listener port, token mode, and database filename changes take effect after restarting the client.
-
-Planned local CPU, memory, disk, and GPU telemetry routes are documented in [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md). They are not part of the current released local API.
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Local telemetry search and rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, `offset`, and optional GPU filters. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, and telemetry scheduler changes take effect after restarting the client.
 
 ## WebSocket
 

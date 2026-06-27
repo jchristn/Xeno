@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next';
 
 const sampleStorageKey = 'xeno.connectedClients.samples';
 const ranges = [
-  { key: 'lastHour', durationMs: 60 * 60 * 1000, buckets: 12 },
-  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, buckets: 24 },
-  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, buckets: 14 },
-  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, buckets: 30 }
+  { key: 'lastHour', durationMs: 60 * 60 * 1000, buckets: 60 },
+  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, buckets: 96 },
+  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, buckets: 84 },
+  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, buckets: 90 }
 ];
 
 export default function ConnectedClientsChart({ connected, onRefresh, sampleVersion, total }) {
@@ -73,9 +73,9 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   chart.plotWidth = chart.width - chart.left - chart.right;
   chart.plotHeight = chart.height - chart.top - chart.bottom;
   chart.baseY = chart.top + chart.plotHeight;
-  const yTicks = [max, Math.round(max / 2), 0];
+  const yTicks = buildYAxisTicks(max);
   const barSlot = chart.plotWidth / Math.max(1, buckets.length);
-  const barWidth = Math.max(5, barSlot - 6);
+  const barWidth = Math.max(2, Math.min(14, barSlot - 2));
 
   return (
     <div className="activity-chart-panel">
@@ -209,9 +209,20 @@ function formatTime(timestamp, range) {
 }
 
 function shouldShowTick(index, count) {
-  if (count <= 12) return true;
-  if (count <= 24) return index % 4 === 0 || index === count - 1;
-  return index % 5 === 0 || index === count - 1;
+  const step = Math.max(1, Math.ceil(count / 8));
+  return index % step === 0 || index === count - 1;
+}
+
+function buildYAxisTicks(max) {
+  if (!Number.isFinite(max) || max <= 1) return [1, 0];
+  const tickCount = Math.min(5, Math.max(2, Math.ceil(max) + 1));
+  const step = Math.max(1, Math.ceil(max / (tickCount - 1)));
+  const ticks = [];
+  for (let tick = 0; tick <= max; tick += step) {
+    ticks.push(tick);
+  }
+  if (!ticks.includes(max)) ticks.push(max);
+  return [...new Set(ticks)].sort((left, right) => right - left).slice(0, 5);
 }
 
 function tooltipFromPointer(event, element) {

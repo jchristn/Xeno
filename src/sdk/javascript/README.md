@@ -43,8 +43,9 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 The SDK covers authentication, tenants, users, credentials, roles, permissions, clients, advertised models, routing policies, OpenAI-compatible inference, request history, analytics, settings, backup, health, metrics, and OpenAPI.
 
-The SDK targets the Xeno server API. The `xeno` client local dashboard API runs
-on the client machine, uses a per-process local token, and is documented in
+The SDK targets the Xeno server API. The `xeno` client local dashboard API,
+including local request history and machine telemetry routes, runs on the client
+machine, uses a per-process local token, and is documented in
 [../../../CLIENT_GETTING_STARTED.md](../../../CLIENT_GETTING_STARTED.md) rather
 than wrapped by the server SDKs.
 

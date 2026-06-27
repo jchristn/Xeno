@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BrainCircuit,
   ChevronRight,
   CircleAlert,
+  Cpu,
   FileJson,
   Gauge,
+  HardDrive,
   History,
+  LineChart,
+  MemoryStick,
   Moon,
   Pencil,
   Play,
@@ -37,6 +41,8 @@ const pages = [
   { id: 'models', descriptionKey: 'localModelsDescription', icon: BrainCircuit, labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
   { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
   { id: 'logs', descriptionKey: 'localLogsDescription', icon: Terminal, labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
+  { id: 'telemetry', descriptionKey: 'localTelemetryDescription', icon: Gauge, labelKey: 'telemetry', tooltipKey: 'tooltipLocalNavTelemetry' },
+  { id: 'telemetryAnalytics', descriptionKey: 'localTelemetryAnalyticsDescription', icon: LineChart, labelKey: 'telemetryAnalytics', tooltipKey: 'tooltipLocalNavTelemetryAnalytics' },
   { id: 'settings', descriptionKey: 'localSettingsDescription', icon: SettingsIcon, labelKey: 'settings', tooltipKey: 'tooltipLocalNavSettings' }
 ];
 
@@ -51,6 +57,18 @@ const interactiveRowClickSelector = [
   '[data-row-click-ignore="true"]'
 ].join(', ');
 
+const tooltipBackfillSelector = [
+  'button:not([title])',
+  'a:not([title])',
+  'input:not([title])',
+  'select:not([title])',
+  'textarea:not([title])',
+  'label:not([title])',
+  'summary:not([title])',
+  'th:not([title])',
+  '[role="button"]:not([title])'
+].join(', ');
+
 export default function LocalDashboardApp() {
   const { t } = useTranslation();
   const [page, setPage] = useState('home');
@@ -63,6 +81,10 @@ export default function LocalDashboardApp() {
   const [requests, setRequests] = useState([]);
   const [logs, setLogs] = useState([]);
   const [database, setDatabase] = useState(null);
+  const [telemetryLatest, setTelemetryLatest] = useState(null);
+  const [telemetrySamples, setTelemetrySamples] = useState([]);
+  const [telemetryRollups, setTelemetryRollups] = useState([]);
+  const [telemetryMetric, setTelemetryMetric] = useState('CpuUtilizationPercent');
   const [range, setRange] = useState('lastHour');
   const [providerFilter, setProviderFilter] = useState('');
   const [logSeverity, setLogSeverity] = useState('all');
@@ -78,6 +100,18 @@ export default function LocalDashboardApp() {
     refresh();
   }, [page, range, logSeverity, logTail]);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      document.querySelectorAll(tooltipBackfillSelector).forEach((element) => {
+        const generated = element.getAttribute('data-tooltip-generated') === 'true';
+        if (element.getAttribute('title') && !generated) return;
+        element.setAttribute('title', localTooltipForElement(element, t));
+        element.setAttribute('data-tooltip-generated', 'true');
+      });
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [page, t, providers, models, requests, telemetrySamples, logs, modal]);
+
   async function refresh() {
     try {
       setError('');
@@ -85,7 +119,7 @@ export default function LocalDashboardApp() {
         const [stateResponse, statisticsResponse, summaryResponse] = await Promise.all([
           localApi('/api/v1/state'),
           localApi('/api/v1/statistics'),
-          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}`)
+          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}&bucketMinutes=${telemetryBucketMinutes(range)}`)
         ]);
         setState(stateResponse);
         setStatistics(statisticsResponse);
@@ -99,10 +133,33 @@ export default function LocalDashboardApp() {
       } else if (page === 'requests') {
         const [historyResponse, summaryResponse] = await Promise.all([
           localApi('/api/v1/requests'),
-          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}`)
+          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}&bucketMinutes=${telemetryBucketMinutes(range)}`)
         ]);
         setRequests(historyResponse.entries || []);
         setSummary(summaryResponse.buckets || []);
+      } else if (page === 'telemetry') {
+        const [latestResponse, rollupResponse] = await Promise.all([
+          localApi('/api/v1/telemetry/latest'),
+          localApi(`/api/v1/telemetry/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: telemetryMetric, bucketMinutes: telemetryBucketMinutes(range) })
+          })
+        ]);
+        setTelemetryLatest(latestResponse);
+        setTelemetryRollups(rollupResponse || []);
+      } else if (page === 'telemetryAnalytics') {
+        const [searchResponse, rollupResponse] = await Promise.all([
+          localApi(`/api/v1/telemetry/history/search?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: telemetryMetric, limit: 250 })
+          }),
+          localApi(`/api/v1/telemetry/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: telemetryMetric, bucketMinutes: telemetryBucketMinutes(range) })
+          })
+        ]);
+        setTelemetrySamples(searchResponse.samples || []);
+        setTelemetryRollups(rollupResponse || []);
       } else if (page === 'logs') {
         const response = await localApi(`/api/v1/logs?tail=${logTail}&severity=${logSeverity}`);
         setLogs(response.lines || []);
@@ -148,7 +205,7 @@ export default function LocalDashboardApp() {
             ))}
           </div>
           <div className="sidebar-group">
-            <div className="sidebar-group-label">{t('configuration')}</div>
+            <div className="sidebar-group-label">{t('administration')}</div>
             {pages.slice(4).map((item) => (
               <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
             ))}
@@ -191,7 +248,9 @@ export default function LocalDashboardApp() {
           {page === 'providers' ? <Providers providers={providers} refresh={refresh} setModal={setModal} /> : null}
           {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
           {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
+          {page === 'telemetry' ? <Telemetry latest={telemetryLatest} metric={telemetryMetric} range={range} refresh={refresh} rollups={telemetryRollups} setMetric={setTelemetryMetric} setRange={setRange} setModal={setModal} /> : null}
           {page === 'logs' ? <Logs logSeverity={logSeverity} logTail={logTail} logs={logs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
+          {page === 'telemetryAnalytics' ? <TelemetryAnalytics metric={telemetryMetric} range={range} refresh={refresh} rollups={telemetryRollups} samples={telemetrySamples} setMetric={setTelemetryMetric} setModal={setModal} setRange={setRange} /> : null}
           {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
         </main>
       </div>
@@ -394,6 +453,130 @@ function Requests({ range, refresh, requests, setModal, setRange, summary }) {
   );
 }
 
+function Telemetry({ latest, metric, range, refresh, rollups, setMetric, setRange, setModal }) {
+  const { t } = useTranslation();
+  const sample = latest?.detail?.sample || {};
+  const snapshot = latest?.snapshot || {};
+  const gpus = latest?.detail?.gpus || snapshot?.gpu?.devices || [];
+
+  async function collect() {
+    const response = await localApi('/api/v1/telemetry/collect', { method: 'POST', body: '{}' });
+    setModal(messageModal(t, t('telemetryCollected'), t('telemetryCollectedMessage'), response));
+    refresh();
+  }
+
+  return (
+    <>
+      <div className="metric-grid">
+        <Metric icon={<Cpu size={18} />} label={t('cpuUtilization')} value={formatPercent(sample.cpuUtilizationPercent)} />
+        <Metric icon={<MemoryStick size={18} />} label={t('memoryUtilization')} value={formatPercent(sample.memoryUtilizationPercent)} />
+        <Metric icon={<HardDrive size={18} />} label={t('diskUtilization')} value={formatPercent(sample.diskUtilizationPercent)} />
+        <Metric icon={<Gauge size={18} />} label={t('gpuUtilization')} value={formatPercent(sample.gpuAverageUtilizationPercent)} />
+      </div>
+      <Panel
+        className="chart-panel-card"
+        title={t('telemetryOverTime')}
+        actions={(
+          <div className="chart-action-row">
+            <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
+            <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
+            <button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>
+          </div>
+        )}
+      >
+        <MetricChart onRangeChange={setRange} range={range} rollups={rollups} />
+      </Panel>
+      <Panel title={t('telemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
+        <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
+      </Panel>
+      <Panel title={t('systemTelemetry')}>
+        <RecordTable fields={['id', 'machineName', 'collectedUtc', 'osDescription', 'architecture', 'processorCount', 'collectionElapsedMs']} record={{ ...sample, id: sample.id }} />
+      </Panel>
+      <Panel title={t('resourceTelemetry')}>
+        <RecordTable fields={['cpuUtilizationPercent', 'memoryTotalBytes', 'memoryUsedBytes', 'memoryAvailableBytes', 'memoryUtilizationPercent', 'diskTotalBytes', 'diskUsedBytes', 'diskAvailableBytes', 'diskUtilizationPercent']} record={sample} />
+      </Panel>
+      <DataTable
+        columns={['uuid', 'name', 'utilizationPercent', 'memoryUtilizationPercent', 'temperatureCelsius', 'powerWatts']}
+        onRefresh={refresh}
+        onRowClick={(row) => setModal({ title: t('gpuDetails'), json: row, body: <RecordTable fields={Object.keys(row)} record={row} /> })}
+        rows={gpus}
+        title={t('gpuDevices')}
+      />
+    </>
+  );
+}
+
+function TelemetryAnalytics({ metric, range, refresh, rollups, samples, setMetric, setModal, setRange }) {
+  const { t } = useTranslation();
+
+  async function details(row) {
+    const entry = await localApi(`/api/v1/telemetry/history/${encodeURIComponent(row.id)}`);
+    setModal({ title: t('telemetrySampleDetails'), json: entry, size: 'request-details', body: <TelemetryDetails detail={entry} /> });
+  }
+
+  async function remove(row) {
+    setModal(confirmModal(
+      t,
+      t('deleteTelemetryTitle'),
+      t('deleteTelemetryMessage', { id: row.id }),
+      async () => {
+        await localApi(`/api/v1/telemetry/history/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        refresh();
+        setModal(null);
+      }
+    ));
+  }
+
+  const metricValues = samples.map((sample) => Number(sample[telemetryMetricField(metric)] || 0)).filter((value) => Number.isFinite(value));
+  const average = metricValues.length ? metricValues.reduce((sum, value) => sum + value, 0) / metricValues.length : null;
+  const maximum = metricValues.length ? Math.max(...metricValues) : null;
+
+  return (
+    <>
+      <div className="chart-controls page-level-controls split" aria-label={t('chartRange')}>
+        <div className="time-range-button-row">
+          {['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
+            <button className={item === range ? 'active' : ''} key={item} onClick={() => setRange(item)} title={t('tooltipChartRangeOption', { range: t(item) })} type="button">{t(item)}</button>
+          ))}
+        </div>
+        <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
+      </div>
+      <div className="metric-grid">
+        <Metric icon={<History size={18} />} label={t('samples')} value={samples.length} />
+        <Metric icon={<Gauge size={18} />} label={t('average')} value={formatMetric(average)} />
+        <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
+        <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
+      </div>
+      <Panel className="chart-panel-card" title={t('telemetryOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
+        <MetricChart onRangeChange={setRange} range={range} rollups={rollups} showControls={false} />
+      </Panel>
+      <DataTable
+        actions={(row) => [
+          { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteTelemetrySample') }
+        ]}
+        columns={['id', 'collectedUtc', 'cpuUtilizationPercent', 'memoryUtilizationPercent', 'diskUtilizationPercent', 'gpuAverageUtilizationPercent', 'gpuAverageTemperatureCelsius']}
+        onRefresh={refresh}
+        onRowClick={details}
+        rows={samples}
+        title={t('telemetrySamples')}
+      />
+    </>
+  );
+}
+
+function TelemetryMetricSelect({ metric, setMetric }) {
+  const { t } = useTranslation();
+  const metrics = ['CpuUtilizationPercent', 'MemoryUtilizationPercent', 'DiskUtilizationPercent', 'GpuUtilizationPercent', 'GpuMemoryUtilizationPercent', 'GpuTemperatureCelsius', 'GpuPowerWatts'];
+  return (
+    <label className="form-field inline compact-field" title={t('tooltipTelemetryMetric')}>
+      <span>{t('metric')}</span>
+      <select value={metric} onChange={(event) => setMetric(event.target.value)} title={t('tooltipTelemetryMetric')}>
+        {metrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function Logs({ logSeverity, logTail, logs, setLogSeverity, setLogTail }) {
   const { t } = useTranslation();
   return (
@@ -427,19 +610,33 @@ function Settings({ database, refresh, state }) {
   async function save(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const settings = state?.settings?.localDashboard || {};
+    const telemetry = state?.settings?.telemetry || {};
     await localApi('/api/v1/settings', {
       method: 'PUT',
       body: jsonBody({
-        enabled: form.get('enabled') === 'on',
-        host: form.get('host'),
-        port: Number(form.get('port')),
-        openBrowserOnStart: form.get('openBrowserOnStart') === 'on',
-        requireLocalToken: form.get('requireLocalToken') === 'on',
-        database: { filename: form.get('filename') },
+        enabled: form.has('enabled') ? form.get('enabled') === 'on' : !!settings.enabled,
+        host: form.get('host') || settings.host || '127.0.0.1',
+        port: Number(form.get('port') || settings.port || 9343),
+        openBrowserOnStart: form.has('openBrowserOnStart') ? form.get('openBrowserOnStart') === 'on' : !!settings.openBrowserOnStart,
+        requireLocalToken: form.has('requireLocalToken') ? form.get('requireLocalToken') === 'on' : !!settings.requireLocalToken,
+        database: { filename: form.get('filename') || settings.database?.filename },
         historyRetention: {
-          maxEntries: Number(form.get('maxEntries')),
-          maxBodyBytes: Number(form.get('maxBodyBytes')),
-          persistBodies: form.get('persistBodies') === 'on'
+          maxEntries: Number(form.get('maxEntries') || settings.historyRetention?.maxEntries || 1000),
+          maxBodyBytes: Number(form.get('maxBodyBytes') || settings.historyRetention?.maxBodyBytes || 65536),
+          persistBodies: form.has('persistBodies') ? form.get('persistBodies') === 'on' : !!settings.historyRetention?.persistBodies
+        },
+        telemetry: {
+          enabled: form.has('telemetryEnabled') ? form.get('telemetryEnabled') === 'on' : !!telemetry.enabled,
+          collectionIntervalMs: Number(form.get('telemetryCollectionIntervalMs') || telemetry.collectionIntervalMs || 15000),
+          retentionDays: Number(form.get('telemetryRetentionDays') || telemetry.retentionDays || 30),
+          pruneIntervalMinutes: Number(form.get('telemetryPruneIntervalMinutes') || telemetry.pruneIntervalMinutes || 60),
+          persistRawSnapshot: form.has('telemetryPersistRawSnapshot') ? form.get('telemetryPersistRawSnapshot') === 'on' : !!telemetry.persistRawSnapshot,
+          gpu: {
+            enabled: form.has('telemetryGpuEnabled') ? form.get('telemetryGpuEnabled') === 'on' : !!telemetry.gpu?.enabled,
+            nvidiaDcgmExporterUrl: form.get('telemetryDcgmUrl') || telemetry.gpu?.nvidiaDcgmExporterUrl || null,
+            commandTimeoutMs: Number(form.get('telemetryGpuCommandTimeoutMs') || telemetry.gpu?.commandTimeoutMs || 5000)
+          }
         }
       })
     });
@@ -447,6 +644,7 @@ function Settings({ database, refresh, state }) {
   }
 
   const settings = state?.settings?.localDashboard || {};
+  const telemetry = state?.settings?.telemetry || {};
   return (
     <>
       <Panel title={t('localDashboardSettings')}>
@@ -466,6 +664,20 @@ function Settings({ database, refresh, state }) {
       </Panel>
       <Panel title={t('databaseStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(database || {}, null, 2)} />}>
         <RecordTable fields={['status', 'resolvedFilename', 'sizeBytes', 'requests', 'oldestRequestUtc', 'newestRequestUtc']} record={database || {}} />
+      </Panel>
+      <Panel title={t('telemetrySettings')}>
+        <div className="empty-state">{t('telemetrySettingsRestartNotice')}</div>
+        <form className="form-grid" onSubmit={save}>
+          <Toggle checked={telemetry.enabled} label={t('enabled')} name="telemetryEnabled" tooltip={t('tooltipTelemetryEnabled')} />
+          <Field defaultValue={telemetry.collectionIntervalMs || 15000} label={t('collectionIntervalMs')} name="telemetryCollectionIntervalMs" tooltip={t('tooltipTelemetryInterval')} type="number" />
+          <Field defaultValue={telemetry.retentionDays || 30} label={t('retentionDays')} name="telemetryRetentionDays" tooltip={t('tooltipTelemetryRetention')} type="number" />
+          <Field defaultValue={telemetry.pruneIntervalMinutes || 60} label={t('pruneIntervalMinutes')} name="telemetryPruneIntervalMinutes" tooltip={t('tooltipTelemetryPruneInterval')} type="number" />
+          <Toggle checked={telemetry.persistRawSnapshot} label={t('persistRawSnapshot')} name="telemetryPersistRawSnapshot" tooltip={t('tooltipTelemetryPersistRawSnapshot')} />
+          <Toggle checked={telemetry.gpu?.enabled} label={t('gpuTelemetry')} name="telemetryGpuEnabled" tooltip={t('tooltipTelemetryGpuEnabled')} />
+          <Field defaultValue={telemetry.gpu?.nvidiaDcgmExporterUrl || ''} label={t('dcgmExporterUrl')} name="telemetryDcgmUrl" tooltip={t('tooltipTelemetryDcgmUrl')} />
+          <Field defaultValue={telemetry.gpu?.commandTimeoutMs || 5000} label={t('gpuCommandTimeoutMs')} name="telemetryGpuCommandTimeoutMs" tooltip={t('tooltipTelemetryGpuCommandTimeout')} type="number" />
+          <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
+        </form>
       </Panel>
     </>
   );
@@ -632,11 +844,11 @@ function DataTable({ actions, columns, compact = false, headerActions, onRefresh
       <div className="table-scroll">
         <table className="data-table">
           <thead>
-            <tr>{columns.map((column) => <th key={column}>{title(column, t)}</th>)}{!compact ? <th className="actions-cell">{t('actions')}</th> : null}</tr>
+            <tr>{columns.map((column) => <th className={columnClass(column)} key={column}>{title(column, t)}</th>)}{!compact ? <th className="actions-cell">{t('actions')}</th> : null}</tr>
             {!compact ? (
               <tr className="table-filter-row">
                 {columns.map((column) => (
-                  <th key={column}>
+                  <th className={columnClass(column)} key={column}>
                     <input
                       onBlur={() => applyFilter(column)}
                       onChange={(event) => setDraftFilters({ ...draftFilters, [column]: event.target.value })}
@@ -663,7 +875,7 @@ function DataTable({ actions, columns, compact = false, headerActions, onRefresh
               </tr>
             ) : pageRows.map((row) => (
               <tr className={onRowClick ? 'clickable-row' : ''} key={row.id || `${row.provider || ''}:${row.name || row.modelName || row.endpoint}`} onClick={(event) => handleRowClick(event, row)}>
-                {columns.map((column) => <td key={column}>{copyColumn(column, row[column]) ? <CopyableValue label={t('copyValue')} value={String(row[column] || '')} /> : display(row[column], t)}</td>)}
+                {columns.map((column) => <td className={columnClass(column)} key={column}>{copyColumn(column, row[column]) ? <CopyableValue label={t('copyValue')} value={String(row[column] || '')} /> : display(row[column], t)}</td>)}
                 {!compact ? <td className="actions-cell"><ActionMenu items={rowActions(row)} /></td> : null}
               </tr>
             ))}
@@ -720,6 +932,172 @@ function RequestDetails({ entry }) {
   );
 }
 
+function TelemetryDetails({ detail }) {
+  const { t } = useTranslation();
+  const sample = detail?.sample || {};
+  return (
+    <div className="details-stack">
+      <RecordTable fields={Object.keys(sample)} record={sample} />
+      <DataTable columns={['uuid', 'name', 'utilizationPercent', 'memoryUtilizationPercent', 'temperatureCelsius', 'powerWatts']} compact rows={detail?.gpus || []} />
+      <details open>
+        <summary>{t('snapshotJson')} <CopyButton label={t('copyValue')} value={detail?.snapshotJson || ''} /></summary>
+        <pre className="json-preview"><code>{detail?.snapshotJson || ''}</code></pre>
+      </details>
+    </div>
+  );
+}
+
+function MetricChart({ onRangeChange, range, rollups, showControls = true }) {
+  const { t } = useTranslation();
+  const canvasRef = useRef(null);
+  const [chartWidth, setChartWidth] = useState(760);
+  const [hovered, setHovered] = useState(null);
+  const buckets = useMemo(() => buildMetricBuckets(rollups, range), [range, rollups]);
+  const max = Math.max(1, ...buckets.map((bucket) => Number(bucket.maximum ?? bucket.average ?? 0)));
+  const height = 320;
+  const left = 58;
+  const right = 28;
+  const top = 28;
+  const bottom = 52;
+  const width = chartWidth;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const baseY = top + plotHeight;
+  const slot = plotWidth / Math.max(1, buckets.length);
+  const barWidth = Math.max(2, Math.min(14, slot - 2));
+  const yTicks = buildMetricYAxisTicks(max);
+
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) return undefined;
+
+    function updateWidth() {
+      setChartWidth(Math.max(360, Math.round(element.clientWidth || 760)));
+    }
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className="activity-chart-panel">
+      {showControls ? (
+        <div className="chart-controls" aria-label={t('chartRange')}>
+          {['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
+            <button className={item === range ? 'active' : ''} key={item} onClick={() => onRangeChange?.(item)} title={t('tooltipChartRangeOption', { range: t(item) })} type="button">{t(item)}</button>
+          ))}
+        </div>
+      ) : null}
+      <div className="chart-canvas" ref={canvasRef}>
+        <svg className="activity-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('telemetry')}>
+          <line x1={left} y1={top} x2={left} y2={baseY} stroke="var(--color-border)" />
+          <line x1={left} y1={baseY} x2={left + plotWidth} y2={baseY} stroke="var(--color-border)" />
+          {yTicks.map((tick) => {
+            const y = baseY - (tick / max) * plotHeight;
+            return <g key={tick}><line x1={left} y1={y} x2={left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" /><text className="axis-label" x={left - 10} y={y + 4} textAnchor="end">{formatMetric(tick)}</text></g>;
+          })}
+          <text className="axis-title" transform={`translate(16 ${top + plotHeight / 2}) rotate(-90)`}>{t('metric')}</text>
+          <text className="axis-title" x={left + plotWidth / 2} y={height - 12} textAnchor="middle">{t('time')}</text>
+          {buckets.map((bucket, index) => {
+            const value = Number(bucket.average ?? 0);
+            const x = left + index * slot + (slot - barWidth) / 2;
+            const barHeight = (value / max) * plotHeight;
+            const y = baseY - barHeight;
+            const showTick = shouldShowChartTick(index, buckets.length);
+            return (
+              <g key={`${bucket.label}-${index}`} onMouseLeave={() => setHovered(null)} onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}>
+                <rect x={x} y={top} width={barWidth} height={plotHeight} fill="transparent" />
+                <rect x={x} y={y} width={barWidth} height={barHeight} rx="3" fill="var(--color-accent)" />
+                {showTick ? <text className="axis-label" x={x + barWidth / 2} y={baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
+              </g>
+            );
+          })}
+        </svg>
+        {hovered ? (
+          <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
+            <strong>{hovered.bucket.label}</strong>
+            <span>{t('average')}: {formatMetric(hovered.bucket.average)}</span>
+            <span>{t('minimum')}: {formatMetric(hovered.bucket.minimum)}</span>
+            <span>{t('maximum')}: {formatMetric(hovered.bucket.maximum)}</span>
+            <span>{t('samples')}: {hovered.bucket.count}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function buildMetricBuckets(rollups, range) {
+  const desiredCount = desiredChartBuckets(range);
+  const raw = Array.isArray(rollups) ? rollups.slice(-desiredCount) : [];
+  const normalized = raw.map((bucket, index) => ({
+    average: Number(bucket.average ?? bucket.Average ?? 0),
+    count: Number(bucket.count ?? bucket.Count ?? 0),
+    label: String(bucket.label ?? bucket.Label ?? fallbackMetricLabel(range, Math.max(0, desiredCount - raw.length + index), desiredCount)),
+    maximum: Number(bucket.maximum ?? bucket.Maximum ?? bucket.average ?? bucket.Average ?? 0),
+    minimum: Number(bucket.minimum ?? bucket.Minimum ?? bucket.average ?? bucket.Average ?? 0)
+  }));
+  const missing = Math.max(0, desiredCount - normalized.length);
+  const padding = Array.from({ length: missing }, (_, index) => ({
+    average: 0,
+    count: 0,
+    label: fallbackMetricLabel(range, index, desiredCount),
+    maximum: 0,
+    minimum: 0
+  }));
+  return [...padding, ...normalized].slice(-desiredCount);
+}
+
+function desiredChartBuckets(range) {
+  if (range === 'lastHour') return 60;
+  if (range === 'lastDay') return 96;
+  if (range === 'lastWeek') return 84;
+  if (range === 'lastMonth') return 90;
+  return 96;
+}
+
+function fallbackMetricLabel(range, index, count) {
+  if (range === 'lastHour') return `${Math.max(0, count - index - 1)}m`;
+  if (range === 'lastDay') return `${Math.max(0, Math.floor(index / 4))}h`;
+  if (range === 'lastWeek') return `D${Math.max(1, Math.floor(index / 12) + 1)}`;
+  if (range === 'lastMonth') return `D${Math.max(1, Math.floor(index / 3) + 1)}`;
+  return String(index + 1);
+}
+
+function buildMetricYAxisTicks(max) {
+  if (!Number.isFinite(max) || max <= 1) return [1, 0];
+  const tickCount = Math.min(5, Math.max(2, Math.ceil(max) + 1));
+  const step = Math.max(1, Math.ceil(max / (tickCount - 1)));
+  const ticks = [];
+  for (let tick = 0; tick <= max; tick += step) {
+    ticks.push(tick);
+  }
+  if (!ticks.includes(max)) ticks.push(max);
+  return [...new Set(ticks)].sort((left, right) => right - left).slice(0, 5);
+}
+
+function shouldShowChartTick(index, count) {
+  const step = Math.max(1, Math.ceil(count / 8));
+  return index % step === 0 || index === count - 1;
+}
+
+function tooltipFromPointer(event, element) {
+  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
+  const bounds = element.getBoundingClientRect();
+  const tooltipWidth = 188;
+  const tooltipHeight = 118;
+  const x = event.clientX - bounds.left;
+  const y = event.clientY - bounds.top;
+  const clampedX = Math.min(Math.max(x, 18), Math.max(18, bounds.width - 18));
+  const clampedY = Math.min(Math.max(y, 42), Math.max(42, bounds.height - 42));
+  const nearRight = clampedX > bounds.width - tooltipWidth;
+  const nearBottom = clampedY > bounds.height - tooltipHeight;
+  const transform = `${nearRight ? 'translateX(calc(-100% - 14px))' : 'translateX(14px)'} ${nearBottom ? 'translateY(calc(-100% + 24px))' : 'translateY(-50%)'}`;
+  return { x: clampedX, y: clampedY, transform };
+}
+
 function Panel({ actions, children, className = '', title: panelTitle }) {
   return (
     <section className={`workspace-card ${className}`.trim()}>
@@ -767,6 +1145,33 @@ function localApiRange(range) {
   return 'hour';
 }
 
+function telemetryBucketMinutes(range) {
+  if (range === 'lastHour') return 1;
+  if (range === 'lastDay') return 15;
+  if (range === 'lastWeek') return 120;
+  return 480;
+}
+
+function telemetryMetricField(metric) {
+  if (metric === 'MemoryUtilizationPercent') return 'memoryUtilizationPercent';
+  if (metric === 'DiskUtilizationPercent') return 'diskUtilizationPercent';
+  if (metric === 'GpuUtilizationPercent') return 'gpuAverageUtilizationPercent';
+  if (metric === 'GpuMemoryUtilizationPercent') return 'gpuAverageMemoryUtilizationPercent';
+  if (metric === 'GpuTemperatureCelsius') return 'gpuAverageTemperatureCelsius';
+  if (metric === 'GpuPowerWatts') return 'gpuAveragePowerWatts';
+  return 'cpuUtilizationPercent';
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function formatMetric(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+  return Number(value).toFixed(2);
+}
+
 function copyColumn(column, value) {
   const normalized = column.toLowerCase();
   return normalized.includes('id')
@@ -781,10 +1186,45 @@ function copyColumn(column, value) {
 
 function title(value, t) {
   const key = String(value || '');
+  const mapped = {
+    modelName: 'model',
+    providerName: 'provider',
+    statusCode: 'status'
+  };
+  if (mapped[key]) return t(mapped[key]);
+
   if (typeof t === 'function') {
     const translated = t(key);
     if (translated !== key) return translated;
   }
 
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase()).trim();
+}
+
+function columnClass(column) {
+  return `column-${String(column || '').replace(/[^a-z0-9_-]/gi, '')}`;
+}
+
+function localTooltipForElement(element, t) {
+  const label = localElementLabel(element, t);
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === 'a') return t('tooltipGenericLink', { label });
+  if (tagName === 'select') return t('tooltipGenericSelect', { label });
+  if (tagName === 'textarea') return t('tooltipGenericTextarea', { label });
+  if (tagName === 'input') return t('tooltipGenericInput', { label });
+  if (tagName === 'button') return t('tooltipGenericButton', { label });
+  return t('tooltipGenericControl', { label });
+}
+
+function localElementLabel(element, t) {
+  const explicit = element.getAttribute('aria-label') || element.getAttribute('placeholder') || element.getAttribute('data-tooltip-label');
+  if (explicit) return explicit.trim();
+
+  const text = element.textContent?.replace(/\s+/g, ' ').trim();
+  if (text) return text;
+
+  const name = element.getAttribute('name') || element.getAttribute('id') || element.getAttribute('value');
+  if (name) return title(name, t);
+
+  return t('control');
 }

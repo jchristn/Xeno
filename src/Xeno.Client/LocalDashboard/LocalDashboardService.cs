@@ -14,6 +14,8 @@ namespace Xeno.Client.LocalDashboard
     using WatsonWebserver.Core;
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
+    using Xeno.Client.Telemetry.Models;
+    using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -23,6 +25,8 @@ namespace Xeno.Client.LocalDashboard
     {
         private readonly ClientSettings _Settings;
         private readonly ILocalRequestHistoryMethods _History;
+        private readonly IClientTelemetryHistoryMethods _TelemetryHistory;
+        private readonly ClientTelemetryPersistenceService? _TelemetryService;
         private readonly Webserver _Webserver;
         private readonly string _Token;
         private bool _Disposed;
@@ -32,10 +36,14 @@ namespace Xeno.Client.LocalDashboard
         /// </summary>
         /// <param name="settings">Client settings.</param>
         /// <param name="history">Local history database methods.</param>
-        public LocalDashboardService(ClientSettings settings, ILocalRequestHistoryMethods history)
+        /// <param name="telemetryHistory">Telemetry history database methods.</param>
+        /// <param name="telemetryService">Telemetry persistence service.</param>
+        public LocalDashboardService(ClientSettings settings, ILocalRequestHistoryMethods history, IClientTelemetryHistoryMethods telemetryHistory, ClientTelemetryPersistenceService? telemetryService)
         {
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _History = history ?? throw new ArgumentNullException(nameof(history));
+            _TelemetryHistory = telemetryHistory ?? throw new ArgumentNullException(nameof(telemetryHistory));
+            _TelemetryService = telemetryService;
             ValidateHost(_Settings.LocalDashboard.Host);
             WebserverSettings webserverSettings = new WebserverSettings(_Settings.LocalDashboard.Host, _Settings.LocalDashboard.Port, false);
             _Webserver = new Webserver(webserverSettings, DefaultRouteAsync);
@@ -224,6 +232,56 @@ namespace Xeno.Client.LocalDashboard
                 return;
             }
 
+            if (method == "GET" && String.Equals(path, "/api/v1/telemetry/status", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetryPersistenceStatus status = await _TelemetryHistory.GetStatusAsync(_Settings.Telemetry, token).ConfigureAwait(false);
+                ApplyRuntimeTelemetryStatus(status);
+                await SendJsonAsync(context, status).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && String.Equals(path, "/api/v1/telemetry/latest", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetrySampleDetail? detail = await _TelemetryHistory.ReadLatestAsync(token).ConfigureAwait(false);
+                ClientTelemetryPersistenceStatus status = await _TelemetryHistory.GetStatusAsync(_Settings.Telemetry, token).ConfigureAwait(false);
+                ApplyRuntimeTelemetryStatus(status);
+                await SendJsonAsync(context, new ClientTelemetryLatestResponse { Snapshot = _TelemetryService?.LatestSnapshot, Detail = detail, Status = status }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/collect", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetrySnapshot? snapshot = _TelemetryService == null ? null : await _TelemetryService.CollectNowAsync(token).ConfigureAwait(false);
+                ClientTelemetrySampleDetail? detail = await _TelemetryHistory.ReadLatestAsync(token).ConfigureAwait(false);
+                ClientTelemetryPersistenceStatus status = await _TelemetryHistory.GetStatusAsync(_Settings.Telemetry, token).ConfigureAwait(false);
+                ApplyRuntimeTelemetryStatus(status);
+                await SendJsonAsync(context, new ClientTelemetryLatestResponse { Snapshot = snapshot, Detail = detail, Status = status }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/history/search", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetrySearchRequest request = ReadJson<ClientTelemetrySearchRequest>(context);
+                ApplyTelemetryRangeDefaults(request, context);
+                await SendJsonAsync(context, await _TelemetryHistory.SearchAsync(request, token).ConfigureAwait(false)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/history/rollups", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetryRollupRequest request = ReadJson<ClientTelemetryRollupRequest>(context);
+                ApplyTelemetryRangeDefaults(request, context);
+                await SendJsonAsync(context, await _TelemetryHistory.RollupAsync(request, token).ConfigureAwait(false)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/history/delete", StringComparison.OrdinalIgnoreCase))
+            {
+                int removed = await _TelemetryHistory.DeleteAllAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed, RemovedOne = removed > 0 }).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && String.Equals(path, "/api/v1/logs", StringComparison.OrdinalIgnoreCase))
             {
                 int tail = ParseInt(context.Request.Query.Elements.Get("tail"), 100);
@@ -359,6 +417,22 @@ namespace Xeno.Client.LocalDashboard
                 return;
             }
 
+            if ((method == "GET" || method == "DELETE") && path.StartsWith("/api/v1/telemetry/history/", StringComparison.OrdinalIgnoreCase))
+            {
+                string id = DecodePathSegment(path.Substring("/api/v1/telemetry/history/".Length));
+                if (method == "GET")
+                {
+                    ClientTelemetrySampleDetail? detail = await _TelemetryHistory.ReadDetailAsync(id, token).ConfigureAwait(false);
+                    if (detail == null) throw new KeyNotFoundException("Telemetry sample not found.");
+                    await SendJsonAsync(context, detail).ConfigureAwait(false);
+                    return;
+                }
+
+                bool removed = await _TelemetryHistory.DeleteAsync(id, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed ? 1 : 0, RemovedOne = removed }).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && String.Equals(path, "/api/v1/settings", StringComparison.OrdinalIgnoreCase))
             {
                 await SendJsonAsync(context, new LocalDashboardSettingsResponse { Settings = RedactedSettings(), SettingsFile = ClientSettings.SettingsFile }).ConfigureAwait(false);
@@ -367,7 +441,7 @@ namespace Xeno.Client.LocalDashboard
 
             if (method == "PUT" && String.Equals(path, "/api/v1/settings", StringComparison.OrdinalIgnoreCase))
             {
-                ClientLocalDashboardSettings request = ReadJson<ClientLocalDashboardSettings>(context);
+                LocalClientSettingsUpdateRequest request = ReadJson<LocalClientSettingsUpdateRequest>(context);
                 ValidateHost(request.Host);
                 _Settings.LocalDashboard.Enabled = request.Enabled;
                 _Settings.LocalDashboard.Host = request.Host;
@@ -376,6 +450,7 @@ namespace Xeno.Client.LocalDashboard
                 _Settings.LocalDashboard.RequireLocalToken = request.RequireLocalToken;
                 _Settings.LocalDashboard.Database = request.Database ?? new ClientLocalDatabaseSettings();
                 _Settings.LocalDashboard.HistoryRetention = request.HistoryRetention ?? new ClientLocalHistorySettings();
+                _Settings.Telemetry = request.Telemetry ?? new ClientTelemetrySettings();
                 _Settings.Save();
                 await SendJsonAsync(context, new LocalDashboardSettingsResponse { Settings = RedactedSettings(), SettingsFile = ClientSettings.SettingsFile, RestartRequired = true }).ConfigureAwait(false);
                 return;
@@ -402,11 +477,40 @@ namespace Xeno.Client.LocalDashboard
                     Token = _Settings.Server.Token
                 },
                 LocalDashboard = _Settings.LocalDashboard,
+                Telemetry = _Settings.Telemetry,
                 Providers = _Settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList()
             };
             copy.Server.SecretKey = String.IsNullOrWhiteSpace(copy.Server.SecretKey) ? null : "configured";
             copy.Server.Token = String.IsNullOrWhiteSpace(copy.Server.Token) ? null : "configured";
             return copy;
+        }
+
+        private void ApplyRuntimeTelemetryStatus(ClientTelemetryPersistenceStatus status)
+        {
+            ClientTelemetryPersistenceStatus? runtime = _TelemetryService?.Status;
+            if (runtime == null) return;
+            status.Running = runtime.Running;
+            status.LastCollectionUtc = runtime.LastCollectionUtc;
+            status.LastPruneUtc = runtime.LastPruneUtc;
+            status.LastMessage = runtime.LastMessage;
+        }
+
+        private static void ApplyTelemetryRangeDefaults(ClientTelemetrySearchRequest request, HttpContextBase context)
+        {
+            DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
+            request.ToUtc = toUtc;
+            request.FromUtc ??= SummaryStartUtc(context.Request.Query.Elements.Get("range") ?? "hour", toUtc);
+            request.Limit = Math.Clamp(request.Limit, 1, 1000);
+            request.Offset = Math.Max(0, request.Offset);
+        }
+
+        private static void ApplyTelemetryRangeDefaults(ClientTelemetryRollupRequest request, HttpContextBase context)
+        {
+            DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
+            string range = context.Request.Query.Elements.Get("range") ?? "hour";
+            request.ToUtc = toUtc;
+            request.FromUtc ??= SummaryStartUtc(range, toUtc);
+            if (request.BucketMinutes <= 0) request.BucketMinutes = DefaultBucketMinutes(range);
         }
 
         private async Task<LocalDashboardDatabaseResponse> BuildDatabaseResponseAsync(CancellationToken token)
@@ -464,10 +568,10 @@ namespace Xeno.Client.LocalDashboard
 
         private static int DefaultBucketMinutes(string range)
         {
-            if (String.Equals(range, "day", StringComparison.OrdinalIgnoreCase)) return 60;
-            if (String.Equals(range, "week", StringComparison.OrdinalIgnoreCase)) return 360;
-            if (String.Equals(range, "month", StringComparison.OrdinalIgnoreCase)) return 1440;
-            return 5;
+            if (String.Equals(range, "day", StringComparison.OrdinalIgnoreCase)) return 15;
+            if (String.Equals(range, "week", StringComparison.OrdinalIgnoreCase)) return 120;
+            if (String.Equals(range, "month", StringComparison.OrdinalIgnoreCase)) return 480;
+            return 1;
         }
 
         private async Task<LocalProviderTestResponse> TestProviderAsync(string name, CancellationToken token)

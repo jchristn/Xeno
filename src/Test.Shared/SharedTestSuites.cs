@@ -110,6 +110,35 @@ namespace Test.Shared
 
                             if (!sawNonHexRandomCharacter) throw new InvalidOperationException("Generated random portions looked hexadecimal-only.");
                             return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "ClientTelemetrySettingsClampDefaults",
+                        displayName: "Client telemetry settings clamp defaults",
+                        executeAsync: delegate
+                        {
+                            ClientSettings settings = new ClientSettings();
+                            if (settings.Telemetry == null) throw new InvalidOperationException("Telemetry settings missing.");
+                            if (!settings.Telemetry.Enabled) throw new InvalidOperationException("Telemetry should be enabled by default.");
+                            if (settings.Telemetry.CollectionIntervalMs != 15000) throw new InvalidOperationException("Unexpected telemetry interval.");
+                            if (settings.Telemetry.RetentionDays != 30) throw new InvalidOperationException("Unexpected telemetry retention.");
+                            if (settings.Telemetry.PruneIntervalMinutes != 60) throw new InvalidOperationException("Unexpected telemetry prune interval.");
+                            if (!settings.Telemetry.Gpu.Enabled) throw new InvalidOperationException("GPU telemetry should be enabled by default.");
+                            settings.Telemetry.CollectionIntervalMs = 1;
+                            settings.Telemetry.RetentionDays = 0;
+                            settings.Telemetry.PruneIntervalMinutes = 0;
+                            settings.Telemetry.Gpu.CommandTimeoutMs = 1;
+                            if (settings.Telemetry.CollectionIntervalMs != 5000) throw new InvalidOperationException("Telemetry interval was not clamped.");
+                            if (settings.Telemetry.RetentionDays != 1) throw new InvalidOperationException("Telemetry retention minimum was not clamped.");
+                            if (settings.Telemetry.PruneIntervalMinutes != 1) throw new InvalidOperationException("Telemetry prune interval minimum was not clamped.");
+                            if (settings.Telemetry.Gpu.CommandTimeoutMs != 1000) throw new InvalidOperationException("GPU command timeout minimum was not clamped.");
+                            settings.Telemetry.RetentionDays = 9999;
+                            if (settings.Telemetry.RetentionDays != 365) throw new InvalidOperationException("Telemetry retention maximum was not clamped.");
+                            string telemetryId = IdGenerator.NewId("tel_");
+                            string gpuId = IdGenerator.NewId("tgd_");
+                            if (telemetryId.Length != IdGenerator.MaxIdLength || !telemetryId.StartsWith("tel_", StringComparison.Ordinal)) throw new InvalidOperationException("Telemetry ID shape mismatch.");
+                            if (gpuId.Length != IdGenerator.MaxIdLength || !gpuId.StartsWith("tgd_", StringComparison.Ordinal)) throw new InvalidOperationException("Telemetry GPU ID shape mismatch.");
+                            return Task.CompletedTask;
                         })
                 });
         }
@@ -453,15 +482,17 @@ namespace Test.Shared
                                 settings.Runners.Clear();
                                 settings.Save();
 
-                                SqliteLocalRequestHistoryMethods history = new SqliteLocalRequestHistoryMethods(settings.LocalDashboard.Database);
-                                await history.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                                LocalDashboardDatabaseDriverBase driver = LocalDashboardDatabaseDriverFactory.Create(settings.LocalDashboard.Database);
+                                await driver.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                                ILocalRequestHistoryMethods history = driver.RequestHistory;
+                                IClientTelemetryHistoryMethods telemetryHistory = driver.TelemetryHistory;
                                 ClientSettings invalidHostSettings = new ClientSettings();
                                 invalidHostSettings.LocalDashboard.Host = "+";
                                 invalidHostSettings.LocalDashboard.Port = port;
                                 bool invalidHostRejected = false;
                                 try
                                 {
-                                    using (LocalDashboardService invalidHostService = new LocalDashboardService(invalidHostSettings, history))
+                                    using (LocalDashboardService invalidHostService = new LocalDashboardService(invalidHostSettings, history, telemetryHistory, null))
                                     {
                                     }
                                 }
@@ -472,7 +503,8 @@ namespace Test.Shared
 
                                 if (!invalidHostRejected) throw new InvalidOperationException("Wildcard local dashboard host was not rejected.");
 
-                                using (LocalDashboardService service = new LocalDashboardService(settings, history))
+                                using (driver)
+                                using (LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, null))
                                 using (HttpClient httpClient = new HttpClient())
                                 {
                                     await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
@@ -483,7 +515,7 @@ namespace Test.Shared
 
                                     string html = await httpClient.GetStringAsync(baseUrl + "/").ConfigureAwait(false);
                                     string scriptPath = ExtractHtmlAttribute(html, "src=\"", "\"");
-                                    string stylesheetPath = ExtractHtmlAttribute(html, "href=\"", "\"");
+                                    string stylesheetPath = ExtractHtmlAttributeEnding(html, "href=\"", "\"", ".css");
                                     if (!scriptPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard script path was not a JavaScript asset.");
                                     if (!stylesheetPath.EndsWith(".css", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard stylesheet path was not a CSS asset.");
                                     HttpResponseMessage scriptResponse = await httpClient.GetAsync(baseUrl + scriptPath).ConfigureAwait(false);
@@ -514,7 +546,8 @@ namespace Test.Shared
                                     LocalProviderListResponse providers = DeserializeRequired<LocalProviderListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/providers").ConfigureAwait(false));
                                     if (!providers.Providers.Any(item => String.Equals(item.Name, "touchstone", StringComparison.Ordinal))) throw new InvalidOperationException("Created provider was not listed.");
                                     if (!ClientConnectionState.IsInventoryUpdatePending()) throw new InvalidOperationException("Provider create did not request inventory re-advertisement.");
-                                    string? snapshotUtc = await history.GetMetadataAsync("last_configuration_snapshot_utc", CancellationToken.None).ConfigureAwait(false);
+                                    ILocalDashboardMetadataMethods metadataMethods = (ILocalDashboardMetadataMethods)history;
+                                    string? snapshotUtc = await metadataMethods.GetMetadataAsync("last_configuration_snapshot_utc", CancellationToken.None).ConfigureAwait(false);
                                     if (String.IsNullOrWhiteSpace(snapshotUtc)) throw new InvalidOperationException("Provider create did not write local configuration snapshot metadata.");
 
                                     HttpResponseMessage providerTest = await PostJsonAsync(httpClient, baseUrl + "/api/v1/providers/touchstone/test", "{}").ConfigureAwait(false);
@@ -2578,6 +2611,24 @@ namespace Test.Shared
             int end = html.IndexOf(suffix, start, StringComparison.OrdinalIgnoreCase);
             if (end < start) throw new InvalidOperationException("Expected HTML attribute suffix was not found: " + suffix);
             return html.Substring(start, end - start);
+        }
+
+        private static string ExtractHtmlAttributeEnding(string html, string prefix, string suffix, string ending)
+        {
+            int searchStart = 0;
+            while (searchStart < html.Length)
+            {
+                int start = html.IndexOf(prefix, searchStart, StringComparison.OrdinalIgnoreCase);
+                if (start < 0) break;
+                start += prefix.Length;
+                int end = html.IndexOf(suffix, start, StringComparison.OrdinalIgnoreCase);
+                if (end < start) break;
+                string value = html.Substring(start, end - start);
+                if (value.EndsWith(ending, StringComparison.OrdinalIgnoreCase)) return value;
+                searchStart = end + suffix.Length;
+            }
+
+            throw new InvalidOperationException("Expected HTML attribute ending was not found: " + ending);
         }
 
         private static bool OpenApiHasMethod(string json, string path, string method)

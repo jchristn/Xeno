@@ -15,7 +15,9 @@ namespace Xeno.Client.LocalDashboard.Database.Sqlite
             "local_request_bodies",
             "local_response_bodies",
             "local_request_telemetry",
-            "local_request_timeline"
+            "local_request_timeline",
+            "local_telemetry_samples",
+            "local_telemetry_gpu_samples"
         };
 
         /// <summary>

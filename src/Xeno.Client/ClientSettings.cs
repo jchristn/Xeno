@@ -68,6 +68,11 @@ namespace Xeno.Client
         public ClientLocalDashboardSettings LocalDashboard { get; set; } = new ClientLocalDashboardSettings();
 
         /// <summary>
+        /// Local telemetry settings.
+        /// </summary>
+        public ClientTelemetrySettings Telemetry { get; set; } = new ClientTelemetrySettings();
+
+        /// <summary>
         /// Provider endpoint settings.
         /// </summary>
         public List<ClientRunnerSettings> Providers { get; set; } = new List<ClientRunnerSettings>();

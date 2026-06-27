@@ -75,6 +75,10 @@
     {
       "key": "localDashboardToken",
       "value": "paste-token-from-dashboard-page"
+    },
+    {
+      "key": "localTelemetrySampleId",
+      "value": "tel_..."
     }
   ],
   "item": [
@@ -1081,6 +1085,285 @@
           }
         ]
       }
+    },
+    {
+      "name": "Xeno Client Local Dashboard",
+      "description": "Local dashboard API served by the background xeno client process on localhost. Set localDashboardToken from the embedded dashboard page when token authentication is enabled.",
+      "item": [
+        {
+          "name": "State",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/state"
+          }
+        },
+        {
+          "name": "Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/statistics"
+          }
+        },
+        {
+          "name": "Telemetry Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/status"
+          }
+        },
+        {
+          "name": "Latest Telemetry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/latest"
+          }
+        },
+        {
+          "name": "Collect Telemetry Now",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/collect",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Search Telemetry History",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/search",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Telemetry Rollups",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/rollups",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5,\n  \"limit\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Telemetry Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
+          }
+        },
+        {
+          "name": "Delete Telemetry Detail",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
+          }
+        },
+        {
+          "name": "Delete Telemetry Range",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/delete",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"beforeUtc\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Providers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/providers"
+          }
+        },
+        {
+          "name": "Models",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/models"
+          }
+        },
+        {
+          "name": "Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/requests"
+          }
+        },
+        {
+          "name": "Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/logs?tail=200"
+          }
+        },
+        {
+          "name": "Settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/settings"
+          }
+        },
+        {
+          "name": "Update Local Telemetry Settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/settings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telemetry\": {\n    \"enabled\": true,\n    \"collectionIntervalMs\": 15000,\n    \"retentionDays\": 30,\n    \"pruneIntervalMinutes\": 60,\n    \"persistRawSnapshot\": true,\n    \"gpu\": {\n      \"enabled\": true,\n      \"nvidiaDcgmExporterUrl\": null,\n      \"commandTimeoutMs\": 5000\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   ]
 }

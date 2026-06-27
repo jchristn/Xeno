@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const ranges = [
-  { key: 'lastHour', buckets: 12 },
-  { key: 'lastDay', buckets: 24 },
-  { key: 'lastWeek', buckets: 14 },
-  { key: 'lastMonth', buckets: 30 }
+  { key: 'lastHour', buckets: 60 },
+  { key: 'lastDay', buckets: 96 },
+  { key: 'lastWeek', buckets: 84 },
+  { key: 'lastMonth', buckets: 90 }
 ];
 
 export default function ActivityChart({ onRangeChange, range, showControls = true, summary }) {
@@ -50,8 +50,8 @@ export default function ActivityChart({ onRangeChange, range, showControls = tru
   chart.plotHeight = chart.height - chart.top - chart.bottom;
   chart.baseY = chart.top + chart.plotHeight;
   const barSlot = chart.plotWidth / Math.max(1, buckets.length);
-  const barWidth = Math.max(5, barSlot - 6);
-  const yTicks = [max, Math.round(max / 2), 0];
+  const barWidth = Math.max(2, Math.min(14, barSlot - 2));
+  const yTicks = buildYAxisTicks(max);
 
   return (
     <div className="activity-chart-panel">
@@ -128,15 +128,16 @@ export default function ActivityChart({ onRangeChange, range, showControls = tru
 }
 
 function buildBuckets(rawBuckets, selectedRange) {
-  const source = Array.isArray(rawBuckets) && rawBuckets.length > 0
-    ? rawBuckets
-    : Array.from({ length: selectedRange.buckets }, (_, index) => ({
+  const source = Array.isArray(rawBuckets) && rawBuckets.length > 0 ? rawBuckets : [];
+  const normalized = source.slice(-selectedRange.buckets).map((bucket, index) => normalizeBucket(bucket, selectedRange, index, source.length));
+  const missing = Math.max(0, selectedRange.buckets - normalized.length);
+  const padding = Array.from({ length: missing }, (_, index) => ({
         label: fallbackLabel(selectedRange.key, index, selectedRange.buckets),
         success: 0,
         failed: 0
       }));
 
-  return source.slice(-selectedRange.buckets).map((bucket, index) => normalizeBucket(bucket, selectedRange, index, source.length));
+  return [...padding, ...normalized].slice(-selectedRange.buckets);
 }
 
 function normalizeBucket(bucket, selectedRange, index, count) {
@@ -178,16 +179,33 @@ function bucketLabel(bucket, selectedRange, index, count) {
 }
 
 function fallbackLabel(range, index, count) {
-  if (range === 'lastHour') return `${index * 5}m`;
+  if (range === 'lastHour') return `${Math.max(0, count - index - 1)}m`;
+  if (range === 'lastDay') {
+    const totalMinutes = Math.max(0, count - index - 1) * 15;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h${minutes ? ` ${minutes}m` : ''}`;
+  }
   if (range === 'lastWeek') return `D${Math.max(1, index + 1)}`;
   if (range === 'lastMonth') return `${Math.max(1, index + 1)}`;
-  return `${Math.max(0, 24 - count + index)}h`;
+  return `${index + 1}`;
 }
 
 function shouldShowTick(index, count) {
-  if (count <= 12) return true;
-  if (count <= 24) return index % 4 === 0 || index === count - 1;
-  return index % 5 === 0 || index === count - 1;
+  const step = Math.max(1, Math.ceil(count / 8));
+  return index % step === 0 || index === count - 1;
+}
+
+function buildYAxisTicks(max) {
+  if (!Number.isFinite(max) || max <= 1) return [1, 0];
+  const tickCount = Math.min(5, Math.max(2, Math.ceil(max) + 1));
+  const step = Math.max(1, Math.ceil(max / (tickCount - 1)));
+  const ticks = [];
+  for (let tick = 0; tick <= max; tick += step) {
+    ticks.push(tick);
+  }
+  if (!ticks.includes(max)) ticks.push(max);
+  return [...new Set(ticks)].sort((left, right) => right - left).slice(0, 5);
 }
 
 function tooltipFromPointer(event, element) {

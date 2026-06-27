@@ -7,6 +7,9 @@ namespace Xeno.Client.LocalDashboard
     using System.Threading.Tasks;
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
+    using Xeno.Client.Telemetry.Abstractions;
+    using Xeno.Client.Telemetry.Providers;
+    using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Models;
 
     /// <summary>
@@ -17,6 +20,8 @@ namespace Xeno.Client.LocalDashboard
         private static readonly ConcurrentDictionary<string, LocalRequestHistoryEntry> _InFlight = new ConcurrentDictionary<string, LocalRequestHistoryEntry>(StringComparer.OrdinalIgnoreCase);
         private static LocalDashboardDatabaseDriverBase? _Driver;
         private static ILocalRequestHistoryMethods? _History;
+        private static IClientTelemetryHistoryMethods? _TelemetryHistory;
+        private static ClientTelemetryPersistenceService? _TelemetryService;
         private static LocalDashboardService? _Service;
 
         /// <summary>
@@ -31,6 +36,28 @@ namespace Xeno.Client.LocalDashboard
         }
 
         /// <summary>
+        /// Local telemetry history database.
+        /// </summary>
+        public static IClientTelemetryHistoryMethods? TelemetryHistory
+        {
+            get
+            {
+                return _TelemetryHistory;
+            }
+        }
+
+        /// <summary>
+        /// Telemetry persistence service.
+        /// </summary>
+        public static ClientTelemetryPersistenceService? TelemetryService
+        {
+            get
+            {
+                return _TelemetryService;
+            }
+        }
+
+        /// <summary>
         /// Start the local dashboard runtime when enabled.
         /// </summary>
         /// <param name="settings">Client settings.</param>
@@ -40,7 +67,7 @@ namespace Xeno.Client.LocalDashboard
         {
             ArgumentNullException.ThrowIfNull(settings);
             token.ThrowIfCancellationRequested();
-            if (!settings.LocalDashboard.Enabled)
+            if (!settings.LocalDashboard.Enabled && !settings.Telemetry.Enabled)
             {
                 ClientConnectionState.MarkLocalDashboardDisabled(settings);
                 return;
@@ -48,21 +75,35 @@ namespace Xeno.Client.LocalDashboard
 
             try
             {
-                ClientConnectionState.MarkLocalDashboardStarting(settings);
+                if (settings.LocalDashboard.Enabled) ClientConnectionState.MarkLocalDashboardStarting(settings);
                 LocalDashboardDatabaseDriverBase driver = LocalDashboardDatabaseDriverFactory.Create(settings.LocalDashboard.Database);
                 await driver.InitializeAsync(token).ConfigureAwait(false);
                 ILocalRequestHistoryMethods history = driver.RequestHistory;
+                IClientTelemetryHistoryMethods telemetryHistory = driver.TelemetryHistory;
                 await SnapshotConfigurationAsync(history, settings, token).ConfigureAwait(false);
-                LocalDashboardService service = new LocalDashboardService(settings, history);
-                await service.StartAsync(token).ConfigureAwait(false);
                 _Driver = driver;
                 _History = history;
-                _Service = service;
-                ClientConnectionState.MarkLocalDashboardListening(settings, service.DashboardUrl);
-                Console.WriteLine("Local dashboard listening at " + service.DashboardUrl + ".");
-                if (String.Equals(settings.LocalDashboard.Host, "0.0.0.0", StringComparison.OrdinalIgnoreCase))
+                _TelemetryHistory = telemetryHistory;
+                ClientTelemetryCommandRunner commandRunner = new ClientTelemetryCommandRunner();
+                IClientTelemetryService telemetry = new ClientTelemetryService(new ClientSystemTelemetryProvider(commandRunner), new ClientGpuTelemetryProvider(commandRunner));
+                ClientTelemetryPersistenceService telemetryService = new ClientTelemetryPersistenceService(settings, telemetryHistory, telemetry);
+                telemetryService.Start();
+                _TelemetryService = telemetryService;
+                if (settings.LocalDashboard.Enabled)
                 {
-                    Console.WriteLine("Local dashboard is bound to 0.0.0.0 and may be reachable from other machines depending on firewall and network policy.");
+                    LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, telemetryService);
+                    await service.StartAsync(token).ConfigureAwait(false);
+                    _Service = service;
+                    ClientConnectionState.MarkLocalDashboardListening(settings, service.DashboardUrl);
+                    Console.WriteLine("Local dashboard listening at " + service.DashboardUrl + ".");
+                    if (String.Equals(settings.LocalDashboard.Host, "0.0.0.0", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine("Local dashboard is bound to 0.0.0.0 and may be reachable from other machines depending on firewall and network policy.");
+                    }
+                }
+                else
+                {
+                    ClientConnectionState.MarkLocalDashboardDisabled(settings);
                 }
             }
             catch (Exception ex)
@@ -77,6 +118,14 @@ namespace Xeno.Client.LocalDashboard
         /// </summary>
         public static void Stop()
         {
+            ClientTelemetryPersistenceService? telemetryService = _TelemetryService;
+            if (telemetryService != null)
+            {
+                telemetryService.Dispose();
+                _TelemetryService = null;
+                Console.WriteLine("Telemetry collection stopped.");
+            }
+
             LocalDashboardService? service = _Service;
             if (service != null)
             {
@@ -86,6 +135,7 @@ namespace Xeno.Client.LocalDashboard
             }
 
             _History = null;
+            _TelemetryHistory = null;
             LocalDashboardDatabaseDriverBase? driver = _Driver;
             if (driver != null)
             {
