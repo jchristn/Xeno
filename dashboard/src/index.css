@@ -1167,6 +1167,25 @@ html[data-theme='dark'] .primitive-list-item {
   width: 100%;
 }
 
+.local-dashboard-shell .telemetry-chart-card .workspace-card-body {
+  padding: 0;
+}
+
+.local-dashboard-shell .telemetry-chart-card .activity-chart-panel {
+  gap: 0;
+}
+
+.local-dashboard-shell .telemetry-chart-card .chart-controls {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.local-dashboard-shell .telemetry-chart-card .chart-canvas {
+  border: 0;
+  border-radius: 0;
+  min-height: 525px;
+}
+
 .workspace-card-header {
   display: flex;
   align-items: flex-start;

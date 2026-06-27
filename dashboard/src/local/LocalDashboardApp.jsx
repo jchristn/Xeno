@@ -476,7 +476,7 @@ function Telemetry({ latest, metric, range, refresh, rollups, setMetric, setRang
         <Metric icon={<Gauge size={18} />} label={t('gpuUtilization')} value={formatPercent(sample.gpuAverageUtilizationPercent)} />
       </div>
       <Panel
-        className="chart-panel-card"
+        className="chart-panel-card telemetry-chart-card"
         title={t('telemetryOverTime')}
         actions={(
           <div className="chart-action-row">
