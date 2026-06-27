@@ -24,6 +24,14 @@ The live OpenAPI document remains available at `GET /openapi.json` and should be
 
 ## Authentication
 
+`GET /api/v1/auth/tenants`
+
+`GET /v1.0/api/auth/tenants`
+
+`POST /api/v1/auth/dashboard/login`
+
+`POST /v1.0/api/auth/dashboard/login`
+
 `POST /api/v1/auth/token`
 
 `POST /v1.0/api/auth/token`
@@ -41,6 +49,8 @@ The live OpenAPI document remains available at `GET /openapi.json` and should be
 Token issuance accepts direct credential fields. Bearer and `x-token` values must match when both are supplied.
 
 Login accepts `username`, `password`, and optional `tenantId`. It returns a generated `accessKey` and `secretKey` for client use. The user password is only accepted by the login endpoint and is never accepted on the WebSocket control plane.
+
+Dashboard login is a multistep flow. The dashboard first resolves the server URL and user email, retrieves matching tenants, prompts for tenant only when more than one tenant is available, and then submits the password.
 
 ## Administration
 
@@ -153,7 +163,7 @@ Routed OpenAI-compatible responses include Xeno trace headers for debugging mode
 - `X-Xeno-Routing-Message`: human-readable routing result.
 - `X-Xeno-Routing-Policy-ID`, `X-Xeno-Routing-Policy-Name`, `X-Xeno-Routing-Policy-Match`, and `X-Xeno-Routing-Policy-Reason`: policy selected for this request and why it matched.
 - `X-Xeno-Routing-Candidate-Count` and `X-Xeno-Routing-Candidates`: eligible client count and IDs.
-- `X-Xeno-Load-Balancing-Mode`: configured selection strategy used for the request. Supported values match Conductor: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
+- `X-Xeno-Load-Balancing-Mode`: configured selection strategy used for the request. Supported values are `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - `X-Xeno-Adaptive-Sample-Count` and `X-Xeno-Adaptive-Score`: adaptive scoring evidence when `Adaptive` mode is used.
 - `X-Xeno-Selection-Reason`: reason the selected node won.
 - `X-Xeno-Selected-Client-Name`, `X-Xeno-Selected-API-Type`, `X-Xeno-Selected-Provider` (backward-compatible), and `X-Xeno-Selected-Source`: selected node and advertised model source metadata.
@@ -183,6 +193,62 @@ Requests relayed from the Xeno server to a connected `xeno` client also include 
 `POST /v1.0/api/request-history/bulk`
 
 `GET /api/v1/requesthistory`
+
+The request history detail response includes routing metadata, selected client metadata, request and response headers, bounded request and response bodies, telemetry fields, and timeline events. Streaming responses include stream chunk and stream event counters when the client reports them.
+
+## Xeno Client Local Dashboard API
+
+The Xeno Client local dashboard API is served by the background `xeno` process, not by the Xeno server. The default local dashboard base URL is `http://127.0.0.1:9343`. When `LocalDashboard.RequireLocalToken` is true, the embedded dashboard page receives a per-process token and sends it to the local API.
+
+These routes are intended for same-machine dashboard use and local diagnostics:
+
+`GET /health`
+
+`GET /api/v1/state`
+
+`GET /api/v1/statistics`
+
+`GET /api/v1/database`
+
+`GET /api/v1/providers`
+
+`POST /api/v1/providers`
+
+`PUT /api/v1/providers/{name}`
+
+`DELETE /api/v1/providers/{name}`
+
+`POST /api/v1/providers/{name}/test`
+
+`GET /api/v1/models`
+
+`POST /api/v1/models`
+
+`PUT /api/v1/models/{provider}/{name}`
+
+`DELETE /api/v1/models/{provider}/{name}`
+
+`GET /api/v1/requests`
+
+`GET /api/v1/requests/summary`
+
+`GET /api/v1/requests/analytics/overview`
+
+`GET /api/v1/requests/{id}`
+
+`DELETE /api/v1/requests/{id}`
+
+`POST /api/v1/requests/bulk`
+
+`GET /api/v1/logs`
+
+`GET /api/v1/settings`
+
+`PUT /api/v1/settings`
+
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Local settings updates modify `LocalDashboard` settings in `~/.xeno/client.json`; listener host, listener port, token mode, and database filename changes take effect after restarting the client.
+
+Planned local CPU, memory, disk, and GPU telemetry routes are documented in [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md). They are not part of the current released local API.
 
 ## WebSocket
 

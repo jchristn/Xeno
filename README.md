@@ -20,6 +20,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Routes requests to connected clients through tenant-scoped routing policies with model/client match rules and load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, and client-side request history.
+- Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
 - Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
@@ -208,6 +209,11 @@ dashboard beyond the client machine depending on firewall and network policy.
 Host, port, token, and database filename changes are saved to the settings file
 but take effect after restarting the client.
 
+The local dashboard API is intentionally localhost-oriented and separate from
+the Xeno server management API. It exposes client state, provider and model
+management, local request history, request summaries, logs, settings, and local
+database status under `http://127.0.0.1:9343/api/v1/...` when enabled.
+
 ## Calling The API
 
 List models:
@@ -289,6 +295,7 @@ Developer documentation:
 - [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
 - [MODEL_ROUTING.md](MODEL_ROUTING.md)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md)
+- [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [AGENTS.md](AGENTS.md)
 - [Xeno.postman_collection.json](Xeno.postman_collection.json)
@@ -304,6 +311,7 @@ Archived planning and audit documents are in [archive](archive).
   REST_API.md
   WEBSOCKETS_API.md
   CLIENT_GETTING_STARTED.md
+  CLIENT_TELEMETRY.md
   Xeno.postman_collection.json
   build-all.bat
   build-server.bat
@@ -390,4 +398,4 @@ Pull requests should describe the problem, the implementation, test coverage, an
 
 ## License
 
-Xeno is licensed under the MIT License. See [LICENSE](LICENSE).
+Xeno is licensed under the MIT License. See [LICENSE.md](LICENSE.md).

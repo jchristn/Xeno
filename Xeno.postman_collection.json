@@ -47,6 +47,34 @@
     {
       "key": "routingPolicyId",
       "value": "rpol_..."
+    },
+    {
+      "key": "requestHistoryId",
+      "value": "req_..."
+    },
+    {
+      "key": "auditId",
+      "value": "aud_..."
+    },
+    {
+      "key": "clientId",
+      "value": "xcl_..."
+    },
+    {
+      "key": "clientModelName",
+      "value": "llama3.2:latest"
+    },
+    {
+      "key": "clientModelSource",
+      "value": "local-ollama"
+    },
+    {
+      "key": "localDashboardUrl",
+      "value": "http://127.0.0.1:9343"
+    },
+    {
+      "key": "localDashboardToken",
+      "value": "paste-token-from-dashboard-page"
     }
   ],
   "item": [
@@ -608,6 +636,450 @@
           }
         ],
         "url": "{{baseUrl}}/v1.0/api/backup"
+      }
+    },
+    {
+      "name": "Login Tenants for Email",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/auth/tenants?username={{username}}"
+      }
+    },
+    {
+      "name": "Dashboard Login",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/v1.0/api/auth/dashboard/login",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\":\"{{username}}\",\"password\":\"{{password}}\",\"tenantId\":\"{{tenantId}}\"}"
+        }
+      }
+    },
+    {
+      "name": "Token Details",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/auth/token/details",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Refresh Token",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/v1.0/api/auth/token/refresh",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Logout",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/v1.0/api/auth/logout",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Tenant",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/tenants/{{tenantId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete User",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/users/{{userId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Credential",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Role",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/roles/{{roleId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Permission",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/permissions/{{permissionId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Effective Permissions",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/effective-permissions",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Audit Records",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/audit",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Audit Record",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/audit/{{auditId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Client",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/clients/{{clientId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Client Advertised Model",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/client-models",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"clientId\":\"{{clientId}}\",\"modelName\":\"{{clientModelName}}\",\"source\":\"{{clientModelSource}}\"}"
+        }
+      }
+    },
+    {
+      "name": "Model Definitions",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/model-definitions",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Model Configurations",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/model-configurations",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Completion",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/v1/completions",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"model\":\"llama3.2:latest\",\"prompt\":\"Say hello in one sentence.\",\"stream\":true,\"max_output_tokens\":2000}"
+        }
+      }
+    },
+    {
+      "name": "Request History Entry",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/request-history/{{requestHistoryId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Delete Request History Entry",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/v1.0/api/request-history/{{requestHistoryId}}",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Bulk Delete Request History",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/v1.0/api/request-history/bulk",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"beforeUtc\":null,\"modelName\":null,\"path\":null}"
+        }
+      }
+    },
+    {
+      "name": "Request Analytics Overview",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/v1.0/api/request-history/analytics/overview",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Restore",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/v1.0/api/restore",
+        "header": [
+          {
+            "key": "x-tenant-guid",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "Local Dashboard Health",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/health"
+      }
+    },
+    {
+      "name": "Local Dashboard State",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/state",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Statistics",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/statistics",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Providers",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/providers",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Models",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/models",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Requests",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/requests",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Request Summary",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/requests/summary?range=hour",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Logs",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/logs?tail=200&severity=all",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Local Dashboard Settings",
+      "request": {
+        "method": "GET",
+        "url": "{{localDashboardUrl}}/api/v1/settings",
+        "header": [
+          {
+            "key": "X-Xeno-Local-Token",
+            "value": "{{localDashboardToken}}"
+          }
+        ]
       }
     }
   ]

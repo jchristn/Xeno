@@ -143,6 +143,19 @@ The local dashboard stores request history in SQLite so it can support analytics
 over requests processed by this client. Change `LocalDashboard.Database.Filename`
 to move the database. `ConnectionString`, when supplied, overrides `Filename`.
 
+The local dashboard currently exposes these client-local pages:
+
+- Home: connectedness, local request KPIs, and requests over time.
+- Provider Endpoints: create, edit, test, and delete configured provider endpoints.
+- Advertised Models: create, edit, filter, and delete local model advertisements.
+- Requests: inspect local request history, timing, headers, bodies, stream counters, and failures.
+- Logs: read recent client log lines by severity and tail length.
+- Settings: edit local dashboard listener, token, SQLite database, and retention settings.
+
+The client telemetry plan for CPU, memory, disk, GPU, Telemetry, and Telemetry
+Analytics pages is documented in [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md).
+That plan is not yet released behavior.
+
 These settings require restarting the background client:
 
 - `Enabled`
@@ -185,6 +198,38 @@ cookies, and credential-like headers are redacted from API responses and stored
 history.
 
 Set `LocalDashboard.Enabled` to `false` to disable the local dashboard.
+
+### Local Dashboard API
+
+The local dashboard is served by the `xeno` background process. Its API is
+local to the client machine and uses a per-process token injected into the page
+when `RequireLocalToken` is true.
+
+Current routes:
+
+```text
+GET    /api/v1/state
+GET    /api/v1/statistics
+GET    /api/v1/database
+GET    /api/v1/providers
+POST   /api/v1/providers
+PUT    /api/v1/providers/{name}
+DELETE /api/v1/providers/{name}
+POST   /api/v1/providers/{name}/test
+GET    /api/v1/models
+POST   /api/v1/models
+PUT    /api/v1/models/{provider}/{name}
+DELETE /api/v1/models/{provider}/{name}
+GET    /api/v1/requests
+GET    /api/v1/requests/summary
+GET    /api/v1/requests/analytics/overview
+GET    /api/v1/requests/{id}
+DELETE /api/v1/requests/{id}
+POST   /api/v1/requests/bulk
+GET    /api/v1/logs
+GET    /api/v1/settings
+PUT    /api/v1/settings
+```
 
 ## Point the Client at a Server
 
@@ -418,6 +463,12 @@ xeno logs
 xeno logs -f
 xeno logs --tail 200
 xeno logs --errors
+```
+
+Log lines include UTC timestamp and severity, for example:
+
+```text
+2026-06-26 01:33:45.123456Z [INFO] Xeno client registered.
 ```
 
 Stop the background client:
