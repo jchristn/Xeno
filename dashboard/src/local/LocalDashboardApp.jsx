@@ -585,20 +585,20 @@ function Logs({ logSeverity, logTail, logs, setLogSeverity, setLogTail }) {
       className="client-logs-card"
       title={t('clientLogs')}
       actions={(
-        <>
-          <label className="form-field inline compact-field" title={t('tooltipLocalLogSeverity')}>
+        <div className="client-logs-actions">
+          <label className="form-field inline client-log-filter severity-filter" title={t('tooltipLocalLogSeverity')}>
             <span>{t('severity')}</span>
             <select value={logSeverity} onChange={(event) => setLogSeverity(event.target.value)} title={t('tooltipLocalLogSeverity')}>
               {['all', 'debug', 'info', 'warn', 'error'].map((item) => <option key={item} value={item}>{title(item, t)}</option>)}
             </select>
           </label>
-          <label className="form-field inline compact-field" title={t('tooltipLocalLogTail')}>
+          <label className="form-field inline client-log-filter tail-filter" title={t('tooltipLocalLogTail')}>
             <span>{t('tail')}</span>
             <select value={logTail} onChange={(event) => setLogTail(Number(event.target.value))} title={t('tooltipLocalLogTail')}>
               {[50, 100, 200, 500].map((count) => <option key={count} value={count}>{count}</option>)}
             </select>
           </label>
-        </>
+        </div>
       )}
     >
       <pre className="json-preview"><code>{logs.join('\n')}</code></pre>

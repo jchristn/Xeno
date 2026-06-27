@@ -1132,6 +1132,37 @@ html[data-theme='dark'] .primitive-list-item {
   min-height: 0;
 }
 
+.local-dashboard-shell .client-logs-card .workspace-card-actions {
+  margin-left: auto;
+}
+
+.client-logs-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.client-log-filter {
+  width: auto;
+  grid-template-columns: auto auto;
+  gap: 6px;
+}
+
+.client-log-filter select {
+  min-height: 32px;
+  padding: 5px 28px 5px 8px;
+}
+
+.client-log-filter.severity-filter select {
+  width: 118px;
+}
+
+.client-log-filter.tail-filter select {
+  width: 82px;
+}
+
 .chart-panel-card {
   width: 100%;
 }
@@ -2753,6 +2784,11 @@ html[data-theme='dark'] .primitive-list-item {
 
   .table-toolbar {
     justify-content: flex-start;
+  }
+
+  .client-logs-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .search-box {
