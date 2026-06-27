@@ -27,6 +27,8 @@ namespace Xeno.Client.LocalDashboard
         private readonly ILocalRequestHistoryMethods _History;
         private readonly IClientTelemetryHistoryMethods _TelemetryHistory;
         private readonly ClientTelemetryPersistenceService? _TelemetryService;
+        private readonly IClientProviderTelemetryHistoryMethods? _ProviderTelemetryHistory;
+        private readonly ClientProviderTelemetryPersistenceService? _ProviderTelemetryService;
         private readonly Webserver _Webserver;
         private readonly string _Token;
         private bool _Disposed;
@@ -38,12 +40,14 @@ namespace Xeno.Client.LocalDashboard
         /// <param name="history">Local history database methods.</param>
         /// <param name="telemetryHistory">Telemetry history database methods.</param>
         /// <param name="telemetryService">Telemetry persistence service.</param>
-        public LocalDashboardService(ClientSettings settings, ILocalRequestHistoryMethods history, IClientTelemetryHistoryMethods telemetryHistory, ClientTelemetryPersistenceService? telemetryService)
+        public LocalDashboardService(ClientSettings settings, ILocalRequestHistoryMethods history, IClientTelemetryHistoryMethods telemetryHistory, ClientTelemetryPersistenceService? telemetryService, IClientProviderTelemetryHistoryMethods? providerTelemetryHistory = null, ClientProviderTelemetryPersistenceService? providerTelemetryService = null)
         {
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _History = history ?? throw new ArgumentNullException(nameof(history));
             _TelemetryHistory = telemetryHistory ?? throw new ArgumentNullException(nameof(telemetryHistory));
             _TelemetryService = telemetryService;
+            _ProviderTelemetryHistory = providerTelemetryHistory;
+            _ProviderTelemetryService = providerTelemetryService;
             ValidateHost(_Settings.LocalDashboard.Host);
             WebserverSettings webserverSettings = new WebserverSettings(_Settings.LocalDashboard.Host, _Settings.LocalDashboard.Port, false);
             _Webserver = new Webserver(webserverSettings, DefaultRouteAsync);
@@ -282,6 +286,63 @@ namespace Xeno.Client.LocalDashboard
                 return;
             }
 
+            if (method == "GET" && String.Equals(path, "/api/v1/telemetry/providers/status", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                ClientTelemetryPersistenceStatus status = await _ProviderTelemetryHistory!.GetStatusAsync(_Settings.Telemetry, token).ConfigureAwait(false);
+                ApplyRuntimeProviderTelemetryStatus(status);
+                await SendJsonAsync(context, status).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && String.Equals(path, "/api/v1/telemetry/providers/latest", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                string? providerName = context.Request.Query.Elements.Get("providerName");
+                ClientProviderTelemetrySampleDetail? detail = await _ProviderTelemetryHistory!.ReadLatestAsync(providerName, token).ConfigureAwait(false);
+                ClientTelemetryPersistenceStatus status = await _ProviderTelemetryHistory.GetStatusAsync(_Settings.Telemetry, token).ConfigureAwait(false);
+                ApplyRuntimeProviderTelemetryStatus(status);
+                await SendJsonAsync(context, new ClientProviderTelemetryLatestResponse { Snapshot = _ProviderTelemetryService?.LatestSnapshot, Detail = detail, Status = status }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/providers/collect", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                ClientProviderTelemetrySnapshot? snapshot = _ProviderTelemetryService == null ? null : await _ProviderTelemetryService.CollectNowAsync(token).ConfigureAwait(false);
+                ClientProviderTelemetrySampleDetail? detail = await _ProviderTelemetryHistory!.ReadLatestAsync(null, token).ConfigureAwait(false);
+                ClientTelemetryPersistenceStatus status = await _ProviderTelemetryHistory.GetStatusAsync(_Settings.Telemetry, token).ConfigureAwait(false);
+                ApplyRuntimeProviderTelemetryStatus(status);
+                await SendJsonAsync(context, new ClientProviderTelemetryLatestResponse { Snapshot = snapshot, Detail = detail, Status = status }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/providers/history/search", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                ClientProviderTelemetrySearchRequest request = ReadJson<ClientProviderTelemetrySearchRequest>(context);
+                ApplyProviderTelemetryRangeDefaults(request, context);
+                await SendJsonAsync(context, await _ProviderTelemetryHistory!.SearchAsync(request, token).ConfigureAwait(false)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/providers/history/rollups", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                ClientProviderTelemetryRollupRequest request = ReadJson<ClientProviderTelemetryRollupRequest>(context);
+                ApplyProviderTelemetryRangeDefaults(request, context);
+                await SendJsonAsync(context, await _ProviderTelemetryHistory!.RollupAsync(request, token).ConfigureAwait(false)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/telemetry/providers/history/delete", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                int removed = await _ProviderTelemetryHistory!.DeleteAllAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed, RemovedOne = removed > 0 }).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && String.Equals(path, "/api/v1/logs", StringComparison.OrdinalIgnoreCase))
             {
                 int tail = ParseInt(context.Request.Query.Elements.Get("tail"), 100);
@@ -433,6 +494,23 @@ namespace Xeno.Client.LocalDashboard
                 return;
             }
 
+            if ((method == "GET" || method == "DELETE") && path.StartsWith("/api/v1/telemetry/providers/history/", StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProviderTelemetryAvailable();
+                string id = DecodePathSegment(path.Substring("/api/v1/telemetry/providers/history/".Length));
+                if (method == "GET")
+                {
+                    ClientProviderTelemetrySampleDetail? detail = await _ProviderTelemetryHistory!.ReadDetailAsync(id, token).ConfigureAwait(false);
+                    if (detail == null) throw new KeyNotFoundException("Provider telemetry sample not found.");
+                    await SendJsonAsync(context, detail).ConfigureAwait(false);
+                    return;
+                }
+
+                bool removed = await _ProviderTelemetryHistory!.DeleteAsync(id, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed ? 1 : 0, RemovedOne = removed }).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && String.Equals(path, "/api/v1/settings", StringComparison.OrdinalIgnoreCase))
             {
                 await SendJsonAsync(context, new LocalDashboardSettingsResponse { Settings = RedactedSettings(), SettingsFile = ClientSettings.SettingsFile }).ConfigureAwait(false);
@@ -495,6 +573,21 @@ namespace Xeno.Client.LocalDashboard
             status.LastMessage = runtime.LastMessage;
         }
 
+        private void ApplyRuntimeProviderTelemetryStatus(ClientTelemetryPersistenceStatus status)
+        {
+            ClientTelemetryPersistenceStatus? runtime = _ProviderTelemetryService?.Status;
+            if (runtime == null) return;
+            status.Running = runtime.Running;
+            status.LastCollectionUtc = runtime.LastCollectionUtc;
+            status.LastPruneUtc = runtime.LastPruneUtc;
+            status.LastMessage = runtime.LastMessage;
+        }
+
+        private void EnsureProviderTelemetryAvailable()
+        {
+            if (_ProviderTelemetryHistory == null) throw new InvalidOperationException("Provider telemetry history is not available.");
+        }
+
         private static void ApplyTelemetryRangeDefaults(ClientTelemetrySearchRequest request, HttpContextBase context)
         {
             DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
@@ -505,6 +598,24 @@ namespace Xeno.Client.LocalDashboard
         }
 
         private static void ApplyTelemetryRangeDefaults(ClientTelemetryRollupRequest request, HttpContextBase context)
+        {
+            DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
+            string range = context.Request.Query.Elements.Get("range") ?? "hour";
+            request.ToUtc = toUtc;
+            request.FromUtc ??= SummaryStartUtc(range, toUtc);
+            if (request.BucketMinutes <= 0) request.BucketMinutes = DefaultBucketMinutes(range);
+        }
+
+        private static void ApplyProviderTelemetryRangeDefaults(ClientProviderTelemetrySearchRequest request, HttpContextBase context)
+        {
+            DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
+            request.ToUtc = toUtc;
+            request.FromUtc ??= SummaryStartUtc(context.Request.Query.Elements.Get("range") ?? "hour", toUtc);
+            request.Limit = Math.Clamp(request.Limit, 1, 1000);
+            request.Offset = Math.Max(0, request.Offset);
+        }
+
+        private static void ApplyProviderTelemetryRangeDefaults(ClientProviderTelemetryRollupRequest request, HttpContextBase context)
         {
             DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
             string range = context.Request.Query.Elements.Get("range") ?? "hour";

@@ -10,6 +10,7 @@ namespace Xeno.Client.LocalDashboard.Database.Sqlite
     {
         private readonly SqliteLocalRequestHistoryMethods _RequestHistory;
         private readonly SqliteClientTelemetryHistoryMethods _TelemetryHistory;
+        private readonly SqliteClientProviderTelemetryHistoryMethods _ProviderTelemetryHistory;
 
         /// <summary>
         /// Instantiate the SQLite local dashboard database driver.
@@ -19,6 +20,7 @@ namespace Xeno.Client.LocalDashboard.Database.Sqlite
         {
             _RequestHistory = new SqliteLocalRequestHistoryMethods(settings);
             _TelemetryHistory = new SqliteClientTelemetryHistoryMethods(settings);
+            _ProviderTelemetryHistory = new SqliteClientProviderTelemetryHistoryMethods(settings);
         }
 
         /// <inheritdoc />
@@ -40,10 +42,20 @@ namespace Xeno.Client.LocalDashboard.Database.Sqlite
         }
 
         /// <inheritdoc />
+        public override IClientProviderTelemetryHistoryMethods ProviderTelemetryHistory
+        {
+            get
+            {
+                return _ProviderTelemetryHistory;
+            }
+        }
+
+        /// <inheritdoc />
         public override async Task InitializeAsync(CancellationToken token)
         {
             await _RequestHistory.InitializeAsync(token).ConfigureAwait(false);
             await _TelemetryHistory.InitializeAsync(token).ConfigureAwait(false);
+            await _ProviderTelemetryHistory.InitializeAsync(token).ConfigureAwait(false);
         }
     }
 }

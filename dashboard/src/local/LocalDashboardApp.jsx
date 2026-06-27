@@ -41,9 +41,17 @@ const pages = [
   { id: 'models', descriptionKey: 'localModelsDescription', icon: BrainCircuit, labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
   { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
   { id: 'logs', descriptionKey: 'localLogsDescription', icon: Terminal, labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
-  { id: 'telemetry', descriptionKey: 'localTelemetryDescription', icon: Gauge, labelKey: 'telemetry', tooltipKey: 'tooltipLocalNavTelemetry' },
-  { id: 'telemetryAnalytics', descriptionKey: 'localTelemetryAnalyticsDescription', icon: LineChart, labelKey: 'telemetryAnalytics', tooltipKey: 'tooltipLocalNavTelemetryAnalytics' },
+  { id: 'telemetry', descriptionKey: 'localTelemetryDescription', icon: Gauge, labelKey: 'host', tooltipKey: 'tooltipLocalNavTelemetry' },
+  { id: 'telemetryAnalytics', descriptionKey: 'localTelemetryAnalyticsDescription', icon: LineChart, labelKey: 'hostAnalytics', tooltipKey: 'tooltipLocalNavTelemetryAnalytics' },
+  { id: 'providerTelemetry', descriptionKey: 'localProviderTelemetryDescription', icon: Server, labelKey: 'provider', tooltipKey: 'tooltipLocalNavProviderTelemetry' },
+  { id: 'providerTelemetryAnalytics', descriptionKey: 'localProviderTelemetryAnalyticsDescription', icon: LineChart, labelKey: 'providerAnalytics', tooltipKey: 'tooltipLocalNavProviderTelemetryAnalytics' },
   { id: 'settings', descriptionKey: 'localSettingsDescription', icon: SettingsIcon, labelKey: 'settings', tooltipKey: 'tooltipLocalNavSettings' }
+];
+
+const localNavGroups = [
+  { key: 'observe', pageIds: ['home', 'providers', 'models', 'requests'] },
+  { key: 'telemetry', pageIds: ['telemetry', 'telemetryAnalytics', 'providerTelemetry', 'providerTelemetryAnalytics'] },
+  { key: 'administration', pageIds: ['logs', 'settings'] }
 ];
 
 const interactiveRowClickSelector = [
@@ -87,6 +95,12 @@ export default function LocalDashboardApp() {
   const [telemetrySamples, setTelemetrySamples] = useState([]);
   const [telemetryRollups, setTelemetryRollups] = useState([]);
   const [telemetryMetric, setTelemetryMetric] = useState('CpuUtilizationPercent');
+  const [providerTelemetryLatest, setProviderTelemetryLatest] = useState(null);
+  const [providerTelemetrySamples, setProviderTelemetrySamples] = useState([]);
+  const [providerTelemetryRollups, setProviderTelemetryRollups] = useState([]);
+  const [providerTelemetryMetric, setProviderTelemetryMetric] = useState('ActiveRequests');
+  const [providerTelemetryProvider, setProviderTelemetryProvider] = useState('');
+  const [providerTelemetryModel, setProviderTelemetryModel] = useState('');
   const [range, setRange] = useState('lastHour');
   const [providerFilter, setProviderFilter] = useState('');
   const [logSeverity, setLogSeverity] = useState('all');
@@ -100,7 +114,7 @@ export default function LocalDashboardApp() {
 
   useEffect(() => {
     refresh();
-  }, [page, range, logSeverity, logTail]);
+  }, [page, range, logSeverity, logTail, telemetryMetric, providerTelemetryMetric, providerTelemetryProvider, providerTelemetryModel]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -112,7 +126,7 @@ export default function LocalDashboardApp() {
       });
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [page, t, providers, models, requests, telemetrySamples, logs, modal]);
+  }, [page, t, providers, models, requests, telemetrySamples, providerTelemetrySamples, logs, modal]);
 
   async function refresh() {
     try {
@@ -162,6 +176,29 @@ export default function LocalDashboardApp() {
         ]);
         setTelemetrySamples(searchResponse.samples || []);
         setTelemetryRollups(rollupResponse || []);
+      } else if (page === 'providerTelemetry') {
+        const [latestResponse, rollupResponse] = await Promise.all([
+          localApi(`/api/v1/telemetry/providers/latest${providerTelemetryProvider ? `?providerName=${encodeURIComponent(providerTelemetryProvider)}` : ''}`),
+          localApi(`/api/v1/telemetry/providers/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, bucketMinutes: telemetryBucketMinutes(range) })
+          })
+        ]);
+        setProviderTelemetryLatest(latestResponse);
+        setProviderTelemetryRollups(rollupResponse || []);
+      } else if (page === 'providerTelemetryAnalytics') {
+        const [searchResponse, rollupResponse] = await Promise.all([
+          localApi(`/api/v1/telemetry/providers/history/search?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, limit: 250 })
+          }),
+          localApi(`/api/v1/telemetry/providers/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, bucketMinutes: telemetryBucketMinutes(range) })
+          })
+        ]);
+        setProviderTelemetrySamples(searchResponse.samples || []);
+        setProviderTelemetryRollups(rollupResponse || []);
       } else if (page === 'logs') {
         const response = await localApi(`/api/v1/logs?tail=${logTail}&severity=${logSeverity}`);
         setLogs(response.lines || []);
@@ -200,18 +237,14 @@ export default function LocalDashboardApp() {
           </div>
         </div>
         <nav className="sidebar-nav" aria-label={t('dashboard')}>
-          <div className="sidebar-group">
-            <div className="sidebar-group-label">{t('observe')}</div>
-            {pages.slice(0, 4).map((item) => (
-              <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
-            ))}
-          </div>
-          <div className="sidebar-group">
-            <div className="sidebar-group-label">{t('administration')}</div>
-            {pages.slice(4).map((item) => (
-              <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
-            ))}
-          </div>
+          {localNavGroups.map((group) => (
+            <div className="sidebar-group" key={group.key}>
+              <div className="sidebar-group-label">{t(group.key)}</div>
+              {group.pageIds.map((id) => pages.find((item) => item.id === id)).filter(Boolean).map((item) => (
+                <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
+              ))}
+            </div>
+          ))}
         </nav>
         <div className="sidebar-footer">
           <span>{t('version')}</span>
@@ -253,6 +286,8 @@ export default function LocalDashboardApp() {
           {page === 'telemetry' ? <Telemetry latest={telemetryLatest} metric={telemetryMetric} range={range} refresh={refresh} rollups={telemetryRollups} setMetric={setTelemetryMetric} setRange={setRange} setModal={setModal} /> : null}
           {page === 'logs' ? <Logs logSeverity={logSeverity} logTail={logTail} logs={logs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
           {page === 'telemetryAnalytics' ? <TelemetryAnalytics metric={telemetryMetric} range={range} refresh={refresh} rollups={telemetryRollups} samples={telemetrySamples} setMetric={setTelemetryMetric} setModal={setModal} setRange={setRange} /> : null}
+          {page === 'providerTelemetry' ? <ProviderTelemetry latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
+          {page === 'providerTelemetryAnalytics' ? <ProviderTelemetryAnalytics metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
           {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
         </main>
       </div>
@@ -469,6 +504,13 @@ function Telemetry({ latest, metric, range, refresh, rollups, setMetric, setRang
 
   return (
     <>
+      <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
+        <TimeRangeButtons range={range} setRange={setRange} />
+        <div className="chart-action-row telemetry-control-actions">
+          <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
+          <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
+        </div>
+      </div>
       <div className="metric-grid">
         <Metric icon={<Cpu size={18} />} label={t('cpuUtilization')} value={formatPercent(sample.cpuUtilizationPercent)} />
         <Metric icon={<MemoryStick size={18} />} label={t('memoryUtilization')} value={formatPercent(sample.memoryUtilizationPercent)} />
@@ -478,14 +520,8 @@ function Telemetry({ latest, metric, range, refresh, rollups, setMetric, setRang
       <Panel
         className="chart-panel-card telemetry-chart-card"
         title={t('telemetryOverTime')}
-        actions={(
-          <div className="chart-action-row">
-            <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
-            <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
-          </div>
-        )}
       >
-        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} />
+        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
       </Panel>
       <Panel title={t('telemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
         <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
@@ -534,12 +570,8 @@ function TelemetryAnalytics({ metric, range, refresh, rollups, samples, setMetri
 
   return (
     <>
-      <div className="chart-controls page-level-controls split" aria-label={t('chartRange')}>
-        <div className="time-range-button-row">
-          {['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
-            <button className={item === range ? 'active' : ''} key={item} onClick={() => setRange(item)} title={t('tooltipChartRangeOption', { range: t(item) })} type="button">{t(item)}</button>
-          ))}
-        </div>
+      <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
+        <TimeRangeButtons range={range} setRange={setRange} />
         <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
       </div>
       <div className="metric-grid">
@@ -548,7 +580,7 @@ function TelemetryAnalytics({ metric, range, refresh, rollups, samples, setMetri
         <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
         <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
       </div>
-      <Panel className="chart-panel-card" title={t('telemetryOverTime')}>
+      <Panel className="chart-panel-card telemetry-chart-card" title={t('telemetryOverTime')}>
         <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
       </Panel>
       <DataTable
@@ -575,6 +607,177 @@ function TelemetryMetricSelect({ metric, setMetric }) {
         {metrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
       </select>
     </label>
+  );
+}
+
+function TimeRangeButtons({ range, setRange }) {
+  const { t } = useTranslation();
+  return (
+    <div className="time-range-button-row">
+      {['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
+        <button className={item === range ? 'active' : ''} key={item} onClick={() => setRange(item)} title={t('tooltipChartRangeOption', { range: t(item) })} type="button">{t(item)}</button>
+      ))}
+    </div>
+  );
+}
+
+function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range, refresh, rollups, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
+  const { t } = useTranslation();
+  const providers = latest?.snapshot?.providers || [];
+  const latestSample = latest?.detail?.sample || {};
+  const modelRows = latest?.detail?.models || providers.flatMap((provider) => provider.models || []);
+  const activeProviders = providers.filter((provider) => provider.status === 'Available' || provider.status === 'Partial').length;
+  const loadedModels = providers.reduce((sum, provider) => sum + Number(provider.loadedModelCount || 0), 0);
+  const activeRequests = providers.reduce((sum, provider) => sum + Number(provider.activeRequests || 0), 0);
+  const queuedRequests = providers.reduce((sum, provider) => sum + Number(provider.queuedRequests || 0), 0);
+
+  async function collect() {
+    const response = await localApi('/api/v1/telemetry/providers/collect', { method: 'POST', body: '{}' });
+    setModal(messageModal(t, t('providerTelemetryCollected'), t('providerTelemetryCollectedMessage'), response));
+    refresh();
+  }
+
+  return (
+    <>
+      <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
+        <TimeRangeButtons range={range} setRange={setRange} />
+        <div className="chart-action-row telemetry-control-actions">
+          <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} providerFilter={providerFilter} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
+          <button className="icon-button" onClick={collect} title={t('tooltipCollectProviderTelemetry')} type="button"><Zap size={16} /></button>
+        </div>
+      </div>
+      <div className="metric-grid">
+        <Metric icon={<Server size={18} />} label={t('healthyProviders')} value={activeProviders} />
+        <Metric icon={<BrainCircuit size={18} />} label={t('loadedModels')} value={loadedModels} />
+        <Metric icon={<Activity size={18} />} label={t('activeRequests')} value={formatMetric(activeRequests)} />
+        <Metric icon={<History size={18} />} label={t('queuedRequests')} value={formatMetric(queuedRequests)} />
+      </div>
+      <Panel
+        className="chart-panel-card telemetry-chart-card"
+        title={t('providerTelemetryOverTime')}
+      >
+        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
+      </Panel>
+      <Panel title={t('providerTelemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
+        <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
+      </Panel>
+      <Panel title={t('latestProviderSample')}>
+        <RecordTable fields={['id', 'providerName', 'apiType', 'providerKind', 'status', 'healthStatus', 'version', 'availableModelCount', 'loadedModelCount', 'activeRequests', 'queuedRequests', 'latencyP95Ms', 'timeToFirstTokenP95Ms']} record={latestSample} />
+      </Panel>
+      <DataTable
+        columns={['providerName', 'apiType', 'providerKind', 'status', 'healthStatus', 'availableModelCount', 'loadedModelCount', 'activeRequests', 'queuedRequests']}
+        onRefresh={refresh}
+        onRowClick={(row) => setModal({ title: t('providerTelemetryDetails'), json: row, size: 'request-details', body: <RecordTable fields={Object.keys(row)} record={row} /> })}
+        rows={providers.map((provider) => ({ ...provider, ...provider.endpoint }))}
+        title={t('providerRuntimeStatus')}
+      />
+      <DataTable
+        columns={['modelName', 'providerName', 'family', 'quantization', 'parameterSize', 'loaded', 'sizeBytes', 'memoryBytes']}
+        onRefresh={refresh}
+        rows={modelRows.map((model) => ({ ...model, modelName: model.modelName || model.name, providerName: model.providerName || latestSample.providerName }))}
+        title={t('providerModelTelemetry')}
+      />
+    </>
+  );
+}
+
+function ProviderTelemetryAnalytics({ metric, modelFilter, providerFilter, range, refresh, rollups, samples, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
+  const { t } = useTranslation();
+
+  async function details(row) {
+    const entry = await localApi(`/api/v1/telemetry/providers/history/${encodeURIComponent(row.id)}`);
+    setModal({ title: t('providerTelemetrySampleDetails'), json: entry, size: 'request-details', body: <ProviderTelemetryDetails detail={entry} /> });
+  }
+
+  async function remove(row) {
+    setModal(confirmModal(
+      t,
+      t('deleteProviderTelemetryTitle'),
+      t('deleteProviderTelemetryMessage', { id: row.id }),
+      async () => {
+        await localApi(`/api/v1/telemetry/providers/history/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        refresh();
+        setModal(null);
+      }
+    ));
+  }
+
+  const metricValues = samples.map((sample) => Number(sample[providerTelemetryMetricField(metric)] || 0)).filter((value) => Number.isFinite(value));
+  const average = metricValues.length ? metricValues.reduce((sum, value) => sum + value, 0) / metricValues.length : null;
+  const maximum = metricValues.length ? Math.max(...metricValues) : null;
+
+  return (
+    <>
+      <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
+        <TimeRangeButtons range={range} setRange={setRange} />
+        <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} providerFilter={providerFilter} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
+      </div>
+      <div className="metric-grid">
+        <Metric icon={<History size={18} />} label={t('samples')} value={samples.length} />
+        <Metric icon={<Gauge size={18} />} label={t('average')} value={formatMetric(average)} />
+        <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
+        <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
+      </div>
+      <Panel className="chart-panel-card telemetry-chart-card" title={t('providerTelemetryOverTime')}>
+        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
+      </Panel>
+      <DataTable
+        actions={(row) => [
+          { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteProviderTelemetrySample') }
+        ]}
+        columns={['id', 'collectedUtc', 'providerName', 'providerKind', 'status', 'healthStatus', 'activeRequests', 'queuedRequests', 'loadedModelCount', 'latencyP95Ms', 'timeToFirstTokenP95Ms']}
+        onRefresh={refresh}
+        onRowClick={details}
+        rows={samples}
+        title={t('providerTelemetrySamples')}
+      />
+    </>
+  );
+}
+
+function ProviderTelemetryControls({ metric, modelFilter, providerFilter, setMetric, setModelFilter, setProviderFilter }) {
+  const { t } = useTranslation();
+  return (
+    <div className="chart-action-row provider-telemetry-controls">
+      <ProviderTelemetryMetricSelect metric={metric} setMetric={setMetric} />
+      <label className="form-field inline compact-field" title={t('tooltipProviderTelemetryProviderFilter')}>
+        <span>{t('provider')}</span>
+        <input onChange={(event) => setProviderFilter(event.target.value)} placeholder={t('all')} title={t('tooltipProviderTelemetryProviderFilter')} value={providerFilter} />
+      </label>
+      <label className="form-field inline compact-field" title={t('tooltipProviderTelemetryModelFilter')}>
+        <span>{t('model')}</span>
+        <input onChange={(event) => setModelFilter(event.target.value)} placeholder={t('all')} title={t('tooltipProviderTelemetryModelFilter')} value={modelFilter} />
+      </label>
+    </div>
+  );
+}
+
+function ProviderTelemetryMetricSelect({ metric, setMetric }) {
+  const { t } = useTranslation();
+  const metrics = ['ActiveRequests', 'QueuedRequests', 'WaitingRequests', 'RequestRatePerSecond', 'ErrorRatePerSecond', 'PromptTokensPerSecond', 'GenerationTokensPerSecond', 'TotalTokensPerSecond', 'LatencyP95Ms', 'TimeToFirstTokenP95Ms', 'CacheUsagePercent', 'LoadedModelCount', 'AvailableModelCount'];
+  return (
+    <label className="form-field inline compact-field" title={t('tooltipProviderTelemetryMetric')}>
+      <span>{t('metric')}</span>
+      <select value={metric} onChange={(event) => setMetric(event.target.value)} title={t('tooltipProviderTelemetryMetric')}>
+        {metrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function ProviderTelemetryDetails({ detail }) {
+  const { t } = useTranslation();
+  const sample = detail?.sample || {};
+  return (
+    <div className="details-stack">
+      <RecordTable fields={Object.keys(sample)} record={sample} />
+      <DataTable columns={['modelName', 'providerName', 'loaded', 'family', 'quantization', 'parameterSize', 'sizeBytes', 'memoryBytes']} compact rows={detail?.models || []} />
+      <DataTable columns={['metricName', 'metricKind', 'metricValue', 'metricUnit', 'source', 'modelName']} compact rows={detail?.metrics || []} />
+      <details open>
+        <summary>{t('snapshotJson')} <CopyButton label={t('copyValue')} value={JSON.stringify(detail?.snapshot || {}, null, 2)} /></summary>
+        <pre className="json-preview"><code>{JSON.stringify(detail?.snapshot || {}, null, 2)}</code></pre>
+      </details>
+    </div>
   );
 }
 
@@ -614,6 +817,7 @@ function Settings({ database, refresh, state }) {
     const form = new FormData(event.currentTarget);
     const settings = state?.settings?.localDashboard || {};
     const telemetry = state?.settings?.telemetry || {};
+    const providerTelemetry = telemetry.providerTelemetry || {};
     await localApi('/api/v1/settings', {
       method: 'PUT',
       body: jsonBody({
@@ -638,6 +842,19 @@ function Settings({ database, refresh, state }) {
             enabled: form.has('telemetryGpuEnabled') ? form.get('telemetryGpuEnabled') === 'on' : !!telemetry.gpu?.enabled,
             nvidiaDcgmExporterUrl: form.get('telemetryDcgmUrl') || telemetry.gpu?.nvidiaDcgmExporterUrl || null,
             commandTimeoutMs: Number(form.get('telemetryGpuCommandTimeoutMs') || telemetry.gpu?.commandTimeoutMs || 5000)
+          },
+          providerTelemetry: {
+            enabled: form.has('providerTelemetryEnabled') ? form.get('providerTelemetryEnabled') === 'on' : !!providerTelemetry.enabled,
+            collectionIntervalMs: Number(form.get('providerTelemetryCollectionIntervalMs') || providerTelemetry.collectionIntervalMs || 15000),
+            requestTimeoutMs: Number(form.get('providerTelemetryRequestTimeoutMs') || providerTelemetry.requestTimeoutMs || 5000),
+            concurrentProviderLimit: Number(form.get('providerTelemetryConcurrentProviderLimit') || providerTelemetry.concurrentProviderLimit || 4),
+            discoverMetricsEndpoints: form.has('providerTelemetryDiscoverMetricsEndpoints') ? form.get('providerTelemetryDiscoverMetricsEndpoints') === 'on' : !!providerTelemetry.discoverMetricsEndpoints,
+            persistRawMetrics: form.has('providerTelemetryPersistRawMetrics') ? form.get('providerTelemetryPersistRawMetrics') === 'on' : !!providerTelemetry.persistRawMetrics,
+            rawMetricsMaxBytes: Number(form.get('providerTelemetryRawMetricsMaxBytes') || providerTelemetry.rawMetricsMaxBytes || 262144),
+            collectModelDetails: form.has('providerTelemetryCollectModelDetails') ? form.get('providerTelemetryCollectModelDetails') === 'on' : !!providerTelemetry.collectModelDetails,
+            collectProcessCorrelation: form.has('providerTelemetryCollectProcessCorrelation') ? form.get('providerTelemetryCollectProcessCorrelation') === 'on' : !!providerTelemetry.collectProcessCorrelation,
+            collectCloudHeaderTelemetry: form.has('providerTelemetryCollectCloudHeaderTelemetry') ? form.get('providerTelemetryCollectCloudHeaderTelemetry') === 'on' : !!providerTelemetry.collectCloudHeaderTelemetry,
+            endpointOverrides: providerTelemetry.endpointOverrides || []
           }
         }
       })
@@ -647,6 +864,7 @@ function Settings({ database, refresh, state }) {
 
   const settings = state?.settings?.localDashboard || {};
   const telemetry = state?.settings?.telemetry || {};
+  const providerTelemetry = telemetry.providerTelemetry || {};
   return (
     <>
       <Panel title={t('localDashboardSettings')}>
@@ -678,6 +896,22 @@ function Settings({ database, refresh, state }) {
           <Toggle checked={telemetry.gpu?.enabled} label={t('gpuTelemetry')} name="telemetryGpuEnabled" tooltip={t('tooltipTelemetryGpuEnabled')} />
           <Field defaultValue={telemetry.gpu?.nvidiaDcgmExporterUrl || ''} label={t('dcgmExporterUrl')} name="telemetryDcgmUrl" tooltip={t('tooltipTelemetryDcgmUrl')} />
           <Field defaultValue={telemetry.gpu?.commandTimeoutMs || 5000} label={t('gpuCommandTimeoutMs')} name="telemetryGpuCommandTimeoutMs" tooltip={t('tooltipTelemetryGpuCommandTimeout')} type="number" />
+          <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
+        </form>
+      </Panel>
+      <Panel title={t('providerTelemetrySettings')}>
+        <div className="empty-state">{t('providerTelemetrySettingsRestartNotice')}</div>
+        <form className="form-grid" onSubmit={save}>
+          <Toggle checked={providerTelemetry.enabled} label={t('enabled')} name="providerTelemetryEnabled" tooltip={t('tooltipProviderTelemetryEnabled')} />
+          <Field defaultValue={providerTelemetry.collectionIntervalMs || 15000} label={t('collectionIntervalMs')} name="providerTelemetryCollectionIntervalMs" tooltip={t('tooltipProviderTelemetryInterval')} type="number" />
+          <Field defaultValue={providerTelemetry.requestTimeoutMs || 5000} label={t('requestTimeoutMs')} name="providerTelemetryRequestTimeoutMs" tooltip={t('tooltipProviderTelemetryTimeout')} type="number" />
+          <Field defaultValue={providerTelemetry.concurrentProviderLimit || 4} label={t('concurrentProviderLimit')} name="providerTelemetryConcurrentProviderLimit" tooltip={t('tooltipProviderTelemetryConcurrentLimit')} type="number" />
+          <Toggle checked={providerTelemetry.discoverMetricsEndpoints} label={t('discoverMetricsEndpoints')} name="providerTelemetryDiscoverMetricsEndpoints" tooltip={t('tooltipProviderTelemetryDiscovery')} />
+          <Toggle checked={providerTelemetry.persistRawMetrics} label={t('persistRawMetrics')} name="providerTelemetryPersistRawMetrics" tooltip={t('tooltipProviderTelemetryPersistRaw')} />
+          <Field defaultValue={providerTelemetry.rawMetricsMaxBytes || 262144} label={t('rawMetricsMaxBytes')} name="providerTelemetryRawMetricsMaxBytes" tooltip={t('tooltipProviderTelemetryRawBytes')} type="number" />
+          <Toggle checked={providerTelemetry.collectModelDetails} label={t('collectModelDetails')} name="providerTelemetryCollectModelDetails" tooltip={t('tooltipProviderTelemetryModelDetails')} />
+          <Toggle checked={providerTelemetry.collectProcessCorrelation} label={t('collectProcessCorrelation')} name="providerTelemetryCollectProcessCorrelation" tooltip={t('tooltipProviderTelemetryProcessCorrelation')} />
+          <Toggle checked={providerTelemetry.collectCloudHeaderTelemetry} label={t('collectCloudHeaderTelemetry')} name="providerTelemetryCollectCloudHeaderTelemetry" tooltip={t('tooltipProviderTelemetryCloudHeaders')} />
           <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
         </form>
       </Panel>
@@ -954,11 +1188,13 @@ function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = 
   const canvasRef = useRef(null);
   const refreshRef = useRef(onRefresh);
   const [chartWidth, setChartWidth] = useState(760);
+  const [chartHeight, setChartHeight] = useState(525);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const [hovered, setHovered] = useState(null);
   const buckets = useMemo(() => buildMetricBuckets(rollups, range), [range, rollups]);
   const max = Math.max(1, ...buckets.map((bucket) => Number(bucket.maximum ?? bucket.average ?? 0)));
-  const height = 320;
+  const axisMax = metricAxisMaximum(max);
+  const height = chartHeight;
   const left = 58;
   const right = 28;
   const top = 28;
@@ -969,7 +1205,7 @@ function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = 
   const baseY = top + plotHeight;
   const slot = plotWidth / Math.max(1, buckets.length);
   const barWidth = Math.max(2, Math.min(14, slot - 2));
-  const yTicks = buildMetricYAxisTicks(max);
+  const yTicks = buildMetricYAxisTicks(axisMax);
 
   useEffect(() => {
     refreshRef.current = onRefresh;
@@ -987,12 +1223,13 @@ function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = 
     const element = canvasRef.current;
     if (!element) return undefined;
 
-    function updateWidth() {
+    function updateSize() {
       setChartWidth(Math.max(360, Math.round(element.clientWidth || 760)));
+      setChartHeight(Math.max(360, Math.round(element.clientHeight || 525)));
     }
 
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
@@ -1018,15 +1255,15 @@ function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = 
           <line x1={left} y1={top} x2={left} y2={baseY} stroke="var(--color-border)" />
           <line x1={left} y1={baseY} x2={left + plotWidth} y2={baseY} stroke="var(--color-border)" />
           {yTicks.map((tick) => {
-            const y = baseY - (tick / max) * plotHeight;
-            return <g key={tick}><line x1={left} y1={y} x2={left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" /><text className="axis-label" x={left - 10} y={y + 4} textAnchor="end">{formatMetric(tick)}</text></g>;
+            const y = baseY - tick.ratio * plotHeight;
+            return <g key={tick.value}><line x1={left} y1={y} x2={left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" /><text className="axis-label" x={left - 10} y={y + 4} textAnchor="end">{formatMetric(tick.value)}</text></g>;
           })}
           <text className="axis-title" transform={`translate(16 ${top + plotHeight / 2}) rotate(-90)`}>{t('metric')}</text>
           <text className="axis-title" x={left + plotWidth / 2} y={height - 12} textAnchor="middle">{t('time')}</text>
           {buckets.map((bucket, index) => {
             const value = Number(bucket.average ?? 0);
             const x = left + index * slot + (slot - barWidth) / 2;
-            const barHeight = (value / max) * plotHeight;
+            const barHeight = (value / axisMax) * plotHeight;
             const y = baseY - barHeight;
             const showTick = shouldShowChartTick(index, buckets.length);
             return (
@@ -1111,16 +1348,24 @@ function fallbackMetricLabel(range, index, count) {
   return String(index + 1);
 }
 
+function metricAxisMaximum(max) {
+  if (!Number.isFinite(max) || max <= 1) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(max));
+  const normalized = max / magnitude;
+  let niceNormalized = 10;
+  if (normalized <= 1) niceNormalized = 1;
+  else if (normalized <= 2) niceNormalized = 2;
+  else if (normalized <= 4) niceNormalized = 4;
+  else if (normalized <= 8) niceNormalized = 8;
+  return niceNormalized * magnitude;
+}
+
 function buildMetricYAxisTicks(max) {
-  if (!Number.isFinite(max) || max <= 1) return [1, 0];
-  const tickCount = Math.min(5, Math.max(2, Math.ceil(max) + 1));
-  const step = Math.max(1, Math.ceil(max / (tickCount - 1)));
-  const ticks = [];
-  for (let tick = 0; tick <= max; tick += step) {
-    ticks.push(tick);
-  }
-  if (!ticks.includes(max)) ticks.push(max);
-  return [...new Set(ticks)].sort((left, right) => right - left).slice(0, 5);
+  if (!Number.isFinite(max) || max <= 1) return [{ value: 1, ratio: 1 }, { value: 0, ratio: 0 }];
+  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
+    ratio,
+    value: max * ratio
+  }));
 }
 
 function shouldShowChartTick(index, count) {
@@ -1207,6 +1452,22 @@ function telemetryMetricField(metric) {
   return 'cpuUtilizationPercent';
 }
 
+function providerTelemetryMetricField(metric) {
+  if (metric === 'QueuedRequests') return 'queuedRequests';
+  if (metric === 'WaitingRequests') return 'waitingRequests';
+  if (metric === 'RequestRatePerSecond') return 'requestRatePerSecond';
+  if (metric === 'ErrorRatePerSecond') return 'errorRatePerSecond';
+  if (metric === 'PromptTokensPerSecond') return 'promptTokensPerSecond';
+  if (metric === 'GenerationTokensPerSecond') return 'generationTokensPerSecond';
+  if (metric === 'TotalTokensPerSecond') return 'totalTokensPerSecond';
+  if (metric === 'LatencyP95Ms') return 'latencyP95Ms';
+  if (metric === 'TimeToFirstTokenP95Ms') return 'timeToFirstTokenP95Ms';
+  if (metric === 'CacheUsagePercent') return 'cacheUsagePercent';
+  if (metric === 'LoadedModelCount') return 'loadedModelCount';
+  if (metric === 'AvailableModelCount') return 'availableModelCount';
+  return 'activeRequests';
+}
+
 function formatPercent(value) {
   if (value === null || value === undefined || value === '') return '-';
   return `${Number(value).toFixed(1)}%`;
@@ -1234,6 +1495,7 @@ function title(value, t) {
   const mapped = {
     modelName: 'model',
     providerName: 'provider',
+    providerKind: 'providerKind',
     statusCode: 'status'
   };
   if (mapped[key]) return t(mapped[key]);

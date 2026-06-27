@@ -51,6 +51,8 @@ namespace Xeno.Client.LocalDashboard.Database
                     command.CommandText = SchemaSql();
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+
+                await EnsureProviderTelemetryColumnsAsync(connection, token).ConfigureAwait(false);
             }
         }
 
@@ -81,6 +83,28 @@ namespace Xeno.Client.LocalDashboard.Database
                     await PruneAsync(connection, transaction, Math.Max(1, settings.MaxEntries), token).ConfigureAwait(false);
                     await transaction.CommitAsync(token).ConfigureAwait(false);
                 }
+            }
+        }
+
+        private static async Task EnsureProviderTelemetryColumnsAsync(SqliteConnection connection, CancellationToken token)
+        {
+            await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN provider_telemetry_sample_id TEXT NULL;", token).ConfigureAwait(false);
+            await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN provider_telemetry_health_status TEXT NULL;", token).ConfigureAwait(false);
+            await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN provider_telemetry_queued_requests REAL NULL;", token).ConfigureAwait(false);
+        }
+
+        private static async Task TryAlterAsync(SqliteConnection connection, string sql, CancellationToken token)
+        {
+            try
+            {
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = sql;
+                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+            {
             }
         }
 
@@ -392,13 +416,17 @@ ON CONFLICT(key) DO UPDATE SET
 INSERT INTO local_request_history
 (
     id, tenant_id, client_id, received_utc, completed_utc, method, path, requestor_ip,
-    provider_name, api_type, model_name, status_code, outcome, error, streamed, duration_ms,
+    provider_name, api_type, model_name, provider_telemetry_sample_id,
+    provider_telemetry_health_status, provider_telemetry_queued_requests,
+    status_code, outcome, error, streamed, duration_ms,
     updated_utc
 )
 VALUES
 (
     $id, $tenantId, $clientId, $receivedUtc, $completedUtc, $method, $path, $requestorIp,
-    $providerName, $apiType, $modelName, $statusCode, $outcome, $error, $streamed, $durationMs,
+    $providerName, $apiType, $modelName, $providerTelemetrySampleId,
+    $providerTelemetryHealthStatus, $providerTelemetryQueuedRequests,
+    $statusCode, $outcome, $error, $streamed, $durationMs,
     $updatedUtc
 )
 ON CONFLICT(id) DO UPDATE SET
@@ -411,6 +439,9 @@ ON CONFLICT(id) DO UPDATE SET
     provider_name = excluded.provider_name,
     api_type = excluded.api_type,
     model_name = excluded.model_name,
+    provider_telemetry_sample_id = excluded.provider_telemetry_sample_id,
+    provider_telemetry_health_status = excluded.provider_telemetry_health_status,
+    provider_telemetry_queued_requests = excluded.provider_telemetry_queued_requests,
     status_code = excluded.status_code,
     outcome = excluded.outcome,
     error = excluded.error,
@@ -429,6 +460,9 @@ ON CONFLICT(id) DO UPDATE SET
                 command.Parameters.AddWithValue("$providerName", DbValue(entry.ProviderName));
                 command.Parameters.AddWithValue("$apiType", DbValue(entry.ApiType));
                 command.Parameters.AddWithValue("$modelName", DbValue(entry.ModelName));
+                command.Parameters.AddWithValue("$providerTelemetrySampleId", DbValue(entry.ProviderTelemetrySampleId));
+                command.Parameters.AddWithValue("$providerTelemetryHealthStatus", DbValue(entry.ProviderTelemetryHealthStatus));
+                command.Parameters.AddWithValue("$providerTelemetryQueuedRequests", entry.ProviderTelemetryQueuedRequests.HasValue ? entry.ProviderTelemetryQueuedRequests.Value : DBNull.Value);
                 command.Parameters.AddWithValue("$statusCode", entry.StatusCode.HasValue ? entry.StatusCode.Value : DBNull.Value);
                 command.Parameters.AddWithValue("$outcome", entry.Outcome.ToString());
                 command.Parameters.AddWithValue("$error", DbValue(entry.Error));
@@ -662,6 +696,9 @@ WHERE id IN
                 ProviderName = GetNullableString(reader, "provider_name"),
                 ApiType = GetNullableString(reader, "api_type"),
                 ModelName = GetNullableString(reader, "model_name"),
+                ProviderTelemetrySampleId = GetNullableString(reader, "provider_telemetry_sample_id"),
+                ProviderTelemetryHealthStatus = GetNullableString(reader, "provider_telemetry_health_status"),
+                ProviderTelemetryQueuedRequests = GetNullableDouble(reader, "provider_telemetry_queued_requests"),
                 StatusCode = GetNullableInt32(reader, "status_code"),
                 Outcome = outcome,
                 Error = GetNullableString(reader, "error"),
@@ -776,6 +813,9 @@ CREATE TABLE IF NOT EXISTS local_request_history
     provider_name TEXT NULL,
     api_type TEXT NULL,
     model_name TEXT NULL,
+    provider_telemetry_sample_id TEXT NULL,
+    provider_telemetry_health_status TEXT NULL,
+    provider_telemetry_queued_requests REAL NULL,
     status_code INTEGER NULL,
     outcome TEXT NOT NULL,
     error TEXT NULL,

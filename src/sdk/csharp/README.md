@@ -52,8 +52,9 @@ The SDK includes methods for:
 - request history, analytics, settings, backup, restore, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
-including local request history and machine telemetry routes, runs on the client
-machine, uses a per-process local token, and is documented in
+including local request history, machine telemetry, and provider runtime
+telemetry routes, runs on the client machine, uses a per-process local token,
+and is documented in
 [../../../CLIENT_GETTING_STARTED.md](../../../CLIENT_GETTING_STARTED.md) rather
 than wrapped by the server SDKs.
 

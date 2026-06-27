@@ -15,8 +15,8 @@ del /q "%PACKAGE_DIR%\Xeno.Client*.nupkg" >nul 2>nul
 
 echo Building xeno from source...
 pushd "%ROOT%dashboard" || exit /b 1
-npm install || exit /b 1
-npm run build:local || exit /b 1
+call npm.cmd install || exit /b 1
+call npm.cmd run build:local || exit /b 1
 popd
 dotnet restore "%PROJECT%" || exit /b 1
 dotnet build "%PROJECT%" -c Release || exit /b 1

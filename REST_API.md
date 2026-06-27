@@ -256,13 +256,29 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `POST /api/v1/telemetry/history/delete`
 
+`GET /api/v1/telemetry/providers/status`
+
+`GET /api/v1/telemetry/providers/latest`
+
+`POST /api/v1/telemetry/providers/collect`
+
+`POST /api/v1/telemetry/providers/history/search`
+
+`POST /api/v1/telemetry/providers/history/rollups`
+
+`GET /api/v1/telemetry/providers/history/{id}`
+
+`DELETE /api/v1/telemetry/providers/history/{id}`
+
+`POST /api/v1/telemetry/providers/history/delete`
+
 `GET /api/v1/logs`
 
 `GET /api/v1/settings`
 
 `PUT /api/v1/settings`
 
-Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Local telemetry search and rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, `offset`, and optional GPU filters. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, and telemetry scheduler changes take effect after restarting the client.
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Local telemetry search and rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, `offset`, and optional GPU filters. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
 
 ## WebSocket
 

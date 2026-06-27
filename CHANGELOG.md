@@ -18,5 +18,6 @@
 - Added `CLIENT_TELEMETRY.md` as the implementation plan for RigMonitor-style CPU, memory, disk, and GPU telemetry in Xeno Client and the local dashboard.
 - Updated markdown documentation and Postman coverage for current Xeno Client commands, local dashboard behavior, routing policies, request history, and SDK scope.
 - Added Xeno Client local CPU, memory, disk, and GPU telemetry collection with SQLite persistence, retention pruning, local dashboard Telemetry and Telemetry Analytics pages, local telemetry API routes, settings controls, and Touchstone coverage for telemetry defaults and clamps.
+- Added Xeno Client provider runtime telemetry planning and implementation surfaces for Ollama, vLLM, OpenAI-compatible endpoints, local dashboard Provider Telemetry pages, SQLite persistence, local API routes, request-history correlation, Postman coverage, and Touchstone tests.
 - Improved server and client dashboard chart density, axis label limits, tooltip coverage, action menu viewport positioning, and local telemetry/request-history layout.
 - Fixed API Explorer non-streamed response timing so Time To First Byte reflects response header arrival instead of showing zero/null.

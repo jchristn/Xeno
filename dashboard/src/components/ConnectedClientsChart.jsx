@@ -27,6 +27,7 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
     [connected, now, samples, selectedRange, total]
   );
   const max = Math.max(1, total || 0, ...buckets.map((bucket) => bucket.connected));
+  const axisMax = axisMaximum(max);
 
   useEffect(() => {
     refreshRef.current = onRefresh;
@@ -77,7 +78,7 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   chart.plotWidth = chart.width - chart.left - chart.right;
   chart.plotHeight = chart.height - chart.top - chart.bottom;
   chart.baseY = chart.top + chart.plotHeight;
-  const yTicks = buildYAxisTicks(max);
+  const yTicks = buildYAxisTicks(axisMax);
   const barSlot = chart.plotWidth / Math.max(1, buckets.length);
   const barWidth = Math.max(2, Math.min(14, barSlot - 2));
 
@@ -117,11 +118,11 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
           <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.baseY} stroke="var(--color-border)" />
           <line x1={chart.left} y1={chart.baseY} x2={chart.left + chart.plotWidth} y2={chart.baseY} stroke="var(--color-border)" />
           {yTicks.map((tick) => {
-            const y = chart.baseY - (tick / max) * chart.plotHeight;
+            const y = chart.baseY - tick.ratio * chart.plotHeight;
             return (
-              <g key={tick}>
+              <g key={tick.value}>
                 <line x1={chart.left} y1={y} x2={chart.left + chart.plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" opacity="0.72" />
-                <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{tick}</text>
+                <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{tick.value}</text>
               </g>
             );
           })}
@@ -129,7 +130,7 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
           <text className="axis-title" x={chart.left + chart.plotWidth / 2} y={chart.height - 12} textAnchor="middle">{t('time')}</text>
           {buckets.map((bucket, index) => {
             const x = chart.left + index * barSlot + (barSlot - barWidth) / 2;
-            const height = (bucket.connected / max) * chart.plotHeight;
+            const height = (bucket.connected / axisMax) * chart.plotHeight;
             const y = chart.baseY - height;
             const showTick = shouldShowTick(index, buckets.length);
             return (
@@ -233,16 +234,17 @@ function shouldShowTick(index, count) {
   return index % step === 0 || index === count - 1;
 }
 
+function axisMaximum(max) {
+  if (!Number.isFinite(max) || max <= 1) return 1;
+  return Math.max(4, Math.ceil(max / 4) * 4);
+}
+
 function buildYAxisTicks(max) {
-  if (!Number.isFinite(max) || max <= 1) return [1, 0];
-  const tickCount = Math.min(5, Math.max(2, Math.ceil(max) + 1));
-  const step = Math.max(1, Math.ceil(max / (tickCount - 1)));
-  const ticks = [];
-  for (let tick = 0; tick <= max; tick += step) {
-    ticks.push(tick);
-  }
-  if (!ticks.includes(max)) ticks.push(max);
-  return [...new Set(ticks)].sort((left, right) => right - left).slice(0, 5);
+  if (!Number.isFinite(max) || max <= 1) return [{ value: 1, ratio: 1 }, { value: 0, ratio: 0 }];
+  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
+    ratio,
+    value: Math.round(max * ratio)
+  }));
 }
 
 function tooltipFromPointer(event, element) {

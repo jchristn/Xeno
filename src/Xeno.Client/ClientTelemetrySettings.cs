@@ -70,5 +70,10 @@ namespace Xeno.Client
         /// GPU telemetry settings.
         /// </summary>
         public ClientGpuTelemetrySettings Gpu { get; set; } = new ClientGpuTelemetrySettings();
+
+        /// <summary>
+        /// Provider runtime telemetry settings.
+        /// </summary>
+        public ClientProviderTelemetrySettings ProviderTelemetry { get; set; } = new ClientProviderTelemetrySettings();
     }
 }

@@ -8,6 +8,7 @@ namespace Xeno.Client.LocalDashboard
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
     using Xeno.Client.Telemetry.Abstractions;
+    using Xeno.Client.Telemetry.Models;
     using Xeno.Client.Telemetry.Providers;
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Models;
@@ -21,7 +22,9 @@ namespace Xeno.Client.LocalDashboard
         private static LocalDashboardDatabaseDriverBase? _Driver;
         private static ILocalRequestHistoryMethods? _History;
         private static IClientTelemetryHistoryMethods? _TelemetryHistory;
+        private static IClientProviderTelemetryHistoryMethods? _ProviderTelemetryHistory;
         private static ClientTelemetryPersistenceService? _TelemetryService;
+        private static ClientProviderTelemetryPersistenceService? _ProviderTelemetryService;
         private static LocalDashboardService? _Service;
 
         /// <summary>
@@ -47,6 +50,17 @@ namespace Xeno.Client.LocalDashboard
         }
 
         /// <summary>
+        /// Local provider telemetry history database.
+        /// </summary>
+        public static IClientProviderTelemetryHistoryMethods? ProviderTelemetryHistory
+        {
+            get
+            {
+                return _ProviderTelemetryHistory;
+            }
+        }
+
+        /// <summary>
         /// Telemetry persistence service.
         /// </summary>
         public static ClientTelemetryPersistenceService? TelemetryService
@@ -54,6 +68,17 @@ namespace Xeno.Client.LocalDashboard
             get
             {
                 return _TelemetryService;
+            }
+        }
+
+        /// <summary>
+        /// Provider telemetry persistence service.
+        /// </summary>
+        public static ClientProviderTelemetryPersistenceService? ProviderTelemetryService
+        {
+            get
+            {
+                return _ProviderTelemetryService;
             }
         }
 
@@ -80,18 +105,23 @@ namespace Xeno.Client.LocalDashboard
                 await driver.InitializeAsync(token).ConfigureAwait(false);
                 ILocalRequestHistoryMethods history = driver.RequestHistory;
                 IClientTelemetryHistoryMethods telemetryHistory = driver.TelemetryHistory;
+                IClientProviderTelemetryHistoryMethods providerTelemetryHistory = driver.ProviderTelemetryHistory;
                 await SnapshotConfigurationAsync(history, settings, token).ConfigureAwait(false);
                 _Driver = driver;
                 _History = history;
                 _TelemetryHistory = telemetryHistory;
+                _ProviderTelemetryHistory = providerTelemetryHistory;
                 ClientTelemetryCommandRunner commandRunner = new ClientTelemetryCommandRunner();
                 IClientTelemetryService telemetry = new ClientTelemetryService(new ClientSystemTelemetryProvider(commandRunner), new ClientGpuTelemetryProvider(commandRunner));
                 ClientTelemetryPersistenceService telemetryService = new ClientTelemetryPersistenceService(settings, telemetryHistory, telemetry);
                 telemetryService.Start();
                 _TelemetryService = telemetryService;
+                ClientProviderTelemetryPersistenceService providerTelemetryService = new ClientProviderTelemetryPersistenceService(settings, providerTelemetryHistory, new ClientProviderTelemetryService(new PrometheusMetricsParser()));
+                providerTelemetryService.Start();
+                _ProviderTelemetryService = providerTelemetryService;
                 if (settings.LocalDashboard.Enabled)
                 {
-                    LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, telemetryService);
+                    LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, telemetryService, providerTelemetryHistory, providerTelemetryService);
                     await service.StartAsync(token).ConfigureAwait(false);
                     _Service = service;
                     ClientConnectionState.MarkLocalDashboardListening(settings, service.DashboardUrl);
@@ -126,6 +156,14 @@ namespace Xeno.Client.LocalDashboard
                 Console.WriteLine("Telemetry collection stopped.");
             }
 
+            ClientProviderTelemetryPersistenceService? providerTelemetryService = _ProviderTelemetryService;
+            if (providerTelemetryService != null)
+            {
+                providerTelemetryService.Dispose();
+                _ProviderTelemetryService = null;
+                Console.WriteLine("Provider telemetry collection stopped.");
+            }
+
             LocalDashboardService? service = _Service;
             if (service != null)
             {
@@ -136,6 +174,7 @@ namespace Xeno.Client.LocalDashboard
 
             _History = null;
             _TelemetryHistory = null;
+            _ProviderTelemetryHistory = null;
             LocalDashboardDatabaseDriverBase? driver = _Driver;
             if (driver != null)
             {
@@ -217,6 +256,18 @@ namespace Xeno.Client.LocalDashboard
                 RequestHeaders = LocalSecretRedactor.RedactHeaders(request.Headers),
                 RequestBody = request.Body
             };
+            if (runner != null && _ProviderTelemetryHistory != null)
+            {
+                ClientProviderTelemetrySampleDetail? providerTelemetry = await _ProviderTelemetryHistory.ReadLatestAsync(runner.Name, token).ConfigureAwait(false);
+                if (providerTelemetry != null)
+                {
+                    entry.ProviderTelemetrySampleId = providerTelemetry.Sample.Id;
+                    entry.ProviderTelemetryHealthStatus = providerTelemetry.Sample.HealthStatus.ToString();
+                    entry.ProviderTelemetryQueuedRequests = providerTelemetry.Sample.QueuedRequests;
+                    entry.Timeline.Add(new LocalRequestTimelineEvent { Stage = LocalRequestTimelineStageEnum.ProviderSelected, TimestampUtc = DateTime.UtcNow, Message = "Provider telemetry sample linked: " + providerTelemetry.Sample.Id });
+                }
+            }
+
             entry.Timeline.Add(new LocalRequestTimelineEvent { Stage = LocalRequestTimelineStageEnum.Received, TimestampUtc = entry.ReceivedUtc, Message = "Request received from Xeno server." });
             if (runner != null) entry.Timeline.Add(new LocalRequestTimelineEvent { Stage = LocalRequestTimelineStageEnum.ProviderSelected, TimestampUtc = DateTime.UtcNow, Message = "Provider selected: " + runner.Name });
             _InFlight[requestId] = entry;

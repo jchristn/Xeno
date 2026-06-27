@@ -633,6 +633,27 @@ The server may supplement or override telemetry values it measures directly,
 including total duration, request body size, response body size, and client
 round-trip time.
 
+## Provider Telemetry Frames
+
+Provider telemetry is currently collected and stored by the Xeno Client local
+dashboard. The following websocket frame names are reserved for the future
+server-requested telemetry workflow:
+
+| Frame | Direction | Purpose |
+| --- | --- | --- |
+| `server.providerTelemetry.request` | server to client | Ask a connected client for current or recent provider telemetry. |
+| `client.providerTelemetry.snapshot` | client to server | Return a current provider telemetry snapshot. |
+| `client.providerTelemetry.history` | client to server | Return bounded provider telemetry history for a requested time range. |
+| `client.providerTelemetry.error` | client to server | Report that provider telemetry could not be collected or returned. |
+| `server.providerTelemetry.ack` | server to client | Acknowledge receipt of provider telemetry. |
+
+Reserved provider telemetry payloads use named fields only and must not include
+provider credentials, prompt content, response content, authorization headers,
+or unbounded raw metrics. A request may include requested provider names,
+requested model names, a time range, maximum sample count, and an explicit
+`includeRawMetrics` flag. Clients must keep raw metrics bounded even when the
+server asks for them.
+
 ## HTTP Response Trace Headers
 
 When a routed request is returned to the original HTTP caller, the server adds

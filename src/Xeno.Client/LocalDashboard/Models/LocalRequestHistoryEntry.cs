@@ -64,6 +64,21 @@ namespace Xeno.Client.LocalDashboard.Models
         public string? ModelName { get; set; } = null;
 
         /// <summary>
+        /// Provider telemetry sample ID captured near request start.
+        /// </summary>
+        public string? ProviderTelemetrySampleId { get; set; } = null;
+
+        /// <summary>
+        /// Provider telemetry health status captured near request start.
+        /// </summary>
+        public string? ProviderTelemetryHealthStatus { get; set; } = null;
+
+        /// <summary>
+        /// Provider telemetry queue depth captured near request start.
+        /// </summary>
+        public double? ProviderTelemetryQueuedRequests { get; set; } = null;
+
+        /// <summary>
         /// HTTP status code.
         /// </summary>
         public int? StatusCode { get; set; } = null;

@@ -16,6 +16,8 @@ namespace Test.Shared
     using Xeno.Client.LocalDashboard;
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
+    using Xeno.Client.Telemetry.Models;
+    using Xeno.Client.Telemetry.Services;
     using Xeno.Core;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
@@ -139,6 +141,92 @@ namespace Test.Shared
                             if (telemetryId.Length != IdGenerator.MaxIdLength || !telemetryId.StartsWith("tel_", StringComparison.Ordinal)) throw new InvalidOperationException("Telemetry ID shape mismatch.");
                             if (gpuId.Length != IdGenerator.MaxIdLength || !gpuId.StartsWith("tgd_", StringComparison.Ordinal)) throw new InvalidOperationException("Telemetry GPU ID shape mismatch.");
                             return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "ClientProviderTelemetrySettingsClampDefaults",
+                        displayName: "Client provider telemetry settings clamp defaults",
+                        executeAsync: delegate
+                        {
+                            ClientSettings settings = new ClientSettings();
+                            if (!settings.Telemetry.ProviderTelemetry.Enabled) throw new InvalidOperationException("Provider telemetry should be enabled by default.");
+                            if (settings.Telemetry.ProviderTelemetry.CollectionIntervalMs != 15000) throw new InvalidOperationException("Unexpected provider telemetry interval.");
+                            if (settings.Telemetry.ProviderTelemetry.RequestTimeoutMs != 5000) throw new InvalidOperationException("Unexpected provider telemetry timeout.");
+                            if (settings.Telemetry.ProviderTelemetry.ConcurrentProviderLimit != 4) throw new InvalidOperationException("Unexpected provider telemetry concurrency.");
+                            settings.Telemetry.ProviderTelemetry.CollectionIntervalMs = 1;
+                            settings.Telemetry.ProviderTelemetry.RequestTimeoutMs = 1;
+                            settings.Telemetry.ProviderTelemetry.ConcurrentProviderLimit = 0;
+                            settings.Telemetry.ProviderTelemetry.RawMetricsMaxBytes = 99999999;
+                            if (settings.Telemetry.ProviderTelemetry.CollectionIntervalMs != 5000) throw new InvalidOperationException("Provider telemetry interval was not clamped.");
+                            if (settings.Telemetry.ProviderTelemetry.RequestTimeoutMs != 500) throw new InvalidOperationException("Provider telemetry timeout was not clamped.");
+                            if (settings.Telemetry.ProviderTelemetry.ConcurrentProviderLimit != 1) throw new InvalidOperationException("Provider telemetry concurrency was not clamped.");
+                            if (settings.Telemetry.ProviderTelemetry.RawMetricsMaxBytes != 1048576) throw new InvalidOperationException("Provider telemetry raw metrics max was not clamped.");
+                            string providerTelemetryId = IdGenerator.NewId("ptel_");
+                            if (providerTelemetryId.Length != IdGenerator.MaxIdLength || !providerTelemetryId.StartsWith("ptel_", StringComparison.Ordinal)) throw new InvalidOperationException("Provider telemetry ID shape mismatch.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "ProviderTelemetryPrometheusParserParsesLabels",
+                        displayName: "Provider telemetry Prometheus parser parses labels",
+                        executeAsync: delegate
+                        {
+                            PrometheusMetricsParser parser = new PrometheusMetricsParser();
+                            PrometheusMetricDocument document = parser.Parse("vllm:num_requests_running{model_name=\"llama\",engine=\"0\"} 2\nvllm:gpu_cache_usage_perc 42.5", CancellationToken.None);
+                            if (document.Samples.Count != 2) throw new InvalidOperationException("Prometheus parser sample count mismatch.");
+                            PrometheusMetricSample sample = document.Samples[0];
+                            if (sample.Name != "vllm:num_requests_running") throw new InvalidOperationException("Prometheus parser metric name mismatch.");
+                            if (sample.Value != 2) throw new InvalidOperationException("Prometheus parser metric value mismatch.");
+                            if (!sample.Labels.Any(item => item.Name == "model_name" && item.Value == "llama")) throw new InvalidOperationException("Prometheus parser label mismatch.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "ProviderTelemetrySqlitePersistsAndRollsUp",
+                        displayName: "Provider telemetry SQLite persists and rolls up",
+                        executeAsync: async delegate
+                        {
+                            string directory = Path.Combine(Path.GetTempPath(), "xeno-provider-telemetry-" + Guid.NewGuid().ToString("N"));
+                            Directory.CreateDirectory(directory);
+                            ClientLocalDatabaseSettings databaseSettings = new ClientLocalDatabaseSettings { Filename = Path.Combine(directory, "local.db") };
+                            SqliteClientProviderTelemetryHistoryMethods history = new SqliteClientProviderTelemetryHistoryMethods(databaseSettings);
+                            await history.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                            ClientProviderTelemetrySnapshot snapshot = new ClientProviderTelemetrySnapshot
+                            {
+                                Metadata = new ClientProviderTelemetryMetadata
+                                {
+                                    Id = IdGenerator.NewId("ptel_"),
+                                    ClientId = "xcl_test",
+                                    MachineName = "test",
+                                    CollectedUtc = DateTime.UtcNow,
+                                    ProviderCount = 1
+                                }
+                            };
+                            snapshot.Providers.Add(new ClientProviderTelemetryProviderStatus
+                            {
+                                Endpoint = new ClientProviderTelemetryEndpoint
+                                {
+                                    ProviderName = "ollama",
+                                    ApiType = "Ollama",
+                                    Kind = ClientProviderTelemetryKindEnum.Ollama,
+                                    EndpointDisplay = "http://127.0.0.1:11434",
+                                    EndpointHash = "hash"
+                                },
+                                Status = ClientProviderTelemetryStatusEnum.Available,
+                                HealthStatus = ClientProviderTelemetryHealthStatusEnum.Healthy,
+                                AvailableModelCount = 1,
+                                LoadedModelCount = 1,
+                                ActiveRequests = 2,
+                                QueuedRequests = 1
+                            });
+                            await history.CreateAsync(snapshot, new ClientTelemetrySettings(), CancellationToken.None).ConfigureAwait(false);
+                            ClientProviderTelemetrySampleDetail? latest = await history.ReadLatestAsync("ollama", CancellationToken.None).ConfigureAwait(false);
+                            if (latest == null) throw new InvalidOperationException("Latest provider telemetry was not persisted.");
+                            if (latest.Sample.ProviderName != "ollama") throw new InvalidOperationException("Latest provider telemetry provider mismatch.");
+                            ClientProviderTelemetryRollupRequest rollupRequest = new ClientProviderTelemetryRollupRequest { FromUtc = DateTime.UtcNow.AddHours(-1), ToUtc = DateTime.UtcNow.AddHours(1), BucketMinutes = 60, Metric = ClientProviderTelemetryMetricEnum.ActiveRequests };
+                            IReadOnlyList<ClientProviderTelemetryRollupBucket> buckets = await history.RollupAsync(rollupRequest, CancellationToken.None).ConfigureAwait(false);
+                            if (!buckets.Any(item => item.Count > 0 && item.Average == 2)) throw new InvalidOperationException("Provider telemetry rollup did not include persisted value.");
+                            Directory.Delete(directory, true);
                         })
                 });
         }
@@ -486,6 +574,7 @@ namespace Test.Shared
                                 await driver.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
                                 ILocalRequestHistoryMethods history = driver.RequestHistory;
                                 IClientTelemetryHistoryMethods telemetryHistory = driver.TelemetryHistory;
+                                IClientProviderTelemetryHistoryMethods providerTelemetryHistory = driver.ProviderTelemetryHistory;
                                 ClientSettings invalidHostSettings = new ClientSettings();
                                 invalidHostSettings.LocalDashboard.Host = "+";
                                 invalidHostSettings.LocalDashboard.Port = port;
@@ -504,7 +593,7 @@ namespace Test.Shared
                                 if (!invalidHostRejected) throw new InvalidOperationException("Wildcard local dashboard host was not rejected.");
 
                                 using (driver)
-                                using (LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, null))
+                                using (LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, null, providerTelemetryHistory, null))
                                 using (HttpClient httpClient = new HttpClient())
                                 {
                                     await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
@@ -532,6 +621,56 @@ namespace Test.Shared
                                     LocalDashboardDatabaseResponse database = DeserializeRequired<LocalDashboardDatabaseResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/database").ConfigureAwait(false));
                                     if (!database.Exists) throw new InvalidOperationException("Local dashboard database status did not report an existing database.");
                                     if (!String.Equals(database.Status.ToString(), LocalDashboardDatabaseStatusEnum.Ready.ToString(), StringComparison.Ordinal)) throw new InvalidOperationException("Local dashboard database status was not ready.");
+
+                                    ClientProviderTelemetrySnapshot providerTelemetrySnapshot = new ClientProviderTelemetrySnapshot
+                                    {
+                                        Metadata = new ClientProviderTelemetryMetadata
+                                        {
+                                            Id = IdGenerator.NewId("ptel_"),
+                                            ClientId = settings.ClientId,
+                                            MachineName = settings.Name,
+                                            CollectedUtc = DateTime.UtcNow,
+                                            ProviderCount = 1
+                                        }
+                                    };
+                                    providerTelemetrySnapshot.Providers.Add(new ClientProviderTelemetryProviderStatus
+                                    {
+                                        Endpoint = new ClientProviderTelemetryEndpoint
+                                        {
+                                            ProviderName = "touchstone-provider-telemetry",
+                                            ApiType = "Ollama",
+                                            Kind = ClientProviderTelemetryKindEnum.Ollama,
+                                            EndpointDisplay = "http://127.0.0.1:11434",
+                                            EndpointHash = "touchstonehash"
+                                        },
+                                        Status = ClientProviderTelemetryStatusEnum.Available,
+                                        HealthStatus = ClientProviderTelemetryHealthStatusEnum.Healthy,
+                                        Version = "test",
+                                        AvailableModelCount = 1,
+                                        LoadedModelCount = 1,
+                                        ActiveRequests = 3,
+                                        QueuedRequests = 1
+                                    });
+                                    await providerTelemetryHistory.CreateAsync(providerTelemetrySnapshot, settings.Telemetry, CancellationToken.None).ConfigureAwait(false);
+
+                                    HttpResponseMessage providerTelemetryStatusResponse = await httpClient.GetAsync(baseUrl + "/api/v1/telemetry/providers/status").ConfigureAwait(false);
+                                    if (!providerTelemetryStatusResponse.IsSuccessStatusCode) throw new InvalidOperationException("Provider telemetry status route failed.");
+                                    ClientTelemetryPersistenceStatus providerTelemetryStatus = DeserializeRequired<ClientTelemetryPersistenceStatus>(await providerTelemetryStatusResponse.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    if (providerTelemetryStatus.Samples < 1) throw new InvalidOperationException("Provider telemetry status did not report samples.");
+
+                                    ClientProviderTelemetryLatestResponse providerTelemetryLatest = DeserializeRequired<ClientProviderTelemetryLatestResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/telemetry/providers/latest").ConfigureAwait(false));
+                                    if (providerTelemetryLatest.Detail == null || !String.Equals(providerTelemetryLatest.Detail.Sample.ProviderName, "touchstone-provider-telemetry", StringComparison.Ordinal)) throw new InvalidOperationException("Provider telemetry latest route did not return the persisted sample.");
+
+                                    HttpResponseMessage providerTelemetrySearchResponse = await PostJsonAsync(httpClient, baseUrl + "/api/v1/telemetry/providers/history/search", JsonUtil.Serialize(new ClientProviderTelemetrySearchRequest { ProviderName = "touchstone-provider-telemetry", Metric = ClientProviderTelemetryMetricEnum.ActiveRequests })).ConfigureAwait(false);
+                                    if (!providerTelemetrySearchResponse.IsSuccessStatusCode) throw new InvalidOperationException("Provider telemetry search route failed.");
+                                    ClientProviderTelemetrySearchResult providerTelemetrySearch = DeserializeRequired<ClientProviderTelemetrySearchResult>(await providerTelemetrySearchResponse.Content.ReadAsStringAsync().ConfigureAwait(false));
+                                    if (providerTelemetrySearch.Samples.Count < 1) throw new InvalidOperationException("Provider telemetry search route did not return samples.");
+
+                                    HttpResponseMessage providerTelemetryRollupResponse = await PostJsonAsync(httpClient, baseUrl + "/api/v1/telemetry/providers/history/rollups", JsonUtil.Serialize(new ClientProviderTelemetryRollupRequest { Metric = ClientProviderTelemetryMetricEnum.ActiveRequests, BucketMinutes = 60 })).ConfigureAwait(false);
+                                    if (!providerTelemetryRollupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Provider telemetry rollup route failed.");
+
+                                    ClientProviderTelemetrySampleDetail providerTelemetryDetail = DeserializeRequired<ClientProviderTelemetrySampleDetail>(await httpClient.GetStringAsync(baseUrl + "/api/v1/telemetry/providers/history/" + providerTelemetryLatest.Detail.Sample.Id).ConfigureAwait(false));
+                                    if (providerTelemetryDetail.Sample.ActiveRequests != 3) throw new InvalidOperationException("Provider telemetry detail route returned the wrong metric value.");
 
                                     string providerJson = JsonUtil.Serialize(new LocalProviderUpsertRequest
                                     {

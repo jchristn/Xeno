@@ -79,6 +79,10 @@
     {
       "key": "localTelemetrySampleId",
       "value": "tel_..."
+    },
+    {
+      "key": "localProviderTelemetrySampleId",
+      "value": "ptel_..."
     }
   ],
   "item": [
@@ -1264,6 +1268,162 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"beforeUtc\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Provider Telemetry Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/status"
+          }
+        },
+        {
+          "name": "Latest Provider Telemetry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/latest"
+          }
+        },
+        {
+          "name": "Collect Provider Telemetry Now",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/collect",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Search Provider Telemetry History",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/search",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metric\": \"ActiveRequests\",\n  \"providerName\": null,\n  \"modelName\": null,\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Provider Telemetry Rollups",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/rollups",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metric\": \"ActiveRequests\",\n  \"providerName\": null,\n  \"modelName\": null,\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Provider Telemetry Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
+          }
+        },
+        {
+          "name": "Delete Provider Telemetry Detail",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
+          }
+        },
+        {
+          "name": "Delete Provider Telemetry Range",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Xeno-Local-Token",
+                "value": "{{localDashboardToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/delete",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"

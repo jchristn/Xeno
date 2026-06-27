@@ -150,12 +150,17 @@ The local dashboard currently exposes these client-local pages:
 - Advertised Models: create, edit, filter, and delete local model advertisements.
 - Requests: inspect local request history, timing, headers, bodies, stream counters, and failures.
 - Telemetry: inspect current CPU, memory, disk, and GPU telemetry collected by this client.
+- Provider Telemetry: inspect current runtime telemetry from Ollama, vLLM, and other configured provider endpoints.
 - Logs: read recent client log lines by severity and tail length.
 - Telemetry Analytics: analyze persisted telemetry over Last Hour, Last Day, Last Week, and Last Month.
+- Provider Telemetry Analytics: analyze persisted provider runtime telemetry over Last Hour, Last Day, Last Week, and Last Month.
 - Settings: edit local dashboard listener, token, SQLite database, and retention settings.
 
-The client telemetry implementation plan and remaining future server-upload
-considerations are tracked in [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md).
+The archived client telemetry implementation plan and remaining future
+server-upload considerations are tracked in
+[archive/CLIENT_TELEMETRY.md](archive/CLIENT_TELEMETRY.md). Provider runtime
+telemetry expansion is tracked in
+[ADDITIONAL_TELEMETRY.md](ADDITIONAL_TELEMETRY.md).
 
 These settings require restarting the background client:
 
@@ -220,6 +225,18 @@ Default settings:
       "Enabled": true,
       "NvidiaDcgmExporterUrl": null,
       "CommandTimeoutMs": 5000
+    },
+    "ProviderTelemetry": {
+      "Enabled": true,
+      "CollectionIntervalMs": 15000,
+      "RequestTimeoutMs": 5000,
+      "ConcurrentProviderLimit": 4,
+      "DiscoverMetricsEndpoints": true,
+      "PersistRawMetrics": false,
+      "RawMetricsMaxBytes": 262144,
+      "CollectModelDetails": true,
+      "CollectProcessCorrelation": true,
+      "CollectCloudHeaderTelemetry": true
     }
   }
 }
@@ -228,6 +245,16 @@ Default settings:
 `CollectionIntervalMs` is clamped to at least 5000 ms. `RetentionDays` is
 clamped from 1 to 365 days. GPU telemetry tries a configured NVIDIA DCGM
 exporter first, then falls back to `nvidia-smi` when it is available.
+
+Provider telemetry is collected from configured provider endpoints on the same
+local schedule. Ollama uses `/api/version`, `/api/tags`, and `/api/ps` when
+available. vLLM and OpenAI-compatible runtimes use `/v1/models` and `/metrics`
+when exposed. Generic OpenAI-compatible, LocalAI, llama.cpp, LM Studio, and TGI
+endpoints degrade to the telemetry they expose. OpenAI and Gemini cloud
+providers do not expose host internals; Xeno records only safe reachability,
+model inventory, and response metadata where available. Raw Prometheus metrics
+are not persisted unless `ProviderTelemetry.PersistRawMetrics` is enabled, and
+stored raw metrics are bounded by `RawMetricsMaxBytes`.
 
 ### Local Dashboard API
 
@@ -264,6 +291,14 @@ POST   /api/v1/telemetry/history/rollups
 GET    /api/v1/telemetry/history/{id}
 DELETE /api/v1/telemetry/history/{id}
 POST   /api/v1/telemetry/history/delete
+GET    /api/v1/telemetry/providers/status
+GET    /api/v1/telemetry/providers/latest
+POST   /api/v1/telemetry/providers/collect
+POST   /api/v1/telemetry/providers/history/search
+POST   /api/v1/telemetry/providers/history/rollups
+GET    /api/v1/telemetry/providers/history/{id}
+DELETE /api/v1/telemetry/providers/history/{id}
+POST   /api/v1/telemetry/providers/history/delete
 GET    /api/v1/logs
 GET    /api/v1/settings
 PUT    /api/v1/settings

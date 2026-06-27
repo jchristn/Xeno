@@ -186,7 +186,8 @@ The `xeno` background process hosts a local dashboard for the machine running
 the client by default. It defaults to `http://127.0.0.1:9343`, uses a local per-process API
 token, and stores request history in SQLite at `~/.xeno/local-dashboard.db`.
 The dashboard shows local connectedness, request activity, CPU/memory/disk/GPU
-telemetry, telemetry analytics, client logs, configured provider endpoints,
+telemetry, provider runtime telemetry from Ollama, vLLM, and compatible
+endpoints, telemetry analytics, client logs, configured provider endpoints,
 advertised models, and request details for work processed by that machine.
 Providers and advertised models can be created, edited, and deleted from the
 browser without hand-editing `client.json`.
@@ -203,7 +204,15 @@ The default settings in `~/.xeno/client.json` are:
   "Telemetry": {
     "Enabled": true,
     "CollectionIntervalMs": 15000,
-    "RetentionDays": 30
+    "RetentionDays": 30,
+    "ProviderTelemetry": {
+      "Enabled": true,
+      "CollectionIntervalMs": 15000,
+      "RequestTimeoutMs": 5000,
+      "ConcurrentProviderLimit": 4,
+      "DiscoverMetricsEndpoints": true,
+      "PersistRawMetrics": false
+    }
   }
 }
 ```
@@ -218,9 +227,12 @@ but take effect after restarting the client.
 
 The local dashboard API is intentionally localhost-oriented and separate from
 the Xeno server management API. It exposes client state, provider and model
-management, local request history, telemetry history, request summaries, logs,
-settings, and local database status under `http://127.0.0.1:9343/api/v1/...`
-when enabled.
+management, local request history, host telemetry history, provider telemetry
+history, request summaries, logs, settings, and local database status under
+`http://127.0.0.1:9343/api/v1/...` when enabled. Provider telemetry is
+best-effort: local runtimes such as Ollama and vLLM expose richer operational
+metrics, while cloud providers generally expose only reachability, model
+inventory, and safe response-header metadata.
 
 ## Calling The API
 
