@@ -180,15 +180,15 @@ model name. For the full walkthrough, see
 
 ### Local Client Dashboard
 
-The `xeno` background process can host a local dashboard for the machine running
-the client. It defaults to `http://127.0.0.1:9343`, uses a local per-process API
+The `xeno` background process hosts a local dashboard for the machine running
+the client by default. It defaults to `http://127.0.0.1:9343`, uses a local per-process API
 token, and stores request history in SQLite at `~/.xeno/local-dashboard.db`.
 The dashboard shows local connectedness, request activity, client logs, configured
 provider endpoints, advertised models, and request details for work processed by
 that machine. Providers and advertised models can be created, edited, and deleted
 from the browser without hand-editing `client.json`.
 
-Enable it in `~/.xeno/client.json`:
+The default settings in `~/.xeno/client.json` are:
 
 ```json
 {
@@ -200,8 +200,9 @@ Enable it in `~/.xeno/client.json`:
 }
 ```
 
-`xeno connect` and `xeno status` print the dashboard URL when it is enabled and
-listening. `xeno dashboard open` opens it in the default browser. Binding to
+`xeno start`, `xeno connect`, and `xeno status` print the dashboard URL when it
+is listening. `xeno dashboard open` opens it in the default browser. Set
+`LocalDashboard.Enabled` to `false` to disable it. Binding to
 `0.0.0.0` is supported only when explicitly configured and may expose the local
 dashboard beyond the client machine depending on firewall and network policy.
 Host, port, token, and database filename changes are saved to the settings file

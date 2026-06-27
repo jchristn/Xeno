@@ -1,19 +1,55 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Github, Moon, Plus, RefreshCw, Sun, Trash2 } from 'lucide-react';
+import {
+  Activity,
+  BrainCircuit,
+  ChevronRight,
+  CircleAlert,
+  FileJson,
+  Gauge,
+  History,
+  Moon,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Server,
+  Settings as SettingsIcon,
+  Sun,
+  Terminal,
+  Trash2,
+  Zap
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import ActionMenu from '../components/ActionMenu.jsx';
+import ActivityChart from '../components/ActivityChart.jsx';
 import CopyButton from '../components/CopyButton.jsx';
+import CopyableValue from '../components/CopyableValue.jsx';
+import EmptyState from '../components/EmptyState.jsx';
 import LanguageSelector from '../components/LanguageSelector.jsx';
 import Modal from '../components/Modal.jsx';
+import Pagination from '../components/Pagination.jsx';
 import { jsonBody, localApi } from './localApi.js';
 
 const pages = [
-  { id: 'home', labelKey: 'home', tooltipKey: 'tooltipLocalNavHome' },
-  { id: 'providers', labelKey: 'localProviders', tooltipKey: 'tooltipLocalNavProviders' },
-  { id: 'models', labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
-  { id: 'requests', labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
-  { id: 'logs', labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
-  { id: 'settings', labelKey: 'settings', tooltipKey: 'tooltipLocalNavSettings' }
+  { id: 'home', descriptionKey: 'localHomeDescription', icon: Activity, labelKey: 'home', tooltipKey: 'tooltipLocalNavHome' },
+  { id: 'providers', descriptionKey: 'localProvidersDescription', icon: Server, labelKey: 'localProviders', tooltipKey: 'tooltipLocalNavProviders' },
+  { id: 'models', descriptionKey: 'localModelsDescription', icon: BrainCircuit, labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
+  { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
+  { id: 'logs', descriptionKey: 'localLogsDescription', icon: Terminal, labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
+  { id: 'settings', descriptionKey: 'localSettingsDescription', icon: SettingsIcon, labelKey: 'settings', tooltipKey: 'tooltipLocalNavSettings' }
 ];
+
+const interactiveRowClickSelector = [
+  'button',
+  'a',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  '[role="button"]',
+  '[data-row-click-ignore="true"]'
+].join(', ');
 
 export default function LocalDashboardApp() {
   const { t } = useTranslation();
@@ -27,11 +63,10 @@ export default function LocalDashboardApp() {
   const [requests, setRequests] = useState([]);
   const [logs, setLogs] = useState([]);
   const [database, setDatabase] = useState(null);
-  const [range, setRange] = useState('hour');
+  const [range, setRange] = useState('lastHour');
   const [providerFilter, setProviderFilter] = useState('');
   const [logSeverity, setLogSeverity] = useState('all');
   const [logTail, setLogTail] = useState(200);
-  const [autoRefreshMs, setAutoRefreshMs] = useState(15000);
   const [modal, setModal] = useState(null);
   const [error, setError] = useState('');
 
@@ -41,10 +76,7 @@ export default function LocalDashboardApp() {
 
   useEffect(() => {
     refresh();
-    if (autoRefreshMs === 0) return undefined;
-    const timer = window.setInterval(refresh, autoRefreshMs);
-    return () => window.clearInterval(timer);
-  }, [page, range, logSeverity, logTail, autoRefreshMs]);
+  }, [page, range, logSeverity, logTail]);
 
   async function refresh() {
     try {
@@ -53,7 +85,7 @@ export default function LocalDashboardApp() {
         const [stateResponse, statisticsResponse, summaryResponse] = await Promise.all([
           localApi('/api/v1/state'),
           localApi('/api/v1/statistics'),
-          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(range)}`)
+          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}`)
         ]);
         setState(stateResponse);
         setStatistics(statisticsResponse);
@@ -67,7 +99,7 @@ export default function LocalDashboardApp() {
       } else if (page === 'requests') {
         const [historyResponse, summaryResponse] = await Promise.all([
           localApi('/api/v1/requests'),
-          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(range)}`)
+          localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}`)
         ]);
         setRequests(historyResponse.entries || []);
         setSummary(summaryResponse.buckets || []);
@@ -92,31 +124,58 @@ export default function LocalDashboardApp() {
     return pageDefinition ? t(pageDefinition.labelKey) : title(value, t);
   }
 
+  function currentPage() {
+    return pages.find((item) => item.id === page) || pages[0];
+  }
+
+  const selectedPage = currentPage();
+
   return (
     <div className="app-shell local-dashboard-shell">
       <aside className="sidebar">
-        <div className="brand-block">
-          <strong>{t('localDashboardTitle')}</strong>
-          <span>{t('client')}</span>
-        </div>
-        <nav className="nav-list">
-          {pages.map((item) => (
-            <button className={page === item.id ? 'active' : ''} key={item.id} onClick={() => setPage(item.id)} title={t(item.tooltipKey)} type="button">
-              {t(item.labelKey)}
-            </button>
-          ))}
-        </nav>
-      </aside>
-      <main className="workspace">
-        <header className="topbar">
+        <div className="sidebar-brand">
+          <img className="sidebar-logo" src="/logo.png" alt={t('localDashboardTitle')} />
           <div>
+            <strong>{t('localDashboardTitle')}</strong>
+            <span>{t('client')}</span>
+          </div>
+        </div>
+        <nav className="sidebar-nav" aria-label={t('dashboard')}>
+          <div className="sidebar-group">
+            <div className="sidebar-group-label">{t('observe')}</div>
+            {pages.slice(0, 4).map((item) => (
+              <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
+            ))}
+          </div>
+          <div className="sidebar-group">
+            <div className="sidebar-group-label">{t('configuration')}</div>
+            {pages.slice(4).map((item) => (
+              <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
+            ))}
+          </div>
+        </nav>
+        <div className="sidebar-footer">
+          <span>{t('version')}</span>
+          <strong>v0.1.0</strong>
+        </div>
+      </aside>
+      <div className="content-shell">
+        <header className="topbar">
+          <div className="topbar-title">
             <h1>{navLabel(page)}</h1>
-            {state?.dashboardUrl ? <span className="topbar-server-url">{state.dashboardUrl}<CopyButton label={t('copyServerUrl')} value={state.dashboardUrl} /></span> : null}
+            <p>{t(selectedPage.descriptionKey)}</p>
           </div>
           <div className="topbar-actions">
+            {state?.dashboardUrl ? (
+              <span className="topbar-server-url" title={t('tooltipServerUrl')}>
+                <Server size={15} />
+                <span>{state.dashboardUrl}</span>
+                <CopyButton label={t('copyServerUrl')} tooltip={t('tooltipCopyServerUrl')} value={state.dashboardUrl} />
+              </span>
+            ) : null}
             <LanguageSelector />
             <a aria-label={t('github')} className="icon-button" href="https://github.com/jchristn/Xeno" rel="noreferrer" target="_blank" title={t('tooltipGitHub')}>
-              <Github size={17} />
+              <GitHubMark size={17} />
             </a>
             <button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={t('tooltipToggleTheme')} type="button">
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
@@ -126,19 +185,22 @@ export default function LocalDashboardApp() {
             </button>
           </div>
         </header>
-        {error ? <div className="empty-state error-state">{error}</div> : null}
-        {page === 'home' ? <Home range={range} setRange={setRange} state={state} statistics={statistics} summary={summary} /> : null}
-        {page === 'providers' ? <Providers autoRefreshMs={autoRefreshMs} providers={providers} refresh={refresh} setAutoRefreshMs={setAutoRefreshMs} setModal={setModal} /> : null}
-        {page === 'models' ? <Models autoRefreshMs={autoRefreshMs} models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setAutoRefreshMs={setAutoRefreshMs} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
-        {page === 'requests' ? <Requests autoRefreshMs={autoRefreshMs} range={range} refresh={refresh} requests={requests} setAutoRefreshMs={setAutoRefreshMs} setModal={setModal} setRange={setRange} summary={summary} /> : null}
-        {page === 'logs' ? <Logs logSeverity={logSeverity} logTail={logTail} logs={logs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
-        {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
-      </main>
+        <main className="workspace">
+          {error ? <div className="settings-restart-banner error-state"><CircleAlert size={18} /><span>{error}</span></div> : null}
+          {page === 'home' ? <Home range={range} refresh={refresh} setRange={setRange} state={state} statistics={statistics} summary={summary} /> : null}
+          {page === 'providers' ? <Providers providers={providers} refresh={refresh} setModal={setModal} /> : null}
+          {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
+          {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
+          {page === 'logs' ? <Logs logSeverity={logSeverity} logTail={logTail} logs={logs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
+          {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
+        </main>
+      </div>
       <Modal
         actions={modal?.actions}
         headerActions={modal?.json ? <CopyButton label={t('copyJson')} value={JSON.stringify(modal.json, null, 2)} /> : null}
         onClose={() => setModal(null)}
         open={!!modal}
+        size={modal?.size || 'large'}
         title={modal?.title || ''}
       >
         {modal?.body}
@@ -147,19 +209,45 @@ export default function LocalDashboardApp() {
   );
 }
 
-function Home({ range, setRange, state, statistics, summary }) {
+function SidebarButton({ item, page, setPage }) {
+  const { t } = useTranslation();
+  const Icon = item.icon;
+  return (
+    <button className={`sidebar-link ${page === item.id ? 'active' : ''}`} onClick={() => setPage(item.id)} title={t(item.tooltipKey)} type="button">
+      <Icon size={17} />
+      <span>{t(item.labelKey)}</span>
+      <ChevronRight className="sidebar-link-arrow" size={14} />
+    </button>
+  );
+}
+
+function GitHubMark({ size = 17 }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="currentColor"
+      height={size}
+      viewBox="0 0 16 16"
+      width={size}
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 3.87c.68 0 1.36.09 2 .26 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
+function Home({ range, refresh, setRange, state, statistics, summary }) {
   const { t } = useTranslation();
   return (
     <>
-      {state?.settings?.localDashboard?.host === '0.0.0.0' ? <div className="empty-state">{t('localBindWarning')}</div> : null}
+      {state?.settings?.localDashboard?.host === '0.0.0.0' ? <div className="settings-restart-banner"><CircleAlert size={18} /><span>{t('localBindWarning')}</span></div> : null}
       <div className="metric-grid">
-        <Metric label={t('connected')} value={state?.connection?.isConnected ? t('yes') : t('no')} />
-        <Metric label={t('registered')} value={state?.connection?.isRegistered ? t('yes') : t('no')} />
-        <Metric label={t('requests')} value={statistics?.requests || 0} />
-        <Metric label={t('failures')} value={statistics?.failures || 0} />
+        <Metric icon={<Zap size={18} />} label={t('connected')} tone={state?.connection?.isConnected ? 'success' : 'danger'} value={state?.connection?.isConnected ? t('yes') : t('no')} />
+        <Metric icon={<Server size={18} />} label={t('registered')} tone={state?.connection?.isRegistered ? 'success' : 'warning'} value={state?.connection?.isRegistered ? t('yes') : t('no')} />
+        <Metric icon={<History size={18} />} label={t('requests')} value={statistics?.requests || 0} />
+        <Metric icon={<Gauge size={18} />} label={t('failures')} tone={statistics?.failures ? 'danger' : 'neutral'} value={statistics?.failures || 0} />
       </div>
-      <Panel title={t('requestsOverTime')} actions={<RangeSelector range={range} setRange={setRange} />}>
-        <BarChart buckets={summary} />
+      <Panel className="chart-panel-card" title={t('requestsOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
+        <ActivityChart onRangeChange={setRange} range={range} summary={{ buckets: summary }} />
       </Panel>
       <Panel title={t('connection')}>
         <RecordTable fields={['clientId', 'tenantId', 'webSocketUrl', 'lastDisconnectReason']} record={state?.connection || {}} />
@@ -168,7 +256,7 @@ function Home({ range, setRange, state, statistics, summary }) {
   );
 }
 
-function Providers({ autoRefreshMs, providers, refresh, setAutoRefreshMs, setModal }) {
+function Providers({ providers, refresh, setModal }) {
   const { t } = useTranslation();
 
   async function remove(provider) {
@@ -190,27 +278,24 @@ function Providers({ autoRefreshMs, providers, refresh, setAutoRefreshMs, setMod
   }
 
   return (
-    <Panel title={t('providerEndpoints')} actions={<button className="primary-button" onClick={() => setModal(providerModal(t, null, refresh))} title={t('tooltipCreateLocalProvider')} type="button"><Plus size={16} />{t('createProvider')}</button>}>
-      <DataTable
-        actions={(row) => (
-          <>
-            <button className="action-button secondary" onClick={() => test(row)} title={t('tooltipTestLocalProvider')} type="button">{t('test')}</button>
-            <button className="action-button secondary" onClick={() => setModal(providerModal(t, row, refresh))} title={t('tooltipEditLocalProvider')} type="button">{t('edit')}</button>
-            <button className="action-button danger" onClick={() => remove(row)} title={t('tooltipDeleteLocalProvider')} type="button"><Trash2 size={16} /></button>
-          </>
-        )}
-        autoRefreshMs={autoRefreshMs}
-        columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential']}
-        onRefresh={refresh}
-        onRowClick={(row) => setModal(providerModal(t, row, refresh))}
-        rows={providers}
-        setAutoRefreshMs={setAutoRefreshMs}
-      />
-    </Panel>
+    <DataTable
+      actions={(row) => [
+        { icon: <Play size={14} />, key: 'test', label: t('test'), onSelect: () => test(row), tooltip: t('tooltipTestLocalProvider') },
+        { divider: true, key: 'divider-delete' },
+        { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalProvider') }
+      ]}
+      columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential']}
+      headerActions={<button className="primary-button" onClick={() => setModal(providerModal(t, null, refresh))} title={t('tooltipCreateLocalProvider')} type="button"><Plus size={16} />{t('createProvider')}</button>}
+      onRefresh={refresh}
+      onRowClick={(row) => setModal(providerModal(t, row, refresh))}
+      rowActionLabel={t('edit')}
+      rows={providers}
+      title={t('providerEndpoints')}
+    />
   );
 }
 
-function Models({ autoRefreshMs, models, providerFilter, providers, refresh, setAutoRefreshMs, setModal, setProviderFilter }) {
+function Models({ models, providerFilter, providers, refresh, setModal, setProviderFilter }) {
   const { t } = useTranslation();
   const providerNames = useMemo(() => [...new Set(models.map((model) => model.provider).filter(Boolean))], [models]);
   const rows = providerFilter ? models.filter((model) => model.provider === providerFilter) : models;
@@ -229,9 +314,12 @@ function Models({ autoRefreshMs, models, providerFilter, providers, refresh, set
   }
 
   return (
-    <Panel
-      title={t('advertisedModels')}
-      actions={(
+    <DataTable
+      actions={(row) => [
+        { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalModel') }
+      ]}
+      columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings']}
+      headerActions={(
         <>
           <label className="form-field inline compact-field" title={t('tooltipLocalModelProviderFilter')}>
             <span>{t('provider')}</span>
@@ -243,26 +331,16 @@ function Models({ autoRefreshMs, models, providerFilter, providers, refresh, set
           <button className="primary-button" onClick={() => setModal(modelModal(t, null, providers, refresh))} title={t('tooltipCreateLocalModel')} type="button"><Plus size={16} />{t('createModel')}</button>
         </>
       )}
-    >
-      <DataTable
-        actions={(row) => (
-          <>
-            <button className="action-button secondary" onClick={() => setModal(modelModal(t, row, providers, refresh))} title={t('tooltipEditLocalModel')} type="button">{t('edit')}</button>
-            <button className="action-button danger" onClick={() => remove(row)} title={t('tooltipDeleteLocalModel')} type="button"><Trash2 size={16} /></button>
-          </>
-        )}
-        autoRefreshMs={autoRefreshMs}
-        columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings']}
-        onRefresh={refresh}
-        onRowClick={(row) => setModal(modelModal(t, row, providers, refresh))}
-        rows={rows}
-        setAutoRefreshMs={setAutoRefreshMs}
-      />
-    </Panel>
+      onRefresh={refresh}
+      onRowClick={(row) => setModal(modelModal(t, row, providers, refresh))}
+      rowActionLabel={t('edit')}
+      rows={rows}
+      title={t('advertisedModels')}
+    />
   );
 }
 
-function Requests({ autoRefreshMs, range, refresh, requests, setAutoRefreshMs, setModal, setRange, summary }) {
+function Requests({ range, refresh, requests, setModal, setRange, summary }) {
   const { t } = useTranslation();
 
   async function clear() {
@@ -293,30 +371,25 @@ function Requests({ autoRefreshMs, range, refresh, requests, setAutoRefreshMs, s
 
   async function details(row) {
     const entry = await localApi(`/api/v1/requests/${encodeURIComponent(row.id)}`);
-    setModal({ title: t('requestDetails'), json: entry, body: <RequestDetails entry={entry} /> });
+    setModal({ title: t('requestDetails'), json: entry, size: 'request-details', body: <RequestDetails entry={entry} /> });
   }
 
   return (
     <>
-      <Panel title={t('requestsOverTime')} actions={<RangeSelector range={range} setRange={setRange} />}>
-        <BarChart buckets={summary} />
+      <Panel className="chart-panel-card" title={t('requestsOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
+        <ActivityChart onRangeChange={setRange} range={range} summary={{ buckets: summary }} />
       </Panel>
-      <Panel title={t('requestHistory')} actions={<button className="action-button danger" onClick={clear} title={t('tooltipClearLocalHistory')} type="button"><Trash2 size={16} />{t('clear')}</button>}>
-        <DataTable
-          actions={(row) => (
-            <>
-              <button className="action-button secondary" onClick={() => details(row)} title={t('tooltipOpenLocalRequestDetails')} type="button">{t('details')}</button>
-              <button className="action-button danger" onClick={() => remove(row)} title={t('tooltipDeleteLocalRequest')} type="button"><Trash2 size={16} /></button>
-            </>
-          )}
-          autoRefreshMs={autoRefreshMs}
-          columns={['id', 'receivedUtc', 'method', 'path', 'modelName', 'providerName', 'statusCode', 'outcome']}
-          onRefresh={refresh}
-          onRowClick={details}
-          rows={requests}
-          setAutoRefreshMs={setAutoRefreshMs}
-        />
-      </Panel>
+      <DataTable
+      actions={(row) => [
+          { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalRequest') }
+        ]}
+        columns={['id', 'receivedUtc', 'method', 'path', 'modelName', 'providerName', 'statusCode', 'outcome']}
+        headerActions={<button className="action-button danger icon-only" onClick={clear} title={t('tooltipClearLocalHistory')} type="button"><Trash2 size={16} /><span className="sr-only">{t('clear')}</span></button>}
+        onRefresh={refresh}
+        onRowClick={details}
+        rows={requests}
+        title={t('requestHistory')}
+      />
     </>
   );
 }
@@ -489,17 +562,25 @@ function messageModal(t, titleText, message, json) {
   };
 }
 
-function DataTable({ actions, autoRefreshMs = 0, columns, compact = false, onRefresh, onRowClick, rows, setAutoRefreshMs }) {
+function DataTable({ actions, columns, compact = false, headerActions, onRefresh, onRowClick, rowActionLabel, rows, title: tableTitle }) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState('');
   const [draftFilters, setDraftFilters] = useState({});
   const [filters, setFilters] = useState({});
+  const [jsonRow, setJsonRow] = useState(null);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
-  const filteredRows = useMemo(() => rows.filter((row) => columns.every((column) => {
-    const filter = String(filters[column] || '').trim().toLowerCase();
-    if (!filter) return true;
-    return String(row[column] || '').toLowerCase().includes(filter);
-  })), [columns, filters, rows]);
+  const [pageSize, setPageSize] = useState(10);
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const filteredRows = useMemo(() => safeRows.filter((row) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const matchesQuery = !normalizedQuery || columns.some((column) => String(row[column] ?? '').toLowerCase().includes(normalizedQuery));
+    if (!matchesQuery) return false;
+    return columns.every((column) => {
+      const filter = String(filters[column] || '').trim().toLowerCase();
+      if (!filter) return true;
+      return String(row[column] || '').toLowerCase().includes(filter);
+    });
+  }), [columns, filters, query, safeRows]);
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const safePage = Math.min(page, pageCount);
   const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -509,42 +590,49 @@ function DataTable({ actions, autoRefreshMs = 0, columns, compact = false, onRef
     setPage(1);
   }
 
-  function updateAutoRefresh(event) {
-    if (!setAutoRefreshMs) return;
-    setAutoRefreshMs(Number(event.target.value));
+  function handleRowClick(event, row) {
+    if (!onRowClick) return;
+    const target = event.target instanceof Element ? event.target : event.currentTarget;
+    if (target.closest(interactiveRowClickSelector)) return;
+    onRowClick(row);
   }
 
-  return (
+  function rowActions(row) {
+    const items = [];
+    if (onRowClick) {
+      items.push({
+        icon: <Pencil size={14} />,
+        key: 'open',
+        label: rowActionLabel || t('details'),
+        onSelect: () => onRowClick(row),
+        tooltip: t('tooltipOpenLocalRequestDetails')
+      });
+    }
+
+    items.push({
+      icon: <FileJson size={14} />,
+      key: 'json',
+      label: t('viewJson'),
+      onSelect: () => setJsonRow(row),
+      tooltip: t('tooltipViewJson')
+    });
+
+    const customItems = actions ? actions(row) : [];
+    if (customItems.length > 0) {
+      items.push({ divider: true, key: 'custom-divider' });
+      items.push(...customItems);
+    }
+
+    return items;
+  }
+
+  const table = (
     <>
-      {!compact ? (
-        <div className="table-controls">
-          <div className="button-row">
-            {onRefresh ? <button className="icon-button" onClick={onRefresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button> : null}
-            {setAutoRefreshMs ? (
-              <label className="form-field inline compact-field" title={t('tooltipAutoRefresh')}>
-                <span>{t('autoRefresh')}</span>
-                <select onChange={updateAutoRefresh} title={t('tooltipAutoRefresh')} value={autoRefreshMs}>
-                  <option value={0}>{t('none')}</option>
-                  <option value={15000}>15s</option>
-                  <option value={30000}>30s</option>
-                  <option value={60000}>60s</option>
-                  <option value={180000}>180s</option>
-                  <option value={300000}>300s</option>
-                </select>
-              </label>
-            ) : null}
-          </div>
-          <div className="button-row">
-            <button className="action-button secondary" disabled={safePage <= 1} onClick={() => setPage(Math.max(1, safePage - 1))} title={t('tooltipPreviousPage')} type="button">{t('previousPage')}</button>
-            <span className="table-page-label">{t('pageOf', { page: safePage, total: pageCount })}</span>
-            <button className="action-button secondary" disabled={safePage >= pageCount} onClick={() => setPage(Math.min(pageCount, safePage + 1))} title={t('tooltipNextPage')} type="button">{t('nextPage')}</button>
-          </div>
-        </div>
-      ) : null}
+      {!compact ? <Pagination currentPage={safePage} onPageChange={setPage} onPageSizeChange={setPageSize} onRefresh={onRefresh} pageSize={pageSize} totalItems={filteredRows.length} /> : null}
       <div className="table-scroll">
         <table className="data-table">
           <thead>
-            <tr>{columns.map((column) => <th key={column}>{title(column, t)}</th>)}{actions ? <th>{t('actions')}</th> : null}</tr>
+            <tr>{columns.map((column) => <th key={column}>{title(column, t)}</th>)}{!compact ? <th className="actions-cell">{t('actions')}</th> : null}</tr>
             {!compact ? (
               <tr className="table-filter-row">
                 {columns.map((column) => (
@@ -562,21 +650,53 @@ function DataTable({ actions, autoRefreshMs = 0, columns, compact = false, onRef
                     />
                   </th>
                 ))}
-                {actions ? <th /> : null}
+                <th />
               </tr>
             ) : null}
           </thead>
           <tbody>
-            {pageRows.length === 0 ? <tr><td colSpan={columns.length + (actions ? 1 : 0)}>{t('emptyTableMessage')}</td></tr> : pageRows.map((row) => (
-              <tr className={onRowClick ? 'clickable-row' : ''} key={row.id || `${row.provider || ''}:${row.name || row.modelName || row.endpoint}`} onClick={onRowClick ? () => onRowClick(row) : undefined}>
-                {columns.map((column) => <td key={column}>{copyColumn(column, row[column]) ? <span className="copyable-value"><code>{String(row[column] || '-')}</code><CopyButton label={t('copyValue')} value={String(row[column] || '')} /></span> : display(row[column], t)}</td>)}
-                {actions ? <td className="table-actions" onClick={(event) => event.stopPropagation()}>{actions(row)}</td> : null}
+            {pageRows.length === 0 ? (
+              <tr>
+                <td className="empty-cell" colSpan={columns.length + (compact ? 0 : 1)}>
+                  <EmptyState message={t('emptyTableMessage')} title={t('noData')} />
+                </td>
+              </tr>
+            ) : pageRows.map((row) => (
+              <tr className={onRowClick ? 'clickable-row' : ''} key={row.id || `${row.provider || ''}:${row.name || row.modelName || row.endpoint}`} onClick={(event) => handleRowClick(event, row)}>
+                {columns.map((column) => <td key={column}>{copyColumn(column, row[column]) ? <CopyableValue label={t('copyValue')} value={String(row[column] || '')} /> : display(row[column], t)}</td>)}
+                {!compact ? <td className="actions-cell"><ActionMenu items={rowActions(row)} /></td> : null}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {jsonRow ? (
+        <Modal headerActions={<CopyButton label={t('copyJson')} value={JSON.stringify(jsonRow, null, 2)} />} onClose={() => setJsonRow(null)} open title={t('recordJson')}>
+          <pre className="json-preview"><code>{JSON.stringify(jsonRow, null, 2)}</code></pre>
+        </Modal>
+      ) : null}
     </>
+  );
+
+  if (compact) return table;
+
+  return (
+    <section className="workspace-card data-panel">
+      <div className="workspace-card-header">
+        <div>
+          <h2>{tableTitle}</h2>
+        </div>
+        <div className="table-toolbar">
+          <label className="search-box" title={t('tooltipSearchTable')}>
+            <Search size={15} />
+            <input aria-label={t('search')} onChange={(event) => setQuery(event.target.value)} placeholder={t('search')} title={t('tooltipSearchTable')} value={query} />
+          </label>
+          <span className="row-count" title={t('showingRange', { start: filteredRows.length === 0 ? 0 : 1, end: filteredRows.length, total: filteredRows.length })}>{filteredRows.length} {t('rows')}</span>
+          {headerActions}
+        </div>
+      </div>
+      {table}
+    </section>
   );
 }
 
@@ -600,40 +720,29 @@ function RequestDetails({ entry }) {
   );
 }
 
-function Panel({ actions, children, title: panelTitle }) {
-  return <section className="workspace-card"><div className="panel-heading"><h2>{panelTitle}</h2><div className="button-row">{actions}</div></div>{children}</section>;
-}
-
-function Metric({ label, value }) {
-  return <div className="metric-card"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function RangeSelector({ range, setRange }) {
-  const { t } = useTranslation();
+function Panel({ actions, children, className = '', title: panelTitle }) {
   return (
-    <label className="form-field inline compact-field" title={t('tooltipChartRange')}>
-      <span>{t('range')}</span>
-      <select value={range} onChange={(event) => setRange(event.target.value)} title={t('tooltipChartRange')}>
-        <option value="hour">{t('lastHour')}</option>
-        <option value="day">{t('lastDay')}</option>
-        <option value="week">{t('lastWeek')}</option>
-        <option value="month">{t('lastMonth')}</option>
-      </select>
-    </label>
+    <section className={`workspace-card ${className}`.trim()}>
+      <div className="workspace-card-header">
+        <div>
+          <h2>{panelTitle}</h2>
+        </div>
+        {actions ? <div className="workspace-card-actions">{actions}</div> : null}
+      </div>
+      <div className="workspace-card-body">{children}</div>
+    </section>
   );
 }
 
-function BarChart({ buckets }) {
-  const max = Math.max(1, ...buckets.map((bucket) => bucket.total || 0));
+function Metric({ icon, label, tone = 'neutral', value }) {
   return (
-    <svg className="activity-chart" role="img" viewBox="0 0 640 220">
-      {buckets.map((bucket, index) => {
-        const width = 640 / Math.max(1, buckets.length);
-        const height = Math.max(2, ((bucket.total || 0) / max) * 180);
-        const x = index * width;
-        return <rect fill="var(--color-accent)" height={height} key={bucket.startUtc || index} rx="2" width={Math.max(2, width - 3)} x={x} y={200 - height}><title>{`${bucket.startUtc}: ${bucket.total || 0}`}</title></rect>;
-      })}
-    </svg>
+    <div className={`metric-card ${tone}`}>
+      <div className="metric-icon">{icon}</div>
+      <div className="metric-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -649,6 +758,13 @@ function display(value, t) {
   if (typeof value === 'boolean') return value ? t('yes') : t('no');
   if (value === null || value === undefined || value === '') return '-';
   return String(value);
+}
+
+function localApiRange(range) {
+  if (range === 'lastDay') return 'day';
+  if (range === 'lastWeek') return 'week';
+  if (range === 'lastMonth') return 'month';
+  return 'hour';
 }
 
 function copyColumn(column, value) {

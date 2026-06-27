@@ -6,9 +6,9 @@ namespace Xeno.Client
     public class ClientLocalDashboardSettings
     {
         /// <summary>
-        /// Enable the local dashboard. Default is false.
+        /// Enable the local dashboard. Default is true.
         /// </summary>
-        public bool Enabled { get; set; } = false;
+        public bool Enabled { get; set; } = true;
 
         /// <summary>
         /// Local dashboard HTTP host. Default is 127.0.0.1.

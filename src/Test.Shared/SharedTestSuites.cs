@@ -183,9 +183,15 @@ namespace Test.Shared
                                 if (configShow.ExitCode != 0) throw new InvalidOperationException("Config show failed: " + configShow.StandardError + configShow.StandardOutput);
                                 if (!configShow.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include configured models.");
                                 if (!configShow.StandardOutput.Contains("Completions:", StringComparison.Ordinal) || !configShow.StandardOutput.Contains("Embeddings:", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include model capabilities.");
+                                string clientSettingsFile = Path.Combine(clientHome, "client.json");
+                                ClientSettings disabledDashboardSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(clientSettingsFile));
+                                disabledDashboardSettings.LocalDashboard.Enabled = false;
+                                File.WriteAllText(clientSettingsFile, JsonUtil.Serialize(disabledDashboardSettings, true));
                                 ClientCommandResult disabledStatus = await RunXenoClientAsync(new[] { "status" }, clientHome).ConfigureAwait(false);
                                 if (disabledStatus.ExitCode != 0) throw new InvalidOperationException("Disabled local dashboard status failed: " + disabledStatus.StandardError + disabledStatus.StandardOutput);
                                 if (!disabledStatus.StandardOutput.Contains("Local Dashboard: disabled", StringComparison.Ordinal)) throw new InvalidOperationException("Disabled local dashboard status was not compact: " + disabledStatus.StandardOutput);
+                                disabledDashboardSettings.LocalDashboard.Enabled = true;
+                                File.WriteAllText(clientSettingsFile, JsonUtil.Serialize(disabledDashboardSettings, true));
                                 ClientCommandResult providerAdd = await RunXenoClientAsync(new[] { "provider", "add", "--name", "openai-compatible", "--type", "OpenAICompatible", "--endpoint", "http://127.0.0.1:11435" }, clientHome).ConfigureAwait(false);
                                 if (providerAdd.ExitCode != 0) throw new InvalidOperationException("Provider add with API type failed: " + providerAdd.StandardError + providerAdd.StandardOutput);
                                 ClientCommandResult startHelp = await RunXenoClientAsync(new[] { "start", "--help" }, clientHome).ConfigureAwait(false);
@@ -476,6 +482,16 @@ namespace Test.Shared
                                     if ((int)unauthorized.StatusCode != 401) throw new InvalidOperationException("Local dashboard API should require the local token.");
 
                                     string html = await httpClient.GetStringAsync(baseUrl + "/").ConfigureAwait(false);
+                                    string scriptPath = ExtractHtmlAttribute(html, "src=\"", "\"");
+                                    string stylesheetPath = ExtractHtmlAttribute(html, "href=\"", "\"");
+                                    if (!scriptPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard script path was not a JavaScript asset.");
+                                    if (!stylesheetPath.EndsWith(".css", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard stylesheet path was not a CSS asset.");
+                                    HttpResponseMessage scriptResponse = await httpClient.GetAsync(baseUrl + scriptPath).ConfigureAwait(false);
+                                    if (!scriptResponse.IsSuccessStatusCode) throw new InvalidOperationException("Local dashboard script asset did not load: " + scriptPath);
+                                    if (!((scriptResponse.Content.Headers.ContentType?.ToString() ?? String.Empty).Contains("javascript", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Local dashboard script asset MIME type was not JavaScript.");
+                                    HttpResponseMessage stylesheetResponse = await httpClient.GetAsync(baseUrl + stylesheetPath).ConfigureAwait(false);
+                                    if (!stylesheetResponse.IsSuccessStatusCode) throw new InvalidOperationException("Local dashboard stylesheet asset did not load: " + stylesheetPath);
+                                    if (!((stylesheetResponse.Content.Headers.ContentType?.ToString() ?? String.Empty).Contains("text/css", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Local dashboard stylesheet asset MIME type was not CSS.");
                                     string token = ExtractLocalDashboardToken(html);
                                     httpClient.DefaultRequestHeaders.Add("X-Xeno-Local-Token", token);
 
@@ -1864,11 +1880,10 @@ namespace Test.Shared
                     clientSettings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
                     File.WriteAllText(Path.Combine(clientHome, "client.json"), JsonUtil.Serialize(clientSettings, true));
 
-                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "--json", "connect", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
                     if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
-                    if (!connect.StandardOutput.Contains("\"connected\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not report connected: " + connect.StandardOutput);
-                    if (!connect.StandardOutput.Contains("\"listening\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not report local dashboard listening: " + connect.StandardOutput);
-                    if (!connect.StandardOutput.Contains("http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background connect did not include local dashboard URL: " + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("Xeno client connected in the background", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not report connected: " + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("Local dashboard : http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not include local dashboard URL: " + connect.StandardOutput);
 
                     string stateFile = Path.Combine(clientHome, "state.json");
                     ClientConnectionState state = DeserializeRequired<ClientConnectionState>(File.ReadAllText(stateFile));
@@ -1886,6 +1901,8 @@ namespace Test.Shared
                     ClientCommandResult secondConnect = await RunXenoClientAsync(new[] { "--json", "connect", "--timeout", "5000" }, clientHome).ConfigureAwait(false);
                     if (secondConnect.ExitCode != 0) throw new InvalidOperationException("Second background connect failed: " + secondConnect.StandardError + secondConnect.StandardOutput);
                     if (!secondConnect.StandardOutput.Contains("\"alreadyRunning\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Second connect did not detect existing worker: " + secondConnect.StandardOutput);
+                    if (!secondConnect.StandardOutput.Contains("\"listening\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Second connect did not report local dashboard listening: " + secondConnect.StandardOutput);
+                    if (!secondConnect.StandardOutput.Contains("http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Second connect did not include local dashboard URL: " + secondConnect.StandardOutput);
 
                     ClientCommandResult status = await RunXenoClientAsync(new[] { "--json", "status" }, clientHome).ConfigureAwait(false);
                     if (status.ExitCode != 0) throw new InvalidOperationException("Background status failed: " + status.StandardError + status.StandardOutput);
@@ -2550,6 +2567,16 @@ namespace Test.Shared
             start += marker.Length;
             int end = html.IndexOf("'", start, StringComparison.Ordinal);
             if (end <= start) throw new InvalidOperationException("Local dashboard token bootstrap value was not found.");
+            return html.Substring(start, end - start);
+        }
+
+        private static string ExtractHtmlAttribute(string html, string prefix, string suffix)
+        {
+            int start = html.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            if (start < 0) throw new InvalidOperationException("Expected HTML attribute prefix was not found: " + prefix);
+            start += prefix.Length;
+            int end = html.IndexOf(suffix, start, StringComparison.OrdinalIgnoreCase);
+            if (end < start) throw new InvalidOperationException("Expected HTML attribute suffix was not found: " + suffix);
             return html.Substring(start, end - start);
         }
 

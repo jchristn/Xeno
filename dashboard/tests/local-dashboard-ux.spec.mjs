@@ -105,7 +105,8 @@ test('local dashboard renders and follows interaction expectations', async ({ pa
   expect(consoleErrors).toEqual([]);
   await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
   await expect(page.locator('.activity-chart')).toBeVisible();
-  await expect(page.locator('.activity-chart rect')).toHaveCount(2);
+  await expect(page.locator('.activity-chart rect')).toHaveCount(4);
+  await expect(page.getByRole('button', { name: 'Last Hour' })).toBeVisible();
   await expect(page.locator('.topbar-server-url')).toContainText('http://127.0.0.1:9343');
 
   await page.getByTitle('Switch between light and dark dashboard themes without changing your account or server settings.').click();
@@ -133,6 +134,10 @@ test('local dashboard renders and follows interaction expectations', async ({ pa
   await expect(page.locator('h1', { hasText: 'Request History' })).toBeVisible();
   await page.getByText('req_local_1').click();
   await expect(page.getByRole('heading', { name: 'Request Details' })).toBeVisible();
+  await expect(page.locator('.modal-panel.request-details')).toBeVisible();
+  const requestDetailsBox = await page.locator('.modal-panel.request-details').boundingBox();
+  expect(requestDetailsBox.width).toBeGreaterThan(1200);
+  expect(requestDetailsBox.height).toBeGreaterThan(800);
   await expect(page.getByText('Request Headers')).toBeVisible();
   await expect(page.getByText('Response Body')).toBeVisible();
   await page.getByTitle('Close this modal without applying unsaved changes.').click();

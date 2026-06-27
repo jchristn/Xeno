@@ -1059,8 +1059,8 @@ namespace Xeno.Client
                 else
                 {
                     WriteInfo("Xeno client is already connected.");
-                    Console.WriteLine("  Process ID: " + existing.ProcessId);
-                    Console.WriteLine("  Log file:   " + DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
+                    PrintStartField("Process ID", existing.ProcessId == null ? "(none)" : existing.ProcessId.Value.ToString(CultureInfo.InvariantCulture));
+                    PrintStartField("Log file", DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(existing);
                 }
 
@@ -1074,7 +1074,7 @@ namespace Xeno.Client
             {
                 if (!process.Start()) throw new InvalidOperationException("Unable to start Xeno client background process.");
                 bool registered = await WaitForRegisteredStateAsync(process.Id, timeoutMs, token).ConfigureAwait(false);
-                ClientConnectionState state = ClientConnectionState.Load();
+                ClientConnectionState state = await WaitForLocalDashboardStateAsync(process.Id, settings, registered, token).ConfigureAwait(false);
                 if (_UseJson)
                 {
                     WriteJson(new
@@ -1090,15 +1090,15 @@ namespace Xeno.Client
                 else if (registered)
                 {
                     WriteSuccess("Xeno client connected in the background.");
-                    Console.WriteLine("  Process ID: " + process.Id);
-                    Console.WriteLine("  Log file:   " + DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                    PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
+                    PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
                 }
                 else
                 {
                     WriteError("Xeno client did not register within " + timeoutMs + "ms.");
-                    Console.WriteLine("  Process ID: " + process.Id);
-                    Console.WriteLine("  Log file:   " + DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                    PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
+                    PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
                     Console.WriteLine("  Last reason: " + DisplayValue(state.LastDisconnectReason, "(none)"));
                 }
@@ -1899,6 +1899,29 @@ namespace Xeno.Client
             return false;
         }
 
+        private static async Task<ClientConnectionState> WaitForLocalDashboardStateAsync(int processId, ClientSettings settings, bool registered, CancellationToken token)
+        {
+            ClientConnectionState state = ClientConnectionState.Load();
+            if (!settings.LocalDashboard.Enabled || !registered) return state;
+
+            DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
+            {
+                state = ClientConnectionState.Load();
+                if (state.ProcessId == processId
+                    && state.LocalDashboardEnabled
+                    && (state.LocalDashboardListening || !String.IsNullOrWhiteSpace(state.LocalDashboardLastError)))
+                {
+                    return state;
+                }
+
+                if (!IsProcessRunning(processId)) return state;
+                await Task.Delay(100, token).ConfigureAwait(false);
+            }
+
+            return ClientConnectionState.Load();
+        }
+
         private static async Task MonitorStopFileAsync(CancellationTokenSource target, CancellationToken token)
         {
             while (!token.IsCancellationRequested)
@@ -2307,10 +2330,15 @@ namespace Xeno.Client
 
         private static void PrintLocalDashboardAccess(ClientConnectionState state)
         {
-            if (!state.LocalDashboardEnabled) return;
+            if (!state.LocalDashboardEnabled)
+            {
+                PrintStartField("Local dashboard", "disabled");
+                return;
+            }
+
             if (state.LocalDashboardListening && !String.IsNullOrWhiteSpace(state.LocalDashboardUrl))
             {
-                Console.WriteLine("  Local dashboard: " + state.LocalDashboardUrl);
+                PrintStartField("Local dashboard", state.LocalDashboardUrl);
                 if (String.Equals(state.LocalDashboardHost, "0.0.0.0", StringComparison.OrdinalIgnoreCase))
                 {
                     Console.WriteLine("  Dashboard bind:  0.0.0.0 (may be reachable from other machines depending on firewall and network policy)");
@@ -2319,8 +2347,13 @@ namespace Xeno.Client
                 return;
             }
 
-            Console.WriteLine("  Local dashboard: enabled, not listening");
+            PrintStartField("Local dashboard", "enabled, not listening");
             if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Dashboard error: " + state.LocalDashboardLastError);
+        }
+
+        private static void PrintStartField(string label, string value)
+        {
+            Console.WriteLine("  " + label.PadRight(15) + " : " + value);
         }
 
         private static void PrintLocalDashboardStatus(ClientConnectionState connection, ClientSettings settings)

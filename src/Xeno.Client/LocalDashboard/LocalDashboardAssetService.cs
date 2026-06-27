@@ -20,8 +20,7 @@ namespace Xeno.Client.LocalDashboard
         {
             asset = new LocalDashboardAsset();
             string normalized = NormalizePath(path);
-            Assembly assembly = typeof(LocalDashboardAssetService).Assembly;
-            using (Stream? stream = assembly.GetManifestResourceStream("local-dashboard/" + normalized))
+            using (Stream? stream = GetResourceStream(normalized))
             {
                 if (stream == null) return false;
                 using (MemoryStream memory = new MemoryStream())
@@ -48,6 +47,28 @@ namespace Xeno.Client.LocalDashboard
             string normalized = (path ?? "/").TrimStart('/');
             if (String.IsNullOrWhiteSpace(normalized) || String.Equals(normalized, "index.html", StringComparison.OrdinalIgnoreCase)) return "index-local.html";
             return normalized.Replace('\\', '/');
+        }
+
+        private static Stream? GetResourceStream(string normalized)
+        {
+            Assembly assembly = typeof(LocalDashboardAssetService).Assembly;
+            string slashName = "local-dashboard/" + normalized;
+            Stream? stream = assembly.GetManifestResourceStream(slashName);
+            if (stream != null) return stream;
+
+            string backslashName = slashName.Replace('/', '\\');
+            stream = assembly.GetManifestResourceStream(backslashName);
+            if (stream != null) return stream;
+
+            foreach (string resourceName in assembly.GetManifestResourceNames())
+            {
+                if (String.Equals(resourceName.Replace('\\', '/'), slashName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return assembly.GetManifestResourceStream(resourceName);
+                }
+            }
+
+            return null;
         }
 
         private static string ContentType(string path)

@@ -484,6 +484,15 @@ textarea {
   text-decoration: none;
 }
 
+button.sidebar-link {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .sidebar-link.nested {
   margin-left: 18px;
   min-height: 34px;
@@ -668,6 +677,12 @@ html[data-theme='dark'] .primitive-list-item {
 .workspace {
   min-width: 0;
   padding: 22px 24px 34px;
+}
+
+.local-dashboard-shell .workspace {
+  display: grid;
+  align-content: start;
+  gap: 16px;
 }
 
 .view-stack {
@@ -1674,6 +1689,26 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel-soft);
   padding: 3px 5px;
   white-space: nowrap;
+}
+
+.json-preview {
+  width: 100%;
+  max-height: 520px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel-soft);
+  color: var(--color-text);
+  padding: 14px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.json-preview code {
+  font-family: inherit;
 }
 
 .json-block,

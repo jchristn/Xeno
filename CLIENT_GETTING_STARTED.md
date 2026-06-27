@@ -111,7 +111,7 @@ endpoints and model advertisements without opening `client.json`. The Requests
 page persists local request history in SQLite, including headers, bounded bodies,
 telemetry, and timeline data for requests handled by this client.
 
-Enable it in `~/.xeno/client.json`:
+The dashboard is enabled by default. The default settings in `~/.xeno/client.json` are:
 
 ```json
 {
@@ -154,13 +154,13 @@ These settings require restarting the background client:
 Start the client:
 
 ```powershell
-xeno connect
+xeno start
 ```
 
-When the local dashboard is enabled and listening, `xeno connect` prints:
+When the local dashboard is listening, `xeno start` and `xeno connect` print:
 
 ```text
-Local dashboard: http://127.0.0.1:9343
+Local dashboard : http://127.0.0.1:9343
 ```
 
 You can also inspect or open it later:
@@ -183,6 +183,8 @@ The local dashboard API uses a per-process local token injected into the page.
 Provider credentials, server secret keys, REST tokens, authorization headers,
 cookies, and credential-like headers are redacted from API responses and stored
 history.
+
+Set `LocalDashboard.Enabled` to `false` to disable the local dashboard.
 
 ## Point the Client at a Server
 

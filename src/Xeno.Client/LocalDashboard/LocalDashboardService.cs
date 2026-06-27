@@ -147,6 +147,19 @@ namespace Xeno.Client.LocalDashboard
                     return;
                 }
 
+                if (method == "GET" && IsRootAsset(path))
+                {
+                    if (LocalDashboardAssetService.TryGetAsset(path, _Token, out LocalDashboardAsset asset))
+                    {
+                        await SendAssetAsync(context, asset).ConfigureAwait(false);
+                        return;
+                    }
+
+                    context.Response.StatusCode = 404;
+                    await SendJsonAsync(context, new LocalDashboardErrorResponse { Error = "NotFound", Message = "Asset not found." }).ConfigureAwait(false);
+                    return;
+                }
+
                 if (method == "GET" && String.Equals(path, "/health", StringComparison.OrdinalIgnoreCase))
                 {
                     await SendJsonAsync(context, new LocalDashboardErrorResponse { Error = "Healthy", Message = "Xeno local dashboard is healthy." }).ConfigureAwait(false);
@@ -549,6 +562,14 @@ namespace Xeno.Client.LocalDashboard
             if (!_Settings.LocalDashboard.RequireLocalToken) return;
             string header = context.Request.Headers.Get("X-Xeno-Local-Token") ?? string.Empty;
             if (!String.Equals(header, _Token, StringComparison.Ordinal)) throw new UnauthorizedAccessException("Local dashboard token is missing or invalid.");
+        }
+
+        private static bool IsRootAsset(string path)
+        {
+            return String.Equals(path, "/logo.png", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(path, "/logo.ico", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(path, "/favicon.ico", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(path, "/config.js", StringComparison.OrdinalIgnoreCase);
         }
 
         private static T ReadJson<T>(HttpContextBase context) where T : new()
