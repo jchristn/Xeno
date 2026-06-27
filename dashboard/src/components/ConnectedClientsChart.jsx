@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 const sampleStorageKey = 'xeno.connectedClients.samples';
+const refreshIntervals = [0, 15, 30, 60, 180, 300];
 const ranges = [
   { key: 'lastHour', durationMs: 60 * 60 * 1000, buckets: 60 },
   { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, buckets: 96 },
@@ -16,6 +18,7 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   const [chartWidth, setChartWidth] = useState(760);
   const [hovered, setHovered] = useState(null);
   const [range, setRange] = useState('lastDay');
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const [samples, setSamples] = useState(loadSamples);
   const selectedRange = ranges.find((item) => item.key === range) || ranges[1];
   const now = Date.now();
@@ -30,11 +33,12 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   }, [onRefresh]);
 
   useEffect(() => {
+    if (!autoRefreshSeconds || !refreshRef.current) return undefined;
     const interval = window.setInterval(() => {
       refreshRef.current?.();
-    }, 15000);
+    }, autoRefreshSeconds * 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [autoRefreshSeconds]);
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -91,6 +95,22 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
             {t(item.key)}
           </button>
         ))}
+        <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
+          <span>{t('autoRefresh')}</span>
+          <select
+            disabled={!onRefresh}
+            value={autoRefreshSeconds}
+            onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
+            title={t('tooltipAutoRefresh')}
+          >
+            {refreshIntervals.map((seconds) => (
+              <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
+            ))}
+          </select>
+          <button className="pagination-button" disabled={!onRefresh} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
+            <RefreshCw size={14} />
+          </button>
+        </label>
       </div>
       <div className="chart-canvas" ref={canvasRef}>
         <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={t('connectedClients')}>

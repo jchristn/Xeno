@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+const refreshIntervals = [0, 15, 30, 60, 180, 300];
 const ranges = [
   { key: 'lastHour', buckets: 60 },
   { key: 'lastDay', buckets: 96 },
@@ -8,12 +10,14 @@ const ranges = [
   { key: 'lastMonth', buckets: 90 }
 ];
 
-export default function ActivityChart({ onRangeChange, range, showControls = true, summary }) {
+export default function ActivityChart({ onRangeChange, onRefresh, range, showControls = true, summary }) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
+  const refreshRef = useRef(onRefresh);
   const [chartWidth, setChartWidth] = useState(760);
   const [localRange, setLocalRange] = useState('lastDay');
   const [hovered, setHovered] = useState(null);
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const activeRange = range || localRange;
   const selectedRange = ranges.find((item) => item.key === activeRange) || ranges[1];
   const buckets = useMemo(() => buildBuckets(summary?.buckets, selectedRange), [summary?.buckets, selectedRange]);
@@ -23,6 +27,18 @@ export default function ActivityChart({ onRangeChange, range, showControls = tru
     if (!range) setLocalRange(nextRange);
     onRangeChange?.(nextRange);
   }
+
+  useEffect(() => {
+    refreshRef.current = onRefresh;
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (!autoRefreshSeconds || !refreshRef.current) return undefined;
+    const interval = window.setInterval(() => {
+      refreshRef.current?.();
+    }, autoRefreshSeconds * 1000);
+    return () => window.clearInterval(interval);
+  }, [autoRefreshSeconds]);
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -55,19 +71,26 @@ export default function ActivityChart({ onRangeChange, range, showControls = tru
 
   return (
     <div className="activity-chart-panel">
-      {showControls ? (
+      {showControls || onRefresh ? (
         <div className="chart-controls" aria-label={t('chartRange')}>
-          {ranges.map((item) => (
-            <button
-              className={item.key === activeRange ? 'active' : ''}
-              key={item.key}
-              onClick={() => updateRange(item.key)}
-              title={t('tooltipChartRangeOption', { range: t(item.key) })}
-              type="button"
-            >
-              {t(item.key)}
-            </button>
-          ))}
+          {showControls ? ranges.map((item) => (
+              <button
+                className={item.key === activeRange ? 'active' : ''}
+                key={item.key}
+                onClick={() => updateRange(item.key)}
+                title={t('tooltipChartRangeOption', { range: t(item.key) })}
+                type="button"
+              >
+                {t(item.key)}
+              </button>
+            )) : null}
+          <ChartRefreshControls
+            autoRefreshSeconds={autoRefreshSeconds}
+            disabled={!onRefresh}
+            onRefresh={onRefresh}
+            setAutoRefreshSeconds={setAutoRefreshSeconds}
+            t={t}
+          />
         </div>
       ) : null}
       <div className="chart-canvas" ref={canvasRef}>
@@ -124,6 +147,28 @@ export default function ActivityChart({ onRangeChange, range, showControls = tru
         <span><i className="failed-swatch" />{t('failed')}</span>
       </div>
     </div>
+  );
+}
+
+function ChartRefreshControls({ autoRefreshSeconds, disabled, onRefresh, setAutoRefreshSeconds, t }) {
+  if (!onRefresh) return null;
+  return (
+    <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
+      <span>{t('autoRefresh')}</span>
+      <select
+        disabled={disabled}
+        value={autoRefreshSeconds}
+        onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
+        title={t('tooltipAutoRefresh')}
+      >
+        {refreshIntervals.map((seconds) => (
+          <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
+        ))}
+      </select>
+      <button className="pagination-button" disabled={disabled} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
+        <RefreshCw size={14} />
+      </button>
+    </label>
   );
 }
 

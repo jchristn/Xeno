@@ -577,7 +577,7 @@ function HomeView() {
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart onRangeChange={updateActivityRange} range={activityRange} summary={summary.data} />
+        <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
       </Panel>
 
       <Panel
@@ -643,7 +643,7 @@ function RequestHistoryView() {
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart onRangeChange={updateActivityRange} range={activityRange} summary={summary.data} />
+        <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
       </Panel>
       <DataTable
         columns={['statusCode', 'method', 'path', 'model', 'selectedClientId', 'durationMs', 'createdUtc']}
@@ -1279,7 +1279,7 @@ function AnalyticsView() {
         actions={<IconButton iconOnly onClick={refreshAnalytics} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         title={t('requestActivity')}
       >
-        <ActivityChart onRangeChange={updateAnalyticsRange} range={analyticsRange} showControls={false} summary={summary.data} />
+        <ActivityChart onRangeChange={updateAnalyticsRange} onRefresh={refreshAnalytics} range={analyticsRange} showControls={false} summary={summary.data} />
       </Panel>
       <div className="workspace-grid">
         <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />

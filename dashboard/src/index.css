@@ -683,6 +683,7 @@ html[data-theme='dark'] .primitive-list-item {
   display: grid;
   align-content: start;
   gap: 16px;
+  min-height: calc(100vh - 76px);
 }
 
 .view-stack {
@@ -1114,6 +1115,23 @@ html[data-theme='dark'] .primitive-list-item {
   overflow: hidden;
 }
 
+.local-dashboard-shell .client-logs-card {
+  min-height: calc(100vh - 120px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.local-dashboard-shell .client-logs-card .workspace-card-body {
+  min-height: 0;
+  display: flex;
+}
+
+.local-dashboard-shell .client-logs-card .json-preview {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
+}
+
 .chart-panel-card {
   width: 100%;
 }
@@ -1211,6 +1229,22 @@ html[data-theme='dark'] .primitive-list-item {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.chart-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chart-refresh select {
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 5px 8px;
 }
 
 .chart-controls.split {

@@ -69,6 +69,8 @@ const tooltipBackfillSelector = [
   '[role="button"]:not([title])'
 ].join(', ');
 
+const chartRefreshIntervals = [0, 15, 30, 60, 180, 300];
+
 export default function LocalDashboardApp() {
   const { t } = useTranslation();
   const [page, setPage] = useState('home');
@@ -306,7 +308,7 @@ function Home({ range, refresh, setRange, state, statistics, summary }) {
         <Metric icon={<Gauge size={18} />} label={t('failures')} tone={statistics?.failures ? 'danger' : 'neutral'} value={statistics?.failures || 0} />
       </div>
       <Panel className="chart-panel-card" title={t('requestsOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
-        <ActivityChart onRangeChange={setRange} range={range} summary={{ buckets: summary }} />
+        <ActivityChart onRangeChange={setRange} onRefresh={refresh} range={range} summary={{ buckets: summary }} />
       </Panel>
       <Panel title={t('connection')}>
         <RecordTable fields={['clientId', 'tenantId', 'webSocketUrl', 'lastDisconnectReason']} record={state?.connection || {}} />
@@ -436,7 +438,7 @@ function Requests({ range, refresh, requests, setModal, setRange, summary }) {
   return (
     <>
       <Panel className="chart-panel-card" title={t('requestsOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
-        <ActivityChart onRangeChange={setRange} range={range} summary={{ buckets: summary }} />
+        <ActivityChart onRangeChange={setRange} onRefresh={refresh} range={range} summary={{ buckets: summary }} />
       </Panel>
       <DataTable
       actions={(row) => [
@@ -480,11 +482,10 @@ function Telemetry({ latest, metric, range, refresh, rollups, setMetric, setRang
           <div className="chart-action-row">
             <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
             <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
-            <button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>
           </div>
         )}
       >
-        <MetricChart onRangeChange={setRange} range={range} rollups={rollups} />
+        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} />
       </Panel>
       <Panel title={t('telemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
         <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
@@ -547,8 +548,8 @@ function TelemetryAnalytics({ metric, range, refresh, rollups, samples, setMetri
         <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
         <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
       </div>
-      <Panel className="chart-panel-card" title={t('telemetryOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
-        <MetricChart onRangeChange={setRange} range={range} rollups={rollups} showControls={false} />
+      <Panel className="chart-panel-card" title={t('telemetryOverTime')}>
+        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
       </Panel>
       <DataTable
         actions={(row) => [
@@ -581,6 +582,7 @@ function Logs({ logSeverity, logTail, logs, setLogSeverity, setLogTail }) {
   const { t } = useTranslation();
   return (
     <Panel
+      className="client-logs-card"
       title={t('clientLogs')}
       actions={(
         <>
@@ -947,10 +949,12 @@ function TelemetryDetails({ detail }) {
   );
 }
 
-function MetricChart({ onRangeChange, range, rollups, showControls = true }) {
+function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = true }) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
+  const refreshRef = useRef(onRefresh);
   const [chartWidth, setChartWidth] = useState(760);
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const [hovered, setHovered] = useState(null);
   const buckets = useMemo(() => buildMetricBuckets(rollups, range), [range, rollups]);
   const max = Math.max(1, ...buckets.map((bucket) => Number(bucket.maximum ?? bucket.average ?? 0)));
@@ -968,6 +972,18 @@ function MetricChart({ onRangeChange, range, rollups, showControls = true }) {
   const yTicks = buildMetricYAxisTicks(max);
 
   useEffect(() => {
+    refreshRef.current = onRefresh;
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (!autoRefreshSeconds || !refreshRef.current) return undefined;
+    const interval = window.setInterval(() => {
+      refreshRef.current?.();
+    }, autoRefreshSeconds * 1000);
+    return () => window.clearInterval(interval);
+  }, [autoRefreshSeconds]);
+
+  useEffect(() => {
     const element = canvasRef.current;
     if (!element) return undefined;
 
@@ -983,11 +999,18 @@ function MetricChart({ onRangeChange, range, rollups, showControls = true }) {
 
   return (
     <div className="activity-chart-panel">
-      {showControls ? (
+      {showControls || onRefresh ? (
         <div className="chart-controls" aria-label={t('chartRange')}>
-          {['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
+          {showControls ? ['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
             <button className={item === range ? 'active' : ''} key={item} onClick={() => onRangeChange?.(item)} title={t('tooltipChartRangeOption', { range: t(item) })} type="button">{t(item)}</button>
-          ))}
+          )) : null}
+          <MetricChartRefresh
+            autoRefreshSeconds={autoRefreshSeconds}
+            disabled={!onRefresh}
+            onRefresh={onRefresh}
+            setAutoRefreshSeconds={setAutoRefreshSeconds}
+            t={t}
+          />
         </div>
       ) : null}
       <div className="chart-canvas" ref={canvasRef}>
@@ -1026,6 +1049,28 @@ function MetricChart({ onRangeChange, range, rollups, showControls = true }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function MetricChartRefresh({ autoRefreshSeconds, disabled, onRefresh, setAutoRefreshSeconds, t }) {
+  if (!onRefresh) return null;
+  return (
+    <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
+      <span>{t('autoRefresh')}</span>
+      <select
+        disabled={disabled}
+        value={autoRefreshSeconds}
+        onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
+        title={t('tooltipAutoRefresh')}
+      >
+        {chartRefreshIntervals.map((seconds) => (
+          <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
+        ))}
+      </select>
+      <button className="pagination-button" disabled={disabled} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
+        <RefreshCw size={14} />
+      </button>
+    </label>
   );
 }
 
