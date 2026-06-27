@@ -19,3 +19,4 @@
 - Updated markdown documentation and Postman coverage for current Xeno Client commands, local dashboard behavior, routing policies, request history, and SDK scope.
 - Added Xeno Client local CPU, memory, disk, and GPU telemetry collection with SQLite persistence, retention pruning, local dashboard Telemetry and Telemetry Analytics pages, local telemetry API routes, settings controls, and Touchstone coverage for telemetry defaults and clamps.
 - Improved server and client dashboard chart density, axis label limits, tooltip coverage, action menu viewport positioning, and local telemetry/request-history layout.
+- Fixed API Explorer non-streamed response timing so Time To First Byte reflects response header arrival instead of showing zero/null.

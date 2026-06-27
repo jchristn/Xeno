@@ -75,6 +75,7 @@ export default class ApiClient {
 
     const startedAt = performance.now();
     const response = await fetch(`${this.baseUrl}${path}`, options);
+    const headersReceivedAt = performance.now();
     const headers = {};
     response.headers.forEach((value, key) => { headers[key] = value; });
     if (isAuthenticationFailure(response)) {
@@ -124,7 +125,7 @@ export default class ApiClient {
       streamType: 'standard',
       timing: {
         requestTimeMs: endedAt - startedAt,
-        timeToFirstByteMs: null,
+        timeToFirstByteMs: headersReceivedAt - startedAt,
         totalTimeMs: endedAt - startedAt
       }
     };
