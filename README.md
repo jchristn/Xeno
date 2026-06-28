@@ -57,6 +57,8 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 
 ## How It Works
 
+![Xeno platform architecture](assets/diagram.png)
+
 1. The Xeno server starts a REST API, OpenAPI/Swagger endpoint, dashboard-facing management API, database layer, and WebSocket endpoint.
 2. A user logs in through the `xeno` client. The password is used only to bootstrap a tenant-bound client credential.
 3. The client stores an access key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
@@ -358,6 +360,30 @@ The dashboard is the primary administration surface for Xeno. It includes:
 - Settings management for server configuration.
 - Analytics by time window, path, model, and request behavior.
 - Integrated API Explorer with editable JSON request bodies, response headers, streaming previews, and copy-to-clipboard controls.
+
+### Dashboard Screenshot Carousel
+
+Use the linked slides below to review the primary server-dashboard surfaces.
+
+<p align="center">
+  <a href="assets/ss1.png"><img src="assets/ss1.png" alt="Xeno dashboard screenshot 1" width="760"></a>
+</p>
+
+<p align="center">
+  <a href="assets/ss1.png">Slide 1</a> ·
+  <a href="assets/ss2.png">Slide 2</a> ·
+  <a href="assets/ss3.png">Slide 3</a> ·
+  <a href="assets/ss4.png">Slide 4</a> ·
+  <a href="assets/ss5.png">Slide 5</a>
+</p>
+
+<p align="center">
+  <a href="assets/ss1.png"><img src="assets/ss1.png" alt="Xeno dashboard screenshot 1 thumbnail" width="18%"></a>
+  <a href="assets/ss2.png"><img src="assets/ss2.png" alt="Xeno dashboard screenshot 2 thumbnail" width="18%"></a>
+  <a href="assets/ss3.png"><img src="assets/ss3.png" alt="Xeno dashboard screenshot 3 thumbnail" width="18%"></a>
+  <a href="assets/ss4.png"><img src="assets/ss4.png" alt="Xeno dashboard screenshot 4 thumbnail" width="18%"></a>
+  <a href="assets/ss5.png"><img src="assets/ss5.png" alt="Xeno dashboard screenshot 5 thumbnail" width="18%"></a>
+</p>
 
 ## Configuration
 
