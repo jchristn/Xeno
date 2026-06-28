@@ -262,17 +262,46 @@ inventory, and safe response-header metadata.
 
 ## Calling The API
 
+The default alpha Docker and source configs set `Rest.RequireAuthentication` to
+`false` for local development, so anonymous calls may work until you enable
+authentication. In any shared, hosted, or production-like deployment, set
+`Rest.RequireAuthentication` to `true` and call the API with a bearer token.
+
+Create a bearer token from a tenant-bound credential:
+
+```bash
+curl http://localhost:9000/v1.0/api/auth/token \
+  -H "Content-Type: application/json" \
+  -H "x-tenant-guid: ten_default" \
+  -d '{
+    "accessKey": "default",
+    "secretKey": "default"
+  }'
+```
+
+The response contains `Token`, `TokenType`, `TenantId`, `SessionId`, and
+`ExpiresUtc`. Use the returned `Token` value in `Authorization: Bearer ...`.
+The examples below assume:
+
+```bash
+TOKEN="paste-token-from-auth-token-response"
+```
+
 List models:
 
 ```bash
-curl http://localhost:9000/v1/models
+curl http://localhost:9000/v1/models \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "x-tenant-guid: ten_default"
 ```
 
 Send a chat completion:
 
 ```bash
 curl http://localhost:9000/v1/chat/completions \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
+  -H "x-tenant-guid: ten_default" \
   -d '{
     "model": "llama3.2:latest",
     "messages": [
@@ -290,7 +319,11 @@ curl http://localhost:9000/v1/chat/completions \
   }'
 ```
 
-Depending on the endpoint and auth configuration, management APIs may require a bearer token. Use the dashboard, Swagger UI, Postman collection, or SDK console apps to explore the full API surface.
+The same bearer token is used for management APIs. Client WebSocket
+connections are different: they authenticate with `x-access-key`,
+`x-secret-key`, and `x-tenant-guid`, not bearer tokens. Use the dashboard,
+Swagger UI, Postman collection, or SDK console apps to explore the full API
+surface.
 
 ## Dashboard
 
