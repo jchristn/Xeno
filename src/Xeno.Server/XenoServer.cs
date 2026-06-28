@@ -3319,7 +3319,7 @@ namespace Xeno.Server
 
             foreach (KeyValuePair<string, string> forwarded in forwardedHeaders)
             {
-                if (!headers.ContainsKey(forwarded.Key)) headers[forwarded.Key] = forwarded.Value;
+                headers[forwarded.Key] = forwarded.Value;
             }
 
             return headers;
@@ -3459,13 +3459,6 @@ namespace Xeno.Server
 
         private static string GetRequestorIp(HttpContextBase context, RequestContext requestContext)
         {
-            string existingForwardedFor = FirstNonEmpty(context.Request.Headers.Get("X-Forwarded-For"), context.Request.Headers.Get("x-forwarded-for"));
-            if (!String.IsNullOrWhiteSpace(existingForwardedFor))
-            {
-                string first = existingForwardedFor.Split(',')[0].Trim();
-                if (!String.IsNullOrWhiteSpace(first)) return SanitizeHeaderValue(first);
-            }
-
             return SanitizeHeaderValue(requestContext.SourceIp);
         }
 

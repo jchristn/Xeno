@@ -53,10 +53,12 @@ namespace Xeno.Client.LocalDashboard
             return normalized.Contains("authorization", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("api-key", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("x-api-key", StringComparison.OrdinalIgnoreCase)
+                || normalized.Contains("access-key", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("secret", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("token", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("cookie", StringComparison.OrdinalIgnoreCase)
-                || normalized.Contains("credential", StringComparison.OrdinalIgnoreCase);
+                || normalized.Contains("credential", StringComparison.OrdinalIgnoreCase)
+                || normalized.EndsWith("-key", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string CanonicalizeHeaderName(string name)

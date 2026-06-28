@@ -83,6 +83,18 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "DefaultCorsHeadersExcludeLegacySecretKey",
+                        displayName: "Default CORS headers exclude legacy secret-key authentication",
+                        executeAsync: delegate
+                        {
+                            XenoSettings settings = new XenoSettings();
+                            if (!settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-access-key", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers do not allow x-access-key.");
+                            if (!settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-token", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers do not allow x-token.");
+                            if (settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-secret-key", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers still allow x-secret-key.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "GeneratedIdsAreCompactAndSortable",
                         displayName: "Generated IDs are compact and k-sortable",
                         executeAsync: delegate
@@ -474,10 +486,18 @@ namespace Test.Shared
                                 Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                                 {
                                     ["Authorization"] = "Bearer secret",
+                                    ["Cookie"] = "session=secret",
+                                    ["X-Api-Key"] = "provider-secret",
+                                    ["x-access-key"] = "tenant-access-key",
+                                    ["X-Provider-Credential"] = "provider-credential",
                                     ["X-Test"] = "visible"
                                 };
                                 Dictionary<string, string> redacted = LocalSecretRedactor.RedactHeaders(headers);
                                 if (!String.Equals(redacted["Authorization"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Authorization header was not redacted.");
+                                if (!String.Equals(redacted["Cookie"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Cookie header was not redacted.");
+                                if (!String.Equals(redacted["X-Api-Key"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("API key header was not redacted.");
+                                if (!String.Equals(redacted["x-access-key"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Access key header was not redacted.");
+                                if (!String.Equals(redacted["X-Provider-Credential"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Credential header was not redacted.");
                                 if (!String.Equals(redacted["X-Test"], "visible", StringComparison.Ordinal)) throw new InvalidOperationException("Non-sensitive header should not be redacted.");
                                 bool rejectedTable = false;
                                 try
@@ -1675,6 +1695,27 @@ namespace Test.Shared
                             int otherCount = platform.ModelDefinitions.Count(item => item.TenantId == "ten_other");
                             if (defaultCount < 1) throw new InvalidOperationException("Default tenant models missing.");
                             if (otherCount != 0) throw new InvalidOperationException("Unexpected cross-tenant models.");
+                        }),
+                    new TestCaseDescriptor(
+                        "TenantIsolation",
+                        "TenantScopedResourceMatrix",
+                        "Tenant scoped resources do not leak across clients, credentials, roles, permissions, audit, or history",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            Tenant otherTenant = new Tenant { Id = "ten_security_matrix", Name = "Security Matrix", Active = true };
+                            platform.Tenants.Add(otherTenant);
+                            platform.EnsureTenantDefaults(otherTenant.Id);
+                            platform.Clients.Add(new XenoClientRecord { TenantId = otherTenant.Id, Name = "other-tenant-client", Connected = true });
+                            platform.Credentials.Add(new Credential { TenantId = otherTenant.Id, UserId = "usr_other", AccessKey = "other-access", Active = true });
+                            platform.RequestHistory.Add(new RequestHistoryEntry { TenantId = otherTenant.Id, Path = "/v1/chat/completions", Method = "POST", RequestorTenantId = otherTenant.Id });
+                            platform.AuditRecords.Add(new AuditRecord { TenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Allowed = false, StatusCode = 403 });
+
+                            if (platform.Clients.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.Name, "other-tenant-client", StringComparison.Ordinal))) throw new InvalidOperationException("Client inventory leaked across tenants.");
+                            if (platform.Credentials.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.AccessKey, "other-access", StringComparison.Ordinal))) throw new InvalidOperationException("Credential leaked across tenants.");
+                            if (platform.RequestHistory.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.RequestorTenantId, otherTenant.Id, StringComparison.Ordinal))) throw new InvalidOperationException("Request history leaked across tenants.");
+                            if (platform.AuditRecords.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.ResourceType, "Users", StringComparison.Ordinal) && item.StatusCode == 403)) throw new InvalidOperationException("Audit record leaked across tenants.");
                         })
                 });
         }
@@ -1749,6 +1790,11 @@ namespace Test.Shared
                         "SecurityManagementContracts",
                         "Security-sensitive management and OpenAI routes enforce admin flags, tenant fences, RBAC, and authentication",
                         executeAsync: delegate { return RunSecurityManagementContractsAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "CredentialLifecycleSecurityContracts",
+                        "Credential lifecycle rejects secret-key exchange, tenant mismatch, disabled credentials, and stale sessions",
+                        executeAsync: delegate { return RunCredentialLifecycleSecurityContractsAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
                         "AuthRateLimitContracts",
@@ -2012,6 +2058,122 @@ namespace Test.Shared
                             {
                                 if ((int)noAccessModels.StatusCode != 403) throw new InvalidOperationException("User without inference permission should get 403 from OpenAI model list.");
                             }
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunCredentialLifecycleSecurityContractsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-credential-lifecycle-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+
+                    using (HttpClient adminClient = new HttpClient())
+                    {
+                        await AuthenticateSeedAdminAsync(adminClient, baseUrl).ConfigureAwait(false);
+                        string tenantBId;
+                        using (HttpResponseMessage createTenantB = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/tenants", JsonUtil.Serialize(new { name = "Credential Tenant B", active = true })).ConfigureAwait(false))
+                        {
+                            string tenantBJson = await createTenantB.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createTenantB.IsSuccessStatusCode) throw new InvalidOperationException("System admin could not create credential tenant B: " + tenantBJson);
+                            tenantBId = FirstRecordId("[" + tenantBJson + "]");
+                        }
+
+                        string credentialId;
+                        using (HttpResponseMessage createCredential = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/credentials", JsonUtil.Serialize(new
+                        {
+                            accessKey = "lifecycle-access",
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string createCredentialJson = await createCredential.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createCredential.IsSuccessStatusCode) throw new InvalidOperationException("Credential create failed: " + createCredentialJson);
+                            if (createCredentialJson.Contains("secretKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Credential create exposed secret-key material.");
+                            credentialId = FirstRecordId("[" + createCredentialJson + "]");
+                        }
+
+                        using (HttpResponseMessage secretExchange = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"lifecycle-access\",\"secretKey\":\"should-not-be-sent\"}").ConfigureAwait(false))
+                        {
+                            if ((int)secretExchange.StatusCode != 401) throw new InvalidOperationException("Credential token exchange accepted secret-key material: " + (int)secretExchange.StatusCode);
+                        }
+
+                        using (HttpClient mismatchClient = new HttpClient())
+                        {
+                            mismatchClient.DefaultRequestHeaders.Add("x-tenant-guid", tenantBId);
+                            using (HttpResponseMessage mismatchToken = await PostJsonAsync(mismatchClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"lifecycle-access\"}").ConfigureAwait(false))
+                            {
+                                if ((int)mismatchToken.StatusCode != 401) throw new InvalidOperationException("Credential token exchange accepted the wrong tenant: " + (int)mismatchToken.StatusCode);
+                            }
+                        }
+
+                        AuthTokenResult issuedToken;
+                        using (HttpResponseMessage tokenResponse = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"lifecycle-access\"}").ConfigureAwait(false))
+                        {
+                            string tokenJson = await tokenResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tokenResponse.IsSuccessStatusCode) throw new InvalidOperationException("Credential token exchange failed: " + tokenJson);
+                            issuedToken = DeserializeRequired<AuthTokenResult>(tokenJson);
+                            if (String.IsNullOrWhiteSpace(issuedToken.Token)) throw new InvalidOperationException("Credential token exchange did not return a bearer token.");
+                        }
+
+                        using (HttpResponseMessage disableCredential = await PutJsonAsync(adminClient, baseUrl + "/v1.0/api/credentials/" + Uri.EscapeDataString(credentialId), JsonUtil.Serialize(new
+                        {
+                            active = false
+                        })).ConfigureAwait(false))
+                        {
+                            string disableJson = await disableCredential.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!disableCredential.IsSuccessStatusCode) throw new InvalidOperationException("Credential disable failed: " + disableJson);
+                        }
+
+                        using (HttpResponseMessage disabledToken = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"lifecycle-access\"}").ConfigureAwait(false))
+                        {
+                            if ((int)disabledToken.StatusCode != 401) throw new InvalidOperationException("Disabled credential was accepted for token exchange: " + (int)disabledToken.StatusCode);
+                        }
+
+                        using (HttpClient staleSessionClient = new HttpClient())
+                        {
+                            ApplyBearerHeaders(staleSessionClient, issuedToken.TenantId, issuedToken.Token);
+                            using (HttpResponseMessage staleDetails = await staleSessionClient.GetAsync(baseUrl + "/v1.0/api/auth/token/details").ConfigureAwait(false))
+                            {
+                                if ((int)staleDetails.StatusCode != 401) throw new InvalidOperationException("Bearer session backed by disabled credential still validated: " + (int)staleDetails.StatusCode);
+                            }
+                        }
+
+                        using (HttpResponseMessage deleteCredential = await adminClient.DeleteAsync(baseUrl + "/v1.0/api/credentials/" + Uri.EscapeDataString(credentialId)).ConfigureAwait(false))
+                        {
+                            if (!deleteCredential.IsSuccessStatusCode) throw new InvalidOperationException("Credential delete failed: " + (int)deleteCredential.StatusCode);
+                        }
+
+                        using (HttpResponseMessage deletedToken = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"lifecycle-access\"}").ConfigureAwait(false))
+                        {
+                            if ((int)deletedToken.StatusCode != 401) throw new InvalidOperationException("Deleted credential was accepted for token exchange: " + (int)deletedToken.StatusCode);
                         }
                     }
                 }
@@ -2875,11 +3037,18 @@ namespace Test.Shared
                         using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/v1/chat/completions"))
                         {
                             await AuthenticateSeedAdminAsync(httpClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
+                            request.Headers.Add("X-Forwarded-For", "203.0.113.66");
+                            request.Headers.Add("X-Xeno-Requestor-IP", "198.51.100.77");
+                            request.Headers.Add("X-Xeno-Tenant-ID", "ten_spoofed");
+                            request.Headers.Add("X-Xeno-Request-ID", "req_spoofed");
+                            request.Headers.Add("X-Api-Key", "provider-secret");
+                            request.Headers.Add("x-access-key", "caller-access-key");
                             request.Content = new StringContent(
                                 "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
                                 Encoding.UTF8,
                                 "application/json");
 
+                            string historyId = String.Empty;
                             using (HttpResponseMessage response = await httpClient.SendAsync(request).ConfigureAwait(false))
                             {
                                 string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -2901,6 +3070,20 @@ namespace Test.Shared
                                 if (HeaderLong(response, "X-Xeno-Request-Duration-Ms") < 0) throw new InvalidOperationException("Relay response included invalid request duration header.");
                                 string timeline = HeaderValue(response, "X-Xeno-Routing-Timeline");
                                 if (!timeline.Contains("ClientSelection", StringComparison.Ordinal) || !timeline.Contains("ClientResponse", StringComparison.Ordinal)) throw new InvalidOperationException("Relay response did not include routing timeline header.");
+                                historyId = HeaderValue(response, "X-Xeno-Request-History-ID");
+                            }
+
+                            using (HttpResponseMessage historyResponse = await httpClient.GetAsync("http://127.0.0.1:" + port + "/api/v1/requesthistory/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
+                            {
+                                string historyJson = await historyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!historyResponse.IsSuccessStatusCode) throw new InvalidOperationException("Request history lookup failed: " + historyJson);
+                                RequestHistoryEntry history = DeserializeRequired<RequestHistoryEntry>(historyJson);
+                                if (!String.Equals(history.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Request history accepted spoofed tenant ID.");
+                                if (String.Equals(history.SourceIp, "203.0.113.66", StringComparison.Ordinal) || String.Equals(history.SourceIp, "198.51.100.77", StringComparison.Ordinal)) throw new InvalidOperationException("Request history accepted spoofed source IP.");
+                                if (!String.Equals(history.RequestHeaders["X-Api-Key"], "(redacted)", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not redact X-Api-Key.");
+                                if (!String.Equals(history.RequestHeaders["x-access-key"], "(redacted)", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not redact x-access-key.");
+                                if (history.RequestHeaders.TryGetValue("X-Xeno-Tenant-ID", out string? tenantHeader) && String.Equals(tenantHeader, "ten_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Request history retained spoofed Xeno tenant header.");
+                                if (history.RequestHeaders.TryGetValue("X-Xeno-Request-ID", out string? requestIdHeader) && String.Equals(requestIdHeader, "req_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Request history retained spoofed Xeno request ID.");
                             }
                         }
 
@@ -2979,6 +3162,31 @@ namespace Test.Shared
                         if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase))
                         {
                             throw new InvalidOperationException("Bearer-authenticated WebSocket was not rejected: " + message);
+                        }
+                    }
+
+                    using (ClientWebSocket secretSocket = new ClientWebSocket())
+                    {
+                        secretSocket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
+                        secretSocket.Options.SetRequestHeader("x-access-key", "default");
+                        secretSocket.Options.SetRequestHeader("x-secret-key", "legacy-secret");
+                        await secretSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? message = await ReceiveWebSocketTextAsync(secretSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("Secret-key WebSocket authentication was not rejected: " + message);
+                        }
+                    }
+
+                    using (ClientWebSocket wrongTenantSocket = new ClientWebSocket())
+                    {
+                        wrongTenantSocket.Options.SetRequestHeader("x-tenant-guid", "ten_wrong");
+                        wrongTenantSocket.Options.SetRequestHeader("x-access-key", "default");
+                        await wrongTenantSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? message = await ReceiveWebSocketTextAsync(wrongTenantSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("Wrong-tenant WebSocket credential was not rejected: " + message);
                         }
                     }
 
@@ -3194,6 +3402,7 @@ namespace Test.Shared
                 string requestId = String.IsNullOrWhiteSpace(serverRequest.RequestId) ? Guid.NewGuid().ToString("N") : serverRequest.RequestId;
                 string requestorIp = serverRequest.RequestorIp ?? String.Empty;
                 if (String.IsNullOrWhiteSpace(requestorIp)) throw new InvalidOperationException("Server request did not include requestorIp.");
+                if (String.Equals(requestorIp, "203.0.113.66", StringComparison.Ordinal) || String.Equals(requestorIp, "198.51.100.77", StringComparison.Ordinal)) throw new InvalidOperationException("Server request accepted a spoofed requestor IP.");
                 if (!String.Equals(serverRequest.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Server request did not include requestor tenant ID.");
                 if (!String.Equals(serverRequest.RequestorPrincipalType, PrincipalTypeEnum.User.ToString(), StringComparison.Ordinal)) throw new InvalidOperationException("Server request did not resolve requestor principal type.");
                 if (String.IsNullOrWhiteSpace(serverRequest.RequestorPrincipalId)) throw new InvalidOperationException("Server request did not include requestor principal ID.");
@@ -3206,6 +3415,8 @@ namespace Test.Shared
                 if (realIp != requestorIp) throw new InvalidOperationException("X-Real-IP did not match requestor IP.");
                 if (xenoRequestorIp != requestorIp) throw new InvalidOperationException("X-Xeno-Requestor-IP did not match requestor IP.");
                 if (xenoRequestId != requestId) throw new InvalidOperationException("Forwarded request ID did not match server request ID.");
+                if (headers.TryGetValue("X-Xeno-Tenant-ID", out string? forwardedTenantId) && !String.Equals(forwardedTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Server request forwarded a spoofed Xeno tenant ID.");
+                if (String.Equals(xenoRequestId, "req_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Server request forwarded a spoofed Xeno request ID.");
                 if (serverRequest.Stream)
                     {
                         string first = "data: {\"choices\":[{\"delta\":{\"content\":\"stream-\"}}]}\n\n";
@@ -3408,13 +3619,18 @@ namespace Test.Shared
                 string loginJson = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                 if (!loginResponse.IsSuccessStatusCode) throw new InvalidOperationException("Authentication failed for " + email + ": " + loginJson);
                 AuthDashboardLoginResponse login = DeserializeRequired<AuthDashboardLoginResponse>(loginJson);
-                httpClient.DefaultRequestHeaders.Remove("Authorization");
-                httpClient.DefaultRequestHeaders.Remove("x-token");
-                httpClient.DefaultRequestHeaders.Remove("x-tenant-guid");
-                httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + login.Token);
-                httpClient.DefaultRequestHeaders.Add("x-token", login.Token);
-                httpClient.DefaultRequestHeaders.Add("x-tenant-guid", login.TenantId);
+                ApplyBearerHeaders(httpClient, login.TenantId, login.Token);
             }
+        }
+
+        private static void ApplyBearerHeaders(HttpClient httpClient, string tenantId, string token)
+        {
+            httpClient.DefaultRequestHeaders.Remove("Authorization");
+            httpClient.DefaultRequestHeaders.Remove("x-token");
+            httpClient.DefaultRequestHeaders.Remove("x-tenant-guid");
+            httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + token);
+            httpClient.DefaultRequestHeaders.Add("x-token", token);
+            httpClient.DefaultRequestHeaders.Add("x-tenant-guid", tenantId);
         }
 
         private static async Task<string> CreateUserViaApiAsync(HttpClient httpClient, string baseUrl, string tenantId, string email, string password, bool isAdmin, bool isTenantAdmin)
