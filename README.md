@@ -10,6 +10,8 @@ Xeno v0.1.0 is an alpha release. APIs, configuration files, dashboard workflows,
 
 Xeno is an AI control plane for turning distributed computers into a shared model-serving network. A lightweight client runs on laptops, desktops, workstations, and servers, advertises the machine's available providers and models, and maintains a persistent WebSocket connection to the Xeno server. The server exposes OpenAI-compatible APIs and routes requests to connected clients that can service the selected model.
 
+The larger goal is to make AI accelerator capacity addressable wherever it already exists. A small Xeno server can run in modest cloud infrastructure while people around the world connect machines with different GPUs, CPUs, memory sizes, provider runtimes, and model inventories. A data center administrator can use the same design inside private infrastructure: deploy a Xeno controller, run the `xeno` client as an agent on accelerator hosts, and expose those federated resources to agentic applications through one governed API endpoint.
+
 ## What Xeno Does
 
 Xeno gives teams one place to manage and use distributed AI capacity.
@@ -38,6 +40,20 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 - Add authentication, multitenancy, request history, dashboard visibility, and routing policy around model execution.
 - Move between local Ollama, hosted APIs, and OpenAI-compatible model servers while keeping the same application integration point.
 - Debug agentic applications with response headers and request history that show which node handled a request and why it was selected.
+
+## Platform Vision
+
+Xeno treats model-serving capacity as a fleet instead of a single box. The server is the controller: it owns identity, tenancy, routing policy, request history, telemetry, and the public API surface. The client is the agent: it runs beside the hardware and provider runtimes, advertises what the node can do, executes routed requests locally, and reports health and telemetry back to the controller.
+
+That split supports several deployment patterns:
+
+- Community or contributor GPU networks: run a small server in the cloud, issue tenant-bound client credentials, and let trusted users connect machines from home labs, offices, classrooms, or partner sites. Each node can advertise only the models and provider endpoints it is willing to serve.
+- Enterprise and data center accelerator federation: deploy the server as an internal controller and run `xeno` on GPU servers as an agent. Agentic applications call one OpenAI-compatible endpoint while Xeno places work on eligible hosts using model inventory, routing policy, capacity, and telemetry.
+- Hybrid and burst capacity: combine local Ollama, vLLM, or OpenAI-compatible runtimes with hosted APIs such as OpenAI or Gemini. Applications keep the same integration point while operators decide where a model name should resolve.
+- Lab, classroom, and research clusters: expose heterogeneous machines as one governed pool without requiring every application developer to know which workstation has which accelerator, runtime, or model.
+- Edge and branch deployments: keep inference near private data or users while maintaining central visibility into connected nodes, advertised models, and request outcomes.
+
+In these modes, Xeno is not just a proxy. It is a coordination layer for resource discovery, placement, observability, and access control around distributed model execution. The current alpha focuses on practical foundations: authenticated clients, OpenAI-compatible routing, local and server-side telemetry, dashboard operations, SDKs, and policy surfaces that can evolve toward richer accelerator scheduling.
 
 ## How It Works
 

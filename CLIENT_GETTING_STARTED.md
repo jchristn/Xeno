@@ -12,6 +12,17 @@ Xeno v0.1.0 is an alpha release. Client commands, configuration shape, and serve
 
 This guide walks through configuring the `xeno` client for a specific Xeno server, adding credentials, advertising provider endpoints, adding models, and connecting to the control plane.
 
+## Client Role In The Platform
+
+The `xeno` client is the agent side of the Xeno platform. It runs on the machine that owns or can reach accelerator capacity, keeps a persistent authenticated WebSocket connection to the server, advertises provider endpoints and model inventory, executes routed OpenAI-compatible requests, and reports host/provider telemetry when requested.
+
+That makes the same client useful in two very different operating models:
+
+- Distributed contributor fleets: a central server can run in small cloud infrastructure while trusted users connect laptops, workstations, home lab machines, or regional servers with different GPUs and model runtimes.
+- Managed accelerator estates: a data center or platform administrator can install the client on GPU servers and use the Xeno server as the controller for routing, telemetry, access control, and operational visibility.
+
+In both models, applications call the server. They do not need to know where a model is running, which machine has the right GPU, or whether a provider is local Ollama, vLLM, OpenAI-compatible, or cloud-backed. The client keeps that node-specific detail at the edge of the fleet.
+
 ## Prerequisites
 
 - A running Xeno server.

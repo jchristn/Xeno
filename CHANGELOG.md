@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added server-requested client telemetry settings, WebSocket frame contracts, SQLite-backed server telemetry persistence, authenticated REST telemetry routes, dashboard `CONTROL > Client Telemetry`, telemetry route wrappers in C#, JavaScript, and Python SDKs, and telemetry routing policy fields.
+- Expanded documentation around Xeno's broader platform vision: a controller-agent model for federating contributor GPUs, private data center accelerators, hybrid provider capacity, and agentic application access through one OpenAI-compatible control plane.
 
 ## 0.1.0
 

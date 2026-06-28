@@ -4,6 +4,8 @@ Base URL: `http://localhost:9000`
 
 The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-scoped calls accept `x-tenant-guid`; if omitted, the seeded `ten_default` tenant is used. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, access key, and secret key material into Try it out requests.
 
+The REST API is the operator and application surface for a federated accelerator fleet. Applications use the OpenAI-compatible routes so they can call one endpoint regardless of which connected machine ultimately serves the request. Operators use the management routes to inspect clients, advertised models, telemetry, request history, routing policy, tenants, credentials, and settings for the controller.
+
 ## System
 
 `GET /health`

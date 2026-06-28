@@ -10,6 +10,13 @@ Clients execute the request against an Ollama, OpenAI, Gemini, vLLM, or other
 OpenAI-compatible provider and return either a buffered response or a streamed
 response.
 
+In the platform architecture, this WebSocket is the control-plane link between
+the Xeno controller and each resource agent. It allows machines in different
+networks, cloud regions, offices, labs, or data center racks to participate in
+one model-serving fleet without exposing every provider endpoint directly to
+applications. The server authenticates the client, receives inventory, places
+work on the connection, and requests telemetry over the same session.
+
 ## Protocol Summary
 
 The WebSocket protocol is JSON-over-text frames.
