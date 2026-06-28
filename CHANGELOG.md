@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added server-requested client telemetry settings, WebSocket frame contracts, SQLite-backed server telemetry persistence, authenticated REST telemetry routes, dashboard `CONTROL > Client Telemetry`, telemetry route wrappers in C#, JavaScript, and Python SDKs, and telemetry routing policy fields.
+
 ## 0.1.0
 
 - Added initial Xeno server, client, dashboard, Docker, documentation, and Touchstone test surfaces.

@@ -48,6 +48,11 @@ namespace Xeno.Core.Settings
         public RequestHistorySettings RequestHistory { get; set; } = new RequestHistorySettings();
 
         /// <summary>
+        /// Server-requested fleet telemetry collection settings.
+        /// </summary>
+        public TelemetryCollectionSettings TelemetryCollection { get; set; } = new TelemetryCollectionSettings();
+
+        /// <summary>
         /// Routing settings.
         /// </summary>
         public RoutingSettings Routing { get; set; } = new RoutingSettings();

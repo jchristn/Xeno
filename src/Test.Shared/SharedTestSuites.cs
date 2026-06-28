@@ -27,6 +27,7 @@ namespace Test.Shared
     using Xeno.Core.Services;
     using Xeno.Core.Settings;
     using Xeno.Server;
+    using Xeno.Server.Services;
 
     /// <summary>
     /// Shared Touchstone test suites for Xeno.
@@ -45,6 +46,7 @@ namespace Test.Shared
                     SettingsSuite(),
                     DatabaseProviderSuite(),
                     AuthenticationSuite(),
+                    TelemetrySuite(),
                     RoutingSuite(),
                     TenantIsolationSuite(),
                     ClientCliSuite(),
@@ -917,6 +919,179 @@ namespace Test.Shared
         }
 
         /// <summary>
+        /// Server-requested telemetry test suite.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor TelemetrySuite()
+        {
+            return new TestSuiteDescriptor(
+                "Telemetry",
+                "Server Telemetry",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "Telemetry",
+                        "TelemetryCollectionSettingsDefaultsAndClamps",
+                        "Telemetry collection settings expose defaults and clamps",
+                        executeAsync: delegate
+                        {
+                            TelemetryCollectionSettings settings = new TelemetryCollectionSettings();
+                            if (!settings.Enabled) throw new InvalidOperationException("Telemetry collection should be enabled by default.");
+                            if (settings.CollectionIntervalSeconds != 60) throw new InvalidOperationException("Unexpected telemetry collection interval default.");
+                            if (settings.RequestTimeoutMs != 5000) throw new InvalidOperationException("Unexpected telemetry request timeout default.");
+                            if (settings.RetentionDays != 30) throw new InvalidOperationException("Unexpected telemetry retention default.");
+                            if (settings.PruneIntervalMinutes != 60) throw new InvalidOperationException("Unexpected telemetry prune interval default.");
+                            if (!settings.CollectHostTelemetry) throw new InvalidOperationException("Host telemetry collection should default to enabled.");
+                            if (!settings.CollectProviderTelemetry) throw new InvalidOperationException("Provider telemetry collection should default to enabled.");
+                            if (!settings.PersistRawSnapshots) throw new InvalidOperationException("Raw snapshot persistence should default to enabled.");
+
+                            settings.CollectionIntervalSeconds = 1;
+                            settings.RequestTimeoutMs = 1;
+                            settings.RetentionDays = 0;
+                            settings.PruneIntervalMinutes = 0;
+                            settings.MaxRawSnapshotBytes = -1;
+                            settings.MaxSamplesPerClientResponse = 0;
+                            settings.MaxProviderMetricRowsPerResponse = -1;
+                            settings.MaxConcurrentClientRequests = 0;
+                            if (settings.CollectionIntervalSeconds != 10) throw new InvalidOperationException("Telemetry collection interval minimum clamp failed.");
+                            if (settings.RequestTimeoutMs != 1000) throw new InvalidOperationException("Telemetry request timeout minimum clamp failed.");
+                            if (settings.RetentionDays != 1) throw new InvalidOperationException("Telemetry retention minimum clamp failed.");
+                            if (settings.PruneIntervalMinutes != 1) throw new InvalidOperationException("Telemetry prune interval minimum clamp failed.");
+                            if (settings.MaxRawSnapshotBytes != 0) throw new InvalidOperationException("Telemetry raw snapshot size minimum clamp failed.");
+                            if (settings.MaxSamplesPerClientResponse != 1) throw new InvalidOperationException("Telemetry max samples minimum clamp failed.");
+                            if (settings.MaxProviderMetricRowsPerResponse != 0) throw new InvalidOperationException("Telemetry provider metric rows minimum clamp failed.");
+                            if (settings.MaxConcurrentClientRequests != 1) throw new InvalidOperationException("Telemetry concurrency minimum clamp failed.");
+
+                            settings.CollectionIntervalSeconds = 999;
+                            settings.RequestTimeoutMs = 999999;
+                            settings.RetentionDays = 99999;
+                            settings.PruneIntervalMinutes = 99999;
+                            settings.MaxRawSnapshotBytes = 99999999;
+                            settings.MaxSamplesPerClientResponse = 99999;
+                            settings.MaxProviderMetricRowsPerResponse = 999999;
+                            settings.MaxConcurrentClientRequests = 999;
+                            if (settings.CollectionIntervalSeconds != 300) throw new InvalidOperationException("Telemetry collection interval maximum clamp failed.");
+                            if (settings.RequestTimeoutMs != 60000) throw new InvalidOperationException("Telemetry request timeout maximum clamp failed.");
+                            if (settings.RetentionDays != 3650) throw new InvalidOperationException("Telemetry retention maximum clamp failed.");
+                            if (settings.PruneIntervalMinutes != 1440) throw new InvalidOperationException("Telemetry prune interval maximum clamp failed.");
+                            if (settings.MaxRawSnapshotBytes != 1048576) throw new InvalidOperationException("Telemetry raw snapshot size maximum clamp failed.");
+                            if (settings.MaxSamplesPerClientResponse != 250) throw new InvalidOperationException("Telemetry max samples maximum clamp failed.");
+                            if (settings.MaxProviderMetricRowsPerResponse != 10000) throw new InvalidOperationException("Telemetry provider metric rows maximum clamp failed.");
+                            if (settings.MaxConcurrentClientRequests != 64) throw new InvalidOperationException("Telemetry concurrency maximum clamp failed.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Telemetry",
+                        "TelemetryIdPrefixes",
+                        "Telemetry ID helpers emit expected prefixes",
+                        executeAsync: delegate
+                        {
+                            AssertIdPrefix(IdGenerator.NewClientTelemetrySampleId(), "ctel_");
+                            AssertIdPrefix(IdGenerator.NewClientTelemetryGpuSampleId(), "ctgpu_");
+                            AssertIdPrefix(IdGenerator.NewClientProviderTelemetrySampleId(), "cptel_");
+                            AssertIdPrefix(IdGenerator.NewClientProviderTelemetryModelSampleId(), "cptmdl_");
+                            AssertIdPrefix(IdGenerator.NewClientProviderTelemetryMetricSampleId(), "cptmet_");
+                            AssertIdPrefix(IdGenerator.NewTelemetryCollectionRequestId(), "telreq_");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Telemetry",
+                        "TelemetryWireContractsSerialize",
+                        "Telemetry WebSocket request and snapshot contracts serialize",
+                        executeAsync: delegate
+                        {
+                            Xeno.Core.Models.Telemetry.ServerTelemetryCollectionRequestMessage request = new Xeno.Core.Models.Telemetry.ServerTelemetryCollectionRequestMessage
+                            {
+                                RequestId = "telreq_test",
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = "xcl_test",
+                                CollectHostTelemetry = true,
+                                CollectProviderTelemetry = false,
+                                IncludeRawSnapshot = false,
+                                MaxRawSnapshotBytes = 1024,
+                                MaxProviderMetricRows = 10,
+                                MaxSamples = 1
+                            };
+                            string requestJson = JsonUtil.Serialize(request);
+                            Xeno.Core.Models.Telemetry.ServerTelemetryCollectionRequestMessage parsedRequest = DeserializeRequired<Xeno.Core.Models.Telemetry.ServerTelemetryCollectionRequestMessage>(requestJson);
+                            if (parsedRequest.Type != "server.telemetry.request") throw new InvalidOperationException("Telemetry request type did not serialize.");
+                            if (parsedRequest.RequestId != request.RequestId) throw new InvalidOperationException("Telemetry request ID did not round-trip.");
+                            if (parsedRequest.CollectProviderTelemetry) throw new InvalidOperationException("Telemetry request provider flag did not round-trip.");
+
+                            Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage snapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage
+                            {
+                                RequestId = request.RequestId,
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = "xcl_test",
+                                Snapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot
+                                {
+                                    Metadata = new Xeno.Core.Models.Telemetry.ClientTelemetryMetadata
+                                    {
+                                        Id = "ctel_test",
+                                        ClientId = "xcl_test",
+                                        MachineName = "test-machine",
+                                        CollectedUtc = DateTime.UtcNow,
+                                        CollectionElapsedMs = 12
+                                    }
+                                }
+                            };
+                            string snapshotJson = JsonUtil.Serialize(snapshot);
+                            Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage parsedSnapshot = DeserializeRequired<Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage>(snapshotJson);
+                            if (parsedSnapshot.Type != "client.telemetry.snapshot") throw new InvalidOperationException("Telemetry snapshot type did not serialize.");
+                            if (parsedSnapshot.Snapshot.Metadata.MachineName != "test-machine") throw new InvalidOperationException("Telemetry snapshot metadata did not round-trip.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Telemetry",
+                        "ClientTelemetryLatestCacheStoresLatestSamples",
+                        "Client telemetry latest cache stores and filters latest samples",
+                        executeAsync: delegate
+                        {
+                            using (ClientTelemetryLatestCache cache = new ClientTelemetryLatestCache())
+                            {
+                                Xeno.Core.Models.Telemetry.ServerClientTelemetrySampleRecord host = new Xeno.Core.Models.Telemetry.ServerClientTelemetrySampleRecord
+                                {
+                                    Id = "ctel_test",
+                                    TenantId = Constants.DefaultTenantId,
+                                    ClientId = "xcl_test",
+                                    ClientName = "client",
+                                    MachineName = "machine"
+                                };
+                                cache.SetHost(host);
+                                if (cache.GetHost(Constants.DefaultTenantId, null).Count != 1) throw new InvalidOperationException("Host cache did not return tenant sample.");
+                                if (cache.GetHost(Constants.DefaultTenantId, "missing").Count != 0) throw new InvalidOperationException("Host cache ignored client filter.");
+
+                                Xeno.Core.Models.Telemetry.ServerProviderTelemetrySampleRecord provider = new Xeno.Core.Models.Telemetry.ServerProviderTelemetrySampleRecord
+                                {
+                                    Id = "cptel_test",
+                                    TenantId = Constants.DefaultTenantId,
+                                    ClientId = "xcl_test",
+                                    ProviderName = "ollama"
+                                };
+                                cache.SetProvider(provider);
+                                if (cache.GetProviders(Constants.DefaultTenantId, "xcl_test").Count != 1) throw new InvalidOperationException("Provider cache did not return client sample.");
+                                cache.ClearTenant(Constants.DefaultTenantId);
+                                if (cache.GetHost(Constants.DefaultTenantId, null).Count != 0) throw new InvalidOperationException("Host cache did not clear tenant samples.");
+                                if (cache.GetProviders(Constants.DefaultTenantId, null).Count != 0) throw new InvalidOperationException("Provider cache did not clear tenant samples.");
+                            }
+
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Telemetry",
+                        "TelemetryOpenApiIncludesRoutes",
+                        "OpenAPI includes telemetry routes and request bodies",
+                        executeAsync: delegate { return RunTelemetryOpenApiSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Telemetry",
+                        "RoutingPolicyValidationRejectsInvalidTelemetry",
+                        "Routing policy validation rejects invalid telemetry policy fields",
+                        executeAsync: delegate { return RunRoutingPolicyValidationSmokeAsync(); })
+                });
+        }
+
+
+        /// <summary>
         /// Database provider suite.
         /// </summary>
         /// <returns>Suite descriptor.</returns>
@@ -960,6 +1135,192 @@ namespace Test.Shared
                         DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false);
                         if (second.Platform.GetDefaultTenant().Name != "Persisted Tenant") throw new InvalidOperationException("SQLite state did not persist.");
                         second.Dispose();
+                    }
+                    finally
+                    {
+                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    }
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "SqliteTelemetryCollectionAttemptsRoundTrip",
+                displayName: "SQLite telemetry collection attempts preserve success fields",
+                executeAsync: async delegate
+                {
+                    string dbFile = Path.Combine(Path.GetTempPath(), "xeno-telemetry-attempts-" + Guid.NewGuid().ToString("N") + ".db");
+                    try
+                    {
+                        DatabaseSettings settings = new DatabaseSettings
+                        {
+                            Type = DatabaseTypeEnum.Sqlite,
+                            Filename = dbFile
+                        };
+
+                        using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+                        {
+                            if (driver.ClientTelemetryCollectionAttempts == null) throw new InvalidOperationException("Telemetry collection attempts driver was not initialized.");
+                            Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord attempt = new Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = "xcl_attempt",
+                                ClientName = "attempt-client",
+                                HostRequested = true,
+                                ProviderRequested = true,
+                                Status = "Started"
+                            };
+
+                            await driver.ClientTelemetryCollectionAttempts.CreateAttemptAsync(attempt, CancellationToken.None).ConfigureAwait(false);
+                            attempt.CompletedUtc = DateTime.UtcNow;
+                            attempt.ElapsedMs = 123;
+                            attempt.HostSucceeded = true;
+                            attempt.ProviderSucceeded = true;
+                            attempt.Status = "Completed";
+                            attempt.HostSampleId = "ctel_attempt";
+                            attempt.ProviderSampleCount = 2;
+                            await driver.ClientTelemetryCollectionAttempts.CompleteAttemptAsync(attempt, CancellationToken.None).ConfigureAwait(false);
+
+                            IReadOnlyList<Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord> attempts = await driver.ClientTelemetryCollectionAttempts.SearchAttemptsAsync(Constants.DefaultTenantId, "xcl_attempt", 10, CancellationToken.None).ConfigureAwait(false);
+                            Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord stored = attempts.FirstOrDefault() ?? throw new InvalidOperationException("Telemetry collection attempt was not returned.");
+                            if (!stored.HostRequested) throw new InvalidOperationException("Host requested flag did not round-trip.");
+                            if (!stored.ProviderRequested) throw new InvalidOperationException("Provider requested flag did not round-trip.");
+                            if (!stored.HostSucceeded) throw new InvalidOperationException("Host succeeded flag did not round-trip.");
+                            if (!stored.ProviderSucceeded) throw new InvalidOperationException("Provider succeeded flag did not round-trip.");
+                            if (stored.HostSampleId != "ctel_attempt") throw new InvalidOperationException("Host sample id did not round-trip.");
+                            if (stored.ProviderSampleCount != 2) throw new InvalidOperationException("Provider sample count did not round-trip.");
+                        }
+                    }
+                    finally
+                    {
+                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    }
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "SqliteServerTelemetryRollupsReturnPersistedSamples",
+                displayName: "SQLite server telemetry rollups return persisted host and provider samples",
+                executeAsync: async delegate
+                {
+                    string dbFile = Path.Combine(Path.GetTempPath(), "xeno-server-telemetry-rollups-" + Guid.NewGuid().ToString("N") + ".db");
+                    try
+                    {
+                        DatabaseSettings settings = new DatabaseSettings
+                        {
+                            Type = DatabaseTypeEnum.Sqlite,
+                            Filename = dbFile
+                        };
+
+                        using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+                        {
+                            if (driver.ClientTelemetry == null) throw new InvalidOperationException("Client telemetry driver was not initialized.");
+                            if (driver.ClientProviderTelemetry == null) throw new InvalidOperationException("Client provider telemetry driver was not initialized.");
+
+                            DateTime sampleUtc = DateTime.UtcNow.AddMinutes(-5);
+                            Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot hostSnapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot
+                            {
+                                Metadata = new Xeno.Core.Models.Telemetry.ClientTelemetryMetadata
+                                {
+                                    ClientId = "xcl_rollup",
+                                    MachineName = "rollup-client",
+                                    CollectedUtc = sampleUtc,
+                                    CollectionElapsedMs = 12
+                                },
+                                Cpu = new Xeno.Core.Models.Telemetry.ClientCpuTelemetry
+                                {
+                                    UtilizationPercent = 42
+                                },
+                                Memory = new Xeno.Core.Models.Telemetry.ClientMemoryTelemetry
+                                {
+                                    TotalBytes = 1000,
+                                    UsedBytes = 550,
+                                    AvailableBytes = 450,
+                                    UtilizationPercent = 55
+                                },
+                                Disk = new Xeno.Core.Models.Telemetry.ClientDiskTelemetry
+                                {
+                                    TotalBytes = 1000,
+                                    UsedBytes = 660,
+                                    AvailableBytes = 340,
+                                    UtilizationPercent = 66
+                                },
+                                Gpu = new Xeno.Core.Models.Telemetry.ClientGpuTelemetry
+                                {
+                                    AverageUtilizationPercent = 12
+                                }
+                            };
+
+                            await driver.ClientTelemetry.CreateHostSampleAsync(Constants.DefaultTenantId, "xcl_rollup", "rollup-client", "telreq_rollup", hostSnapshot, null, CancellationToken.None).ConfigureAwait(false);
+
+                            Xeno.Core.Models.Telemetry.ClientProviderTelemetrySnapshot providerSnapshot = new Xeno.Core.Models.Telemetry.ClientProviderTelemetrySnapshot
+                            {
+                                Metadata = new Xeno.Core.Models.Telemetry.ClientProviderTelemetryMetadata
+                                {
+                                    ClientId = "xcl_rollup",
+                                    MachineName = "rollup-client",
+                                    CollectedUtc = sampleUtc,
+                                    ProviderCount = 1
+                                }
+                            };
+                            providerSnapshot.Providers.Add(new Xeno.Core.Models.Telemetry.ClientProviderTelemetryProviderStatus
+                            {
+                                Endpoint = new Xeno.Core.Models.Telemetry.ClientProviderTelemetryEndpoint
+                                {
+                                    ProviderName = "rollup-provider",
+                                    ApiType = "Ollama",
+                                    Kind = Xeno.Core.Models.Telemetry.ClientProviderTelemetryKindEnum.Ollama,
+                                    EndpointDisplay = "http://127.0.0.1:11434",
+                                    EndpointHash = "rolluphash"
+                                },
+                                Status = Xeno.Core.Models.Telemetry.ClientProviderTelemetryStatusEnum.Available,
+                                HealthStatus = Xeno.Core.Models.Telemetry.ClientProviderTelemetryHealthStatusEnum.Healthy,
+                                CollectedUtc = sampleUtc,
+                                AvailableModelCount = 7,
+                                LoadedModelCount = 2,
+                                ActiveRequests = 3,
+                                QueuedRequests = 1,
+                                LatencyP95Ms = 123
+                            });
+
+                            await driver.ClientProviderTelemetry.CreateProviderSnapshotAsync(Constants.DefaultTenantId, "xcl_rollup", "rollup-client", "telreq_rollup", providerSnapshot, false, CancellationToken.None).ConfigureAwait(false);
+
+                            DateTime fromUtc = sampleUtc.AddHours(-1);
+                            DateTime toUtc = sampleUtc.AddHours(1);
+                            IReadOnlyList<Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupBucket> hostBuckets = await driver.ClientTelemetry.RollupHostAsync(new Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupRequest
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = "xcl_rollup",
+                                FromUtc = fromUtc,
+                                ToUtc = toUtc,
+                                BucketMinutes = 5,
+                                Metric = Xeno.Core.Models.Telemetry.ClientTelemetryMetricEnum.CpuUtilizationPercent
+                            }, CancellationToken.None).ConfigureAwait(false);
+                            if (!hostBuckets.Any(item => item.Count > 0 && item.Average == 42)) throw new InvalidOperationException("Host telemetry rollup did not include persisted CPU value.");
+
+                            IReadOnlyList<Xeno.Core.Models.Telemetry.ServerProviderTelemetryRollupBucket> providerBuckets = await driver.ClientProviderTelemetry.RollupProviderAsync(new Xeno.Core.Models.Telemetry.ServerProviderTelemetryRollupRequest
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = "xcl_rollup",
+                                ProviderName = "rollup-provider",
+                                FromUtc = fromUtc,
+                                ToUtc = toUtc,
+                                BucketMinutes = 5,
+                                Metric = Xeno.Core.Models.Telemetry.ClientProviderTelemetryMetricEnum.ActiveRequests
+                            }, CancellationToken.None).ConfigureAwait(false);
+                            if (!providerBuckets.Any(item => item.Count > 0 && item.Average == 3)) throw new InvalidOperationException("Provider telemetry rollup did not include persisted active request value.");
+
+                            IReadOnlyList<Xeno.Core.Models.Telemetry.ServerProviderTelemetryRollupBucket> modelBuckets = await driver.ClientProviderTelemetry.RollupProviderAsync(new Xeno.Core.Models.Telemetry.ServerProviderTelemetryRollupRequest
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                ClientId = "xcl_rollup",
+                                ProviderName = "rollup-provider",
+                                FromUtc = fromUtc,
+                                ToUtc = toUtc,
+                                BucketMinutes = 5,
+                                Metric = Xeno.Core.Models.Telemetry.ClientProviderTelemetryMetricEnum.AvailableModelCount
+                            }, CancellationToken.None).ConfigureAwait(false);
+                            if (!modelBuckets.Any(item => item.Count > 0 && item.Average == 7)) throw new InvalidOperationException("Provider telemetry rollup did not include persisted available model count.");
+                        }
                     }
                     finally
                     {
@@ -2813,6 +3174,169 @@ namespace Test.Shared
             if (!document.Paths.TryGetValue(path, out Dictionary<string, TestOpenApiOperation>? pathItem)) return null;
             if (!pathItem.TryGetValue(method, out TestOpenApiOperation? operation)) return null;
             return operation;
+        }
+
+        private static async Task RunTelemetryOpenApiSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-telemetry-openapi-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string openApi = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/openapi.json").ConfigureAwait(false);
+                        foreach (OpenApiRouteExpectation route in new List<OpenApiRouteExpectation>
+                        {
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/status", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/latest", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/collect", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/search", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/rollups", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/{id}", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/{id}", Method = "delete" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/delete", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/latest", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/collect", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/search", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/rollups", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/{id}", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/{id}", Method = "delete" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/delete", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/collection-attempts", Method = "get" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/metrics", Method = "get" }
+                        })
+                        {
+                            if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
+                        }
+
+                        foreach (OpenApiRouteExpectation route in new List<OpenApiRouteExpectation>
+                        {
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/collect", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/search", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/rollups", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/history/delete", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/collect", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/search", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/rollups", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-telemetry/providers/history/delete", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/validate", Method = "post" }
+                        })
+                        {
+                            if (!OpenApiHasRequestBody(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing request body on " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunRoutingPolicyValidationSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-routing-validation-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        RoutingPolicySaveRequest invalidRequest = new RoutingPolicySaveRequest
+                        {
+                            Name = "Invalid telemetry policy",
+                            ModelName = "*",
+                            ClientName = "*",
+                            MaxTelemetryAgeMs = 1,
+                            TelemetryFilters = new List<RoutingPolicyCondition>
+                            {
+                                new RoutingPolicyCondition
+                                {
+                                    Metric = "missing.metric",
+                                    ValueType = RoutingPolicyMetricValueTypeEnum.Number,
+                                    Value = "abc"
+                                },
+                                new RoutingPolicyCondition
+                                {
+                                    Metric = "telemetry.gpu.available",
+                                    ValueType = RoutingPolicyMetricValueTypeEnum.Number,
+                                    Value = "1"
+                                }
+                            },
+                            TelemetryRanking = new List<RoutingPolicyRankingRule>
+                            {
+                                new RoutingPolicyRankingRule
+                                {
+                                    Metric = "provider.healthStatus",
+                                    Weight = 0
+                                }
+                            }
+                        };
+
+                        using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/routing-policies/validate", JsonUtil.Serialize(invalidRequest)).ConfigureAwait(false))
+                        {
+                            string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Routing validation route failed: " + json);
+                            RoutingPolicyValidationResult result = DeserializeRequired<RoutingPolicyValidationResult>(json);
+                            if (result.Valid) throw new InvalidOperationException("Invalid telemetry policy was accepted.");
+                            if (!result.Issues.Any(issue => issue.Code == "UnsupportedMetric")) throw new InvalidOperationException("Validation did not report unsupported metric.");
+                            if (!result.Issues.Any(issue => issue.Code == "WrongValueType")) throw new InvalidOperationException("Validation did not report wrong value type.");
+                            if (!result.Issues.Any(issue => issue.Code == "InvalidRankingWeight")) throw new InvalidOperationException("Validation did not report invalid ranking weight.");
+                            if (!result.Issues.Any(issue => issue.Code == "InvalidTelemetryAge")) throw new InvalidOperationException("Validation did not report invalid telemetry age.");
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static void AssertIdPrefix(string id, string prefix)
+        {
+            if (id.Length != IdGenerator.MaxIdLength) throw new InvalidOperationException("ID length mismatch: " + id);
+            if (!id.StartsWith(prefix, StringComparison.Ordinal)) throw new InvalidOperationException("ID prefix mismatch: " + id);
         }
 
         private static async Task<string?> ReceiveWebSocketTextAsync(ClientWebSocket socket, CancellationToken token)

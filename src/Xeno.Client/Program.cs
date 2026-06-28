@@ -11,9 +11,12 @@ namespace Xeno.Client
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Client.LocalDashboard;
+    using Xeno.Client.Telemetry.Providers;
+    using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
     using Xeno.Core.Models;
+    using Xeno.Core.Models.Telemetry;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -1264,10 +1267,104 @@ namespace Xeno.Client
 
         private static async Task HandleServerMessageAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
         {
-            if (message.IndexOf("\"server.request\"", StringComparison.OrdinalIgnoreCase) < 0) return;
+            WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+            string type = envelope?.Type ?? string.Empty;
+            if (String.Equals(type, "server.telemetry.request", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleServerTelemetryRequestAsync(socket, settings, message, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (!String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase)) return;
 
             object? response = await ExecuteServerRequestAsync(socket, settings, message, token).ConfigureAwait(false);
             if (response != null) await SendMessageAsync(socket, response, token).ConfigureAwait(false);
+        }
+
+        private static async Task HandleServerTelemetryRequestAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
+        {
+            ServerTelemetryCollectionRequestMessage? request = JsonUtil.Deserialize<ServerTelemetryCollectionRequestMessage>(message);
+            if (request == null) return;
+            string tenantId = settings.TenantId ?? string.Empty;
+            string clientId = settings.ClientId ?? string.Empty;
+
+            if (!String.Equals(request.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) ||
+                !String.Equals(request.ClientId, clientId, StringComparison.OrdinalIgnoreCase))
+            {
+                await SendMessageAsync(socket, new ClientTelemetryErrorMessage
+                {
+                    RequestId = request.RequestId,
+                    TenantId = tenantId,
+                    ClientId = clientId,
+                    ErrorCode = "TelemetryIdentityMismatch",
+                    ErrorMessage = "Telemetry request tenant or client did not match this client."
+                }, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.CollectHostTelemetry)
+            {
+                try
+                {
+                    ClientTelemetryCommandRunner commandRunner = new ClientTelemetryCommandRunner();
+                    ClientTelemetryService service = new ClientTelemetryService(new ClientSystemTelemetryProvider(commandRunner), new ClientGpuTelemetryProvider(commandRunner));
+                    Xeno.Client.Telemetry.Models.ClientTelemetrySnapshot localSnapshot = await service.CollectAsync(settings, token).ConfigureAwait(false);
+                    ClientTelemetrySnapshot? snapshot = JsonUtil.Deserialize<ClientTelemetrySnapshot>(JsonUtil.Serialize(localSnapshot));
+                    if (snapshot != null)
+                    {
+                        await SendMessageAsync(socket, new ClientTelemetrySnapshotMessage
+                        {
+                            RequestId = request.RequestId,
+                            TenantId = tenantId,
+                            ClientId = clientId,
+                            Snapshot = snapshot
+                        }, token).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException || ex is TimeoutException)
+                {
+                    await SendMessageAsync(socket, new ClientTelemetryErrorMessage
+                    {
+                        RequestId = request.RequestId,
+                        TenantId = tenantId,
+                        ClientId = clientId,
+                        ErrorCode = "HostTelemetryFailed",
+                        ErrorMessage = ex.Message
+                    }, token).ConfigureAwait(false);
+                }
+            }
+
+            if (request.CollectProviderTelemetry)
+            {
+                try
+                {
+                    ClientProviderTelemetryService service = new ClientProviderTelemetryService(new PrometheusMetricsParser());
+                    Xeno.Client.Telemetry.Models.ClientProviderTelemetrySnapshot localSnapshot = await service.CollectAsync(settings, token).ConfigureAwait(false);
+                    ClientProviderTelemetrySnapshot? snapshot = JsonUtil.Deserialize<ClientProviderTelemetrySnapshot>(JsonUtil.Serialize(localSnapshot));
+                    if (snapshot != null)
+                    {
+                        await SendMessageAsync(socket, new ClientProviderTelemetrySnapshotMessage
+                        {
+                            RequestId = request.RequestId,
+                            TenantId = tenantId,
+                            ClientId = clientId,
+                            Snapshot = snapshot
+                        }, token).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException || ex is TimeoutException)
+                {
+                    await SendMessageAsync(socket, new ClientTelemetryErrorMessage
+                    {
+                        Type = "client.providerTelemetry.error",
+                        RequestId = request.RequestId,
+                        TenantId = tenantId,
+                        ClientId = clientId,
+                        ErrorCode = "ProviderTelemetryFailed",
+                        ErrorMessage = ex.Message
+                    }, token).ConfigureAwait(false);
+                }
+            }
         }
 
         private static async Task<object?> ExecuteServerRequestAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)

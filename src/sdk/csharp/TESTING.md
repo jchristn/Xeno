@@ -6,6 +6,8 @@ Run the SDK tests:
 dotnet test .\src\sdk\csharp\Xeno.Sdk.Tests\Xeno.Sdk.Tests.csproj
 ```
 
+The test suite verifies request construction for management APIs, OpenAI-compatible APIs, request history, and server-collected client telemetry routes.
+
 Run the interactive console:
 
 ```powershell

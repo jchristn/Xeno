@@ -42,6 +42,60 @@ namespace Xeno.Core.Helpers
             return NewId("req_");
         }
 
+        /// <summary>
+        /// Generate a server host telemetry sample identifier.
+        /// </summary>
+        /// <returns>Telemetry sample identifier.</returns>
+        public static string NewClientTelemetrySampleId()
+        {
+            return NewId("ctel_");
+        }
+
+        /// <summary>
+        /// Generate a server GPU telemetry row identifier.
+        /// </summary>
+        /// <returns>GPU telemetry row identifier.</returns>
+        public static string NewClientTelemetryGpuSampleId()
+        {
+            return NewId("ctgpu_");
+        }
+
+        /// <summary>
+        /// Generate a server provider telemetry sample identifier.
+        /// </summary>
+        /// <returns>Provider telemetry sample identifier.</returns>
+        public static string NewClientProviderTelemetrySampleId()
+        {
+            return NewId("cptel_");
+        }
+
+        /// <summary>
+        /// Generate a server provider model telemetry row identifier.
+        /// </summary>
+        /// <returns>Provider model telemetry row identifier.</returns>
+        public static string NewClientProviderTelemetryModelSampleId()
+        {
+            return NewId("cptmdl_");
+        }
+
+        /// <summary>
+        /// Generate a server provider metric telemetry row identifier.
+        /// </summary>
+        /// <returns>Provider metric telemetry row identifier.</returns>
+        public static string NewClientProviderTelemetryMetricSampleId()
+        {
+            return NewId("cptmet_");
+        }
+
+        /// <summary>
+        /// Generate a telemetry collection request or attempt identifier.
+        /// </summary>
+        /// <returns>Telemetry collection request identifier.</returns>
+        public static string NewTelemetryCollectionRequestId()
+        {
+            return NewId("telreq_");
+        }
+
         private static string NormalizePrefix(string prefix)
         {
             if (String.IsNullOrWhiteSpace(prefix)) return String.Empty;

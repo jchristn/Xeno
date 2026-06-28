@@ -165,6 +165,58 @@ export class XenoClient {
     return this.#request('DELETE', '/v1.0/api/client-models', model);
   }
 
+  async getClientTelemetryStatus() {
+    return this.#request('GET', '/v1.0/api/client-telemetry/status');
+  }
+
+  async getLatestClientTelemetry(filters = {}) {
+    return this.#request('GET', `/v1.0/api/client-telemetry/latest${this.#queryString(filters)}`);
+  }
+
+  async collectClientTelemetry(request = {}) {
+    return this.#request('POST', '/v1.0/api/client-telemetry/collect', request);
+  }
+
+  async searchClientTelemetry(request = {}) {
+    return this.#request('POST', '/v1.0/api/client-telemetry/history/search', request);
+  }
+
+  async getClientTelemetryRollups(request = {}) {
+    return this.#request('POST', '/v1.0/api/client-telemetry/history/rollups', request);
+  }
+
+  async getClientTelemetryDetail(id) {
+    return this.#request('GET', `/v1.0/api/client-telemetry/history/${encodeURIComponent(id)}`);
+  }
+
+  async deleteClientTelemetry(id) {
+    return this.#request('DELETE', `/v1.0/api/client-telemetry/history/${encodeURIComponent(id)}`);
+  }
+
+  async getLatestClientProviderTelemetry(filters = {}) {
+    return this.#request('GET', `/v1.0/api/client-telemetry/providers/latest${this.#queryString(filters)}`);
+  }
+
+  async searchClientProviderTelemetry(request = {}) {
+    return this.#request('POST', '/v1.0/api/client-telemetry/providers/history/search', request);
+  }
+
+  async getClientProviderTelemetryRollups(request = {}) {
+    return this.#request('POST', '/v1.0/api/client-telemetry/providers/history/rollups', request);
+  }
+
+  async getClientProviderTelemetryDetail(id) {
+    return this.#request('GET', `/v1.0/api/client-telemetry/providers/history/${encodeURIComponent(id)}`);
+  }
+
+  async deleteClientProviderTelemetry(id) {
+    return this.#request('DELETE', `/v1.0/api/client-telemetry/providers/history/${encodeURIComponent(id)}`);
+  }
+
+  async getClientTelemetryMetricCatalog() {
+    return this.#request('GET', '/v1.0/api/client-telemetry/metrics');
+  }
+
   async listModelDefinitions() {
     return this.#request('GET', '/v1.0/api/model-definitions');
   }

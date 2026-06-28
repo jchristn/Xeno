@@ -825,6 +825,16 @@ html[data-theme='dark'] .primitive-list-item {
   align-items: start;
 }
 
+.dashboard-grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.dashboard-grid.two-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .workspace-grid.wide-left {
   grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.8fr);
 }
@@ -1261,6 +1271,19 @@ html[data-theme='dark'] .primitive-list-item {
   padding-bottom: 5px;
 }
 
+.client-telemetry-view {
+  gap: 18px;
+}
+
+.client-telemetry-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.client-telemetry-chart-grid {
+  margin-top: 2px;
+}
+
 .workspace-card-body {
   padding: 16px;
 }
@@ -1274,6 +1297,19 @@ html[data-theme='dark'] .primitive-list-item {
 .activity-chart-panel {
   display: grid;
   gap: 12px;
+}
+
+.telemetry-spark-chart-panel,
+.telemetry-spark-chart-panel .chart-canvas,
+.telemetry-spark-chart-panel .activity-chart {
+  width: 100%;
+  min-width: 0;
+}
+
+.telemetry-spark-chart-panel .activity-chart {
+  height: auto;
+  min-height: 360px;
+  aspect-ratio: 900 / 360;
 }
 
 .analytics-range-toolbar {
@@ -1295,6 +1331,14 @@ html[data-theme='dark'] .primitive-list-item {
 
 .analytics-range-controls {
   justify-content: flex-end;
+}
+
+.home-range-actions {
+  flex: 1 1 auto;
+}
+
+.home-range-actions .analytics-range-controls {
+  flex: 1 1 auto;
 }
 
 .chart-controls {
@@ -1391,6 +1435,45 @@ html[data-theme='dark'] .primitive-list-item {
 
 .chart-tooltip strong {
   font-size: 13px;
+}
+
+.chart-tooltip-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.chart-tooltip-row i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.chart-tooltip-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-tooltip-row b {
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.telemetry-chart-tooltip {
+  min-width: 210px;
+  max-width: 260px;
+}
+
+.chart-hover-line {
+  stroke: var(--color-border-strong);
+  stroke-dasharray: 4 5;
+  stroke-width: 1.5;
+  opacity: 0.9;
+  pointer-events: none;
 }
 
 .chart-legend {
@@ -2769,6 +2852,7 @@ html[data-theme='dark'] .primitive-list-item {
   .workspace-grid,
   .workspace-grid.wide-left,
   .workspace-grid.explorer-grid,
+  .dashboard-grid.two-column,
   .settings-grid {
     grid-template-columns: 1fr;
   }

@@ -107,6 +107,49 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
+        public async Task ClientTelemetryMethods_UseExpectedRoutesAndBodies()
+        {
+            RecordingHandler handler = new RecordingHandler(request =>
+            {
+                if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.NoContent);
+                return JsonResponse("{}");
+            });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                await client.GetClientTelemetryStatusAsync();
+                await client.GetLatestClientTelemetryAsync();
+                await client.CollectClientTelemetryAsync(new { clientId = "xcl_1", collectHostTelemetry = true });
+                await client.SearchClientTelemetryAsync(new { clientId = "xcl_1", metric = "telemetry.cpu.utilizationPercent" });
+                await client.GetClientTelemetryRollupsAsync(new { metric = "telemetry.cpu.utilizationPercent" });
+                await client.GetClientTelemetryDetailAsync("ctel_1");
+                await client.DeleteClientTelemetryAsync("ctel_1");
+                await client.GetLatestClientProviderTelemetryAsync();
+                await client.SearchClientProviderTelemetryAsync(new { providerName = "ollama" });
+                await client.GetClientProviderTelemetryRollupsAsync(new { metric = "provider.queuedRequests" });
+                await client.GetClientProviderTelemetryDetailAsync("cptel_1");
+                await client.DeleteClientProviderTelemetryAsync("cptel_1");
+                await client.GetClientTelemetryMetricCatalogAsync();
+
+                Assert.Collection(
+                    handler.Requests,
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/status"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/latest"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/collect", "\"clientId\":\"xcl_1\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/history/search", "\"metric\":\"telemetry.cpu.utilizationPercent\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/history/rollups", "\"metric\":\"telemetry.cpu.utilizationPercent\""),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/history/ctel_1"),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/client-telemetry/history/ctel_1"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/providers/latest"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/providers/history/search", "\"providerName\":\"ollama\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/providers/history/rollups", "\"metric\":\"provider.queuedRequests\""),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1"),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/metrics"));
+            }
+        }
+
+        [Fact]
         public async Task GetMetricsAsync_ReturnsText()
         {
             RecordingHandler handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

@@ -1,5 +1,13 @@
 # Xeno Client Getting Started
 
+## Server-Requested Telemetry
+
+The Xeno client can answer server telemetry request frames on the existing authenticated WebSocket connection. The server controls fleet collection cadence through `TelemetryCollection` settings; the client does not decide how often server-collected fleet telemetry is stored.
+
+Server-requested telemetry reuses the client host and provider telemetry collectors. Host telemetry covers CPU, memory, disk, and GPU. Provider telemetry covers provider health, model counts, queues, latency, token rates, cache pressure, and normalized metrics where available.
+
+Telemetry responses do not include prompts, responses, provider credentials, authorization headers, cookies, API keys, or unbounded raw provider metrics. The local client dashboard telemetry database remains separate from server-collected telemetry.
+
 Xeno v0.1.0 is an alpha release. Client commands, configuration shape, and server workflows are subject to change.
 
 This guide walks through configuring the `xeno` client for a specific Xeno server, adding credentials, advertising provider endpoints, adding models, and connecting to the control plane.

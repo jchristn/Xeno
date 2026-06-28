@@ -11,16 +11,17 @@ const ranges = [
   { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, buckets: 90 }
 ];
 
-export default function ConnectedClientsChart({ connected, onRefresh, sampleVersion, total }) {
+export default function ConnectedClientsChart({ connected, onRangeChange, onRefresh, range, sampleVersion, showControls = true, total }) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
   const refreshRef = useRef(onRefresh);
   const [chartWidth, setChartWidth] = useState(760);
   const [hovered, setHovered] = useState(null);
-  const [range, setRange] = useState('lastDay');
+  const [localRange, setLocalRange] = useState('lastDay');
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const [samples, setSamples] = useState(loadSamples);
-  const selectedRange = ranges.find((item) => item.key === range) || ranges[1];
+  const activeRange = range || localRange;
+  const selectedRange = ranges.find((item) => item.key === activeRange) || ranges[1];
   const now = Date.now();
   const buckets = useMemo(
     () => buildBuckets(samples, connected, total, selectedRange, now),
@@ -82,37 +83,46 @@ export default function ConnectedClientsChart({ connected, onRefresh, sampleVers
   const barSlot = chart.plotWidth / Math.max(1, buckets.length);
   const barWidth = Math.max(2, Math.min(14, barSlot - 2));
 
+  function updateRange(nextRange) {
+    if (!range) setLocalRange(nextRange);
+    onRangeChange?.(nextRange);
+  }
+
   return (
     <div className="activity-chart-panel">
-      <div className="chart-controls" aria-label={t('chartRange')}>
-        {ranges.map((item) => (
-          <button
-            className={item.key === range ? 'active' : ''}
-            key={item.key}
-            onClick={() => setRange(item.key)}
-            title={t('tooltipChartRangeOption', { range: t(item.key) })}
-            type="button"
-          >
-            {t(item.key)}
-          </button>
-        ))}
-        <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
-          <span>{t('autoRefresh')}</span>
-          <select
-            disabled={!onRefresh}
-            value={autoRefreshSeconds}
-            onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
-            title={t('tooltipAutoRefresh')}
-          >
-            {refreshIntervals.map((seconds) => (
-              <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
-            ))}
-          </select>
-          <button className="pagination-button" disabled={!onRefresh} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
-            <RefreshCw size={14} />
-          </button>
-        </label>
-      </div>
+      {showControls || onRefresh ? (
+        <div className="chart-controls" aria-label={t('chartRange')}>
+          {showControls ? ranges.map((item) => (
+            <button
+              className={item.key === activeRange ? 'active' : ''}
+              key={item.key}
+              onClick={() => updateRange(item.key)}
+              title={t('tooltipChartRangeOption', { range: t(item.key) })}
+              type="button"
+            >
+              {t(item.key)}
+            </button>
+          )) : null}
+          {onRefresh ? (
+            <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
+              <span>{t('autoRefresh')}</span>
+              <select
+                disabled={!onRefresh}
+                value={autoRefreshSeconds}
+                onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
+                title={t('tooltipAutoRefresh')}
+              >
+                {refreshIntervals.map((seconds) => (
+                  <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
+                ))}
+              </select>
+              <button className="pagination-button" disabled={!onRefresh} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
+                <RefreshCw size={14} />
+              </button>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
       <div className="chart-canvas" ref={canvasRef}>
         <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={t('connectedClients')}>
           <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.baseY} stroke="var(--color-border)" />

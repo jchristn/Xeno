@@ -1,1529 +1,2132 @@
 {
-  "info": {
-    "name": "Xeno",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "baseUrl",
-      "value": "http://localhost:9000"
-    },
-    {
-      "key": "tenantId",
-      "value": "ten_default"
-    },
-    {
-      "key": "username",
-      "value": "admin@xeno"
-    },
-    {
-      "key": "password",
-      "value": "password"
-    },
-    {
-      "key": "accessKey",
-      "value": "default"
-    },
-    {
-      "key": "secretKey",
-      "value": "default"
-    },
-    {
-      "key": "userId",
-      "value": "usr_..."
-    },
-    {
-      "key": "credentialId",
-      "value": "cred_..."
-    },
-    {
-      "key": "roleId",
-      "value": "role_..."
-    },
-    {
-      "key": "permissionId",
-      "value": "perm_..."
-    },
-    {
-      "key": "routingPolicyId",
-      "value": "rpol_..."
-    },
-    {
-      "key": "requestHistoryId",
-      "value": "req_..."
-    },
-    {
-      "key": "auditId",
-      "value": "aud_..."
-    },
-    {
-      "key": "clientId",
-      "value": "xcl_..."
-    },
-    {
-      "key": "clientModelName",
-      "value": "llama3.2:latest"
-    },
-    {
-      "key": "clientModelSource",
-      "value": "local-ollama"
-    },
-    {
-      "key": "localDashboardUrl",
-      "value": "http://127.0.0.1:9343"
-    },
-    {
-      "key": "localDashboardToken",
-      "value": "paste-token-from-dashboard-page"
-    },
-    {
-      "key": "localTelemetrySampleId",
-      "value": "tel_..."
-    },
-    {
-      "key": "localProviderTelemetrySampleId",
-      "value": "ptel_..."
-    }
-  ],
-  "item": [
-    {
-      "name": "Health",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/health"
-      }
-    },
-    {
-      "name": "OpenAPI",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/openapi.json"
-      }
-    },
-    {
-      "name": "Tenants",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/tenants"
-      }
-    },
-    {
-      "name": "Update Tenant",
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"name\":\"Default\",\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/tenants/{{tenantId}}"
-      }
-    },
-    {
-      "name": "Create Tenant",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"name\":\"New Tenant\",\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/tenants"
-      }
-    },
-    {
-      "name": "Users",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/users"
-      }
-    },
-    {
-      "name": "Create User",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"tenantId\":\"{{tenantId}}\",\"username\":\"new-user@xeno\",\"email\":\"new-user@xeno\",\"isAdmin\":false,\"isTenantAdmin\":false,\"active\":true,\"password\":\"password\"}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/users"
-      }
-    },
-    {
-      "name": "Update User",
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"username\":\"{{username}}\",\"email\":\"admin@xeno\",\"isAdmin\":true,\"isTenantAdmin\":true,\"active\":true,\"password\":\"\"}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/users/{{userId}}"
-      }
-    },
-    {
-      "name": "Credentials",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/credentials"
-      }
-    },
-    {
-      "name": "Create Credential",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"userId\":\"{{userId}}\"}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/credentials"
-      }
-    },
-    {
-      "name": "Update Credential",
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"userId\":\"{{userId}}\",\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"\",\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}"
-      }
-    },
-    {
-      "name": "Roles",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/roles"
-      }
-    },
-    {
-      "name": "Create Role",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"name\":\"New Role\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/roles"
-      }
-    },
-    {
-      "name": "Update Role",
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"name\":\"Administrator\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/roles/{{roleId}}"
-      }
-    },
-    {
-      "name": "Permissions",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/permissions"
-      }
-    },
-    {
-      "name": "Create Permission",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"resourceType\":\"Clients\",\"operationType\":\"Read\",\"permit\":true,\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/permissions"
-      }
-    },
-    {
-      "name": "Update Permission",
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"resourceType\":\"Clients\",\"operationType\":\"Read\",\"permit\":true,\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/permissions/{{permissionId}}"
-      }
-    },
-    {
-      "name": "Clients",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/clients"
-      }
-    },
-    {
-      "name": "Routing Policies",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/routing-policies"
-      }
-    },
-    {
-      "name": "Create Routing Policy",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"name\":\"GPU clients for gpt-oss\",\"modelName\":\"gpt-oss:120b\",\"clientName\":\"*\",\"requestTimeoutMs\":300000,\"loadBalancingMode\":\"LeastRecentlyUsed\",\"adaptive\":{\"sampleCount\":3,\"capacityWeight\":40,\"inFlightWeight\":30,\"clientWeight\":20,\"heartbeatWeight\":10},\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/routing-policies"
-      }
-    },
-    {
-      "name": "Update Routing Policy",
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"name\":\"GPU clients for gpt-oss\",\"loadBalancingMode\":\"Adaptive\",\"requestTimeoutMs\":300000,\"active\":true}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}"
-      }
-    },
-    {
-      "name": "Delete Routing Policy",
-      "request": {
-        "method": "DELETE",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}"
-      }
-    },
-    {
-      "name": "OpenAI Models",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1/models"
-      }
-    },
-    {
-      "name": "Chat Completion",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
-        },
-        "url": "{{baseUrl}}/v1/chat/completions"
-      }
-    },
-    {
-      "name": "Embeddings",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"model\":\"text-embedding-3-small\",\"input\":\"hello\"}"
-        },
-        "url": "{{baseUrl}}/v1/embeddings"
-      }
-    },
-    {
-      "name": "Request History",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/request-history"
-      }
-    },
-    {
-      "name": "Request History Summary",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/request-history/summary?bucketMinutes=60"
-      }
-    },
-    {
-      "name": "Login for Client Credential",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"username\":\"{{username}}\",\"password\":\"{{password}}\",\"tenantId\":\"{{tenantId}}\"}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/auth/login"
-      }
-    },
-    {
-      "name": "Create Token",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"{{secretKey}}\"}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/auth/token"
-      }
-    },
-    {
-      "name": "Metrics",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/metrics"
-      }
-    },
-    {
-      "name": "Settings",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/settings"
-      }
-    },
-    {
-      "name": "Update Settings",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"Rest\":{\"Hostname\":\"0.0.0.0\",\"Port\":9000,\"Ssl\":false,\"RequireAuthentication\":false},\"Cors\":{\"Enabled\":true,\"AllowedOrigins\":[\"http://localhost:9100\"],\"AllowedHeaders\":[\"Authorization\",\"Content-Type\",\"x-token\",\"x-tenant-guid\"],\"AllowedMethods\":[\"GET\",\"POST\",\"PUT\",\"DELETE\",\"OPTIONS\"]},\"WebSocket\":{\"Enabled\":true,\"Path\":\"/ws/v1/clients\",\"HeartbeatIntervalMs\":15000,\"RequestTimeoutMs\":120000},\"Routing\":{\"DefaultTimeoutMs\":300000,\"LoadBalancingMode\":\"RoundRobin\",\"Adaptive\":{\"SampleCount\":2,\"CapacityWeight\":45,\"InFlightWeight\":30,\"ClientWeight\":15,\"HeartbeatWeight\":10}},\"Database\":{\"Type\":\"Sqlite\",\"Filename\":\"data/xeno.db\"},\"Logging\":{\"ConsoleLogging\":true,\"FileLogging\":true,\"LogDirectory\":\"logs\",\"LogFilename\":\"xeno.log\"}}"
-        },
-        "url": "{{baseUrl}}/v1.0/api/settings"
-      }
-    },
-    {
-      "name": "Analytics Overview",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/analytics/overview"
-      }
-    },
-    {
-      "name": "Backup",
-      "request": {
-        "method": "GET",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ],
-        "url": "{{baseUrl}}/v1.0/api/backup"
-      }
-    },
-    {
-      "name": "Login Tenants for Email",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/auth/tenants?username={{username}}"
-      }
-    },
-    {
-      "name": "Dashboard Login",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/v1.0/api/auth/dashboard/login",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"username\":\"{{username}}\",\"password\":\"{{password}}\",\"tenantId\":\"{{tenantId}}\"}"
-        }
-      }
-    },
-    {
-      "name": "Token Details",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/auth/token/details",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Refresh Token",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/v1.0/api/auth/token/refresh",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Logout",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/v1.0/api/auth/logout",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Tenant",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/tenants/{{tenantId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete User",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/users/{{userId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Credential",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Role",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/roles/{{roleId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Permission",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/permissions/{{permissionId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Effective Permissions",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/effective-permissions",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Audit Records",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/audit",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Audit Record",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/audit/{{auditId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Client",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/clients/{{clientId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Client Advertised Model",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/client-models",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"clientId\":\"{{clientId}}\",\"modelName\":\"{{clientModelName}}\",\"source\":\"{{clientModelSource}}\"}"
-        }
-      }
-    },
-    {
-      "name": "Model Definitions",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/model-definitions",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Model Configurations",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/model-configurations",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Completion",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/v1/completions",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"model\":\"llama3.2:latest\",\"prompt\":\"Say hello in one sentence.\",\"stream\":true,\"max_output_tokens\":2000}"
-        }
-      }
-    },
-    {
-      "name": "Request History Entry",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/request-history/{{requestHistoryId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Delete Request History Entry",
-      "request": {
-        "method": "DELETE",
-        "url": "{{baseUrl}}/v1.0/api/request-history/{{requestHistoryId}}",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Bulk Delete Request History",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/v1.0/api/request-history/bulk",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"beforeUtc\":null,\"modelName\":null,\"path\":null}"
-        }
-      }
-    },
-    {
-      "name": "Request Analytics Overview",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/v1.0/api/request-history/analytics/overview",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Restore",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/v1.0/api/restore",
-        "header": [
-          {
-            "key": "x-tenant-guid",
-            "value": "{{tenantId}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{}"
-        }
-      }
-    },
-    {
-      "name": "Local Dashboard Health",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/health"
-      }
-    },
-    {
-      "name": "Local Dashboard State",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/state",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Statistics",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/statistics",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Providers",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/providers",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Models",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/models",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Requests",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/requests",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Request Summary",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/requests/summary?range=hour",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Logs",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/logs?tail=200&severity=all",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Local Dashboard Settings",
-      "request": {
-        "method": "GET",
-        "url": "{{localDashboardUrl}}/api/v1/settings",
-        "header": [
-          {
-            "key": "X-Xeno-Local-Token",
-            "value": "{{localDashboardToken}}"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Xeno Client Local Dashboard",
-      "description": "Local dashboard API served by the background xeno client process on localhost. Set localDashboardToken from the embedded dashboard page when token authentication is enabled.",
-      "item": [
-        {
-          "name": "State",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/state"
-          }
-        },
-        {
-          "name": "Statistics",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/statistics"
-          }
-        },
-        {
-          "name": "Telemetry Status",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/status"
-          }
-        },
-        {
-          "name": "Latest Telemetry",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/latest"
-          }
-        },
-        {
-          "name": "Collect Telemetry Now",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/collect",
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Search Telemetry History",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/search",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Telemetry Rollups",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/rollups",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5,\n  \"limit\": 500\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Telemetry Detail",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
-          }
-        },
-        {
-          "name": "Delete Telemetry Detail",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
-          }
-        },
-        {
-          "name": "Delete Telemetry Range",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/history/delete",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"beforeUtc\": null\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Provider Telemetry Status",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/status"
-          }
-        },
-        {
-          "name": "Latest Provider Telemetry",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/latest"
-          }
-        },
-        {
-          "name": "Collect Provider Telemetry Now",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/collect",
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Search Provider Telemetry History",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/search",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"metric\": \"ActiveRequests\",\n  \"providerName\": null,\n  \"modelName\": null,\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Provider Telemetry Rollups",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/rollups",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"metric\": \"ActiveRequests\",\n  \"providerName\": null,\n  \"modelName\": null,\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Provider Telemetry Detail",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
-          }
-        },
-        {
-          "name": "Delete Provider Telemetry Detail",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
-          }
-        },
-        {
-          "name": "Delete Provider Telemetry Range",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/delete",
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Providers",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/providers"
-          }
-        },
-        {
-          "name": "Models",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/models"
-          }
-        },
-        {
-          "name": "Requests",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/requests"
-          }
-        },
-        {
-          "name": "Logs",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/logs?tail=200"
-          }
-        },
-        {
-          "name": "Settings",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/settings"
-          }
-        },
-        {
-          "name": "Update Local Telemetry Settings",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "X-Xeno-Local-Token",
-                "value": "{{localDashboardToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{localDashboardUrl}}/api/v1/settings",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"telemetry\": {\n    \"enabled\": true,\n    \"collectionIntervalMs\": 15000,\n    \"retentionDays\": 30,\n    \"pruneIntervalMinutes\": 60,\n    \"persistRawSnapshot\": true,\n    \"gpu\": {\n      \"enabled\": true,\n      \"nvidiaDcgmExporterUrl\": null,\n      \"commandTimeoutMs\": 5000\n    }\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    }
-  ]
+    "info":  {
+                 "name":  "Xeno",
+                 "schema":  "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+             },
+    "variable":  [
+                     {
+                         "key":  "baseUrl",
+                         "value":  "http://localhost:9000"
+                     },
+                     {
+                         "key":  "tenantId",
+                         "value":  "ten_default"
+                     },
+                     {
+                         "key":  "username",
+                         "value":  "admin@xeno"
+                     },
+                     {
+                         "key":  "password",
+                         "value":  "password"
+                     },
+                     {
+                         "key":  "accessKey",
+                         "value":  "default"
+                     },
+                     {
+                         "key":  "secretKey",
+                         "value":  "default"
+                     },
+                     {
+                         "key":  "userId",
+                         "value":  "usr_..."
+                     },
+                     {
+                         "key":  "credentialId",
+                         "value":  "cred_..."
+                     },
+                     {
+                         "key":  "roleId",
+                         "value":  "role_..."
+                     },
+                     {
+                         "key":  "permissionId",
+                         "value":  "perm_..."
+                     },
+                     {
+                         "key":  "routingPolicyId",
+                         "value":  "rpol_..."
+                     },
+                     {
+                         "key":  "requestHistoryId",
+                         "value":  "req_..."
+                     },
+                     {
+                         "key":  "auditId",
+                         "value":  "aud_..."
+                     },
+                     {
+                         "key":  "clientId",
+                         "value":  "xcl_..."
+                     },
+                     {
+                         "key":  "clientModelName",
+                         "value":  "llama3.2:latest"
+                     },
+                     {
+                         "key":  "clientModelSource",
+                         "value":  "local-ollama"
+                     },
+                     {
+                         "key":  "localDashboardUrl",
+                         "value":  "http://127.0.0.1:9343"
+                     },
+                     {
+                         "key":  "localDashboardToken",
+                         "value":  "paste-token-from-dashboard-page"
+                     },
+                     {
+                         "key":  "localTelemetrySampleId",
+                         "value":  "tel_..."
+                     },
+                     {
+                         "key":  "localProviderTelemetrySampleId",
+                         "value":  "ptel_..."
+                     },
+                     {
+                         "key":  "clientTelemetrySampleId",
+                         "value":  "ctel_..."
+                     },
+                     {
+                         "key":  "clientProviderTelemetrySampleId",
+                         "value":  "cptel_..."
+                     },
+                     {
+                         "key":  "clientTelemetryClientId",
+                         "value":  "xcl_..."
+                     },
+                     {
+                         "key":  "clientTelemetryProviderName",
+                         "value":  "local-ollama"
+                     },
+                     {
+                         "key":  "clientTelemetryModelName",
+                         "value":  "llama3.2:latest"
+                     },
+                     {
+                         "key":  "bearerToken",
+                         "value":  "paste-token-from-auth-token"
+                     }
+                 ],
+    "item":  [
+                 {
+                     "name":  "Health",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/health"
+                                 }
+                 },
+                 {
+                     "name":  "OpenAPI",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/openapi.json"
+                                 }
+                 },
+                 {
+                     "name":  "Tenants",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/tenants"
+                                 }
+                 },
+                 {
+                     "name":  "Update Tenant",
+                     "request":  {
+                                     "method":  "PUT",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"name\":\"Default\",\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/tenants/{{tenantId}}"
+                                 }
+                 },
+                 {
+                     "name":  "Create Tenant",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"name\":\"New Tenant\",\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/tenants"
+                                 }
+                 },
+                 {
+                     "name":  "Users",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/users"
+                                 }
+                 },
+                 {
+                     "name":  "Create User",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"tenantId\":\"{{tenantId}}\",\"username\":\"new-user@xeno\",\"email\":\"new-user@xeno\",\"isAdmin\":false,\"isTenantAdmin\":false,\"active\":true,\"password\":\"password\"}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/users"
+                                 }
+                 },
+                 {
+                     "name":  "Update User",
+                     "request":  {
+                                     "method":  "PUT",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"username\":\"{{username}}\",\"email\":\"admin@xeno\",\"isAdmin\":true,\"isTenantAdmin\":true,\"active\":true,\"password\":\"\"}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/users/{{userId}}"
+                                 }
+                 },
+                 {
+                     "name":  "Credentials",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/credentials"
+                                 }
+                 },
+                 {
+                     "name":  "Create Credential",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"userId\":\"{{userId}}\"}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/credentials"
+                                 }
+                 },
+                 {
+                     "name":  "Update Credential",
+                     "request":  {
+                                     "method":  "PUT",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"userId\":\"{{userId}}\",\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"\",\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}"
+                                 }
+                 },
+                 {
+                     "name":  "Roles",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/roles"
+                                 }
+                 },
+                 {
+                     "name":  "Create Role",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"name\":\"New Role\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/roles"
+                                 }
+                 },
+                 {
+                     "name":  "Update Role",
+                     "request":  {
+                                     "method":  "PUT",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"name\":\"Administrator\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/roles/{{roleId}}"
+                                 }
+                 },
+                 {
+                     "name":  "Permissions",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/permissions"
+                                 }
+                 },
+                 {
+                     "name":  "Create Permission",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"resourceType\":\"Clients\",\"operationType\":\"Read\",\"permit\":true,\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/permissions"
+                                 }
+                 },
+                 {
+                     "name":  "Update Permission",
+                     "request":  {
+                                     "method":  "PUT",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"resourceType\":\"Clients\",\"operationType\":\"Read\",\"permit\":true,\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/permissions/{{permissionId}}"
+                                 }
+                 },
+                 {
+                     "name":  "Clients",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/clients"
+                                 }
+                 },
+                 {
+                     "name":  "Routing Policies",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/routing-policies"
+                                 }
+                 },
+                 {
+                     "name":  "Create Routing Policy",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"name\":\"GPU clients for gpt-oss\",\"modelName\":\"gpt-oss:120b\",\"clientName\":\"*\",\"requestTimeoutMs\":300000,\"loadBalancingMode\":\"LeastRecentlyUsed\",\"adaptive\":{\"sampleCount\":3,\"capacityWeight\":40,\"inFlightWeight\":30,\"clientWeight\":20,\"heartbeatWeight\":10},\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/routing-policies"
+                                 }
+                 },
+                 {
+                     "name":  "Update Routing Policy",
+                     "request":  {
+                                     "method":  "PUT",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"name\":\"GPU clients for gpt-oss\",\"loadBalancingMode\":\"Adaptive\",\"requestTimeoutMs\":300000,\"active\":true}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}"
+                                 }
+                 },
+                 {
+                     "name":  "Delete Routing Policy",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}"
+                                 }
+                 },
+                 {
+                     "name":  "OpenAI Models",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1/models"
+                                 }
+                 },
+                 {
+                     "name":  "Chat Completion",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1/chat/completions"
+                                 }
+                 },
+                 {
+                     "name":  "Embeddings",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"model\":\"text-embedding-3-small\",\"input\":\"hello\"}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1/embeddings"
+                                 }
+                 },
+                 {
+                     "name":  "Request History",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history"
+                                 }
+                 },
+                 {
+                     "name":  "Request History Summary",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history/summary?bucketMinutes=60"
+                                 }
+                 },
+                 {
+                     "name":  "Login for Client Credential",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"username\":\"{{username}}\",\"password\":\"{{password}}\",\"tenantId\":\"{{tenantId}}\"}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/login"
+                                 }
+                 },
+                 {
+                     "name":  "Create Token",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"{{secretKey}}\"}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/token"
+                                 }
+                 },
+                 {
+                     "name":  "Metrics",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/metrics"
+                                 }
+                 },
+                 {
+                     "name":  "Settings",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/settings"
+                                 }
+                 },
+                 {
+                     "name":  "Update Settings",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"Rest\":{\"Hostname\":\"0.0.0.0\",\"Port\":9000,\"Ssl\":false,\"RequireAuthentication\":false},\"Cors\":{\"Enabled\":true,\"AllowedOrigins\":[\"http://localhost:9100\"],\"AllowedHeaders\":[\"Authorization\",\"Content-Type\",\"x-token\",\"x-tenant-guid\"],\"AllowedMethods\":[\"GET\",\"POST\",\"PUT\",\"DELETE\",\"OPTIONS\"]},\"WebSocket\":{\"Enabled\":true,\"Path\":\"/ws/v1/clients\",\"HeartbeatIntervalMs\":15000,\"RequestTimeoutMs\":120000},\"Routing\":{\"DefaultTimeoutMs\":300000,\"LoadBalancingMode\":\"RoundRobin\",\"Adaptive\":{\"SampleCount\":2,\"CapacityWeight\":45,\"InFlightWeight\":30,\"ClientWeight\":15,\"HeartbeatWeight\":10}},\"Database\":{\"Type\":\"Sqlite\",\"Filename\":\"data/xeno.db\"},\"Logging\":{\"ConsoleLogging\":true,\"FileLogging\":true,\"LogDirectory\":\"logs\",\"LogFilename\":\"xeno.log\"}}"
+                                              },
+                                     "url":  "{{baseUrl}}/v1.0/api/settings"
+                                 }
+                 },
+                 {
+                     "name":  "Analytics Overview",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/analytics/overview"
+                                 }
+                 },
+                 {
+                     "name":  "Backup",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/backup"
+                                 }
+                 },
+                 {
+                     "name":  "Login Tenants for Email",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/tenants?username={{username}}"
+                                 }
+                 },
+                 {
+                     "name":  "Dashboard Login",
+                     "request":  {
+                                     "method":  "POST",
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/dashboard/login",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"username\":\"{{username}}\",\"password\":\"{{password}}\",\"tenantId\":\"{{tenantId}}\"}"
+                                              }
+                                 }
+                 },
+                 {
+                     "name":  "Token Details",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/token/details",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Refresh Token",
+                     "request":  {
+                                     "method":  "POST",
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/token/refresh",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Logout",
+                     "request":  {
+                                     "method":  "POST",
+                                     "url":  "{{baseUrl}}/v1.0/api/auth/logout",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Tenant",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/tenants/{{tenantId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete User",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/users/{{userId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Credential",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Role",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/roles/{{roleId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Permission",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/permissions/{{permissionId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Effective Permissions",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/effective-permissions",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Audit Records",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/audit",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Audit Record",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/audit/{{auditId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Client",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/clients/{{clientId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Client Advertised Model",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/client-models",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"clientId\":\"{{clientId}}\",\"modelName\":\"{{clientModelName}}\",\"source\":\"{{clientModelSource}}\"}"
+                                              }
+                                 }
+                 },
+                 {
+                     "name":  "Model Definitions",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/model-definitions",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Model Configurations",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/model-configurations",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Completion",
+                     "request":  {
+                                     "method":  "POST",
+                                     "url":  "{{baseUrl}}/v1/completions",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"model\":\"llama3.2:latest\",\"prompt\":\"Say hello in one sentence.\",\"stream\":true,\"max_output_tokens\":2000}"
+                                              }
+                                 }
+                 },
+                 {
+                     "name":  "Request History Entry",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history/{{requestHistoryId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Delete Request History Entry",
+                     "request":  {
+                                     "method":  "DELETE",
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history/{{requestHistoryId}}",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Bulk Delete Request History",
+                     "request":  {
+                                     "method":  "POST",
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history/bulk",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\"beforeUtc\":null,\"modelName\":null,\"path\":null}"
+                                              }
+                                 }
+                 },
+                 {
+                     "name":  "Request Analytics Overview",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history/analytics/overview",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Restore",
+                     "request":  {
+                                     "method":  "POST",
+                                     "url":  "{{baseUrl}}/v1.0/api/restore",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    },
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{}"
+                                              }
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Health",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/health"
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard State",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/state",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Statistics",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/statistics",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Providers",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/providers",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Models",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/models",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Requests",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/requests",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Request Summary",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/requests/summary?range=hour",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Logs",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/logs?tail=200\u0026severity=all",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Local Dashboard Settings",
+                     "request":  {
+                                     "method":  "GET",
+                                     "url":  "{{localDashboardUrl}}/api/v1/settings",
+                                     "header":  [
+                                                    {
+                                                        "key":  "X-Xeno-Local-Token",
+                                                        "value":  "{{localDashboardToken}}"
+                                                    }
+                                                ]
+                                 }
+                 },
+                 {
+                     "name":  "Xeno Client Local Dashboard",
+                     "description":  "Local dashboard API served by the background xeno client process on localhost. Set localDashboardToken from the embedded dashboard page when token authentication is enabled.",
+                     "item":  [
+                                  {
+                                      "name":  "State",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/state"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Statistics",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/statistics"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Telemetry Status",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/status"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Latest Telemetry",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/latest"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Collect Telemetry Now",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/collect",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Search Telemetry History",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/search",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Telemetry Rollups",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/rollups",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5,\n  \"limit\": 500\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Telemetry Detail",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Delete Telemetry Detail",
+                                      "request":  {
+                                                      "method":  "DELETE",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Delete Telemetry Range",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/delete",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\n  \"beforeUtc\": null\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Provider Telemetry Status",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/status"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Latest Provider Telemetry",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/latest"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Collect Provider Telemetry Now",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/collect",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Search Provider Telemetry History",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/history/search",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\n  \"metric\": \"ActiveRequests\",\n  \"providerName\": null,\n  \"modelName\": null,\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Provider Telemetry Rollups",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/history/rollups",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\n  \"metric\": \"ActiveRequests\",\n  \"providerName\": null,\n  \"modelName\": null,\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Provider Telemetry Detail",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Delete Provider Telemetry Detail",
+                                      "request":  {
+                                                      "method":  "DELETE",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Delete Provider Telemetry Range",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/telemetry/providers/history/delete",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Providers",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/providers"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Models",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/models"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Requests",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/requests"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Logs",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/logs?tail=200"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Settings",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/settings"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Update Local Telemetry Settings",
+                                      "request":  {
+                                                      "method":  "PUT",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "X-Xeno-Local-Token",
+                                                                         "value":  "{{localDashboardToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{localDashboardUrl}}/api/v1/settings",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\n  \"telemetry\": {\n    \"enabled\": true,\n    \"collectionIntervalMs\": 15000,\n    \"retentionDays\": 30,\n    \"pruneIntervalMinutes\": 60,\n    \"persistRawSnapshot\": true,\n    \"gpu\": {\n      \"enabled\": true,\n      \"nvidiaDcgmExporterUrl\": null,\n      \"commandTimeoutMs\": 5000\n    }\n  }\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  }
+                              ]
+                 },
+                 {
+                     "name":  "Client Telemetry",
+                     "item":  [
+                                  {
+                                      "name":  "Get client telemetry status",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/status"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Trigger host/provider collection for all clients",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/collect",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"collectHostTelemetry\": true, \"collectProviderTelemetry\": true }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Trigger collection for one client",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/collect",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"clientId\": \"{{clientTelemetryClientId}}\", \"collectHostTelemetry\": true, \"collectProviderTelemetry\": true }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Get latest host telemetry",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/latest"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Search host telemetry",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/search",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"metric\": \"CpuUtilizationPercent\", \"limit\": 100, \"offset\": 0 }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Host telemetry rollups",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/rollups",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"metric\": \"CpuUtilizationPercent\", \"bucketMinutes\": 5 }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Get host telemetry detail",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/{{clientTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Delete host telemetry detail",
+                                      "request":  {
+                                                      "method":  "DELETE",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/{{clientTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Bulk delete host telemetry by range",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/delete",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"clientId\": \"{{clientTelemetryClientId}}\", \"toUtc\": \"2026-01-01T00:00:00Z\" }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Get latest provider telemetry",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/latest"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Search provider telemetry",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/search",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"providerName\": \"{{clientTelemetryProviderName}}\", \"metric\": \"LatencyP95Ms\", \"limit\": 100, \"offset\": 0 }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Provider telemetry rollups",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/rollups",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"metric\": \"LatencyP95Ms\", \"bucketMinutes\": 5 }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Get provider telemetry detail",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Delete provider telemetry detail",
+                                      "request":  {
+                                                      "method":  "DELETE",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Bulk delete provider telemetry by range",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/delete",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{ \"clientId\": \"{{clientTelemetryClientId}}\", \"toUtc\": \"2026-01-01T00:00:00Z\" }",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Get telemetry metric catalog",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/client-telemetry/metrics"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Validate routing policy with telemetry filters",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/routing-policies/validate",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\r\n    \"name\":  \"Telemetry GPU policy validation\",\r\n    \"modelName\":  \"*\",\r\n    \"clientName\":  \"*\",\r\n    \"maxTelemetryAgeMs\":  30000,\r\n    \"telemetryFilters\":  [\r\n                             {\r\n                                 \"metric\":  \"telemetry.gpu.available\",\r\n                                 \"operator\":  \"Equal\",\r\n                                 \"valueType\":  \"Boolean\",\r\n                                 \"value\":  \"true\"\r\n                             }\r\n                         ],\r\n    \"telemetryRanking\":  [\r\n                             {\r\n                                 \"metric\":  \"telemetry.gpu.avgUtilizationPercent\",\r\n                                 \"direction\":  \"Ascending\",\r\n                                 \"weight\":  1\r\n                             }\r\n                         ],\r\n    \"telemetryFallbackMode\":  \"FailClosed\",\r\n    \"active\":  true\r\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Create routing policy with telemetry filters",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/routing-policies",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\r\n    \"name\":  \"Telemetry GPU policy\",\r\n    \"modelName\":  \"*\",\r\n    \"clientName\":  \"*\",\r\n    \"maxTelemetryAgeMs\":  30000,\r\n    \"telemetryFilters\":  [\r\n                             {\r\n                                 \"metric\":  \"telemetry.gpu.available\",\r\n                                 \"operator\":  \"Equal\",\r\n                                 \"valueType\":  \"Boolean\",\r\n                                 \"value\":  \"true\"\r\n                             }\r\n                         ],\r\n    \"telemetryFallbackMode\":  \"FailClosed\",\r\n    \"active\":  true\r\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Update routing policy with telemetry ranking",
+                                      "request":  {
+                                                      "method":  "PUT",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-token",
+                                                                         "value":  "{{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1.0/api/routing-policies/{{routingPolicyId}}",
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\r\n    \"telemetryRanking\":  [\r\n                             {\r\n                                 \"metric\":  \"provider.queuedRequests\",\r\n                                 \"direction\":  \"Ascending\",\r\n                                 \"weight\":  1\r\n                             }\r\n                         ],\r\n    \"telemetryFallbackMode\":  \"UseLoadBalancingMode\",\r\n    \"active\":  true\r\n}",
+                                                                   "options":  {
+                                                                                   "raw":  {
+                                                                                               "language":  "json"
+                                                                                           }
+                                                                               }
+                                                               }
+                                                  }
+                                  }
+                              ]
+                 }
+             ]
 }

@@ -28,6 +28,14 @@ wss://{server}/ws/v1/clients
 
 Every text frame is a JSON object with a stable `type` discriminator.
 
+Telemetry collection frames are part of the same authenticated client WebSocket session. The server sends `server.telemetry.request`; clients answer with `client.telemetry.snapshot`, `client.providerTelemetry.snapshot`, `client.telemetry.error`, or `client.providerTelemetry.error`. The server replies with `server.telemetry.ack` after processing the frame.
+
+Telemetry request fields include `requestId`, `tenantId`, `clientId`, `sentUtc`, `collectHostTelemetry`, `collectProviderTelemetry`, `includeRawSnapshot`, `maxRawSnapshotBytes`, `maxProviderMetricRows`, optional history bounds, and `maxSamples`.
+
+Clients must echo the request ID, tenant ID, and client ID. The server rejects telemetry frames whose tenant, client, or WebSocket session does not match the authenticated connection. Telemetry frames never complete inference `server.request` pending responses.
+
+Telemetry payloads must not contain prompts, responses, provider credentials, authorization headers, cookies, API keys, or unbounded raw metrics.
+
 The current protocol version is the Xeno application version:
 
 ```text

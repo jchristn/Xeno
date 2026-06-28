@@ -22,6 +22,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, client-side request history, and machine telemetry.
 - Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
 - Collects local CPU, memory, disk, and GPU telemetry on the client at a configurable interval, persists it in SQLite, and exposes live and historical telemetry dashboard pages.
+- Can collect fleet-level client telemetry from the server. When `TelemetryCollection.Enabled` is true, the server requests host and provider telemetry over the authenticated client WebSocket, persists server-collected samples, and shows them under `CONTROL > Client Telemetry`.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
 - Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
@@ -49,6 +50,15 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
 8. The server returns the model response to the caller and persists request history for dashboard inspection.
 9. When enabled, the client also writes local request history to SQLite and exposes a local dashboard for inspecting what that specific machine processed.
+10. When server telemetry collection is enabled, the server controls collection cadence and clients answer explicit telemetry request frames. Disabling server collection does not disable the client's local telemetry dashboard.
+
+## Server Client Telemetry
+
+Server-side telemetry collection is configured with `TelemetryCollection` in `xeno.json`. The collection interval is clamped to a minimum of `10` seconds and a maximum of `300` seconds. Request timeout, retention, pruning interval, raw snapshot persistence, raw snapshot byte limit, provider metric row limit, and collection concurrency are also bounded settings.
+
+Collected data includes normalized host metrics for CPU, memory, disk, and GPU, plus provider health, model counts, queue depth, latency, token rates, cache pressure, and normalized provider metrics where available. Xeno does not collect prompts, responses, provider credentials, authorization headers, cookies, API keys, or unbounded raw metrics as telemetry.
+
+The server dashboard exposes the fleet view at `CONTROL > Client Telemetry`. REST clients can use `/v1.0/api/client-telemetry/status`, `/latest`, `/collect`, host/provider history search, details, deletes, collection attempts, and `/metrics`.
 
 ## Getting Started With Docker
 

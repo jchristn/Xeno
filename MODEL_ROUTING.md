@@ -4,6 +4,19 @@ Xeno routes OpenAI-compatible completions and embeddings through tenant-scoped r
 
 Xeno v0.1.0 is alpha. Policy fields and routing behavior may change before a stable release.
 
+## Telemetry-Aware Policy Fields
+
+Routing policies include telemetry fields that round-trip through the REST API:
+
+- `maxTelemetryAgeMs`: default `30000`, clamped from `1000` to `300000`.
+- `telemetryFilters`: metric/operator/value conditions.
+- `telemetryRanking`: metric/direction/weight ranking rules.
+- `telemetryFallbackMode`: `UseLoadBalancingMode` or `FailClosed`.
+
+The telemetry metric catalog is available at `GET /v1.0/api/client-telemetry/metrics`. Catalog entries include host metrics such as `telemetry.cpu.utilizationPercent`, `telemetry.memory.utilizationPercent`, `telemetry.gpu.available`, and provider metrics such as `provider.queuedRequests`, `provider.latencyP95Ms`, and `provider.cacheUsagePercent`.
+
+Runtime telemetry evaluation is designed to use fresh server-collected samples. Operators can inspect collected data under `CONTROL > Client Telemetry` before authoring policy conditions.
+
 ## Policy Object
 
 A routing policy contains:

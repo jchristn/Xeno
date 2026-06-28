@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -19,6 +19,7 @@ import {
   History,
   KeyRound,
   Layers3,
+  LineChart,
   LockKeyhole,
   Network,
   LogOut,
@@ -103,6 +104,7 @@ const navGroups = [
     key: 'control',
     links: [
       { to: '/dashboard/clients', key: 'clients', icon: Network },
+      { to: '/dashboard/client-telemetry', key: 'clientTelemetry', icon: LineChart },
       { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit },
       { to: '/dashboard/routing-policies', key: 'routingPolicies', icon: GitBranch }
     ]
@@ -129,6 +131,7 @@ const pageMeta = {
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
+  '/dashboard/client-telemetry': { title: 'clientTelemetry', description: 'clientTelemetryDescription' },
   '/dashboard/routing-policies': { title: 'routingPolicies', description: 'routingPoliciesDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
@@ -214,6 +217,7 @@ function navTooltipKey(key) {
     advertisedModels: 'tooltipNavAdvertisedModels',
     analytics: 'tooltipNavAnalytics',
     clients: 'tooltipNavClients',
+    clientTelemetry: 'tooltipNavClientTelemetry',
     credentials: 'tooltipNavCredentials',
     explorer: 'tooltipNavExplorer',
     home: 'tooltipNavHome',
@@ -308,6 +312,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <Route path="security" element={<SecurityView />} />
             <Route path="clients" element={<ClientsView />} />
             <Route path="clients/advertised-models" element={<AdvertisedModelsView />} />
+            <Route path="client-telemetry" element={<ClientTelemetryView />} />
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
             <Route path="settings" element={<SettingsView />} />
@@ -317,6 +322,375 @@ function Shell({ onLogout, onToggleTheme, theme }) {
       </div>
     </div>
   );
+}
+
+function ClientTelemetryView() {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const clients = useResource('/api/v1/clients', []);
+  const [status, setStatus] = useState(null);
+  const [latest, setLatest] = useState({ hostTelemetry: [], providerTelemetry: [] });
+  const [attempts, setAttempts] = useState([]);
+  const [hostRollups, setHostRollups] = useState({ cpu: [], memory: [], gpu: [] });
+  const [providerRollups, setProviderRollups] = useState({ active: [], available: [], loaded: [] });
+  const [telemetryRange, setTelemetryRange] = useState('lastHour');
+  const [rangeAnchor, setRangeAnchor] = useState(Date.now());
+  const [loading, setLoading] = useState(true);
+  const [collecting, setCollecting] = useState(false);
+  const telemetryWindow = useMemo(() => buildAnalyticsWindow(telemetryRange, rangeAnchor), [rangeAnchor, telemetryRange]);
+  const selectedClientId = searchParams.get('clientId') || 'all';
+  const selectedClient = clients.data.find((client) => String(value(client, 'id') || '') === selectedClientId);
+  const selectedClientName = value(selectedClient, 'name') || selectedClientId;
+  const selectedClientExists = selectedClientId === 'all' || Boolean(selectedClient);
+  const selectedClientQuery = selectedClientId === 'all' ? '' : `?clientId=${encodeURIComponent(selectedClientId)}`;
+  const latestHostTelemetry = value(latest, 'hostTelemetry');
+  const latestProviderTelemetry = value(latest, 'providerTelemetry');
+  const hostRows = Array.isArray(latestHostTelemetry) ? latestHostTelemetry : [];
+  const providerRows = Array.isArray(latestProviderTelemetry) ? latestProviderTelemetry : [];
+  const connectedClientCount = selectedClientId === 'all'
+    ? value(status, 'connectedClientCount') || 0
+    : (value(selectedClient, 'connected') === true ? 1 : 0);
+  const freshHostCount = hostRows.filter((item) => telemetryAgeMs(item) <= 30000).length;
+  const averageCpu = average(hostRows.map((item) => value(item, 'cpuUtilizationPercent')));
+  const averageMemory = average(hostRows.map((item) => value(item, 'memoryUtilizationPercent')));
+  const averageGpu = average(hostRows.map((item) => value(item, 'gpuAverageUtilizationPercent')));
+  const unhealthyProviders = providerRows.filter((item) => String(value(item, 'healthStatus') || '').toLowerCase() === 'unhealthy').length;
+  const hostChartSeries = [
+    { key: 'cpu', label: t('cpu', 'CPU'), color: 'var(--color-info)', values: telemetryRollupValues(hostRollups.cpu, telemetryWindow) },
+    { key: 'memory', label: t('memory', 'Memory'), color: 'var(--color-success)', values: telemetryRollupValues(hostRollups.memory, telemetryWindow) },
+    { key: 'gpu', label: t('gpu', 'GPU'), color: 'var(--color-warning)', values: telemetryRollupValues(hostRollups.gpu, telemetryWindow) }
+  ];
+  const providerChartSeries = [
+    { key: 'available', label: t('availableModels', 'Available Models'), color: 'var(--color-success)', values: telemetryRollupValues(providerRollups.available, telemetryWindow) },
+    { key: 'loaded', label: t('loadedModels', 'Loaded Models'), color: 'var(--color-warning)', values: telemetryRollupValues(providerRollups.loaded, telemetryWindow) },
+    { key: 'active', label: t('activeRequests', 'Active'), color: 'var(--color-info)', values: telemetryRollupValues(providerRollups.active, telemetryWindow) }
+  ];
+
+  async function refresh(nextAnchor = rangeAnchor) {
+    const nextWindow = buildAnalyticsWindow(telemetryRange, nextAnchor);
+    setLoading(true);
+    try {
+      const clientId = selectedClientId === 'all' ? null : selectedClientId;
+      const rollupBase = {
+        bucketMinutes: nextWindow.bucketMinutes,
+        clientId,
+        fromUtc: nextWindow.fromUtc,
+        toUtc: nextWindow.toUtc
+      };
+      const [
+        nextStatus,
+        nextLatest,
+        nextAttempts,
+        cpuRollups,
+        memoryRollups,
+        gpuRollups,
+        activeRollups,
+        availableRollups,
+        loadedRollups
+      ] = await Promise.all([
+        api.get('/v1.0/api/client-telemetry/status'),
+        api.get(`/v1.0/api/client-telemetry/latest${selectedClientQuery}`),
+        api.get(`/v1.0/api/client-telemetry/collection-attempts${selectedClientQuery}`),
+        api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: 'CpuUtilizationPercent' }),
+        api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: 'MemoryUtilizationPercent' }),
+        api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: 'GpuUtilizationPercent' }),
+        api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: 'ActiveRequests' }),
+        api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: 'AvailableModelCount' }),
+        api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: 'LoadedModelCount' })
+      ]);
+      setStatus(nextStatus || null);
+      setLatest(nextLatest || { hostTelemetry: [], providerTelemetry: [] });
+      setAttempts(Array.isArray(nextAttempts) ? nextAttempts : []);
+      setHostRollups({
+        cpu: Array.isArray(cpuRollups) ? cpuRollups : [],
+        memory: Array.isArray(memoryRollups) ? memoryRollups : [],
+        gpu: Array.isArray(gpuRollups) ? gpuRollups : []
+      });
+      setProviderRollups({
+        active: Array.isArray(activeRollups) ? activeRollups : [],
+        available: Array.isArray(availableRollups) ? availableRollups : [],
+        loaded: Array.isArray(loadedRollups) ? loadedRollups : []
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function refreshWithCurrentTime() {
+    const nextAnchor = Date.now();
+    setRangeAnchor(nextAnchor);
+    return refresh(nextAnchor);
+  }
+
+  async function collectNow() {
+    setCollecting(true);
+    try {
+      await api.post('/v1.0/api/client-telemetry/collect', { clientId: selectedClientId === 'all' ? null : selectedClientId });
+      await refreshWithCurrentTime();
+    } finally {
+      setCollecting(false);
+    }
+  }
+
+  function updateTelemetryRange(nextRange) {
+    const nextAnchor = Date.now();
+    setTelemetryRange(nextRange);
+    setRangeAnchor(nextAnchor);
+  }
+
+  function updateSelectedClient(clientId) {
+    const nextClientId = String(clientId || 'all');
+    if (nextClientId === 'all') {
+      setSearchParams({});
+      return;
+    }
+
+    setSearchParams({ clientId: nextClientId });
+  }
+
+  useEffect(() => {
+    refresh();
+  }, [rangeAnchor, selectedClientQuery, telemetryRange]);
+
+  return (
+    <div className="view-stack client-telemetry-view">
+      <div className="analytics-range-toolbar">
+        <div>
+          <span className="eyebrow">{t('timeRange')}</span>
+          <h2>{t('clientTelemetryTimeRange', 'Telemetry Time Range')}</h2>
+        </div>
+        <div className="chart-action-row home-range-actions">
+          <TimeRangeSelector onChange={updateTelemetryRange} range={telemetryRange} />
+          <IconButton iconOnly disabled={loading} onClick={refreshWithCurrentTime} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+          <IconButton iconOnly disabled={collecting} onClick={collectNow} label={t('collectNow', 'Collect Now')} tooltip={t('collectNow', 'Collect Now')} icon={<Play size={16} />} />
+        </div>
+      </div>
+
+      <div className="client-telemetry-toolbar">
+        <label className="form-field inline compact-field table-inline-filter">
+          <span>{t('clientFilter')}</span>
+          <select value={selectedClientId} onChange={(event) => updateSelectedClient(event.target.value)} title={t('filterClientTelemetry', 'Filter client telemetry by client')}>
+            <option value="all">{t('allClients')}</option>
+            {!selectedClientExists ? <option value={selectedClientId}>{selectedClientName}</option> : null}
+            {clients.data.map((client) => {
+              const clientId = String(value(client, 'id') || '');
+              return (
+                <option key={clientId || value(client, 'name')} value={clientId}>
+                  {value(client, 'name') || clientId}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      </div>
+
+      <div className="metric-grid">
+        <MetricCard icon={<Network size={18} />} label={t('connectedClients')} value={formatNumber(connectedClientCount)} subtext={t('clients')} tone="info" />
+        <MetricCard icon={<Gauge size={18} />} label={t('freshTelemetry', 'Fresh Telemetry')} value={formatNumber(freshHostCount)} subtext={t('clients')} tone="success" />
+        <MetricCard icon={<Cpu size={18} />} label={t('averageCpu', 'Average CPU')} value={formatPercent(averageCpu / 100)} />
+        <MetricCard icon={<Activity size={18} />} label={t('averageMemory', 'Average Memory')} value={formatPercent(averageMemory / 100)} />
+        <MetricCard icon={<Zap size={18} />} label={t('averageGpu', 'Average GPU')} value={formatPercent(averageGpu / 100)} />
+        <MetricCard icon={<Shield size={18} />} label={t('unhealthyProviders', 'Unhealthy Providers')} value={formatNumber(unhealthyProviders)} tone={unhealthyProviders > 0 ? 'danger' : 'success'} />
+        <MetricCard icon={<ShieldCheck size={18} />} label={t('enabled', 'Enabled')} value={String(Boolean(value(status, 'enabled')))} tone={value(status, 'enabled') ? 'success' : 'warning'} />
+        <MetricCard icon={<Activity size={18} />} label={t('running', 'Running')} value={String(Boolean(value(status, 'running')))} tone={value(status, 'running') ? 'success' : 'warning'} />
+        <MetricCard icon={<History size={18} />} label={t('collectionInterval', 'Collection Interval')} value={`${formatNumber(value(status, 'collectionIntervalSeconds') || 0)}s`} />
+        <MetricCard icon={<Gauge size={18} />} label={t('requestTimeout', 'Request Timeout')} value={`${formatNumber(value(status, 'requestTimeoutMs') || 0)}ms`} />
+        <MetricCard icon={<History size={18} />} label={t('lastCycle', 'Last Cycle')} value={formatDateTime(value(status, 'lastCycleUtc'))} />
+        <MetricCard icon={<History size={18} />} label={t('nextCycle', 'Next Cycle')} value={formatDateTime(value(status, 'nextCycleUtc'))} />
+      </div>
+
+      <div className="client-telemetry-chart-grid view-stack">
+        <TelemetrySparkChart
+          emptyTitle={t('noData')}
+          series={hostChartSeries}
+          subtitle={t('latestHostTelemetrySubtitle', 'Latest host telemetry samples collected by the server.')}
+          title={t('latestHostTelemetry', 'Latest Host Telemetry')}
+          valueFormatter={(nextValue) => formatPercent(nextValue / 100)}
+        />
+        <TelemetrySparkChart
+          emptyTitle={t('noData')}
+          series={providerChartSeries}
+          subtitle={t('latestProviderTelemetrySubtitle', 'Latest provider telemetry samples collected by the server.')}
+          title={t('latestProviderTelemetry', 'Latest Provider Telemetry')}
+          valueFormatter={(nextValue) => formatOptionalNumber(nextValue)}
+        />
+      </div>
+
+      <DataTable
+        columns={[
+          { key: 'clientName', label: t('client') },
+          { key: 'machineName', label: t('machine', 'Machine') },
+          { key: 'collectedUtc', label: t('collectedUtc', 'Collected UTC'), render: (item) => formatDateTime(value(item, 'collectedUtc')) },
+          { key: 'cpuUtilizationPercent', label: t('cpu', 'CPU'), render: (item) => formatPercent(Number(value(item, 'cpuUtilizationPercent') || 0) / 100) },
+          { key: 'memoryUtilizationPercent', label: t('memory', 'Memory'), render: (item) => formatPercent(Number(value(item, 'memoryUtilizationPercent') || 0) / 100) },
+          { key: 'gpuAverageUtilizationPercent', label: t('gpu', 'GPU'), render: (item) => formatPercent(Number(value(item, 'gpuAverageUtilizationPercent') || 0) / 100) }
+        ]}
+        rows={hostRows}
+        subtitle={t('latestHostTelemetrySubtitle', 'Latest host telemetry samples collected by the server.')}
+        title={t('latestHostTelemetry', 'Latest Host Telemetry')}
+      />
+
+      <DataTable
+        columns={[
+          { key: 'clientName', label: t('client') },
+          { key: 'providerName', label: t('provider', 'Provider') },
+          { key: 'collectedUtc', label: t('collectedUtc', 'Collected UTC'), render: (item) => formatDateTime(value(item, 'collectedUtc')) },
+          { key: 'healthStatus', label: t('health', 'Health') },
+          { key: 'queuedRequests', label: t('queuedRequests', 'Queued'), render: (item) => formatOptionalNumber(value(item, 'queuedRequests')) },
+          { key: 'latencyP95Ms', label: t('latencyP95', 'Latency p95'), render: (item) => formatDuration(value(item, 'latencyP95Ms')) }
+        ]}
+        rows={providerRows}
+        subtitle={t('latestProviderTelemetrySubtitle', 'Latest provider telemetry samples collected by the server.')}
+        title={t('latestProviderTelemetry', 'Latest Provider Telemetry')}
+      />
+
+      <DataTable
+        columns={[
+          { key: 'startedUtc', label: t('startedUtc', 'Started UTC'), render: (item) => formatDateTime(value(item, 'startedUtc')) },
+          { key: 'clientName', label: t('client') },
+          { key: 'status', label: t('status') },
+          { key: 'elapsedMs', label: t('elapsed', 'Elapsed'), render: (item) => formatDuration(value(item, 'elapsedMs')) },
+          { key: 'providerSampleCount', label: t('providerSamples', 'Provider Samples'), render: (item) => formatOptionalNumber(value(item, 'providerSampleCount')) }
+        ]}
+        rows={attempts}
+        subtitle={t('collectionAttemptsSubtitle', 'Recent server telemetry collection attempts.')}
+        title={t('collectionAttempts', 'Collection Attempts')}
+      />
+
+    </div>
+  );
+}
+
+function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatter }) {
+  const canvasRef = useRef(null);
+  const [hovered, setHovered] = useState(null);
+  const normalizedSeries = series.map((item) => ({
+    ...item,
+    values: Array.isArray(item.values) ? item.values : []
+  }));
+  const finiteValues = normalizedSeries.flatMap((item) => item.values.map((point) => Number(point.value)).filter((nextValue) => Number.isFinite(nextValue)));
+  const max = Math.max(1, ...finiteValues);
+  const chart = { width: 900, height: 360, left: 54, right: 28, top: 24, bottom: 44 };
+  const plotWidth = chart.width - chart.left - chart.right;
+  const plotHeight = chart.height - chart.top - chart.bottom;
+  const hasData = finiteValues.length > 0;
+  const bucketCount = Math.max(0, ...normalizedSeries.map((item) => item.values.length));
+
+  function updateHover(event) {
+    if (bucketCount === 0 || !canvasRef.current) {
+      setHovered(null);
+      return;
+    }
+
+    const bounds = canvasRef.current.getBoundingClientRect();
+    const svgX = (event.clientX - bounds.left) / Math.max(1, bounds.width) * chart.width;
+    const boundedX = Math.max(chart.left, Math.min(chart.left + plotWidth, svgX));
+    const index = Math.round(((boundedX - chart.left) / Math.max(1, plotWidth)) * Math.max(1, bucketCount - 1));
+    const x = chart.left + (index / Math.max(1, bucketCount - 1)) * plotWidth;
+    const rows = normalizedSeries.map((item) => {
+      const point = item.values[index] || {};
+      const pointValue = Number(point.value);
+      return {
+        color: item.color,
+        key: item.key,
+        label: item.label,
+        value: Number.isFinite(pointValue) ? pointValue : null
+      };
+    });
+    const label = normalizedSeries.map((item) => item.values[index]?.label).find(Boolean) || '';
+    setHovered({
+      label,
+      rows,
+      svgX: x,
+      ...telemetryTooltipFromPointer(event, canvasRef.current)
+    });
+  }
+
+  return (
+    <Panel subtitle={subtitle} title={title}>
+      {!hasData ? <EmptyState title={emptyTitle} description={subtitle} /> : (
+        <div className="activity-chart-panel compact-chart-panel telemetry-spark-chart-panel">
+          <div className="chart-canvas" ref={canvasRef}>
+            <svg className="activity-chart" onMouseLeave={() => setHovered(null)} onMouseMove={updateHover} viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={title}>
+              <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.top + plotHeight} stroke="var(--color-border)" />
+              <line x1={chart.left} y1={chart.top + plotHeight} x2={chart.left + plotWidth} y2={chart.top + plotHeight} stroke="var(--color-border)" />
+              {[1, 0.5, 0].map((ratio) => {
+                const y = chart.top + (1 - ratio) * plotHeight;
+                return (
+                  <g key={ratio}>
+                    <line x1={chart.left} y1={y} x2={chart.left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" opacity="0.72" />
+                    <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{valueFormatter(max * ratio)}</text>
+                  </g>
+                );
+              })}
+              {normalizedSeries.map((item) => {
+                const points = item.values.map((point, index) => {
+                  const denominator = Math.max(1, item.values.length - 1);
+                  const x = chart.left + (index / denominator) * plotWidth;
+                  const pointValue = Number(point.value);
+                  const y = Number.isFinite(pointValue) ? chart.top + plotHeight - (pointValue / max) * plotHeight : null;
+                  return { ...point, value: pointValue, x, y };
+                });
+                const visiblePoints = points.filter((point) => Number.isFinite(point.value) && point.y !== null);
+                const line = visiblePoints.map((point) => `${point.x},${point.y}`).join(' ');
+                return (
+                  <g key={item.key}>
+                    {visiblePoints.length > 1 ? <polyline points={line} fill="none" stroke={item.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" /> : null}
+                    {visiblePoints.map((point, index) => (
+                      <g key={`${item.key}-${point.label}-${index}`}>
+                        <title>{`${item.label} ${point.label}: ${valueFormatter(point.value)}`}</title>
+                        <circle cx={point.x} cy={point.y} r="4" fill={item.color} />
+                      </g>
+                    ))}
+                  </g>
+                );
+              })}
+              {hovered ? (
+                <line className="chart-hover-line" x1={hovered.svgX} y1={chart.top} x2={hovered.svgX} y2={chart.top + plotHeight} />
+              ) : null}
+              <rect
+                fill="transparent"
+                height={plotHeight}
+                onFocus={(event) => updateHover({ ...event, clientX: event.currentTarget.getBoundingClientRect().left, clientY: event.currentTarget.getBoundingClientRect().top })}
+                width={plotWidth}
+                x={chart.left}
+                y={chart.top}
+              />
+            </svg>
+            {hovered ? (
+              <div className="chart-tooltip telemetry-chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
+                <strong>{hovered.label}</strong>
+                {hovered.rows.map((row) => (
+                  <span className="chart-tooltip-row" key={row.key}>
+                    <i style={{ background: row.color }} />
+                    <span>{row.label}</span>
+                    <b>{row.value === null ? '-' : valueFormatter(row.value)}</b>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="chart-legend">
+            {normalizedSeries.map((item) => <span key={item.key}><i style={{ background: item.color }} />{item.label}</span>)}
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function telemetryTooltipFromPointer(event, element) {
+  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
+  const bounds = element.getBoundingClientRect();
+  return telemetryTooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
+}
+
+function telemetryTooltipPosition(x, y, width, height) {
+  const tooltipWidth = 220;
+  const clampedX = Math.max(10, Math.min(width - 10, x));
+  const clampedY = Math.max(24, Math.min(height - 24, y));
+  const transform = clampedX > width - tooltipWidth ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
+  return { x: clampedX, y: clampedY, transform };
 }
 
 function LoginView({ onLogin, onToggleTheme, theme }) {
@@ -563,6 +937,17 @@ function HomeView() {
 
   return (
     <div className="view-stack">
+      <div className="analytics-range-toolbar">
+        <div>
+          <span className="eyebrow">{t('timeRange')}</span>
+          <h2>{t('homeTimeRange', 'Dashboard Time Range')}</h2>
+        </div>
+        <div className="chart-action-row home-range-actions">
+          <TimeRangeSelector onChange={updateActivityRange} range={activityRange} />
+          <IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+        </div>
+      </div>
+
       <div className="metric-grid">
         <MetricCard icon={<History size={18} />} label={t('requestVolume')} value={formatNumber(analytics.data.total)} subtext={t('total')} />
         <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analytics.data.success)} subtext={formatPercent(1 - Number(analytics.data.failureRate || 0))} tone="success" />
@@ -573,22 +958,21 @@ function HomeView() {
       </div>
 
       <Panel
-        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
+        <ActivityChart range={activityRange} showControls={false} summary={summary.data} />
       </Panel>
 
       <Panel
-        actions={<IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         className="chart-panel-card"
         title={t('connectedClients')}
       >
         <ConnectedClientsChart
           connected={connected}
-          onRefresh={refreshAll}
+          range={activityRange}
           sampleVersion={clients.updatedAt}
+          showControls={false}
           total={clients.data.length}
         />
       </Panel>
@@ -1088,6 +1472,7 @@ function CredentialsView() {
 
 function ClientsView() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const clients = useResource('/api/v1/clients', []);
   const [selectedClient, setSelectedClient] = useState(null);
   const clientModels = flattenClientModels(clients.data);
@@ -1109,6 +1494,17 @@ function ClientsView() {
         }}
         onRefresh={clients.refresh}
         onRowClick={setSelectedClient}
+        getRowActions={(row) => {
+          const clientId = recordId(row);
+          return [{
+            disabled: !clientId,
+            icon: <LineChart size={14} />,
+            key: 'view-telemetry',
+            label: t('viewTelemetry', 'View Telemetry'),
+            tooltip: t('tooltipViewClientTelemetry', 'Open client telemetry filtered to this client.'),
+            onSelect: () => navigate(`/dashboard/client-telemetry?clientId=${encodeURIComponent(clientId)}`)
+          }];
+        }}
         rows={clients.data}
         subtitle={t('clientsTableSubtitle')}
         title={t('clients')}
@@ -1766,6 +2162,15 @@ function MetricCard({ icon, label, subtext, tone = 'neutral', value }) {
   );
 }
 
+function KeyValue({ label, value }) {
+  return (
+    <div className="detail-item">
+      <span>{label}</span>
+      <strong>{value ?? '-'}</strong>
+    </div>
+  );
+}
+
 function Panel({ actions, children, className = '', eyebrow, title }) {
   return (
     <section className={`workspace-card ${className}`.trim()}>
@@ -1790,7 +2195,7 @@ function IconButton({ disabled = false, icon, iconOnly = false, label, onClick, 
   );
 }
 
-function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, title }) {
+function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, getRowActions, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
@@ -1923,6 +2328,12 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, on
         tooltip: t('tooltipEditRow'),
         onSelect: () => onRowClick(row)
       });
+    }
+    if (getRowActions) {
+      const additionalItems = getRowActions(row);
+      if (Array.isArray(additionalItems) && additionalItems.length > 0) {
+        items.push(...additionalItems);
+      }
     }
     items.push({
       icon: <FileJson size={14} />,
@@ -3786,6 +4197,20 @@ function value(row, key) {
   return row[key] ?? row[pascal];
 }
 
+function average(values) {
+  const numbers = values.map(Number).filter((item) => Number.isFinite(item));
+  if (numbers.length === 0) return 0;
+  return numbers.reduce((sum, item) => sum + item, 0) / numbers.length;
+}
+
+function telemetryAgeMs(item) {
+  const collected = value(item, 'collectedUtc');
+  if (!collected) return Number.POSITIVE_INFINITY;
+  const timestamp = new Date(collected).getTime();
+  if (!Number.isFinite(timestamp)) return Number.POSITIVE_INFINITY;
+  return Date.now() - timestamp;
+}
+
 function collectionRows(input) {
   if (Array.isArray(input)) return input;
   if (!input || typeof input !== 'object') return [];
@@ -3842,6 +4267,42 @@ function buildAnalyticsWindow(rangeKey, anchorMs) {
     toMs,
     toUtc: new Date(toMs).toISOString()
   };
+}
+
+function telemetryRollupValues(rollups, window) {
+  const bucketMs = Math.max(1, Number(window.bucketMinutes || 1)) * 60 * 1000;
+  const bucketCount = Math.max(1, Math.ceil((window.toMs - window.fromMs) / bucketMs));
+  const values = Array.from({ length: bucketCount }, (_, index) => {
+    const startMs = window.fromMs + index * bucketMs;
+    return {
+      label: telemetryBucketLabel(startMs, window.key),
+      value: null
+    };
+  });
+
+  (Array.isArray(rollups) ? rollups : []).forEach((bucket) => {
+    const startUtc = value(bucket, 'startUtc');
+    const startMs = Date.parse(String(startUtc || ''));
+    if (!Number.isFinite(startMs)) return;
+    const index = Math.floor((startMs - window.fromMs) / bucketMs);
+    if (index < 0 || index >= values.length) return;
+    const averageValue = Number(value(bucket, 'average'));
+    values[index] = {
+      label: value(bucket, 'label') || telemetryBucketLabel(startMs, window.key),
+      value: Number.isFinite(averageValue) ? averageValue : null
+    };
+  });
+
+  return values;
+}
+
+function telemetryBucketLabel(timestamp, rangeKey) {
+  const date = new Date(timestamp);
+  if (rangeKey === 'lastHour' || rangeKey === 'lastDay') {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 function requestHistorySummaryPath(window) {

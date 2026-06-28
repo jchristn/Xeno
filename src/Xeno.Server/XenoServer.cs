@@ -19,9 +19,11 @@ namespace Xeno.Server
     using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
     using Xeno.Core.Models;
+    using Xeno.Core.Models.Telemetry;
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
     using Xeno.Core.Settings;
+    using Xeno.Server.Services;
 
     /// <summary>
     /// Watson-backed Xeno REST, OpenAPI, Swagger, and WebSocket server host.
@@ -36,11 +38,21 @@ namespace Xeno.Server
         private readonly Webserver _Webserver;
         private readonly object _ClientConnectionsLock = new object();
         private readonly object _PendingResponsesLock = new object();
+        private readonly object _PendingTelemetryResponsesLock = new object();
         private readonly Dictionary<string, ClientConnection> _ClientConnections = new Dictionary<string, ClientConnection>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, PendingClientResponse> _PendingClientResponses = new Dictionary<string, PendingClientResponse>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, PendingTelemetryResponse> _PendingTelemetryResponses = new Dictionary<string, PendingTelemetryResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly AuthenticationService _Authentication = new AuthenticationService();
+        private readonly ClientTelemetryLatestCache _TelemetryLatestCache = new ClientTelemetryLatestCache();
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
+        private CancellationTokenSource? _TelemetryCollectionCancellation;
+        private Task? _TelemetryCollectionTask;
+        private DateTime? _TelemetryLastCycleUtc;
+        private DateTime? _TelemetryNextCycleUtc;
+        private DateTime? _TelemetryNextPruneUtc;
+        private int _TelemetryRecentFailureCount;
+        private int _TelemetryCollectionCycleActive;
         private bool _Disposed;
 
         /// <summary>
@@ -79,6 +91,7 @@ namespace Xeno.Server
             _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
 
             _Webserver.Start();
+            StartTelemetryCollectionLoop();
 
             try
             {
@@ -101,6 +114,7 @@ namespace Xeno.Server
         /// </summary>
         public void Stop()
         {
+            _TelemetryCollectionCancellation?.Cancel();
             try
             {
                 _Webserver.Stop();
@@ -120,6 +134,7 @@ namespace Xeno.Server
             IDisposable? disposable = _Webserver as IDisposable;
             disposable?.Dispose();
             _Database?.Dispose();
+            _TelemetryLatestCache.Dispose();
             _Disposed = true;
         }
 
@@ -146,6 +161,7 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "Authentication", Description = "Tenant-bound token endpoints" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Tenants", Description = "Tenant administration" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Clients", Description = "Connected Xeno clients and their advertised models" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Client Telemetry", Description = "Server-collected client host and provider telemetry" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Routing", Description = "Direct routing to connected Xeno clients" });
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
@@ -259,6 +275,19 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/clients", "List clients", "Clients");
             RegisterStaticRoute(HttpMethod.DELETE, "/api/v1/clientmodels", "Delete client-advertised model", "Clients");
             RegisterStaticRoute(HttpMethod.DELETE, "/v1.0/api/client-models", "Delete client-advertised model", "Clients");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/status", "Client telemetry status", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/latest", "Latest client telemetry", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/collect", "Trigger client telemetry collection", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/history/search", "Search client telemetry history", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/history/rollups", "Client telemetry rollups", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/history/delete", "Bulk delete client telemetry", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/providers/latest", "Latest provider telemetry", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/collect", "Trigger provider telemetry collection", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/search", "Search provider telemetry history", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/rollups", "Provider telemetry rollups", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/delete", "Bulk delete provider telemetry", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/collection-attempts", "List client telemetry collection attempts", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/metrics", "Client telemetry metric catalog", "Client Telemetry");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modeldefinitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
@@ -267,6 +296,7 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/routing-policies", "List routing policies", "Routing");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/routingpolicies", "Create routing policy", "Routing");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/routing-policies", "Create routing policy", "Routing");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/routing-policies/validate", "Validate routing policy", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/openai/v1/models", "List OpenAI models", "OpenAI");
             RegisterStaticRoute(HttpMethod.POST, "/v1/chat/completions", "Create chat completion", "OpenAI");
@@ -317,6 +347,10 @@ namespace Xeno.Server
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/clients/{id}", "Delete client", "Clients");
+            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/history/{id}", "Get client telemetry detail", "Client Telemetry");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/history/{id}", "Delete client telemetry detail", "Client Telemetry");
+            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/providers/history/{id}", "Get provider telemetry detail", "Client Telemetry");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/providers/history/{id}", "Delete provider telemetry detail", "Client Telemetry");
             RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/routingpolicies/{id}", "Update routing policy", "Routing");
             RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/routing-policies/{id}", "Update routing policy", "Routing");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/routingpolicies/{id}", "Delete routing policy", "Routing");
@@ -639,6 +673,14 @@ namespace Xeno.Server
                     RoutingPolicyExample());
             }
 
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/routing-policies/validate"))
+            {
+                return JsonBody(
+                    "Routing policy validation request.",
+                    RoutingPolicyBodySchema("Routing policy validation request.", false),
+                    RoutingPolicyExample());
+            }
+
             if (method == HttpMethod.PUT && path.Contains("/routing", StringComparison.OrdinalIgnoreCase) && path.Contains("{id}", StringComparison.OrdinalIgnoreCase))
             {
                 return JsonBody(
@@ -662,6 +704,106 @@ namespace Xeno.Server
                         ["clientId"] = "xcl_example",
                         ["name"] = "llama3.2:latest",
                         ["source"] = "local-ollama"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/client-telemetry/collect", "/v1.0/api/client-telemetry/providers/collect"))
+            {
+                bool providerOnly = path.Contains("/providers/", StringComparison.OrdinalIgnoreCase);
+                return JsonBody(
+                    "Manual telemetry collection request.",
+                    ObjectSchemaMetadata(
+                        "Manual telemetry collection request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("clientId", OpenApiSchemaMetadata.String("Optional client ID. Omit to collect from all connected clients.")),
+                        SchemaProperty("collectHostTelemetry", BooleanSchemaMetadata("Whether host telemetry should be collected.")),
+                        SchemaProperty("collectProviderTelemetry", BooleanSchemaMetadata("Whether provider telemetry should be collected.")),
+                        SchemaProperty("wait", BooleanSchemaMetadata("Whether the caller wants to wait for collection completion when supported."))),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["collectHostTelemetry"] = !providerOnly,
+                        ["collectProviderTelemetry"] = true,
+                        ["wait"] = false
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/client-telemetry/history/search"))
+            {
+                return JsonBody(
+                    "Host telemetry search request.",
+                    TelemetrySearchSchemaMetadata("Host telemetry search request."),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["metric"] = "telemetry.cpu.utilizationPercent",
+                        ["fromUtc"] = DateTime.UtcNow.AddHours(-1).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["page"] = 1,
+                        ["pageSize"] = 50
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/client-telemetry/providers/history/search"))
+            {
+                return JsonBody(
+                    "Provider telemetry search request.",
+                    TelemetrySearchSchemaMetadata(
+                        "Provider telemetry search request.",
+                        SchemaProperty("providerName", OpenApiSchemaMetadata.String("Optional provider name.")),
+                        SchemaProperty("modelName", OpenApiSchemaMetadata.String("Optional model name.")),
+                        SchemaProperty("status", OpenApiSchemaMetadata.String("Optional provider status.")),
+                        SchemaProperty("healthStatus", OpenApiSchemaMetadata.String("Optional provider health status."))),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["providerName"] = "local-ollama",
+                        ["metric"] = "provider.queuedRequests",
+                        ["fromUtc"] = DateTime.UtcNow.AddHours(-1).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["page"] = 1,
+                        ["pageSize"] = 50
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/client-telemetry/history/rollups", "/v1.0/api/client-telemetry/providers/history/rollups"))
+            {
+                bool providerRollup = path.Contains("/providers/", StringComparison.OrdinalIgnoreCase);
+                return JsonBody(
+                    "Telemetry rollup request.",
+                    ObjectSchemaMetadata(
+                        "Telemetry rollup request.",
+                        new[] { "metric", "fromUtc", "toUtc" },
+                        SchemaProperty("clientId", OpenApiSchemaMetadata.String("Optional client ID.")),
+                        SchemaProperty("providerName", OpenApiSchemaMetadata.String("Optional provider name.")),
+                        SchemaProperty("modelName", OpenApiSchemaMetadata.String("Optional model name.")),
+                        SchemaProperty("metric", OpenApiSchemaMetadata.String("Metric name.")),
+                        SchemaProperty("fromUtc", DateTimeSchema("Inclusive UTC start time.")),
+                        SchemaProperty("toUtc", DateTimeSchema("Exclusive UTC end time.")),
+                        SchemaProperty("bucketMinutes", IntegerSchemaMetadata("Bucket width in minutes."))),
+                    new Dictionary<string, object>
+                    {
+                        ["metric"] = providerRollup ? "provider.queuedRequests" : "telemetry.cpu.utilizationPercent",
+                        ["fromUtc"] = DateTime.UtcNow.AddHours(-1).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["bucketMinutes"] = 5
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/client-telemetry/history/delete", "/v1.0/api/client-telemetry/providers/history/delete"))
+            {
+                return JsonBody(
+                    "Telemetry bulk delete request.",
+                    ObjectSchemaMetadata(
+                        "Telemetry bulk delete request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("clientId", OpenApiSchemaMetadata.String("Optional client ID.")),
+                        SchemaProperty("fromUtc", DateTimeSchema("Inclusive UTC start time.")),
+                        SchemaProperty("toUtc", DateTimeSchema("Exclusive UTC end time."))),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["toUtc"] = DateTime.UtcNow.AddDays(-30).ToString("O", CultureInfo.InvariantCulture)
                     });
             }
 
@@ -885,6 +1027,26 @@ namespace Xeno.Server
                 },
                 ["active"] = true
             };
+        }
+
+        private static OpenApiSchemaMetadata TelemetrySearchSchemaMetadata(string description, params KeyValuePair<string, OpenApiSchemaMetadata>[] additionalProperties)
+        {
+            List<KeyValuePair<string, OpenApiSchemaMetadata>> properties = new List<KeyValuePair<string, OpenApiSchemaMetadata>>
+            {
+                SchemaProperty("clientId", OpenApiSchemaMetadata.String("Optional client ID.")),
+                SchemaProperty("clientName", OpenApiSchemaMetadata.String("Optional client name.")),
+                SchemaProperty("machineName", OpenApiSchemaMetadata.String("Optional machine name.")),
+                SchemaProperty("metric", OpenApiSchemaMetadata.String("Optional metric name.")),
+                SchemaProperty("metricMinimum", NumberSchemaMetadata("Optional minimum metric value.")),
+                SchemaProperty("metricMaximum", NumberSchemaMetadata("Optional maximum metric value.")),
+                SchemaProperty("fromUtc", DateTimeSchema("Inclusive UTC start time.")),
+                SchemaProperty("toUtc", DateTimeSchema("Exclusive UTC end time.")),
+                SchemaProperty("page", IntegerSchemaMetadata("Page number.")),
+                SchemaProperty("pageSize", IntegerSchemaMetadata("Page size.")),
+                SchemaProperty("sortDescending", BooleanSchemaMetadata("Whether newest samples are returned first."))
+            };
+            properties.AddRange(additionalProperties);
+            return ObjectSchemaMetadata(description, Array.Empty<string>(), properties.ToArray());
         }
 
         private static OpenApiSchemaMetadata ChatCompletionBodySchema()
@@ -1345,6 +1507,171 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/status"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, BuildTelemetryStatus(requestContext)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/latest"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string? clientId = context.Request.Query.Elements.Get("clientId");
+                ServerClientTelemetryLatestResponse latest = new ServerClientTelemetryLatestResponse();
+                latest.HostTelemetry.AddRange(_TelemetryLatestCache.GetHost(requestContext.TenantId, clientId));
+                latest.ProviderTelemetry.AddRange(_TelemetryLatestCache.GetProviders(requestContext.TenantId, clientId));
+                if (latest.HostTelemetry.Count == 0 && _Database?.ClientTelemetry != null)
+                {
+                    latest.HostTelemetry.AddRange(await _Database.ClientTelemetry.LatestHostByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false));
+                }
+
+                if (latest.ProviderTelemetry.Count == 0 && _Database?.ClientProviderTelemetry != null)
+                {
+                    latest.ProviderTelemetry.AddRange(await _Database.ClientProviderTelemetry.LatestProviderByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false));
+                }
+
+                await SendJsonAsync(context, latest).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/providers/latest"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string? clientId = context.Request.Query.Elements.Get("clientId");
+                IReadOnlyList<ServerProviderTelemetrySampleRecord> latest = _TelemetryLatestCache.GetProviders(requestContext.TenantId, clientId);
+                if (latest.Count == 0 && _Database?.ClientProviderTelemetry != null)
+                {
+                    latest = await _Database.ClientProviderTelemetry.LatestProviderByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false);
+                }
+
+                await SendJsonAsync(context, latest).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/collect", "/v1.0/api/client-telemetry/providers/collect"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                ServerClientTelemetryCollectRequest body = ReadJsonBody<ServerClientTelemetryCollectRequest>(context);
+                bool collectHostTelemetry = body.CollectHostTelemetry && _Settings.TelemetryCollection.CollectHostTelemetry;
+                bool collectProviderTelemetry = body.CollectProviderTelemetry && _Settings.TelemetryCollection.CollectProviderTelemetry;
+                ServerClientTelemetryCollectResponse collectResponse = await CollectTelemetryForConnectedClientsAsync(body.ClientId, collectHostTelemetry, collectProviderTelemetry, token).ConfigureAwait(false);
+                await SendJsonAsync(context, collectResponse).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/history/search"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                ServerClientTelemetrySearchRequest body = ReadJsonBody<ServerClientTelemetrySearchRequest>(context);
+                body.TenantId = requestContext.TenantId;
+                ServerClientTelemetrySearchResult result = _Database?.ClientTelemetry == null ? new ServerClientTelemetrySearchResult() : await _Database.ClientTelemetry.SearchHostAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/providers/history/search"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                ServerProviderTelemetrySearchRequest body = ReadJsonBody<ServerProviderTelemetrySearchRequest>(context);
+                body.TenantId = requestContext.TenantId;
+                ServerProviderTelemetrySearchResult result = _Database?.ClientProviderTelemetry == null ? new ServerProviderTelemetrySearchResult() : await _Database.ClientProviderTelemetry.SearchProviderAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/history/rollups"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                ServerClientTelemetryRollupRequest body = ReadJsonBody<ServerClientTelemetryRollupRequest>(context);
+                body.TenantId = requestContext.TenantId;
+                IReadOnlyList<ServerClientTelemetryRollupBucket> result = _Database?.ClientTelemetry == null ? Array.Empty<ServerClientTelemetryRollupBucket>() : await _Database.ClientTelemetry.RollupHostAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/providers/history/rollups"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                ServerProviderTelemetryRollupRequest body = ReadJsonBody<ServerProviderTelemetryRollupRequest>(context);
+                body.TenantId = requestContext.TenantId;
+                IReadOnlyList<ServerProviderTelemetryRollupBucket> result = _Database?.ClientProviderTelemetry == null ? Array.Empty<ServerProviderTelemetryRollupBucket>() : await _Database.ClientProviderTelemetry.RollupProviderAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/collection-attempts"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string? clientId = context.Request.Query.Elements.Get("clientId");
+                IReadOnlyList<ServerClientTelemetryCollectionAttemptRecord> attempts = _Database?.ClientTelemetryCollectionAttempts == null
+                    ? Array.Empty<ServerClientTelemetryCollectionAttemptRecord>()
+                    : await _Database.ClientTelemetryCollectionAttempts.SearchAttemptsAsync(requestContext.TenantId, clientId, 100, token).ConfigureAwait(false);
+                await SendJsonAsync(context, attempts).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/metrics"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, BuildTelemetryMetricCatalog()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && TryGetPathId(path, "/v1.0/api/client-telemetry/history/") is string hostTelemetryId)
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                ServerClientTelemetrySampleDetail? detail = _Database?.ClientTelemetry == null ? null : await _Database.ClientTelemetry.ReadHostDetailAsync(requestContext.TenantId, hostTelemetryId, token).ConfigureAwait(false);
+                if (detail == null) throw new KeyNotFoundException("Telemetry sample was not found.");
+                await SendJsonAsync(context, detail).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/v1.0/api/client-telemetry/history/") is string deleteHostTelemetryId)
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                if (_Database?.ClientTelemetry != null) await _Database.ClientTelemetry.DeleteHostAsync(requestContext.TenantId, deleteHostTelemetryId, token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && TryGetPathId(path, "/v1.0/api/client-telemetry/providers/history/") is string providerTelemetryId)
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                ServerProviderTelemetrySampleDetail? detail = _Database?.ClientProviderTelemetry == null ? null : await _Database.ClientProviderTelemetry.ReadProviderDetailAsync(requestContext.TenantId, providerTelemetryId, token).ConfigureAwait(false);
+                if (detail == null) throw new KeyNotFoundException("Provider telemetry sample was not found.");
+                await SendJsonAsync(context, detail).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/v1.0/api/client-telemetry/providers/history/") is string deleteProviderTelemetryId)
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                if (_Database?.ClientProviderTelemetry != null) await _Database.ClientProviderTelemetry.DeleteProviderAsync(requestContext.TenantId, deleteProviderTelemetryId, token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/history/delete"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                ServerClientTelemetryDeleteRequest body = ReadJsonBody<ServerClientTelemetryDeleteRequest>(context);
+                body.TenantId = requestContext.TenantId;
+                int deleted = _Database?.ClientTelemetry == null ? 0 : await _Database.ClientTelemetry.DeleteHostBulkAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { deleted }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/providers/history/delete"))
+            {
+                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+                ServerClientTelemetryDeleteRequest body = ReadJsonBody<ServerClientTelemetryDeleteRequest>(context);
+                body.TenantId = requestContext.TenantId;
+                int deleted = _Database?.ClientProviderTelemetry == null ? 0 : await _Database.ClientProviderTelemetry.DeleteProviderBulkAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new { deleted }).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/modeldefinitions", "/v1.0/api/model-definitions"))
             {
                 await SendJsonAsync(context, RequirePlatform().ModelDefinitions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
@@ -1361,6 +1688,15 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().RoutingPolicies.Where(item => item.TenantId == requestContext.TenantId).OrderByDescending(item => item.IsDefault).ThenBy(item => item.ModelName).ThenBy(item => item.ClientName).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/routing-policies/validate"))
+            {
+                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
+                RoutingPolicyValidationResult result = ValidateRoutingPolicySaveRequest(body);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
                 return;
             }
 
@@ -1783,6 +2119,480 @@ namespace Xeno.Server
             }
         }
 
+        private void StartTelemetryCollectionLoop()
+        {
+            if (!_Settings.TelemetryCollection.Enabled) return;
+            _TelemetryCollectionCancellation = new CancellationTokenSource();
+            _TelemetryCollectionTask = Task.Run(async () => await TelemetryCollectionLoopAsync(_TelemetryCollectionCancellation.Token).ConfigureAwait(false));
+        }
+
+        private async Task TelemetryCollectionLoopAsync(CancellationToken token)
+        {
+            TimeSpan interval = TimeSpan.FromSeconds(_Settings.TelemetryCollection.CollectionIntervalSeconds);
+            using (PeriodicTimer timer = new PeriodicTimer(interval))
+            {
+                _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                        await CollectTelemetryForConnectedClientsAsync(null, _Settings.TelemetryCollection.CollectHostTelemetry, _Settings.TelemetryCollection.CollectProviderTelemetry, token).ConfigureAwait(false);
+                        await PruneTelemetryIfDueAsync(token).ConfigureAwait(false);
+                        _TelemetryLastCycleUtc = DateTime.UtcNow;
+                        _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception)
+                    {
+                        _TelemetryRecentFailureCount++;
+                    }
+                }
+            }
+        }
+
+        private async Task<ServerClientTelemetryCollectResponse> CollectTelemetryForConnectedClientsAsync(string? clientId, bool collectHostTelemetry, bool collectProviderTelemetry, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            ServerClientTelemetryCollectResponse response = new ServerClientTelemetryCollectResponse();
+            List<ClientTelemetryCollectionTarget> targets = SnapshotTelemetryTargets(clientId);
+            response.TargetClientCount = targets.Count;
+
+            if (Interlocked.Exchange(ref _TelemetryCollectionCycleActive, 1) == 1)
+            {
+                foreach (ClientTelemetryCollectionTarget target in targets)
+                {
+                    string attemptId = await PersistSkippedOverlapAttemptAsync(target, collectHostTelemetry, collectProviderTelemetry, token).ConfigureAwait(false);
+                    response.AttemptIds.Add(attemptId);
+                }
+
+                _TelemetryRecentFailureCount++;
+                return response;
+            }
+
+            try
+            {
+                using (SemaphoreSlim semaphore = new SemaphoreSlim(_Settings.TelemetryCollection.MaxConcurrentClientRequests))
+                {
+                    List<Task> tasks = new List<Task>();
+                    foreach (ClientTelemetryCollectionTarget target in targets)
+                    {
+                        await semaphore.WaitAsync(token).ConfigureAwait(false);
+                        tasks.Add(Task.Run(async () =>
+                        {
+                            try
+                            {
+                                string attemptId = await CollectTelemetryForClientAsync(target, collectHostTelemetry, collectProviderTelemetry, token).ConfigureAwait(false);
+                                lock (response.AttemptIds)
+                                {
+                                    response.AttemptIds.Add(attemptId);
+                                }
+                            }
+                            finally
+                            {
+                                semaphore.Release();
+                            }
+                        }, token));
+                    }
+
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _TelemetryCollectionCycleActive, 0);
+            }
+
+            return response;
+        }
+
+        private async Task<string> PersistSkippedOverlapAttemptAsync(ClientTelemetryCollectionTarget target, bool collectHostTelemetry, bool collectProviderTelemetry, CancellationToken token)
+        {
+            ServerClientTelemetryCollectionAttemptRecord attempt = new ServerClientTelemetryCollectionAttemptRecord
+            {
+                TenantId = target.TenantId,
+                ClientId = target.ClientId,
+                ClientName = target.ClientName,
+                HostRequested = collectHostTelemetry,
+                ProviderRequested = collectProviderTelemetry,
+                Status = "SkippedOverlap",
+                ErrorCode = "SkippedOverlap",
+                ErrorMessage = "A previous telemetry collection cycle is still running.",
+                CompletedUtc = DateTime.UtcNow
+            };
+            attempt.ElapsedMs = Math.Max(0, (attempt.CompletedUtc.Value - attempt.StartedUtc).TotalMilliseconds);
+            if (_Database?.ClientTelemetryCollectionAttempts != null)
+            {
+                await _Database.ClientTelemetryCollectionAttempts.CreateAttemptAsync(attempt, token).ConfigureAwait(false);
+                await _Database.ClientTelemetryCollectionAttempts.CompleteAttemptAsync(attempt, token).ConfigureAwait(false);
+            }
+
+            return attempt.Id;
+        }
+
+        private List<ClientTelemetryCollectionTarget> SnapshotTelemetryTargets(string? clientId)
+        {
+            List<ClientTelemetryCollectionTarget> targets = new List<ClientTelemetryCollectionTarget>();
+            lock (_ClientConnectionsLock)
+            {
+                foreach (ClientConnection connection in _ClientConnections.Values)
+                {
+                    if (!String.IsNullOrWhiteSpace(clientId) && !String.Equals(connection.ClientId, clientId, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!connection.Session.IsConnected) continue;
+                    XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => String.Equals(item.Id, connection.ClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, connection.TenantId, StringComparison.OrdinalIgnoreCase));
+                    if (client == null) continue;
+                    targets.Add(new ClientTelemetryCollectionTarget
+                    {
+                        ClientId = connection.ClientId,
+                        TenantId = connection.TenantId,
+                        ClientName = client.Name
+                    });
+                }
+            }
+
+            return targets;
+        }
+
+        private ServerClientTelemetryCollectionStatusResponse BuildTelemetryStatus(RequestContext requestContext)
+        {
+            List<ClientTelemetryCollectionTarget> targets = SnapshotTelemetryTargets(null);
+            return new ServerClientTelemetryCollectionStatusResponse
+            {
+                Enabled = _Settings.TelemetryCollection.Enabled,
+                Running = _TelemetryCollectionTask != null && !_TelemetryCollectionTask.IsCompleted,
+                CollectionIntervalSeconds = _Settings.TelemetryCollection.CollectionIntervalSeconds,
+                RequestTimeoutMs = _Settings.TelemetryCollection.RequestTimeoutMs,
+                RetentionDays = _Settings.TelemetryCollection.RetentionDays,
+                LastCycleUtc = _TelemetryLastCycleUtc,
+                NextCycleUtc = _TelemetryNextCycleUtc,
+                ConnectedClientCount = RequirePlatform().Clients.Count(item => item.TenantId == requestContext.TenantId && item.Connected),
+                EligibleClientCount = targets.Count(item => item.TenantId == requestContext.TenantId),
+                RecentFailureCount = _TelemetryRecentFailureCount
+            };
+        }
+
+        private static List<RoutingPolicyMetricDefinition> BuildTelemetryMetricCatalog()
+        {
+            return new List<RoutingPolicyMetricDefinition>
+            {
+                Metric("health.connected", "Boolean"),
+                Metric("health.hasCapacity", "Boolean"),
+                Metric("health.inFlightRequests", "Number"),
+                Metric("client.weight", "Number"),
+                Metric("client.maxParallelRequests", "Number"),
+                Metric("client.heartbeatAgeMs", "Number"),
+                Metric("telemetry.ageMs", "Number"),
+                Metric("telemetry.host.available", "Boolean"),
+                Metric("telemetry.cpu.utilizationPercent", "Number"),
+                Metric("telemetry.memory.utilizationPercent", "Number"),
+                Metric("telemetry.memory.availableBytes", "Number"),
+                Metric("telemetry.disk.utilizationPercent", "Number"),
+                Metric("telemetry.disk.readBytesPerSecond", "Number"),
+                Metric("telemetry.disk.writeBytesPerSecond", "Number"),
+                Metric("telemetry.gpu.available", "Boolean"),
+                Metric("telemetry.gpu.deviceCount", "Number"),
+                Metric("telemetry.gpu.avgUtilizationPercent", "Number"),
+                Metric("telemetry.gpu.avgMemoryUtilizationPercent", "Number"),
+                Metric("telemetry.gpu.totalMemoryBytes", "Number"),
+                Metric("telemetry.gpu.usedMemoryBytes", "Number"),
+                Metric("telemetry.gpu.avgTemperatureCelsius", "Number"),
+                Metric("provider.available", "Boolean"),
+                Metric("provider.healthStatus", "String"),
+                Metric("provider.activeRequests", "Number"),
+                Metric("provider.queuedRequests", "Number"),
+                Metric("provider.waitingRequests", "Number"),
+                Metric("provider.loadedModelCount", "Number"),
+                Metric("provider.latencyP95Ms", "Number"),
+                Metric("provider.timeToFirstTokenP95Ms", "Number"),
+                Metric("provider.cacheUsagePercent", "Number"),
+                Metric("provider.requestRatePerSecond", "Number"),
+                Metric("provider.errorRatePerSecond", "Number")
+            };
+        }
+
+        private static RoutingPolicyMetricDefinition Metric(string name, string valueType)
+        {
+            return new RoutingPolicyMetricDefinition
+            {
+                Name = name,
+                ValueType = valueType
+            };
+        }
+
+        private static RoutingPolicyValidationResult ValidateRoutingPolicySaveRequest(RoutingPolicySaveRequest request)
+        {
+            RoutingPolicyValidationResult result = new RoutingPolicyValidationResult();
+            Dictionary<string, RoutingPolicyMetricDefinition> metrics = BuildTelemetryMetricCatalog()
+                .ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
+
+            if (request.MaxTelemetryAgeMs.HasValue && (request.MaxTelemetryAgeMs.Value < 1000 || request.MaxTelemetryAgeMs.Value > 300000))
+            {
+                AddRoutingValidationIssue(result, "maxTelemetryAgeMs", "InvalidTelemetryAge", "Maximum telemetry age must be between 1000 and 300000 milliseconds.");
+            }
+
+            if (request.TelemetryFilters != null)
+            {
+                for (int i = 0; i < request.TelemetryFilters.Count; i++)
+                {
+                    RoutingPolicyCondition condition = request.TelemetryFilters[i];
+                    string fieldPrefix = "telemetryFilters[" + i.ToString(CultureInfo.InvariantCulture) + "]";
+                    if (!metrics.TryGetValue(condition.Metric, out RoutingPolicyMetricDefinition? metric))
+                    {
+                        AddRoutingValidationIssue(result, fieldPrefix + ".metric", "UnsupportedMetric", "Metric is not in the telemetry metric catalog.");
+                        continue;
+                    }
+
+                    if (!String.Equals(metric.ValueType, condition.ValueType.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        AddRoutingValidationIssue(result, fieldPrefix + ".valueType", "WrongValueType", "Condition value type does not match the metric catalog.");
+                    }
+
+                    ValidateRoutingPolicyConditionValue(result, fieldPrefix, condition);
+                }
+            }
+
+            if (request.TelemetryRanking != null)
+            {
+                for (int i = 0; i < request.TelemetryRanking.Count; i++)
+                {
+                    RoutingPolicyRankingRule ranking = request.TelemetryRanking[i];
+                    string fieldPrefix = "telemetryRanking[" + i.ToString(CultureInfo.InvariantCulture) + "]";
+                    if (!metrics.TryGetValue(ranking.Metric, out RoutingPolicyMetricDefinition? metric))
+                    {
+                        AddRoutingValidationIssue(result, fieldPrefix + ".metric", "UnsupportedMetric", "Metric is not in the telemetry metric catalog.");
+                    }
+                    else if (!String.Equals(metric.ValueType, "Number", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AddRoutingValidationIssue(result, fieldPrefix + ".metric", "NonNumericRankingMetric", "Ranking metrics must be numeric.");
+                    }
+
+                    if (ranking.Weight <= 0 || Double.IsNaN(ranking.Weight) || Double.IsInfinity(ranking.Weight))
+                    {
+                        AddRoutingValidationIssue(result, fieldPrefix + ".weight", "InvalidRankingWeight", "Ranking weight must be a positive finite number.");
+                    }
+                }
+            }
+
+            result.Valid = result.Issues.Count == 0;
+            return result;
+        }
+
+        private static void ValidateRoutingPolicyConditionValue(RoutingPolicyValidationResult result, string fieldPrefix, RoutingPolicyCondition condition)
+        {
+            if (condition.ValueType == RoutingPolicyMetricValueTypeEnum.Number)
+            {
+                if (!Double.TryParse(condition.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) || Double.IsNaN(parsed) || Double.IsInfinity(parsed))
+                {
+                    AddRoutingValidationIssue(result, fieldPrefix + ".value", "InvalidNumberValue", "Condition value must be a finite number.");
+                }
+
+                return;
+            }
+
+            if (condition.ValueType == RoutingPolicyMetricValueTypeEnum.Boolean)
+            {
+                if (!Boolean.TryParse(condition.Value, out bool _))
+                {
+                    AddRoutingValidationIssue(result, fieldPrefix + ".value", "InvalidBooleanValue", "Condition value must be true or false.");
+                }
+
+                return;
+            }
+
+            if (String.IsNullOrWhiteSpace(condition.Value))
+            {
+                AddRoutingValidationIssue(result, fieldPrefix + ".value", "InvalidStringValue", "Condition value must not be empty.");
+            }
+        }
+
+        private static void AddRoutingValidationIssue(RoutingPolicyValidationResult result, string field, string code, string message)
+        {
+            result.Issues.Add(new RoutingPolicyValidationIssue
+            {
+                Field = field,
+                Code = code,
+                Message = message
+            });
+        }
+
+        private async Task<string> CollectTelemetryForClientAsync(ClientTelemetryCollectionTarget target, bool collectHostTelemetry, bool collectProviderTelemetry, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            ClientConnection? connection = GetClientConnection(target.ClientId);
+            ServerClientTelemetryCollectionAttemptRecord attempt = new ServerClientTelemetryCollectionAttemptRecord
+            {
+                TenantId = target.TenantId,
+                ClientId = target.ClientId,
+                ClientName = target.ClientName,
+                HostRequested = collectHostTelemetry,
+                ProviderRequested = collectProviderTelemetry,
+                Status = "Started"
+            };
+
+            if (_Database?.ClientTelemetryCollectionAttempts != null)
+            {
+                await _Database.ClientTelemetryCollectionAttempts.CreateAttemptAsync(attempt, token).ConfigureAwait(false);
+            }
+
+            if (connection == null || !connection.Session.IsConnected)
+            {
+                attempt.Status = "Disconnected";
+                attempt.CompletedUtc = DateTime.UtcNow;
+                attempt.ElapsedMs = Math.Max(0, (attempt.CompletedUtc.Value - attempt.StartedUtc).TotalMilliseconds);
+                if (_Database?.ClientTelemetryCollectionAttempts != null) await _Database.ClientTelemetryCollectionAttempts.CompleteAttemptAsync(attempt, token).ConfigureAwait(false);
+                return attempt.Id;
+            }
+
+            PendingTelemetryResponse pending = new PendingTelemetryResponse();
+            lock (_PendingTelemetryResponsesLock)
+            {
+                _PendingTelemetryResponses[attempt.Id] = pending;
+            }
+
+            try
+            {
+                ServerTelemetryCollectionRequestMessage request = new ServerTelemetryCollectionRequestMessage
+                {
+                    RequestId = attempt.Id,
+                    TenantId = target.TenantId,
+                    ClientId = target.ClientId,
+                    CollectHostTelemetry = collectHostTelemetry,
+                    CollectProviderTelemetry = collectProviderTelemetry,
+                    IncludeRawSnapshot = _Settings.TelemetryCollection.PersistRawSnapshots,
+                    MaxRawSnapshotBytes = _Settings.TelemetryCollection.MaxRawSnapshotBytes,
+                    MaxProviderMetricRows = _Settings.TelemetryCollection.MaxProviderMetricRowsPerResponse,
+                    MaxSamples = _Settings.TelemetryCollection.MaxSamplesPerClientResponse
+                };
+                await SendToClientAsync(connection, JsonUtil.Serialize(request), token).ConfigureAwait(false);
+
+                if (request.CollectHostTelemetry && _Database?.ClientTelemetry != null)
+                {
+                    ClientTelemetrySnapshotMessage? host = await WaitForHostTelemetryAsync(pending, token).ConfigureAwait(false);
+                    if (host != null)
+                    {
+                        string? rawJson = _Settings.TelemetryCollection.PersistRawSnapshots ? LimitRawSnapshot(JsonUtil.Serialize(host.Snapshot, true)) : null;
+                        ServerClientTelemetrySampleRecord record = await _Database.ClientTelemetry.CreateHostSampleAsync(target.TenantId, target.ClientId, target.ClientName, attempt.Id, host.Snapshot, rawJson, token).ConfigureAwait(false);
+                        _TelemetryLatestCache.SetHost(record);
+                        attempt.HostSucceeded = true;
+                        attempt.HostSampleId = record.Id;
+                    }
+                }
+
+                if (request.CollectProviderTelemetry && _Database?.ClientProviderTelemetry != null)
+                {
+                    ClientProviderTelemetrySnapshotMessage? provider = await WaitForProviderTelemetryAsync(pending, token).ConfigureAwait(false);
+                    if (provider != null)
+                    {
+                        IReadOnlyList<ServerProviderTelemetrySampleRecord> records = await _Database.ClientProviderTelemetry.CreateProviderSnapshotAsync(target.TenantId, target.ClientId, target.ClientName, attempt.Id, provider.Snapshot, _Settings.TelemetryCollection.PersistRawSnapshots, token).ConfigureAwait(false);
+                        foreach (ServerProviderTelemetrySampleRecord record in records)
+                        {
+                            _TelemetryLatestCache.SetProvider(record);
+                        }
+
+                        attempt.ProviderSucceeded = true;
+                        attempt.ProviderSampleCount = records.Count;
+                    }
+                }
+
+                attempt.Status = "Completed";
+            }
+            catch (OperationCanceledException)
+            {
+                attempt.Status = "TimedOut";
+                attempt.ErrorCode = "TelemetryTimeout";
+                attempt.ErrorMessage = "Client telemetry collection timed out.";
+                _TelemetryRecentFailureCount++;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is UnauthorizedAccessException || ex is ArgumentException)
+            {
+                attempt.Status = "Failed";
+                attempt.ErrorCode = ex.GetType().Name;
+                attempt.ErrorMessage = ex.Message;
+                _TelemetryRecentFailureCount++;
+            }
+            finally
+            {
+                lock (_PendingTelemetryResponsesLock)
+                {
+                    _PendingTelemetryResponses.Remove(attempt.Id);
+                }
+
+                attempt.CompletedUtc = DateTime.UtcNow;
+                attempt.ElapsedMs = Math.Max(0, (attempt.CompletedUtc.Value - attempt.StartedUtc).TotalMilliseconds);
+                if (_Database?.ClientTelemetryCollectionAttempts != null)
+                {
+                    await _Database.ClientTelemetryCollectionAttempts.CompleteAttemptAsync(attempt, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+
+            return attempt.Id;
+        }
+
+        private async Task<ClientTelemetrySnapshotMessage?> WaitForHostTelemetryAsync(PendingTelemetryResponse pending, CancellationToken token)
+        {
+            using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(_Settings.TelemetryCollection.RequestTimeoutMs));
+                Task delay = Task.Delay(Timeout.InfiniteTimeSpan, timeout.Token);
+                Task completed = await Task.WhenAny(pending.Host.Task, pending.HostError.Task, delay).ConfigureAwait(false);
+                if (completed == pending.Host.Task) return await pending.Host.Task.ConfigureAwait(false);
+                if (completed == pending.HostError.Task)
+                {
+                    ClientTelemetryErrorMessage error = await pending.HostError.Task.ConfigureAwait(false);
+                    throw new InvalidOperationException(error.ErrorMessage);
+                }
+
+                throw new OperationCanceledException(timeout.Token);
+            }
+        }
+
+        private async Task<ClientProviderTelemetrySnapshotMessage?> WaitForProviderTelemetryAsync(PendingTelemetryResponse pending, CancellationToken token)
+        {
+            using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(_Settings.TelemetryCollection.RequestTimeoutMs));
+                Task delay = Task.Delay(Timeout.InfiniteTimeSpan, timeout.Token);
+                Task completed = await Task.WhenAny(pending.Provider.Task, pending.ProviderError.Task, delay).ConfigureAwait(false);
+                if (completed == pending.Provider.Task) return await pending.Provider.Task.ConfigureAwait(false);
+                if (completed == pending.ProviderError.Task)
+                {
+                    ClientTelemetryErrorMessage error = await pending.ProviderError.Task.ConfigureAwait(false);
+                    throw new InvalidOperationException(error.ErrorMessage);
+                }
+
+                throw new OperationCanceledException(timeout.Token);
+            }
+        }
+
+        private string? LimitRawSnapshot(string json)
+        {
+            if (_Settings.TelemetryCollection.MaxRawSnapshotBytes == 0) return null;
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            if (bytes.Length <= _Settings.TelemetryCollection.MaxRawSnapshotBytes) return json;
+            return Encoding.UTF8.GetString(bytes, 0, _Settings.TelemetryCollection.MaxRawSnapshotBytes);
+        }
+
+        private async Task PruneTelemetryIfDueAsync(CancellationToken token)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (_TelemetryNextPruneUtc.HasValue && now < _TelemetryNextPruneUtc.Value) return;
+            _TelemetryNextPruneUtc = now.AddMinutes(_Settings.TelemetryCollection.PruneIntervalMinutes);
+
+            DateTime olderThanUtc = now.AddDays(-_Settings.TelemetryCollection.RetentionDays);
+            if (_Database?.ClientTelemetry != null)
+            {
+                await _Database.ClientTelemetry.DeleteOlderThanAsync(olderThanUtc, token).ConfigureAwait(false);
+            }
+
+            if (_Database?.ClientProviderTelemetry != null)
+            {
+                await _Database.ClientProviderTelemetry.DeleteOlderThanAsync(olderThanUtc, token).ConfigureAwait(false);
+            }
+        }
+
         private async Task<ClientResponseMessage> WaitForClientFirstResponseAsync(string requestId, PendingClientResponse pending, CancellationToken token)
         {
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
@@ -1923,6 +2733,28 @@ namespace Xeno.Server
                 return "server.inventory.updated";
             }
 
+            if (String.Equals(type, "client.telemetry.snapshot", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetrySnapshotMessage? message = JsonUtil.Deserialize<ClientTelemetrySnapshotMessage>(json);
+                if (message != null) await AcceptClientTelemetrySnapshotAsync(session, message, requestContext, token).ConfigureAwait(false);
+                return null;
+            }
+
+            if (String.Equals(type, "client.providerTelemetry.snapshot", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientProviderTelemetrySnapshotMessage? message = JsonUtil.Deserialize<ClientProviderTelemetrySnapshotMessage>(json);
+                if (message != null) await AcceptClientProviderTelemetrySnapshotAsync(session, message, requestContext, token).ConfigureAwait(false);
+                return null;
+            }
+
+            if (String.Equals(type, "client.telemetry.error", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(type, "client.providerTelemetry.error", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientTelemetryErrorMessage? message = JsonUtil.Deserialize<ClientTelemetryErrorMessage>(json);
+                if (message != null) await AcceptClientTelemetryErrorAsync(session, message, requestContext, token).ConfigureAwait(false);
+                return null;
+            }
+
             if (String.Equals(type, "client.response.start", StringComparison.OrdinalIgnoreCase))
             {
                 ClientResponseMessage? message = JsonUtil.Deserialize<ClientResponseMessage>(json);
@@ -1946,6 +2778,64 @@ namespace Xeno.Server
             }
 
             return "server.ack";
+        }
+
+        private async Task AcceptClientTelemetrySnapshotAsync(WebSocketSession session, ClientTelemetrySnapshotMessage message, RequestContext requestContext, CancellationToken token)
+        {
+            ValidateTelemetryFrame(session, message.RequestId, message.TenantId, message.ClientId, requestContext);
+            PendingTelemetryResponse? pending = GetPendingTelemetryResponse(message.RequestId);
+            pending?.SetHost(message);
+            await SendTelemetryAckAsync(message.RequestId, message.TenantId, message.ClientId, true, null, token).ConfigureAwait(false);
+        }
+
+        private async Task AcceptClientProviderTelemetrySnapshotAsync(WebSocketSession session, ClientProviderTelemetrySnapshotMessage message, RequestContext requestContext, CancellationToken token)
+        {
+            ValidateTelemetryFrame(session, message.RequestId, message.TenantId, message.ClientId, requestContext);
+            PendingTelemetryResponse? pending = GetPendingTelemetryResponse(message.RequestId);
+            pending?.SetProvider(message);
+            await SendTelemetryAckAsync(message.RequestId, message.TenantId, message.ClientId, true, null, token).ConfigureAwait(false);
+        }
+
+        private async Task AcceptClientTelemetryErrorAsync(WebSocketSession session, ClientTelemetryErrorMessage message, RequestContext requestContext, CancellationToken token)
+        {
+            ValidateTelemetryFrame(session, message.RequestId, message.TenantId, message.ClientId, requestContext);
+            PendingTelemetryResponse? pending = GetPendingTelemetryResponse(message.RequestId);
+            pending?.SetError(message);
+            await SendTelemetryAckAsync(message.RequestId, message.TenantId, message.ClientId, false, message.ErrorMessage, token).ConfigureAwait(false);
+        }
+
+        private PendingTelemetryResponse? GetPendingTelemetryResponse(string requestId)
+        {
+            if (String.IsNullOrWhiteSpace(requestId)) return null;
+            lock (_PendingTelemetryResponsesLock)
+            {
+                _PendingTelemetryResponses.TryGetValue(requestId, out PendingTelemetryResponse? pending);
+                return pending;
+            }
+        }
+
+        private void ValidateTelemetryFrame(WebSocketSession session, string requestId, string tenantId, string clientId, RequestContext requestContext)
+        {
+            if (String.IsNullOrWhiteSpace(requestId)) throw new ArgumentException("Telemetry frame request ID is required.");
+            if (!String.Equals(tenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Telemetry frame tenant does not match authenticated tenant.");
+            ClientConnection? connection = GetClientConnection(clientId);
+            if (connection == null) throw new UnauthorizedAccessException("Telemetry frame client is not registered.");
+            if (!String.Equals(connection.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Telemetry frame client tenant is invalid.");
+            if (!String.Equals(connection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Telemetry frame arrived on the wrong client session.");
+        }
+
+        private async Task SendTelemetryAckAsync(string requestId, string tenantId, string clientId, bool accepted, string? message, CancellationToken token)
+        {
+            ClientConnection? connection = GetClientConnection(clientId);
+            if (connection == null || !connection.Session.IsConnected) return;
+            await SendToClientAsync(connection, JsonUtil.Serialize(new ServerTelemetryAckMessage
+            {
+                RequestId = requestId,
+                TenantId = tenantId,
+                ClientId = clientId,
+                Accepted = accepted,
+                Message = message
+            }), token).ConfigureAwait(false);
         }
 
         private string RegisterClient(ClientRegisterMessage message, WebSocketSession session, RequestContext requestContext)
@@ -2923,6 +3813,10 @@ namespace Xeno.Server
                 RequestTimeoutMs = NormalizePolicyTimeout(body.RequestTimeoutMs),
                 LoadBalancingMode = body.LoadBalancingMode ?? LoadBalancingModeEnum.LeastRecentlyUsed,
                 Adaptive = body.Adaptive ?? new AdaptiveLoadBalancingSettings(),
+                MaxTelemetryAgeMs = body.MaxTelemetryAgeMs ?? 30000,
+                TelemetryFilters = body.TelemetryFilters ?? new List<RoutingPolicyCondition>(),
+                TelemetryRanking = body.TelemetryRanking ?? new List<RoutingPolicyRankingRule>(),
+                TelemetryFallbackMode = body.TelemetryFallbackMode ?? RoutingPolicyFallbackModeEnum.UseLoadBalancingMode,
                 IsDefault = false,
                 Active = body.Active ?? true,
                 CreatedUtc = DateTime.UtcNow,
@@ -2962,6 +3856,10 @@ namespace Xeno.Server
             if (body.RequestTimeoutMs.HasValue) policy.RequestTimeoutMs = NormalizePolicyTimeout(body.RequestTimeoutMs);
             if (body.LoadBalancingMode.HasValue) policy.LoadBalancingMode = body.LoadBalancingMode.Value;
             if (body.Adaptive != null) policy.Adaptive = body.Adaptive;
+            if (body.MaxTelemetryAgeMs.HasValue) policy.MaxTelemetryAgeMs = body.MaxTelemetryAgeMs.Value;
+            if (body.TelemetryFilters != null) policy.TelemetryFilters = body.TelemetryFilters;
+            if (body.TelemetryRanking != null) policy.TelemetryRanking = body.TelemetryRanking;
+            if (body.TelemetryFallbackMode.HasValue) policy.TelemetryFallbackMode = body.TelemetryFallbackMode.Value;
             policy.LastUpdateUtc = DateTime.UtcNow;
             EnsureRoutingPolicyUnique(policy, policy.Id);
             return policy;
@@ -3622,9 +4520,25 @@ namespace Xeno.Server
                     ["/v1.0/api/clients"] = Path(Operation("get", "listClients", "Clients", "List clients", "Lists connected or registered Xeno clients and their advertised models.", "ClientArray", true)),
                     ["/v1.0/api/clients/{id}"] = Path(Operation("delete", "deleteClient", "Clients", "Delete client", "Deletes a registered Xeno client.", "GenericObject", true)),
                     ["/v1.0/api/client-models"] = Path(Operation("delete", "deleteClientModel", "Clients", "Delete client model", "Deletes one model advertised by a client.", "GenericObject", true)),
+                    ["/v1.0/api/client-telemetry/status"] = Path(Operation("get", "getClientTelemetryStatus", "Client Telemetry", "Client telemetry status", "Returns collection settings, running state, next cycle, connected clients, and recent failures.", "ServerClientTelemetryCollectionStatusResponse", true)),
+                    ["/v1.0/api/client-telemetry/latest"] = Path(Operation("get", "getLatestClientTelemetry", "Client Telemetry", "Latest client telemetry", "Returns latest host and provider telemetry for the tenant.", "ServerClientTelemetryLatestResponse", true)),
+                    ["/v1.0/api/client-telemetry/collect"] = Path(Operation("post", "collectClientTelemetry", "Client Telemetry", "Collect client telemetry", "Triggers immediate host and provider telemetry collection.", "ServerClientTelemetryCollectResponse", true)),
+                    ["/v1.0/api/client-telemetry/history/search"] = Path(Operation("post", "searchClientTelemetry", "Client Telemetry", "Search host telemetry", "Searches server-collected host telemetry samples.", "ServerClientTelemetrySearchResult", true)),
+                    ["/v1.0/api/client-telemetry/history/rollups"] = Path(Operation("post", "rollupClientTelemetry", "Client Telemetry", "Host telemetry rollups", "Returns host telemetry rollup buckets.", "ServerClientTelemetryRollupBucketArray", true)),
+                    ["/v1.0/api/client-telemetry/history/{id}"] = Path(Operation("get", "getClientTelemetryDetail", "Client Telemetry", "Get host telemetry detail", "Returns one host telemetry detail record.", "ServerClientTelemetrySampleDetail", true), Operation("delete", "deleteClientTelemetryDetail", "Client Telemetry", "Delete host telemetry detail", "Deletes one host telemetry sample.", "GenericObject", true)),
+                    ["/v1.0/api/client-telemetry/history/delete"] = Path(Operation("post", "bulkDeleteClientTelemetry", "Client Telemetry", "Bulk delete host telemetry", "Deletes host telemetry samples by filter.", "GenericObject", true)),
+                    ["/v1.0/api/client-telemetry/providers/latest"] = Path(Operation("get", "getLatestClientProviderTelemetry", "Client Telemetry", "Latest provider telemetry", "Returns latest provider telemetry for the tenant.", "ServerProviderTelemetrySampleRecordArray", true)),
+                    ["/v1.0/api/client-telemetry/providers/collect"] = Path(Operation("post", "collectClientProviderTelemetry", "Client Telemetry", "Collect provider telemetry", "Triggers immediate provider telemetry collection.", "ServerClientTelemetryCollectResponse", true)),
+                    ["/v1.0/api/client-telemetry/providers/history/search"] = Path(Operation("post", "searchClientProviderTelemetry", "Client Telemetry", "Search provider telemetry", "Searches server-collected provider telemetry samples.", "ServerProviderTelemetrySearchResult", true)),
+                    ["/v1.0/api/client-telemetry/providers/history/rollups"] = Path(Operation("post", "rollupClientProviderTelemetry", "Client Telemetry", "Provider telemetry rollups", "Returns provider telemetry rollup buckets.", "ServerProviderTelemetryRollupBucketArray", true)),
+                    ["/v1.0/api/client-telemetry/providers/history/{id}"] = Path(Operation("get", "getClientProviderTelemetryDetail", "Client Telemetry", "Get provider telemetry detail", "Returns one provider telemetry detail record.", "ServerProviderTelemetrySampleDetail", true), Operation("delete", "deleteClientProviderTelemetryDetail", "Client Telemetry", "Delete provider telemetry detail", "Deletes one provider telemetry sample.", "GenericObject", true)),
+                    ["/v1.0/api/client-telemetry/providers/history/delete"] = Path(Operation("post", "bulkDeleteClientProviderTelemetry", "Client Telemetry", "Bulk delete provider telemetry", "Deletes provider telemetry samples by filter.", "GenericObject", true)),
+                    ["/v1.0/api/client-telemetry/collection-attempts"] = Path(Operation("get", "listClientTelemetryCollectionAttempts", "Client Telemetry", "List collection attempts", "Lists recent telemetry collection attempts.", "ServerClientTelemetryCollectionAttemptRecordArray", true)),
+                    ["/v1.0/api/client-telemetry/metrics"] = Path(Operation("get", "listClientTelemetryMetrics", "Client Telemetry", "Telemetry metric catalog", "Returns the telemetry metric catalog used by dashboard selectors and routing policies.", "RoutingPolicyMetricDefinitionArray", true)),
                     ["/v1.0/api/model-definitions"] = Path(Operation("get", "listModelDefinitions", "Routing", "List model definitions", "Lists model definitions available for routing.", "ModelDefinitionArray", true)),
                     ["/v1.0/api/model-configurations"] = Path(Operation("get", "listModelConfigurations", "Routing", "List model configurations", "Lists pinned model configurations.", "ModelConfigurationArray", true)),
                     ["/v1.0/api/routing-policies"] = Path(Operation("get", "listRoutingPolicies", "Routing", "List routing policies", "Lists tenant-scoped routing policies.", "RoutingPolicyArray", true), Operation("post", "createRoutingPolicy", "Routing", "Create routing policy", "Creates a tenant-scoped routing policy.", "RoutingPolicy", true)),
+                    ["/v1.0/api/routing-policies/validate"] = Path(Operation("post", "validateRoutingPolicy", "Routing", "Validate routing policy", "Validates telemetry filters, ranking rules, and freshness bounds without saving a policy.", "RoutingPolicyValidationResult", true)),
                     ["/v1.0/api/routing-policies/{id}"] = Path(Operation("put", "updateRoutingPolicy", "Routing", "Update routing policy", "Updates a tenant-scoped routing policy.", "RoutingPolicy", true), Operation("delete", "deleteRoutingPolicy", "Routing", "Delete routing policy", "Deletes a non-default routing policy.", "GenericObject", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
                     ["/v1.0/api/request-history/{id}"] = Path(Operation("get", "getRequestHistory", "Request History", "Get request history", "Returns a captured request history entry.", "RequestHistoryEntry", true), Operation("delete", "deleteRequestHistory", "Request History", "Delete request history", "Deletes one captured request history entry.", "GenericObject", true)),
@@ -3664,9 +4578,22 @@ namespace Xeno.Server
                         ["EffectivePermissionArray"] = ArraySchema("EffectivePermission"),
                         ["AuditRecordArray"] = ArraySchema("AuditRecord"),
                         ["ClientArray"] = ArraySchema("XenoClientRecord"),
+                        ["ServerClientTelemetrySampleRecordArray"] = ArraySchema("ServerClientTelemetrySampleRecord"),
+                        ["ServerProviderTelemetrySampleRecordArray"] = ArraySchema("ServerProviderTelemetrySampleRecord"),
+                        ["ServerClientTelemetryRollupBucketArray"] = ArraySchema("ServerClientTelemetryRollupBucket"),
+                        ["ServerProviderTelemetryRollupBucketArray"] = ArraySchema("ServerProviderTelemetryRollupBucket"),
+                        ["ServerClientTelemetryCollectionAttemptRecordArray"] = ArraySchema("ServerClientTelemetryCollectionAttemptRecord"),
+                        ["RoutingPolicyMetricDefinitionArray"] = ArraySchema("RoutingPolicyMetricDefinition"),
                         ["ModelDefinitionArray"] = ArraySchema("ModelDefinition"),
                         ["ModelConfigurationArray"] = ArraySchema("ModelConfiguration"),
                         ["RoutingPolicyArray"] = ArraySchema("RoutingPolicy"),
+                        ["RoutingPolicyValidationResult"] = ObjectSchema(
+                            Property("valid", BooleanSchema()),
+                            Property("issues", new Dictionary<string, object> { ["type"] = "array", ["items"] = SchemaRef("RoutingPolicyValidationIssue") })),
+                        ["RoutingPolicyValidationIssue"] = ObjectSchema(
+                            Property("field", StringSchema()),
+                            Property("code", StringSchema()),
+                            Property("message", StringSchema())),
                         ["RequestHistoryArray"] = ArraySchema("RequestHistoryEntry"),
                         ["RequestHistorySummary"] = ObjectSchema(Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["RoutingDecision"] = ObjectSchema(Property("success", BooleanSchema()), Property("outcomeCode", StringSchema()), Property("message", StringSchema())),
@@ -3683,6 +4610,102 @@ namespace Xeno.Server
                         ["EffectivePermission"] = ObjectSchema(Property("resourceType", StringSchema()), Property("sourceRole", StringSchema())),
                         ["AuditRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("reasonCode", StringSchema())),
                         ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
+                        ["ServerClientTelemetryCollectionStatusResponse"] = ObjectSchema(
+                            Property("enabled", BooleanSchema()),
+                            Property("running", BooleanSchema()),
+                            Property("collectionIntervalSeconds", IntegerSchema()),
+                            Property("requestTimeoutMs", IntegerSchema()),
+                            Property("retentionDays", IntegerSchema()),
+                            Property("lastCycleUtc", StringSchema("date-time")),
+                            Property("nextCycleUtc", StringSchema("date-time")),
+                            Property("connectedClientCount", IntegerSchema()),
+                            Property("eligibleClientCount", IntegerSchema()),
+                            Property("recentFailureCount", IntegerSchema())),
+                        ["ServerClientTelemetryCollectResponse"] = ObjectSchema(
+                            Property("attemptIds", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() }),
+                            Property("targetClientCount", IntegerSchema())),
+                        ["ServerClientTelemetryLatestResponse"] = ObjectSchema(
+                            Property("hostTelemetry", ArraySchema("ServerClientTelemetrySampleRecord")),
+                            Property("providerTelemetry", ArraySchema("ServerProviderTelemetrySampleRecord"))),
+                        ["ServerClientTelemetrySampleRecord"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("clientId", StringSchema()),
+                            Property("clientName", StringSchema()),
+                            Property("machineName", StringSchema()),
+                            Property("collectedUtc", StringSchema("date-time")),
+                            Property("persistedUtc", StringSchema("date-time")),
+                            Property("cpuUtilizationPercent", NumberSchema()),
+                            Property("memoryUtilizationPercent", NumberSchema()),
+                            Property("diskUtilizationPercent", NumberSchema()),
+                            Property("gpuDeviceCount", IntegerSchema()),
+                            Property("gpuAverageUtilizationPercent", NumberSchema())),
+                        ["ServerClientTelemetrySampleDetail"] = ObjectSchema(
+                            Property("sample", SchemaRef("ServerClientTelemetrySampleRecord")),
+                            Property("gpuSamples", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }),
+                            Property("rawSnapshotJson", StringSchema())),
+                        ["ServerClientTelemetrySearchResult"] = ObjectSchema(
+                            Property("items", ArraySchema("ServerClientTelemetrySampleRecord")),
+                            Property("total", IntegerSchema()),
+                            Property("page", IntegerSchema()),
+                            Property("pageSize", IntegerSchema())),
+                        ["ServerClientTelemetryRollupBucket"] = ObjectSchema(
+                            Property("bucketUtc", StringSchema("date-time")),
+                            Property("minimum", NumberSchema()),
+                            Property("average", NumberSchema()),
+                            Property("maximum", NumberSchema()),
+                            Property("sampleCount", IntegerSchema())),
+                        ["ServerProviderTelemetrySampleRecord"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("clientId", StringSchema()),
+                            Property("clientName", StringSchema()),
+                            Property("providerName", StringSchema()),
+                            Property("providerKind", StringSchema()),
+                            Property("status", StringSchema()),
+                            Property("healthStatus", StringSchema()),
+                            Property("collectedUtc", StringSchema("date-time")),
+                            Property("persistedUtc", StringSchema("date-time")),
+                            Property("activeRequests", NumberSchema()),
+                            Property("queuedRequests", NumberSchema()),
+                            Property("loadedModelCount", IntegerSchema()),
+                            Property("latencyP95Ms", NumberSchema())),
+                        ["ServerProviderTelemetrySampleDetail"] = ObjectSchema(
+                            Property("sample", SchemaRef("ServerProviderTelemetrySampleRecord")),
+                            Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }),
+                            Property("metrics", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }),
+                            Property("rawSnapshotJson", StringSchema())),
+                        ["ServerProviderTelemetrySearchResult"] = ObjectSchema(
+                            Property("items", ArraySchema("ServerProviderTelemetrySampleRecord")),
+                            Property("total", IntegerSchema()),
+                            Property("page", IntegerSchema()),
+                            Property("pageSize", IntegerSchema())),
+                        ["ServerProviderTelemetryRollupBucket"] = ObjectSchema(
+                            Property("bucketUtc", StringSchema("date-time")),
+                            Property("minimum", NumberSchema()),
+                            Property("average", NumberSchema()),
+                            Property("maximum", NumberSchema()),
+                            Property("sampleCount", IntegerSchema())),
+                        ["ServerClientTelemetryCollectionAttemptRecord"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("clientId", StringSchema()),
+                            Property("clientName", StringSchema()),
+                            Property("startedUtc", StringSchema("date-time")),
+                            Property("completedUtc", StringSchema("date-time")),
+                            Property("elapsedMs", NumberSchema()),
+                            Property("hostRequested", BooleanSchema()),
+                            Property("providerRequested", BooleanSchema()),
+                            Property("hostSucceeded", BooleanSchema()),
+                            Property("providerSucceeded", BooleanSchema()),
+                            Property("status", StringSchema()),
+                            Property("errorCode", StringSchema()),
+                            Property("errorMessage", StringSchema()),
+                            Property("hostSampleId", StringSchema()),
+                            Property("providerSampleCount", IntegerSchema())),
+                        ["RoutingPolicyMetricDefinition"] = ObjectSchema(
+                            Property("name", StringSchema()),
+                            Property("valueType", StringSchema())),
                         ["ModelDefinition"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["ModelConfiguration"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
                         ["RoutingPolicy"] = ObjectSchema(
@@ -3932,6 +4955,13 @@ namespace Xeno.Server
                 parameters.Add(Parameter("id", "path", true, "Route identifier.", StringSchema()));
             }
 
+            if (String.Equals(operationId, "getLatestClientTelemetry", StringComparison.Ordinal)
+                || String.Equals(operationId, "getLatestClientProviderTelemetry", StringComparison.Ordinal)
+                || String.Equals(operationId, "listClientTelemetryCollectionAttempts", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("clientId", "query", false, "Optional client identifier.", StringSchema()));
+            }
+
             if (String.Equals(operationId, "summarizeRequestHistory", StringComparison.Ordinal))
             {
                 parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
@@ -3966,6 +4996,10 @@ namespace Xeno.Server
                 or "deletePermission"
                 or "deleteAuditRecord"
                 or "deleteClient"
+                or "getClientTelemetryDetail"
+                or "deleteClientTelemetryDetail"
+                or "getClientProviderTelemetryDetail"
+                or "deleteClientProviderTelemetryDetail"
                 or "getRequestHistory"
                 or "deleteRequestHistory";
         }
@@ -4088,6 +5122,97 @@ namespace Xeno.Server
                     "Client-advertised model delete request.",
                     ObjectSchema(Property("clientId", StringSchema()), Property("name", StringSchema()), Property("source", StringSchema())),
                     new Dictionary<string, object> { ["clientId"] = "xcl_example", ["name"] = "llama3.2:latest", ["source"] = "local-ollama" });
+            }
+
+            if (String.Equals(operationId, "collectClientTelemetry", StringComparison.Ordinal) || String.Equals(operationId, "collectClientProviderTelemetry", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Manual telemetry collection request.",
+                    ObjectSchema(
+                        Property("clientId", StringSchema()),
+                        Property("collectHostTelemetry", BooleanSchema()),
+                        Property("collectProviderTelemetry", BooleanSchema()),
+                        Property("wait", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["collectHostTelemetry"] = !String.Equals(operationId, "collectClientProviderTelemetry", StringComparison.Ordinal),
+                        ["collectProviderTelemetry"] = true,
+                        ["wait"] = false
+                    });
+            }
+
+            if (String.Equals(operationId, "searchClientTelemetry", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Host telemetry search request.",
+                    TelemetrySearchBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["metric"] = "telemetry.cpu.utilizationPercent",
+                        ["fromUtc"] = DateTime.UtcNow.AddHours(-1).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["page"] = 1,
+                        ["pageSize"] = 50
+                    });
+            }
+
+            if (String.Equals(operationId, "searchClientProviderTelemetry", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Provider telemetry search request.",
+                    TelemetrySearchBodySchema(
+                        Property("providerName", StringSchema()),
+                        Property("modelName", StringSchema()),
+                        Property("status", StringSchema()),
+                        Property("healthStatus", StringSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["providerName"] = "local-ollama",
+                        ["metric"] = "provider.queuedRequests",
+                        ["fromUtc"] = DateTime.UtcNow.AddHours(-1).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["page"] = 1,
+                        ["pageSize"] = 50
+                    });
+            }
+
+            if (String.Equals(operationId, "rollupClientTelemetry", StringComparison.Ordinal) || String.Equals(operationId, "rollupClientProviderTelemetry", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Telemetry rollup request.",
+                    ObjectSchema(
+                        Property("clientId", StringSchema()),
+                        Property("providerName", StringSchema()),
+                        Property("modelName", StringSchema()),
+                        Property("metric", StringSchema()),
+                        Property("fromUtc", StringSchema("date-time")),
+                        Property("toUtc", StringSchema("date-time")),
+                        Property("bucketMinutes", IntegerSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["metric"] = String.Equals(operationId, "rollupClientTelemetry", StringComparison.Ordinal) ? "telemetry.cpu.utilizationPercent" : "provider.queuedRequests",
+                        ["fromUtc"] = DateTime.UtcNow.AddHours(-1).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["bucketMinutes"] = 5
+                    });
+            }
+
+            if (String.Equals(operationId, "bulkDeleteClientTelemetry", StringComparison.Ordinal) || String.Equals(operationId, "bulkDeleteClientProviderTelemetry", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Telemetry bulk delete request.",
+                    ObjectSchema(
+                        Property("clientId", StringSchema()),
+                        Property("fromUtc", StringSchema("date-time")),
+                        Property("toUtc", StringSchema("date-time"))),
+                    new Dictionary<string, object>
+                    {
+                        ["clientId"] = "xcl_example",
+                        ["toUtc"] = DateTime.UtcNow.AddDays(-30).ToString("O", CultureInfo.InvariantCulture)
+                    });
             }
 
             if (String.Equals(operationId, "bulkDeleteRequestHistory", StringComparison.Ordinal))
@@ -4251,6 +5376,26 @@ namespace Xeno.Server
             Dictionary<string, object> propertyMap = new Dictionary<string, object>();
             foreach (KeyValuePair<string, object> property in properties) propertyMap[property.Key] = property.Value;
             return new Dictionary<string, object> { ["type"] = "object", ["properties"] = propertyMap };
+        }
+
+        private static Dictionary<string, object> TelemetrySearchBodySchema(params KeyValuePair<string, object>[] additionalProperties)
+        {
+            List<KeyValuePair<string, object>> properties = new List<KeyValuePair<string, object>>
+            {
+                Property("clientId", StringSchema()),
+                Property("clientName", StringSchema()),
+                Property("machineName", StringSchema()),
+                Property("metric", StringSchema()),
+                Property("metricMinimum", NumberSchema()),
+                Property("metricMaximum", NumberSchema()),
+                Property("fromUtc", StringSchema("date-time")),
+                Property("toUtc", StringSchema("date-time")),
+                Property("page", IntegerSchema()),
+                Property("pageSize", IntegerSchema()),
+                Property("sortDescending", BooleanSchema())
+            };
+            properties.AddRange(additionalProperties);
+            return ObjectSchema(properties.ToArray());
         }
 
         private static KeyValuePair<string, object> Property(string name, object schema)

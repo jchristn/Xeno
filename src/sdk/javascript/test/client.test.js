@@ -109,6 +109,44 @@ test('OpenAI and request history methods use expected routes', async () => {
   ]);
 });
 
+test('client telemetry methods use expected routes and bodies', async () => {
+  const fetchImpl = createFetch((url, options) => jsonResponse({}, options.method === 'DELETE' ? 204 : 200));
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
+
+  await client.getClientTelemetryStatus();
+  await client.getLatestClientTelemetry({ clientId: 'xcl_1', empty: '' });
+  await client.collectClientTelemetry({ clientId: 'xcl_1', collectHostTelemetry: true });
+  await client.searchClientTelemetry({ clientId: 'xcl_1', metric: 'telemetry.cpu.utilizationPercent' });
+  await client.getClientTelemetryRollups({ metric: 'telemetry.cpu.utilizationPercent' });
+  await client.getClientTelemetryDetail('ctel_1');
+  await client.deleteClientTelemetry('ctel_1');
+  await client.getLatestClientProviderTelemetry({ clientId: 'xcl_1' });
+  await client.searchClientProviderTelemetry({ providerName: 'ollama' });
+  await client.getClientProviderTelemetryRollups({ metric: 'provider.queuedRequests' });
+  await client.getClientProviderTelemetryDetail('cptel_1');
+  await client.deleteClientProviderTelemetry('cptel_1');
+  await client.getClientTelemetryMetricCatalog();
+
+  assert.deepEqual(fetchImpl.calls.map((call) => [call.options.method, call.url]), [
+    ['GET', 'https://xeno.local/v1.0/api/client-telemetry/status'],
+    ['GET', 'https://xeno.local/v1.0/api/client-telemetry/latest?clientId=xcl_1'],
+    ['POST', 'https://xeno.local/v1.0/api/client-telemetry/collect'],
+    ['POST', 'https://xeno.local/v1.0/api/client-telemetry/history/search'],
+    ['POST', 'https://xeno.local/v1.0/api/client-telemetry/history/rollups'],
+    ['GET', 'https://xeno.local/v1.0/api/client-telemetry/history/ctel_1'],
+    ['DELETE', 'https://xeno.local/v1.0/api/client-telemetry/history/ctel_1'],
+    ['GET', 'https://xeno.local/v1.0/api/client-telemetry/providers/latest?clientId=xcl_1'],
+    ['POST', 'https://xeno.local/v1.0/api/client-telemetry/providers/history/search'],
+    ['POST', 'https://xeno.local/v1.0/api/client-telemetry/providers/history/rollups'],
+    ['GET', 'https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1'],
+    ['DELETE', 'https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1'],
+    ['GET', 'https://xeno.local/v1.0/api/client-telemetry/metrics']
+  ]);
+  assert.match(fetchImpl.calls[2].options.body, /"clientId":"xcl_1"/);
+  assert.match(fetchImpl.calls[3].options.body, /"metric":"telemetry.cpu.utilizationPercent"/);
+  assert.match(fetchImpl.calls[8].options.body, /"providerName":"ollama"/);
+});
+
 test('text and error responses are handled', async () => {
   const metricsFetch = createFetch(() => jsonResponse('xeno_connected_clients 1'));
   const metricsClient = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl: metricsFetch });

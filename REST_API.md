@@ -22,6 +22,30 @@ C#, JavaScript, and Python SDKs are checked in under `src/sdk/`. Each SDK includ
 
 The live OpenAPI document remains available at `GET /openapi.json` and should be treated as the contract source of truth when validating or regenerating SDK coverage.
 
+## Client Telemetry
+
+All client telemetry routes are tenant-scoped and require authentication. Canonical routes use `/v1.0/api/...`.
+
+- `GET /v1.0/api/client-telemetry/status`
+- `GET /v1.0/api/client-telemetry/latest`
+- `POST /v1.0/api/client-telemetry/collect`
+- `POST /v1.0/api/client-telemetry/history/search`
+- `POST /v1.0/api/client-telemetry/history/rollups`
+- `GET /v1.0/api/client-telemetry/history/{id}`
+- `DELETE /v1.0/api/client-telemetry/history/{id}`
+- `POST /v1.0/api/client-telemetry/history/delete`
+- `GET /v1.0/api/client-telemetry/providers/latest`
+- `POST /v1.0/api/client-telemetry/providers/collect`
+- `POST /v1.0/api/client-telemetry/providers/history/search`
+- `POST /v1.0/api/client-telemetry/providers/history/rollups`
+- `GET /v1.0/api/client-telemetry/providers/history/{id}`
+- `DELETE /v1.0/api/client-telemetry/providers/history/{id}`
+- `POST /v1.0/api/client-telemetry/providers/history/delete`
+- `GET /v1.0/api/client-telemetry/collection-attempts`
+- `GET /v1.0/api/client-telemetry/metrics`
+
+`status` returns telemetry settings state, service running state, last/next collection timestamps, connected client count, eligible client count, and recent failure count. `collect` triggers immediate server-requested collection for all connected clients or for a supplied `clientId`. Detail routes return normalized rows and bounded raw snapshot JSON when persisted. Delete routes are tenant-scoped.
+
 ## Authentication
 
 `GET /api/v1/auth/tenants`

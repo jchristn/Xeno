@@ -4,6 +4,7 @@ namespace Xeno.Core.Database
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Core.Enums;
+    using Xeno.Core.Database.Interfaces;
     using Xeno.Core.Models;
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
@@ -28,6 +29,21 @@ namespace Xeno.Core.Database
         /// Platform state.
         /// </summary>
         public XenoPlatform Platform { get; protected set; } = new XenoPlatform();
+
+        /// <summary>
+        /// Server-collected host telemetry methods.
+        /// </summary>
+        public IClientTelemetryMethods? ClientTelemetry { get; protected set; } = null;
+
+        /// <summary>
+        /// Server-collected provider telemetry methods.
+        /// </summary>
+        public IClientProviderTelemetryMethods? ClientProviderTelemetry { get; protected set; } = null;
+
+        /// <summary>
+        /// Server telemetry collection attempt methods.
+        /// </summary>
+        public IClientTelemetryCollectionAttemptMethods? ClientTelemetryCollectionAttempts { get; protected set; } = null;
 
         /// <summary>
         /// Instantiate the database driver.

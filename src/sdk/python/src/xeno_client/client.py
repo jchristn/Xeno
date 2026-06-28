@@ -137,6 +137,45 @@ class XenoClient:
     def delete_client_model(self, model: dict[str, Any]) -> dict[str, Any]:
         return self._request("DELETE", "/v1.0/api/client-models", model)
 
+    def get_client_telemetry_status(self) -> dict[str, Any]:
+        return self._request("GET", "/v1.0/api/client-telemetry/status")
+
+    def get_latest_client_telemetry(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("GET", f"/v1.0/api/client-telemetry/latest{self._query_string(filters)}")
+
+    def collect_client_telemetry(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/client-telemetry/collect", request or {})
+
+    def search_client_telemetry(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/client-telemetry/history/search", request or {})
+
+    def get_client_telemetry_rollups(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/client-telemetry/history/rollups", request or {})
+
+    def get_client_telemetry_detail(self, sample_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/v1.0/api/client-telemetry/history/{sample_id}")
+
+    def delete_client_telemetry(self, sample_id: str) -> None:
+        return self._request("DELETE", f"/v1.0/api/client-telemetry/history/{sample_id}")
+
+    def get_latest_client_provider_telemetry(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        return self._request("GET", f"/v1.0/api/client-telemetry/providers/latest{self._query_string(filters)}")
+
+    def search_client_provider_telemetry(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/client-telemetry/providers/history/search", request or {})
+
+    def get_client_provider_telemetry_rollups(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/client-telemetry/providers/history/rollups", request or {})
+
+    def get_client_provider_telemetry_detail(self, sample_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/v1.0/api/client-telemetry/providers/history/{sample_id}")
+
+    def delete_client_provider_telemetry(self, sample_id: str) -> None:
+        return self._request("DELETE", f"/v1.0/api/client-telemetry/providers/history/{sample_id}")
+
+    def get_client_telemetry_metric_catalog(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/v1.0/api/client-telemetry/metrics")
+
     def list_model_definitions(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/model-definitions")
 

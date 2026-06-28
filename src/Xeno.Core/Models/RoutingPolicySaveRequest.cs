@@ -1,5 +1,6 @@
 namespace Xeno.Core.Models
 {
+    using System.Collections.Generic;
     using System.Text.Json.Serialization;
     using Xeno.Core.Enums;
     using Xeno.Core.Settings;
@@ -50,6 +51,30 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("adaptive")]
         public AdaptiveLoadBalancingSettings? Adaptive { get; set; } = null;
+
+        /// <summary>
+        /// Maximum telemetry age in milliseconds.
+        /// </summary>
+        [JsonPropertyName("maxTelemetryAgeMs")]
+        public int? MaxTelemetryAgeMs { get; set; } = null;
+
+        /// <summary>
+        /// Telemetry filter conditions.
+        /// </summary>
+        [JsonPropertyName("telemetryFilters")]
+        public List<RoutingPolicyCondition>? TelemetryFilters { get; set; } = null;
+
+        /// <summary>
+        /// Telemetry ranking rules.
+        /// </summary>
+        [JsonPropertyName("telemetryRanking")]
+        public List<RoutingPolicyRankingRule>? TelemetryRanking { get; set; } = null;
+
+        /// <summary>
+        /// Telemetry fallback mode.
+        /// </summary>
+        [JsonPropertyName("telemetryFallbackMode")]
+        public RoutingPolicyFallbackModeEnum? TelemetryFallbackMode { get; set; } = null;
 
         /// <summary>
         /// Whether the policy is active.

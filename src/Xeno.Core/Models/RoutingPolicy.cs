@@ -1,6 +1,7 @@
 namespace Xeno.Core.Models
 {
     using System;
+    using System.Collections.Generic;
     using Xeno.Core;
     using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
@@ -11,6 +12,8 @@ namespace Xeno.Core.Models
     /// </summary>
     public class RoutingPolicy
     {
+        private int _MaxTelemetryAgeMs = 30000;
+
         /// <summary>
         /// Routing policy ID.
         /// </summary>
@@ -50,6 +53,30 @@ namespace Xeno.Core.Models
         /// Adaptive load-balancing settings used when LoadBalancingMode is Adaptive.
         /// </summary>
         public AdaptiveLoadBalancingSettings Adaptive { get; set; } = new AdaptiveLoadBalancingSettings();
+
+        /// <summary>
+        /// Maximum telemetry age in milliseconds. Defaults to 30000. Minimum is 1000 and maximum is 300000.
+        /// </summary>
+        public int MaxTelemetryAgeMs
+        {
+            get { return _MaxTelemetryAgeMs; }
+            set { _MaxTelemetryAgeMs = Math.Clamp(value, 1000, 300000); }
+        }
+
+        /// <summary>
+        /// Telemetry filter conditions.
+        /// </summary>
+        public List<RoutingPolicyCondition> TelemetryFilters { get; set; } = new List<RoutingPolicyCondition>();
+
+        /// <summary>
+        /// Telemetry ranking rules.
+        /// </summary>
+        public List<RoutingPolicyRankingRule> TelemetryRanking { get; set; } = new List<RoutingPolicyRankingRule>();
+
+        /// <summary>
+        /// Fallback behavior when telemetry cannot select a client.
+        /// </summary>
+        public RoutingPolicyFallbackModeEnum TelemetryFallbackMode { get; set; } = RoutingPolicyFallbackModeEnum.UseLoadBalancingMode;
 
         /// <summary>
         /// Whether this is the tenant fallback policy.

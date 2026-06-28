@@ -119,6 +119,46 @@ class XenoClientTests(unittest.TestCase):
             ],
         )
 
+    def test_client_telemetry_methods_use_expected_routes_and_bodies(self):
+        opener = FakeOpener(lambda request: FakeResponse("{}", 204 if request.get_method() == "DELETE" else 200))
+        client = XenoClient("https://xeno.local", opener=opener)
+
+        client.get_client_telemetry_status()
+        client.get_latest_client_telemetry({"clientId": "xcl_1", "empty": ""})
+        client.collect_client_telemetry({"clientId": "xcl_1", "collectHostTelemetry": True})
+        client.search_client_telemetry({"clientId": "xcl_1", "metric": "telemetry.cpu.utilizationPercent"})
+        client.get_client_telemetry_rollups({"metric": "telemetry.cpu.utilizationPercent"})
+        client.get_client_telemetry_detail("ctel_1")
+        client.delete_client_telemetry("ctel_1")
+        client.get_latest_client_provider_telemetry({"clientId": "xcl_1"})
+        client.search_client_provider_telemetry({"providerName": "ollama"})
+        client.get_client_provider_telemetry_rollups({"metric": "provider.queuedRequests"})
+        client.get_client_provider_telemetry_detail("cptel_1")
+        client.delete_client_provider_telemetry("cptel_1")
+        client.get_client_telemetry_metric_catalog()
+
+        self.assertEqual(
+            [(call["request"].get_method(), call["request"].full_url) for call in opener.calls],
+            [
+                ("GET", "https://xeno.local/v1.0/api/client-telemetry/status"),
+                ("GET", "https://xeno.local/v1.0/api/client-telemetry/latest?clientId=xcl_1"),
+                ("POST", "https://xeno.local/v1.0/api/client-telemetry/collect"),
+                ("POST", "https://xeno.local/v1.0/api/client-telemetry/history/search"),
+                ("POST", "https://xeno.local/v1.0/api/client-telemetry/history/rollups"),
+                ("GET", "https://xeno.local/v1.0/api/client-telemetry/history/ctel_1"),
+                ("DELETE", "https://xeno.local/v1.0/api/client-telemetry/history/ctel_1"),
+                ("GET", "https://xeno.local/v1.0/api/client-telemetry/providers/latest?clientId=xcl_1"),
+                ("POST", "https://xeno.local/v1.0/api/client-telemetry/providers/history/search"),
+                ("POST", "https://xeno.local/v1.0/api/client-telemetry/providers/history/rollups"),
+                ("GET", "https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1"),
+                ("DELETE", "https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1"),
+                ("GET", "https://xeno.local/v1.0/api/client-telemetry/metrics"),
+            ],
+        )
+        self.assertIn('"clientId": "xcl_1"', opener.calls[2]["body"])
+        self.assertIn('"metric": "telemetry.cpu.utilizationPercent"', opener.calls[3]["body"])
+        self.assertIn('"providerName": "ollama"', opener.calls[8]["body"])
+
     def test_text_and_error_responses_are_handled(self):
         metrics_opener = FakeOpener(lambda request: FakeResponse("xeno_connected_clients 1"))
         metrics_client = XenoClient("https://xeno.local", opener=metrics_opener)

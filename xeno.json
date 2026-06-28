@@ -38,6 +38,20 @@
     "Enabled": true,
     "RetentionDays": 30
   },
+  "TelemetryCollection": {
+    "Enabled": true,
+    "CollectionIntervalSeconds": 60,
+    "RequestTimeoutMs": 5000,
+    "RetentionDays": 30,
+    "PruneIntervalMinutes": 60,
+    "CollectHostTelemetry": true,
+    "CollectProviderTelemetry": true,
+    "PersistRawSnapshots": true,
+    "MaxRawSnapshotBytes": 262144,
+    "MaxSamplesPerClientResponse": 1,
+    "MaxProviderMetricRowsPerResponse": 1000,
+    "MaxConcurrentClientRequests": 8
+  },
   "ModelAccessControl": {
     "Enabled": true,
     "Mode": "Monitor"

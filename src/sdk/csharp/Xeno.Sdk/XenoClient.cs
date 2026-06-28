@@ -435,6 +435,145 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
+        /// Gets server-collected client telemetry status.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Telemetry status JSON.</returns>
+        public async Task<XenoApiResponse> GetClientTelemetryStatusAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/client-telemetry/status", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets latest server-collected host and provider telemetry.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Latest telemetry JSON.</returns>
+        public async Task<XenoApiResponse> GetLatestClientTelemetryAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/client-telemetry/latest", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Triggers server-side telemetry collection.
+        /// </summary>
+        /// <param name="request">Collection request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Collection trigger response JSON.</returns>
+        public async Task<XenoApiResponse> CollectClientTelemetryAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/client-telemetry/collect", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Searches host telemetry history.
+        /// </summary>
+        /// <param name="request">Search request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Search result JSON.</returns>
+        public async Task<XenoApiResponse> SearchClientTelemetryAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/client-telemetry/history/search", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets host telemetry rollups.
+        /// </summary>
+        /// <param name="request">Rollup request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Rollup JSON.</returns>
+        public async Task<XenoApiResponse> GetClientTelemetryRollupsAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/client-telemetry/history/rollups", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets one host telemetry detail.
+        /// </summary>
+        /// <param name="id">Sample identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Telemetry detail JSON.</returns>
+        public async Task<XenoApiResponse> GetClientTelemetryDetailAsync(string id, CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/client-telemetry/history/" + Escape(id), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Deletes one host telemetry sample.
+        /// </summary>
+        /// <param name="id">Sample identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public async Task DeleteClientTelemetryAsync(string id, CancellationToken token = default)
+        {
+            await DeleteAsync("/v1.0/api/client-telemetry/history/" + Escape(id), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets latest server-collected provider telemetry.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Latest provider telemetry JSON.</returns>
+        public async Task<XenoApiResponse> GetLatestClientProviderTelemetryAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/client-telemetry/providers/latest", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Searches provider telemetry history.
+        /// </summary>
+        /// <param name="request">Search request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Search result JSON.</returns>
+        public async Task<XenoApiResponse> SearchClientProviderTelemetryAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/client-telemetry/providers/history/search", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets provider telemetry rollups.
+        /// </summary>
+        /// <param name="request">Rollup request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Rollup JSON.</returns>
+        public async Task<XenoApiResponse> GetClientProviderTelemetryRollupsAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/client-telemetry/providers/history/rollups", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets one provider telemetry detail.
+        /// </summary>
+        /// <param name="id">Sample identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Provider telemetry detail JSON.</returns>
+        public async Task<XenoApiResponse> GetClientProviderTelemetryDetailAsync(string id, CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/client-telemetry/providers/history/" + Escape(id), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Deletes one provider telemetry sample.
+        /// </summary>
+        /// <param name="id">Sample identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public async Task DeleteClientProviderTelemetryAsync(string id, CancellationToken token = default)
+        {
+            await DeleteAsync("/v1.0/api/client-telemetry/providers/history/" + Escape(id), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets telemetry metric catalog.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Metric catalog JSON.</returns>
+        public async Task<XenoApiResponse> GetClientTelemetryMetricCatalogAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/client-telemetry/metrics", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Lists model definitions.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
