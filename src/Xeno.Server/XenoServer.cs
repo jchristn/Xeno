@@ -8,6 +8,7 @@ namespace Xeno.Server
     using System.Net.WebSockets;
     using System.Security.Cryptography;
     using System.Text;
+    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using WatsonWebserver;
@@ -2910,6 +2911,16 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Client ID belongs to a different tenant.");
             }
 
+            lock (_ClientConnectionsLock)
+            {
+                if (_ClientConnections.TryGetValue(clientId, out ClientConnection? existingConnection) &&
+                    existingConnection.Session.IsConnected &&
+                    !String.Equals(existingConnection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new UnauthorizedAccessException("Client ID is already connected.");
+                }
+            }
+
             if (client == null)
             {
                 client = new XenoClientRecord
@@ -3167,8 +3178,8 @@ namespace Xeno.Server
             entry.ResponseHeaders = RedactHeaders(responseHeaders);
             entry.RequestBodyLength = Encoding.UTF8.GetByteCount(requestBodyJson ?? String.Empty);
             entry.ResponseBodyLength = Encoding.UTF8.GetByteCount(responseBody ?? String.Empty);
-            entry.RequestBody = TruncateBody(requestBodyJson, out bool requestTruncated);
-            entry.ResponseBody = TruncateBody(responseBody, out bool responseTruncated);
+            entry.RequestBody = TruncateBody(RedactSensitiveJsonBody(requestBodyJson), out bool requestTruncated);
+            entry.ResponseBody = TruncateBody(RedactSensitiveJsonBody(responseBody), out bool responseTruncated);
             entry.RequestBodyTruncated = requestTruncated;
             entry.ResponseBodyTruncated = responseTruncated;
             entry.Telemetry = ExtractTelemetry(response, decision, entry);
@@ -3306,6 +3317,73 @@ namespace Xeno.Server
             if (body.Length <= MaxCapturedBodyChars) return body;
             truncated = true;
             return body.Substring(0, MaxCapturedBodyChars);
+        }
+
+        private static string? RedactSensitiveJsonBody(string? body)
+        {
+            if (String.IsNullOrWhiteSpace(body)) return body;
+            try
+            {
+                using (JsonDocument document = JsonDocument.Parse(body))
+                {
+                    object? redacted = RedactSensitiveJsonElement(document.RootElement, null);
+                    return JsonUtil.Serialize(redacted);
+                }
+            }
+            catch (JsonException)
+            {
+                return body;
+            }
+        }
+
+        private static object? RedactSensitiveJsonElement(JsonElement element, string? propertyName)
+        {
+            if (IsSensitiveBodyField(propertyName)) return "(redacted)";
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    Dictionary<string, object?> obj = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    foreach (JsonProperty property in element.EnumerateObject())
+                    {
+                        obj[property.Name] = RedactSensitiveJsonElement(property.Value, property.Name);
+                    }
+
+                    return obj;
+                case JsonValueKind.Array:
+                    List<object?> values = new List<object?>();
+                    foreach (JsonElement value in element.EnumerateArray())
+                    {
+                        values.Add(RedactSensitiveJsonElement(value, propertyName));
+                    }
+
+                    return values;
+                case JsonValueKind.String:
+                    return element.GetString();
+                case JsonValueKind.Number:
+                    if (element.TryGetInt64(out long longValue)) return longValue;
+                    if (element.TryGetDecimal(out decimal decimalValue)) return decimalValue;
+                    return element.GetDouble();
+                case JsonValueKind.True:
+                    return true;
+                case JsonValueKind.False:
+                    return false;
+                default:
+                    return null;
+            }
+        }
+
+        private static bool IsSensitiveBodyField(string? name)
+        {
+            if (String.IsNullOrWhiteSpace(name)) return false;
+            string normalized = name.Replace("_", String.Empty, StringComparison.Ordinal).Replace("-", String.Empty, StringComparison.Ordinal);
+            return normalized.Contains("authorization", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("apikey", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("accesskey", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("cookie", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("credential", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("password", StringComparison.OrdinalIgnoreCase);
         }
 
         private static Dictionary<string, string> CaptureRequestHeaders(HttpContextBase context, Dictionary<string, string> forwardedHeaders)
@@ -5044,7 +5122,7 @@ namespace Xeno.Server
     .xeno-auth-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
     .xeno-auth-header h1 { margin: 0; font-size: 17px; }
     .xeno-auth-header p { margin: 0; color: #5f6b7a; font-size: 13px; }
-    .xeno-auth-grid { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 10px; }
+    .xeno-auth-grid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 10px; }
     .xeno-auth-grid label { display: grid; gap: 5px; color: #374151; font-size: 12px; font-weight: 700; }
     .xeno-auth-grid input { min-width: 0; height: 34px; border: 1px solid #cfd6e2; border-radius: 6px; padding: 0 9px; font: inherit; }
     .xeno-auth-actions { display: flex; align-items: center; gap: 8px; }
@@ -5069,7 +5147,6 @@ namespace Xeno.Server
       <label>Bearer token<input id="xeno-bearer-token" placeholder="Bearer token or raw token" autocomplete="off"></label>
       <label>x-token<input id="xeno-token" placeholder="Optional x-token header" autocomplete="off"></label>
       <label>Access key<input id="xeno-access-key" placeholder="default" autocomplete="off"></label>
-      <label>Secret key<input id="xeno-secret-key" placeholder="default" autocomplete="off" type="password"></label>
     </div>
     <div class="xeno-auth-actions">
       <button class="primary" id="xeno-auth-save" type="button">Save authentication</button>

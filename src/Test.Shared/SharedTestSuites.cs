@@ -1792,6 +1792,11 @@ namespace Test.Shared
                         executeAsync: delegate { return RunSecurityManagementContractsAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
+                        "ManagementAuthorizationMatrixContracts",
+                        "Protected management and inference routes enforce anonymous, unprivileged, and administrator access decisions",
+                        executeAsync: delegate { return RunManagementAuthorizationMatrixContractsAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
                         "CredentialLifecycleSecurityContracts",
                         "Credential lifecycle rejects secret-key exchange, tenant mismatch, disabled credentials, and stale sessions",
                         executeAsync: delegate { return RunCredentialLifecycleSecurityContractsAsync(); }),
@@ -2059,6 +2064,64 @@ namespace Test.Shared
                                 if ((int)noAccessModels.StatusCode != 403) throw new InvalidOperationException("User without inference permission should get 403 from OpenAI model list.");
                             }
                         }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunManagementAuthorizationMatrixContractsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-management-auth-matrix-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    using (HttpClient adminClient = new HttpClient())
+                    using (HttpClient anonymousClient = new HttpClient())
+                    using (HttpClient noAccessClient = new HttpClient())
+                    {
+                        await AuthenticateSeedAdminAsync(adminClient, baseUrl).ConfigureAwait(false);
+                        await CreateUserViaApiAsync(adminClient, baseUrl, Constants.DefaultTenantId, "matrix-no-access@security.test", "password", false, false).ConfigureAwait(false);
+                        await AuthenticateUserAsync(noAccessClient, baseUrl, Constants.DefaultTenantId, "matrix-no-access@security.test", "password").ConfigureAwait(false);
+
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/settings", "settings").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/backup", "backup").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/users", "users").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/credentials", "credentials").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/roles", "roles").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/permissions", "permissions").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/role-assignments", "role assignments").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/audit", "audit").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/clients", "clients").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/request-history", "request history").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/request-history/summary", "request history summary").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/request-history/analytics/overview", "request analytics").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/client-telemetry/status", "client telemetry status").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1/models", "OpenAI model list").ConfigureAwait(false);
                     }
                 }
                 finally
@@ -2439,6 +2502,11 @@ namespace Test.Shared
                         if (!swagger.Contains("xeno-auth-panel", StringComparison.Ordinal) || !swagger.Contains("xeno.swagger.auth", StringComparison.Ordinal) || !swagger.Contains("requestInterceptor", StringComparison.Ordinal))
                         {
                             throw new InvalidOperationException("Swagger UI does not include Xeno authentication loading support.");
+                        }
+
+                        if (swagger.Contains("xeno-secret-key", StringComparison.OrdinalIgnoreCase) || swagger.Contains("Secret key", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("Swagger UI exposed legacy secret-key authentication controls.");
                         }
 
                         await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
@@ -3044,7 +3112,7 @@ namespace Test.Shared
                             request.Headers.Add("X-Api-Key", "provider-secret");
                             request.Headers.Add("x-access-key", "caller-access-key");
                             request.Content = new StringContent(
-                                "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
+                                "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"apiKey\":\"body-secret\",\"nested\":{\"accessKey\":\"inner-secret\",\"safe\":\"visible\"}}",
                                 Encoding.UTF8,
                                 "application/json");
 
@@ -3084,6 +3152,9 @@ namespace Test.Shared
                                 if (!String.Equals(history.RequestHeaders["x-access-key"], "(redacted)", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not redact x-access-key.");
                                 if (history.RequestHeaders.TryGetValue("X-Xeno-Tenant-ID", out string? tenantHeader) && String.Equals(tenantHeader, "ten_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Request history retained spoofed Xeno tenant header.");
                                 if (history.RequestHeaders.TryGetValue("X-Xeno-Request-ID", out string? requestIdHeader) && String.Equals(requestIdHeader, "req_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Request history retained spoofed Xeno request ID.");
+                                if ((history.RequestBody ?? String.Empty).Contains("body-secret", StringComparison.Ordinal) || (history.RequestBody ?? String.Empty).Contains("inner-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Request history persisted sensitive request body fields.");
+                                if (!(history.RequestBody ?? String.Empty).Contains("(redacted)", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not mark redacted request body fields.");
+                                if ((history.ResponseBody ?? String.Empty).Contains("response-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Request history persisted sensitive response body fields.");
                             }
                         }
 
@@ -3188,6 +3259,56 @@ namespace Test.Shared
                         {
                             throw new InvalidOperationException("Wrong-tenant WebSocket credential was not rejected: " + message);
                         }
+                    }
+
+                    using (ClientWebSocket malformedSocket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(malformedSocket);
+                        await malformedSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? connected = await ReceiveWebSocketTextAsync(malformedSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Authenticated WebSocket did not connect before malformed JSON test: " + connected);
+                        await SendWebSocketTextAsync(malformedSocket, "{", clientTokenSource.Token).ConfigureAwait(false);
+                        string? message = await ReceiveWebSocketTextAsync(malformedSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(message) || !message.Contains("server.invalid-json", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Malformed WebSocket JSON was not rejected: " + message);
+                    }
+
+                    using (ClientWebSocket protocolSocket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(protocolSocket);
+                        await protocolSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? connected = await ReceiveWebSocketTextAsync(protocolSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Authenticated WebSocket did not connect before protocol abuse test: " + connected);
+                        await SendWebSocketJsonAsync(protocolSocket, new { type = "client.inventory.update", clientId = "xcl_unregistered", tenantId = Constants.DefaultTenantId, inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? inventoryMessage = await ReceiveWebSocketTextAsync(protocolSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(inventoryMessage) || !inventoryMessage.Contains("server.invalid-message", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unregistered inventory update was not rejected: " + inventoryMessage);
+
+                        await SendWebSocketJsonAsync(protocolSocket, new { type = "client.telemetry.snapshot", requestId = "tel_abuse", tenantId = Constants.DefaultTenantId, clientId = "xcl_unregistered", snapshot = new { metadata = new { clientId = "xcl_unregistered", tenantId = Constants.DefaultTenantId } } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? telemetryMessage = await ReceiveWebSocketTextAsync(protocolSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(telemetryMessage) || !telemetryMessage.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unregistered telemetry frame was not rejected: " + telemetryMessage);
+
+                        await SendWebSocketJsonAsync(protocolSocket, new { type = "client.register", clientId = "xcl_wrong_tenant", tenantId = "ten_wrong", name = "wrong-tenant", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? registerMessage = await ReceiveWebSocketTextAsync(protocolSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(registerMessage) || !registerMessage.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Wrong-tenant registration frame was not rejected: " + registerMessage);
+                    }
+
+                    using (ClientWebSocket firstDuplicateSocket = new ClientWebSocket())
+                    using (ClientWebSocket secondDuplicateSocket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(firstDuplicateSocket);
+                        ApplySeedCredentialHeaders(secondDuplicateSocket);
+                        await firstDuplicateSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? firstConnected = await ReceiveWebSocketTextAsync(firstDuplicateSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(firstConnected) || !firstConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("First duplicate socket did not connect: " + firstConnected);
+                        await SendWebSocketJsonAsync(firstDuplicateSocket, new { type = "client.register", clientId = "xcl_duplicate_security", tenantId = Constants.DefaultTenantId, name = "duplicate-one", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? firstRegistered = await ReceiveWebSocketTextAsync(firstDuplicateSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(firstRegistered) || !firstRegistered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("First duplicate socket did not register: " + firstRegistered);
+
+                        await secondDuplicateSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? secondConnected = await ReceiveWebSocketTextAsync(secondDuplicateSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(secondConnected) || !secondConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Second duplicate socket did not connect: " + secondConnected);
+                        await SendWebSocketJsonAsync(secondDuplicateSocket, new { type = "client.register", clientId = "xcl_duplicate_security", tenantId = Constants.DefaultTenantId, name = "duplicate-two", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? secondRegistered = await ReceiveWebSocketTextAsync(secondDuplicateSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(secondRegistered) || !secondRegistered.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Duplicate active client registration was not rejected: " + secondRegistered);
                     }
 
                 }
@@ -3501,7 +3622,7 @@ namespace Test.Shared
                         continue;
                     }
 
-                    string completion = "{\"id\":\"chatcmpl_touchstone\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"relay-ok\"},\"finish_reason\":\"stop\"}]}";
+                    string completion = "{\"id\":\"chatcmpl_touchstone\",\"object\":\"chat.completion\",\"providerApiKey\":\"response-secret\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"relay-ok\"},\"finish_reason\":\"stop\"}]}";
                     await SendWebSocketJsonAsync(socket, new
                     {
                         type = "client.response",
@@ -3587,6 +3708,12 @@ namespace Test.Shared
         private static async Task SendWebSocketJsonAsync(ClientWebSocket socket, object value, CancellationToken token)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(JsonUtil.Serialize(value));
+            await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
+        }
+
+        private static async Task SendWebSocketTextAsync(ClientWebSocket socket, string value, CancellationToken token)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value);
             await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
         }
 
@@ -3695,6 +3822,27 @@ namespace Test.Shared
             {
                 string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Role assignment failed: " + json);
+            }
+        }
+
+        private static async Task AssertProtectedGetRouteAsync(HttpClient anonymousClient, HttpClient noAccessClient, HttpClient adminClient, string url, string name)
+        {
+            using (HttpResponseMessage anonymous = await anonymousClient.GetAsync(url).ConfigureAwait(false))
+            {
+                string body = await anonymous.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if ((int)anonymous.StatusCode != 401) throw new InvalidOperationException("Anonymous caller should receive 401 for " + name + ": " + (int)anonymous.StatusCode + " " + body);
+            }
+
+            using (HttpResponseMessage noAccess = await noAccessClient.GetAsync(url).ConfigureAwait(false))
+            {
+                string body = await noAccess.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if ((int)noAccess.StatusCode != 403) throw new InvalidOperationException("Unprivileged caller should receive 403 for " + name + ": " + (int)noAccess.StatusCode + " " + body);
+            }
+
+            using (HttpResponseMessage admin = await adminClient.GetAsync(url).ConfigureAwait(false))
+            {
+                string body = await admin.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!admin.IsSuccessStatusCode) throw new InvalidOperationException("Administrator caller should access " + name + ": " + (int)admin.StatusCode + " " + body);
             }
         }
 
