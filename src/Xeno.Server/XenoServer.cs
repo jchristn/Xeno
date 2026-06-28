@@ -17,6 +17,7 @@ namespace Xeno.Server
     using Xeno.Core;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
+    using Xeno.Core.Exceptions;
     using Xeno.Core.Helpers;
     using Xeno.Core.Models;
     using Xeno.Core.Models.Telemetry;
@@ -39,10 +40,13 @@ namespace Xeno.Server
         private readonly object _ClientConnectionsLock = new object();
         private readonly object _PendingResponsesLock = new object();
         private readonly object _PendingTelemetryResponsesLock = new object();
+        private readonly object _AuthRateLimitLock = new object();
         private readonly Dictionary<string, ClientConnection> _ClientConnections = new Dictionary<string, ClientConnection>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, PendingClientResponse> _PendingClientResponses = new Dictionary<string, PendingClientResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, PendingTelemetryResponse> _PendingTelemetryResponses = new Dictionary<string, PendingTelemetryResponse>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<DateTime>> _AuthRateLimitAttempts = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
         private readonly AuthenticationService _Authentication = new AuthenticationService();
+        private readonly AuthorizationService _Authorization = new AuthorizationService();
         private readonly ClientTelemetryLatestCache _TelemetryLatestCache = new ClientTelemetryLatestCache();
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
@@ -53,6 +57,10 @@ namespace Xeno.Server
         private DateTime? _TelemetryNextPruneUtc;
         private int _TelemetryRecentFailureCount;
         private int _TelemetryCollectionCycleActive;
+        private long _AuthSuccessCount;
+        private long _AuthFailureCount;
+        private long _AuthorizationDenialCount;
+        private long _PrivilegedBypassCount;
         private bool _Disposed;
 
         /// <summary>
@@ -265,8 +273,14 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/roles", "Create role", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/permissions", "List permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/permissions", "List permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/permissions/grantable", "List grantable permissions", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/permissions/grantable", "List grantable permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/permissions", "Create permission", "Authorization");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/permissions", "Create permission", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/roleassignments", "List role assignments", "Authorization");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/role-assignments", "List role assignments", "Authorization");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/roleassignments", "Create role assignment", "Authorization");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/role-assignments", "Create role assignment", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/effective-permissions", "List effective permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/effective-permissions", "List effective permissions", "Authorization");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/audit", "List audit records", "Audit");
@@ -343,6 +357,8 @@ namespace Xeno.Server
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/permissions/{id}", "Delete permission", "Authorization");
             RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/permissions/{id}", "Update permission", "Authorization");
             RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/permissions/{id}", "Update permission", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/roleassignments/{id}", "Delete role assignment", "Authorization");
+            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/role-assignments/{id}", "Delete role assignment", "Authorization");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
@@ -1146,8 +1162,16 @@ namespace Xeno.Server
                 ApplyCors(context.Response);
                 await HandleRestAsync(context, method, path, context.Token).ConfigureAwait(false);
             }
+            catch (AuthorizationDeniedException ex)
+            {
+                Interlocked.Increment(ref _AuthorizationDenialCount);
+                if (_Database != null) await SavePlatformAsync(context.Token).ConfigureAwait(false);
+                context.Response.StatusCode = ex.StatusCode;
+                await SendJsonAsync(context, new { error = ex.ReasonCode, message = ex.Message }).ConfigureAwait(false);
+            }
             catch (UnauthorizedAccessException ex)
             {
+                Interlocked.Increment(ref _AuthFailureCount);
                 context.Response.StatusCode = 401;
                 await SendJsonAsync(context, new { error = "Unauthorized", message = ex.Message }).ConfigureAwait(false);
             }
@@ -1204,6 +1228,7 @@ namespace Xeno.Server
 
             if (method == "POST" && IsPath(path, "/api/v1/auth/login", "/v1.0/api/auth/login"))
             {
+                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
                 await HandleLoginAsync(context, token).ConfigureAwait(false);
                 return;
             }
@@ -1216,6 +1241,7 @@ namespace Xeno.Server
 
             if (method == "POST" && IsPath(path, "/api/v1/auth/dashboard/login", "/v1.0/api/auth/dashboard/login"))
             {
+                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
                 await HandleDashboardLoginAsync(context, token).ConfigureAwait(false);
                 return;
             }
@@ -1224,6 +1250,7 @@ namespace Xeno.Server
 
             if (method == "POST" && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
             {
+                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
                 await HandleCreateTokenAsync(context, requestContext, token).ConfigureAwait(false);
                 return;
             }
@@ -1355,7 +1382,7 @@ namespace Xeno.Server
             if (method == "POST" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
             {
                 await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                Credential credential = CreateCredential(requestContext, context);
+                Credential credential = CreateCredential(requestContext, context, out string plainSecretKey);
                 RequirePlatform().Credentials.Add(credential);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new
@@ -1364,7 +1391,7 @@ namespace Xeno.Server
                     credential.TenantId,
                     credential.UserId,
                     credential.AccessKey,
-                    credential.SecretKey,
+                    SecretKey = plainSecretKey,
                     credential.Active,
                     warning = "SecretKey is shown once. Store it securely."
                 }).ConfigureAwait(false);
@@ -1431,6 +1458,13 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/api/v1/permissions/grantable", "/v1.0/api/permissions/grantable"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, ListGrantablePermissions(requestContext)).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "POST" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
@@ -1454,6 +1488,32 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
                 int removed = DeletePermission(requestContext, deletePermissionId);
+                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendNoContentAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/roleassignments", "/v1.0/api/role-assignments"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await SendJsonAsync(context, RequirePlatform().RoleAssignments.Where(item => IsTenantVisible(requestContext, item.TenantId)).ToList()).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/roleassignments", "/v1.0/api/role-assignments"))
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                RoleAssignment assignment = CreateRoleAssignment(requestContext, context);
+                RequirePlatform().RoleAssignments.Add(assignment);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, assignment).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && TryGetPathId(path, "/api/v1/roleassignments/", "/v1.0/api/role-assignments/") is string deleteRoleAssignmentId)
+            {
+                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                int removed = DeleteRoleAssignment(requestContext, deleteRoleAssignmentId);
                 if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
@@ -1730,6 +1790,7 @@ namespace Xeno.Server
 
             if (method == "GET" && IsPath(path, "/v1/models", "/api/v1/openai/v1/models"))
             {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 List<object> models = RequirePlatform().Clients
                     .Where(item => item.TenantId == requestContext.TenantId)
                     .SelectMany(item => item.Models)
@@ -1742,24 +1803,28 @@ namespace Xeno.Server
 
             if (method == "POST" && IsPath(path, "/v1/chat/completions", "/v1/completions", "/api/v1/openai/v1/chat/completions", "/api/v1/openai/v1/completions"))
             {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
                 await HandleCompletionAsync(context, requestContext, path, false, token).ConfigureAwait(false);
                 return;
             }
 
             if (method == "POST" && IsPath(path, "/v1/embeddings", "/api/v1/openai/v1/embeddings"))
             {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
                 await HandleEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory", "/v1.0/api/request-history"))
             {
+                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, FilterRequestHistory(requestContext)).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
             {
+                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, SummarizeRequestHistory(requestContext, context)).ConfigureAwait(false);
                 return;
             }
@@ -3529,12 +3594,13 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Invalid username or password.");
             }
 
+            string secretKey = _Authentication.GenerateSecret();
             Credential credential = new Credential
             {
                 TenantId = tenantId,
                 UserId = user.Id,
                 AccessKey = IdGenerator.NewId("xeno_"),
-                SecretKey = _Authentication.GenerateSecret(),
+                SecretKey = _Authentication.HashCredentialSecret(secretKey),
                 Active = true
             };
             platform.Credentials.Add(credential);
@@ -3546,7 +3612,7 @@ namespace Xeno.Server
                 tenantId = credential.TenantId,
                 userId = credential.UserId,
                 accessKey = credential.AccessKey,
-                secretKey = credential.SecretKey,
+                secretKey = secretKey,
                 authScheme = "Credential",
                 warning = "SecretKey is shown once. The Xeno client stores this credential; it does not store the user's password."
             }).ConfigureAwait(false);
@@ -3643,24 +3709,80 @@ namespace Xeno.Server
 
         private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
         {
-            if (!_Settings.Rest.RequireAuthentication && context.AuthScheme == AuthSchemeEnum.None)
+            await RequirePermissionAsync(context, context.TenantId, resourceType, operationType, token).ConfigureAwait(false);
+        }
+
+        private async Task RequirePermissionAsync(RequestContext context, string targetTenantId, string resourceType, OperationTypeEnum operationType, CancellationToken token)
+        {
+            AuthorizationDecision decision = _Authorization.Authorize(RequirePlatform(), new AuthorizationRequest
             {
-                return;
+                Context = context,
+                TargetTenantId = targetTenantId,
+                ResourceType = resourceType,
+                OperationType = operationType
+            });
+
+            if (!decision.Allowed)
+            {
+                string reasonCode = String.Equals(resourceType, "Inference", StringComparison.OrdinalIgnoreCase) && decision.StatusCode == 403
+                    ? "OpenAiPermissionDenied"
+                    : decision.ReasonCode;
+                string message = String.Equals(reasonCode, "OpenAiPermissionDenied", StringComparison.Ordinal)
+                    ? "OpenAI-compatible API permission denied."
+                    : decision.Message;
+                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, false, reasonCode, decision.StatusCode, targetTenantId, null);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new AuthorizationDeniedException(decision.StatusCode, reasonCode, message);
             }
 
-            if (!context.IsAuthenticated)
+            if (String.Equals(decision.MatchedSource, "SystemAdmin", StringComparison.Ordinal) || String.Equals(decision.MatchedSource, "TenantAdmin", StringComparison.Ordinal))
             {
-                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, false, "Unauthenticated", 401);
+                Interlocked.Increment(ref _PrivilegedBypassCount);
+                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, true, decision.MatchedSource ?? "PrivilegedBypass", 200, targetTenantId, null);
                 await SavePlatformAsync(token).ConfigureAwait(false);
-                throw new UnauthorizedAccessException("Authentication is required.");
+            }
+        }
+
+        private async Task<bool> RejectRateLimitedAuthAttemptAsync(HttpContextBase context)
+        {
+            int limit = _Settings.Auth.MaxLoginRequestsPerMinute;
+            if (limit <= 0) return false;
+
+            string sourceIp = String.IsNullOrWhiteSpace(context.Request.Source.IpAddress)
+                ? "unknown"
+                : context.Request.Source.IpAddress;
+            DateTime now = DateTime.UtcNow;
+            DateTime cutoff = now.AddMinutes(-1);
+            bool limited = false;
+            lock (_AuthRateLimitLock)
+            {
+                if (!_AuthRateLimitAttempts.TryGetValue(sourceIp, out List<DateTime>? attempts))
+                {
+                    attempts = new List<DateTime>();
+                    _AuthRateLimitAttempts[sourceIp] = attempts;
+                }
+
+                attempts.RemoveAll(item => item < cutoff);
+                if (attempts.Count >= limit)
+                {
+                    limited = true;
+                }
+                else
+                {
+                    attempts.Add(now);
+                }
+
+                foreach (string staleKey in _AuthRateLimitAttempts.Where(item => item.Value.Count == 0 || item.Value.All(timestamp => timestamp < cutoff)).Select(item => item.Key).ToList())
+                {
+                    _AuthRateLimitAttempts.Remove(staleKey);
+                }
             }
 
-            if (!_Authentication.IsAllowed(RequirePlatform(), context, resourceType, operationType))
-            {
-                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, false, "PermissionDenied", 403);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                throw new UnauthorizedAccessException("Permission denied.");
-            }
+            if (!limited) return false;
+            Interlocked.Increment(ref _AuthFailureCount);
+            context.Response.Headers.Add("Retry-After", "60");
+            await SendStatusJsonAsync(context, 429, new { error = "RateLimited", message = "Too many authentication attempts. Try again later." }).ConfigureAwait(false);
+            return true;
         }
 
         private Tenant CreateTenant(HttpContextBase context)
@@ -3689,7 +3811,7 @@ namespace Xeno.Server
             XenoPlatform platform = RequirePlatform();
             UserSaveRequest body = ReadJsonBody<UserSaveRequest>(context);
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
+            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
             if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
 
             string username = FirstNonEmpty(body.Username, body.Email);
@@ -3708,19 +3830,29 @@ namespace Xeno.Server
                 IsTenantAdmin = false,
                 Active = true
             };
-            if (body.IsAdmin.HasValue) user.IsAdmin = body.IsAdmin.Value;
-            if (body.IsTenantAdmin.HasValue) user.IsTenantAdmin = body.IsTenantAdmin.Value;
+            if (body.IsAdmin.HasValue && body.IsAdmin.Value)
+            {
+                EnsureCanChangeSystemAdminFlag(requestContext);
+                user.IsAdmin = body.IsAdmin.Value;
+            }
+
+            if (body.IsTenantAdmin.HasValue && body.IsTenantAdmin.Value)
+            {
+                EnsureCanChangeTenantAdminFlag(requestContext, tenantId);
+                user.IsTenantAdmin = body.IsTenantAdmin.Value;
+            }
+
             if (body.Active.HasValue) user.Active = body.Active.Value;
             _Authentication.SetUserPassword(user, password);
             return user;
         }
 
-        private Credential CreateCredential(RequestContext requestContext, HttpContextBase context)
+        private Credential CreateCredential(RequestContext requestContext, HttpContextBase context, out string plainSecretKey)
         {
             XenoPlatform platform = RequirePlatform();
             CredentialSaveRequest body = ReadJsonBody<CredentialSaveRequest>(context);
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
+            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
             string userId = FirstNonEmpty(body.UserId, requestContext.UserId);
             if (String.IsNullOrWhiteSpace(userId))
             {
@@ -3734,12 +3866,13 @@ namespace Xeno.Server
             string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
             if (platform.Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
             string secretKey = FirstNonEmpty(body.SecretKey, _Authentication.GenerateSecret());
+            plainSecretKey = secretKey;
             Credential credential = new Credential
             {
                 TenantId = tenantId,
                 UserId = userId,
                 AccessKey = accessKey,
-                SecretKey = secretKey,
+                SecretKey = _Authentication.HashCredentialSecret(secretKey),
                 Active = true
             };
             if (body.Active.HasValue) credential.Active = body.Active.Value;
@@ -3759,7 +3892,7 @@ namespace Xeno.Server
                 TenantId = requestContext.TenantId,
                 Name = name.Trim(),
                 BuiltIn = false,
-                PermissionIds = GetStringSet(body.PermissionIds).Where(permissionId => platform.Permissions.Any(permission => permission.Id == permissionId && permission.TenantId == requestContext.TenantId)).ToList(),
+                PermissionIds = GetGrantablePermissionIds(requestContext, GetStringSet(body.PermissionIds)).ToList(),
                 CreatedUtc = DateTime.UtcNow,
                 LastUpdateUtc = DateTime.UtcNow,
                 Active = true
@@ -3777,6 +3910,7 @@ namespace Xeno.Server
             OperationTypeEnum operationType = OperationTypeEnum.Read;
             string? operationTypeText = body.OperationType;
             if (!String.IsNullOrWhiteSpace(operationTypeText) && !Enum.TryParse(operationTypeText, true, out operationType)) throw new ArgumentException("Operation type is invalid.");
+            EnsureCanGrantPermission(requestContext, requestContext.TenantId, resourceType, operationType);
 
             Permission permission = new Permission
             {
@@ -3793,12 +3927,59 @@ namespace Xeno.Server
             return permission;
         }
 
+        private IEnumerable<string> GetGrantablePermissionIds(RequestContext requestContext, IEnumerable<string> permissionIds)
+        {
+            XenoPlatform platform = RequirePlatform();
+            foreach (string permissionId in permissionIds)
+            {
+                Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId && item.Active);
+                if (permission == null) continue;
+                EnsureCanGrantPermission(requestContext, permission.TenantId, permission.ResourceType, permission.OperationType);
+                yield return permission.Id;
+            }
+        }
+
+        private List<Permission> ListGrantablePermissions(RequestContext requestContext)
+        {
+            XenoPlatform platform = RequirePlatform();
+            List<Permission> permissions = platform.Permissions
+                .Where(item => item.TenantId == requestContext.TenantId && item.Active)
+                .ToList();
+            if (_Authorization.IsSystemAdmin(platform, requestContext)) return permissions;
+            if (_Authorization.IsTenantAdmin(platform, requestContext, requestContext.TenantId)) return permissions;
+            return permissions
+                .Where(permission => _Authorization.Authorize(platform, new AuthorizationRequest
+                {
+                    Context = requestContext,
+                    TargetTenantId = permission.TenantId,
+                    ResourceType = permission.ResourceType,
+                    OperationType = permission.OperationType
+                }).Allowed)
+                .ToList();
+        }
+
+        private void EnsureCanGrantPermission(RequestContext requestContext, string tenantId, string resourceType, OperationTypeEnum operationType)
+        {
+            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
+            if (_Authorization.IsTenantAdmin(RequirePlatform(), requestContext, tenantId)) return;
+            AuthorizationDecision decision = _Authorization.Authorize(RequirePlatform(), new AuthorizationRequest
+            {
+                Context = requestContext,
+                TargetTenantId = tenantId,
+                ResourceType = resourceType,
+                OperationType = operationType
+            });
+            if (decision.Allowed) return;
+            _Authentication.AppendAudit(RequirePlatform(), requestContext, resourceType, operationType, false, "GrantExceedsAuthority", 403, tenantId, null);
+            throw new AuthorizationDeniedException(403, "GrantExceedsAuthority", "Permission grant exceeds the grantor's authority.");
+        }
+
         private RoutingPolicy CreateRoutingPolicy(RequestContext requestContext, HttpContextBase context)
         {
             XenoPlatform platform = RequirePlatform();
             RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new UnauthorizedAccessException("Tenant is not visible to the caller.");
+            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
             if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
 
             string name = FirstNonEmpty(body.Name);
@@ -3968,14 +4149,39 @@ namespace Xeno.Server
             string? email = body.Email;
             if (email != null) user.Email = email.Trim();
 
-            if (body.IsAdmin.HasValue) user.IsAdmin = body.IsAdmin.Value;
-            if (body.IsTenantAdmin.HasValue) user.IsTenantAdmin = body.IsTenantAdmin.Value;
+            if (body.IsAdmin.HasValue && body.IsAdmin.Value != user.IsAdmin)
+            {
+                EnsureCanChangeSystemAdminFlag(requestContext);
+                user.IsAdmin = body.IsAdmin.Value;
+            }
+
+            if (body.IsTenantAdmin.HasValue && body.IsTenantAdmin.Value != user.IsTenantAdmin)
+            {
+                EnsureCanChangeTenantAdminFlag(requestContext, user.TenantId);
+                user.IsTenantAdmin = body.IsTenantAdmin.Value;
+            }
+
             if (body.Active.HasValue) user.Active = body.Active.Value;
 
             string? password = body.Password;
             if (!String.IsNullOrWhiteSpace(password)) _Authentication.SetUserPassword(user, password);
 
             return user;
+        }
+
+        private void EnsureCanChangeSystemAdminFlag(RequestContext requestContext)
+        {
+            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
+            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, requestContext.TenantId, null);
+            throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can change the system administrator flag.");
+        }
+
+        private void EnsureCanChangeTenantAdminFlag(RequestContext requestContext, string tenantId)
+        {
+            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
+            if (_Authorization.IsTenantAdmin(RequirePlatform(), requestContext, tenantId)) return;
+            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.TenantAdmin", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, null);
+            throw new AuthorizationDeniedException(403, "TenantAdminRequired", "Only a system administrator or same-tenant tenant administrator can change the tenant administrator flag.");
         }
 
         private Credential UpdateCredential(RequestContext requestContext, string credentialId, HttpContextBase context)
@@ -3995,7 +4201,7 @@ namespace Xeno.Server
             }
 
             string? secretKey = body.SecretKey;
-            if (!String.IsNullOrWhiteSpace(secretKey)) credential.SecretKey = secretKey;
+            if (!String.IsNullOrWhiteSpace(secretKey)) credential.SecretKey = _Authentication.HashCredentialSecret(secretKey);
             if (body.Active.HasValue) credential.Active = body.Active.Value;
             return credential;
         }
@@ -4016,6 +4222,7 @@ namespace Xeno.Server
         {
             Role? role = RequirePlatform().Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
             if (role == null) throw new KeyNotFoundException("Role not found.");
+            if (role.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInRoleProtected", "Built-in roles cannot be modified through the management API.");
 
             RoleSaveRequest body = ReadJsonBody<RoleSaveRequest>(context);
             string? name = body.Name;
@@ -4025,7 +4232,7 @@ namespace Xeno.Server
                 role.Name = name.Trim();
             }
 
-            if (body.PermissionIds != null) role.PermissionIds = GetStringSet(body.PermissionIds).ToList();
+            if (body.PermissionIds != null) role.PermissionIds = GetGrantablePermissionIds(requestContext, GetStringSet(body.PermissionIds)).ToList();
             if (body.Active.HasValue) role.Active = body.Active.Value;
             role.LastUpdateUtc = DateTime.UtcNow;
             return role;
@@ -4034,6 +4241,8 @@ namespace Xeno.Server
         private int DeleteRole(RequestContext requestContext, string roleId)
         {
             XenoPlatform platform = RequirePlatform();
+            Role? role = platform.Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
+            if (role != null && role.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInRoleProtected", "Built-in roles cannot be deleted through the management API.");
             int removed = platform.Roles.RemoveAll(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
             removed += platform.RoleAssignments.RemoveAll(item => item.RoleId == roleId && item.TenantId == requestContext.TenantId);
             return removed;
@@ -4043,6 +4252,7 @@ namespace Xeno.Server
         {
             Permission? permission = RequirePlatform().Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
             if (permission == null) throw new KeyNotFoundException("Permission not found.");
+            if (permission.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInPermissionProtected", "Built-in permissions cannot be modified through the management API.");
 
             PermissionSaveRequest body = ReadJsonBody<PermissionSaveRequest>(context);
             string? resourceType = body.ResourceType;
@@ -4056,9 +4266,11 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(operationType))
             {
                 if (!Enum.TryParse(operationType, true, out OperationTypeEnum parsedOperation)) throw new ArgumentException("Operation type is invalid.");
+                EnsureCanGrantPermission(requestContext, requestContext.TenantId, permission.ResourceType, parsedOperation);
                 permission.OperationType = parsedOperation;
             }
 
+            EnsureCanGrantPermission(requestContext, requestContext.TenantId, permission.ResourceType, permission.OperationType);
             if (body.Permit.HasValue) permission.Permit = body.Permit.Value;
             if (body.Active.HasValue) permission.Active = body.Active.Value;
             permission.LastUpdateUtc = DateTime.UtcNow;
@@ -4068,6 +4280,8 @@ namespace Xeno.Server
         private int DeletePermission(RequestContext requestContext, string permissionId)
         {
             XenoPlatform platform = RequirePlatform();
+            Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
+            if (permission != null && permission.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInPermissionProtected", "Built-in permissions cannot be deleted through the management API.");
             int removed = platform.Permissions.RemoveAll(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
             foreach (Role role in platform.Roles.Where(item => item.TenantId == requestContext.TenantId))
             {
@@ -4075,6 +4289,75 @@ namespace Xeno.Server
             }
 
             return removed;
+        }
+
+        private RoleAssignment CreateRoleAssignment(RequestContext requestContext, HttpContextBase context)
+        {
+            XenoPlatform platform = RequirePlatform();
+            RoleAssignmentSaveRequest body = ReadJsonBody<RoleAssignmentSaveRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
+            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+
+            string roleId = FirstNonEmpty(body.RoleId);
+            if (String.IsNullOrWhiteSpace(roleId)) throw new ArgumentException("Role ID is required.");
+            Role? role = platform.Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == tenantId && item.Active);
+            if (role == null) throw new KeyNotFoundException("Role not found.");
+            foreach (string permissionId in role.PermissionIds)
+            {
+                Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == tenantId && item.Active);
+                if (permission == null) continue;
+                EnsureCanGrantPermission(requestContext, tenantId, permission.ResourceType, permission.OperationType);
+            }
+
+            string principalTypeText = FirstNonEmpty(body.PrincipalType, PrincipalTypeEnum.User.ToString());
+            if (!Enum.TryParse(principalTypeText, true, out PrincipalTypeEnum principalType)) throw new ArgumentException("Principal type is invalid.");
+            if (principalType != PrincipalTypeEnum.User && principalType != PrincipalTypeEnum.Credential) throw new ArgumentException("Principal type must be User or Credential.");
+
+            string principalId = FirstNonEmpty(body.PrincipalId);
+            if (String.IsNullOrWhiteSpace(principalId)) throw new ArgumentException("Principal ID is required.");
+            if (principalType == PrincipalTypeEnum.User && !platform.Users.Any(item => item.Id == principalId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("User principal does not exist in the tenant.");
+            if (principalType == PrincipalTypeEnum.Credential && !platform.Credentials.Any(item => item.Id == principalId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("Credential principal does not exist in the tenant.");
+
+            RoleAssignment? existing = platform.RoleAssignments.FirstOrDefault(item =>
+                item.TenantId == tenantId &&
+                item.RoleId == roleId &&
+                item.PrincipalType == principalType &&
+                item.PrincipalId == principalId);
+            if (existing != null)
+            {
+                throw new ArgumentException("Role assignment already exists.");
+            }
+
+            RoleAssignment assignment = new RoleAssignment
+            {
+                TenantId = tenantId,
+                RoleId = roleId,
+                PrincipalType = principalType,
+                PrincipalId = principalId,
+                Active = body.Active ?? true,
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+            return assignment;
+        }
+
+        private int DeleteRoleAssignment(RequestContext requestContext, string assignmentId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            RoleAssignment? assignment = platform.RoleAssignments.FirstOrDefault(item => item.Id == assignmentId && IsTenantVisible(requestContext, item.TenantId));
+            if (assignment == null) return 0;
+            Role? role = platform.Roles.FirstOrDefault(item => item.Id == assignment.RoleId && item.TenantId == assignment.TenantId);
+            if (role != null)
+            {
+                foreach (string permissionId in role.PermissionIds)
+                {
+                    Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == assignment.TenantId && item.Active);
+                    if (permission == null) continue;
+                    EnsureCanGrantPermission(requestContext, assignment.TenantId, permission.ResourceType, permission.OperationType);
+                }
+            }
+
+            return platform.RoleAssignments.RemoveAll(item => item.Id == assignmentId && item.TenantId == assignment.TenantId);
         }
 
         private int DeleteClient(RequestContext requestContext, string clientId)
@@ -4159,6 +4442,7 @@ namespace Xeno.Server
                 requestContext.CredentialId = session.CredentialId;
                 requestContext.PrincipalType = session.PrincipalType;
                 requestContext.AuthScheme = AuthSchemeEnum.Bearer;
+                Interlocked.Increment(ref _AuthSuccessCount);
                 return requestContext;
             }
 
@@ -4171,18 +4455,13 @@ namespace Xeno.Server
                 requestContext.UserId = credential.UserId;
                 requestContext.PrincipalType = PrincipalTypeEnum.Credential;
                 requestContext.AuthScheme = AuthSchemeEnum.Credential;
+                Interlocked.Increment(ref _AuthSuccessCount);
                 return requestContext;
             }
 
-            if (_Settings.Rest.RequireAuthentication)
-            {
-                throw new UnauthorizedAccessException("Authentication is required.");
-            }
-
-            User? devUser = RequirePlatform().Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active && (item.IsAdmin || item.IsTenantAdmin));
-            requestContext.IsAuthenticated = devUser != null;
-            requestContext.UserId = devUser?.Id;
-            requestContext.PrincipalType = devUser == null ? PrincipalTypeEnum.None : PrincipalTypeEnum.User;
+            requestContext.IsAuthenticated = false;
+            requestContext.UserId = null;
+            requestContext.PrincipalType = PrincipalTypeEnum.None;
             requestContext.AuthScheme = AuthSchemeEnum.None;
             return requestContext;
         }
@@ -4261,10 +4540,9 @@ namespace Xeno.Server
             return String.Equals(value, filter, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsTenantVisible(RequestContext context, string tenantId)
+        private bool IsTenantVisible(RequestContext context, string tenantId)
         {
-            return String.Equals(context.TenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase)
-                || String.Equals(context.TenantId, tenantId, StringComparison.OrdinalIgnoreCase);
+            return _Authorization.CanAccessTenant(RequirePlatform(), context, tenantId);
         }
 
         private static bool FixedTimeEquals(string left, string right)
@@ -4323,7 +4601,19 @@ namespace Xeno.Server
                 "xeno_request_history_total " + requests + "\n" +
                 "# HELP xeno_request_failures_total Captured failed request entries\n" +
                 "# TYPE xeno_request_failures_total counter\n" +
-                "xeno_request_failures_total " + failures + "\n";
+                "xeno_request_failures_total " + failures + "\n" +
+                "# HELP xeno_auth_success_total Successful authenticated request contexts\n" +
+                "# TYPE xeno_auth_success_total counter\n" +
+                "xeno_auth_success_total " + Interlocked.Read(ref _AuthSuccessCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                "# HELP xeno_auth_failure_total Authentication failures\n" +
+                "# TYPE xeno_auth_failure_total counter\n" +
+                "xeno_auth_failure_total " + Interlocked.Read(ref _AuthFailureCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                "# HELP xeno_authorization_denial_total Authorization denials\n" +
+                "# TYPE xeno_authorization_denial_total counter\n" +
+                "xeno_authorization_denial_total " + Interlocked.Read(ref _AuthorizationDenialCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                "# HELP xeno_privileged_bypass_total System-admin and tenant-admin bypass authorizations\n" +
+                "# TYPE xeno_privileged_bypass_total counter\n" +
+                "xeno_privileged_bypass_total " + Interlocked.Read(ref _PrivilegedBypassCount).ToString(CultureInfo.InvariantCulture) + "\n";
             await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
         }
 
@@ -4513,7 +4803,10 @@ namespace Xeno.Server
                     ["/v1.0/api/roles"] = Path(Operation("get", "listRoles", "Authorization", "List roles", "Lists tenant roles.", "RoleArray", true), Operation("post", "createRole", "Authorization", "Create role", "Creates a tenant role.", "Role", true)),
                     ["/v1.0/api/roles/{id}"] = Path(Operation("put", "updateRole", "Authorization", "Update role", "Updates role name, permission assignments, and active state.", "Role", true), Operation("delete", "deleteRole", "Authorization", "Delete role", "Deletes a tenant role and related assignments.", "GenericObject", true)),
                     ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true), Operation("post", "createPermission", "Authorization", "Create permission", "Creates a tenant permission.", "Permission", true)),
+                    ["/v1.0/api/permissions/grantable"] = Path(Operation("get", "listGrantablePermissions", "Authorization", "List grantable permissions", "Lists permissions the caller may assign to roles or principals.", "PermissionArray", true)),
                     ["/v1.0/api/permissions/{id}"] = Path(Operation("put", "updatePermission", "Authorization", "Update permission", "Updates permission resource, operation, permit decision, and active state.", "Permission", true), Operation("delete", "deletePermission", "Authorization", "Delete permission", "Deletes a tenant permission and removes it from roles.", "GenericObject", true)),
+                    ["/v1.0/api/role-assignments"] = Path(Operation("get", "listRoleAssignments", "Authorization", "List role assignments", "Lists tenant role assignments.", "RoleAssignmentArray", true), Operation("post", "createRoleAssignment", "Authorization", "Create role assignment", "Assigns a role to a user or credential within grantor authority.", "RoleAssignment", true)),
+                    ["/v1.0/api/role-assignments/{id}"] = Path(Operation("delete", "deleteRoleAssignment", "Authorization", "Delete role assignment", "Deletes one tenant role assignment.", "GenericObject", true)),
                     ["/v1.0/api/effective-permissions"] = Path(Operation("get", "listEffectivePermissions", "Authorization", "Effective permissions", "Lists effective permissions.", "EffectivePermissionArray", true)),
                     ["/v1.0/api/audit"] = Path(Operation("get", "listAudit", "Audit", "List audit records", "Lists tenant audit records.", "AuditRecordArray", true)),
                     ["/v1.0/api/audit/{id}"] = Path(Operation("delete", "deleteAuditRecord", "Audit", "Delete audit record", "Deletes one tenant audit record.", "GenericObject", true)),
@@ -4549,10 +4842,10 @@ namespace Xeno.Server
                     ["/v1.0/api/settings"] = Path(Operation("get", "getSettings", "Settings", "Get server settings", "Returns running server settings and config file path.", "SettingsResponse", true), Operation("post", "updateSettings", "Settings", "Update server settings", "Persists server settings to the JSON config file.", "SettingsResponse", true)),
                     ["/v1.0/api/backup"] = Path(Operation("get", "backup", "Backup", "Backup", "Returns platform state backup.", "GenericObject", true)),
                     ["/v1.0/api/restore"] = Path(Operation("post", "restore", "Backup", "Restore", "Restores platform state backup.", "GenericObject", true)),
-                    ["/v1/models"] = Path(Operation("get", "listOpenAiModels", "OpenAI", "List models", "OpenAI-compatible model list.", "OpenAiModelList", true)),
-                    ["/v1/chat/completions"] = Path(Operation("post", "createChatCompletion", "OpenAI", "Create chat completion", "OpenAI-compatible chat completion.", "OpenAiChatCompletion", true)),
-                    ["/v1/completions"] = Path(Operation("post", "createCompletion", "OpenAI", "Create completion", "OpenAI-compatible completion.", "OpenAiChatCompletion", true)),
-                    ["/v1/embeddings"] = Path(Operation("post", "createEmbedding", "OpenAI", "Create embeddings", "OpenAI-compatible embeddings.", "OpenAiEmbeddingList", true))
+                    ["/v1/models"] = Path(Operation("get", "listOpenAiModels", "OpenAI", "List models", "OpenAI-compatible model list. Requires Inference.Read in the selected tenant.", "OpenAiModelList", true)),
+                    ["/v1/chat/completions"] = Path(Operation("post", "createChatCompletion", "OpenAI", "Create chat completion", "OpenAI-compatible chat completion. Requires Inference.Execute in the selected tenant.", "OpenAiChatCompletion", true)),
+                    ["/v1/completions"] = Path(Operation("post", "createCompletion", "OpenAI", "Create completion", "OpenAI-compatible completion. Requires Inference.Execute in the selected tenant.", "OpenAiChatCompletion", true)),
+                    ["/v1/embeddings"] = Path(Operation("post", "createEmbedding", "OpenAI", "Create embeddings", "OpenAI-compatible embeddings. Requires Inference.Execute in the selected tenant.", "OpenAiEmbeddingList", true))
                 },
                 components = new
                 {
@@ -4575,6 +4868,7 @@ namespace Xeno.Server
                         ["CredentialArray"] = ArraySchema("Credential"),
                         ["RoleArray"] = ArraySchema("Role"),
                         ["PermissionArray"] = ArraySchema("Permission"),
+                        ["RoleAssignmentArray"] = ArraySchema("RoleAssignment"),
                         ["EffectivePermissionArray"] = ArraySchema("EffectivePermission"),
                         ["AuditRecordArray"] = ArraySchema("AuditRecord"),
                         ["ClientArray"] = ArraySchema("XenoClientRecord"),
@@ -4600,13 +4894,15 @@ namespace Xeno.Server
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["OpenAiChatCompletion"] = ObjectSchema(Property("id", StringSchema()), Property("object", StringSchema()), Property("model", StringSchema())),
                         ["OpenAiEmbeddingList"] = ObjectSchema(Property("object", StringSchema()), Property("model", StringSchema())),
+                        ["ErrorResponse"] = ObjectSchema(Property("error", StringSchema()), Property("message", StringSchema())),
                         ["SettingsResponse"] = ObjectSchema(Property("settings", ObjectSchema()), Property("settingsFile", StringSchema()), Property("restartRequired", BooleanSchema())),
                         ["GenericObject"] = ObjectSchema(),
                         ["Tenant"] = ObjectSchema(Property("id", StringSchema()), Property("name", StringSchema())),
                         ["User"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("email", StringSchema())),
                         ["Credential"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("accessKey", StringSchema())),
                         ["Role"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema())),
-                        ["Permission"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("resourceType", StringSchema())),
+                        ["Permission"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("resourceType", StringSchema()), Property("operationType", StringSchema()), Property("permit", BooleanSchema()), Property("builtIn", BooleanSchema())),
+                        ["RoleAssignment"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("roleId", StringSchema()), Property("principalType", StringSchema()), Property("principalId", StringSchema()), Property("active", BooleanSchema())),
                         ["EffectivePermission"] = ObjectSchema(Property("resourceType", StringSchema()), Property("sourceRole", StringSchema())),
                         ["AuditRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("reasonCode", StringSchema())),
                         ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
@@ -4938,7 +5234,13 @@ namespace Xeno.Server
             object? requestBody = ManualRequestBodyForOperation(operationId);
             if (requestBody != null) operation["requestBody"] = requestBody;
 
-            if (auth) operation["security"] = AuthSecurityRequirements();
+            if (auth)
+            {
+                operation["security"] = AuthSecurityRequirements();
+                Dictionary<string, object> responses = (Dictionary<string, object>)operation["responses"];
+                responses["401"] = ErrorResponse("Authentication required or invalid.");
+                responses["403"] = ErrorResponse("Authenticated caller lacks permission for the requested tenant or operation.");
+            }
             return new KeyValuePair<string, object>(method, operation);
         }
 
@@ -4994,6 +5296,7 @@ namespace Xeno.Server
                 or "deleteRole"
                 or "updatePermission"
                 or "deletePermission"
+                or "deleteRoleAssignment"
                 or "deleteAuditRecord"
                 or "deleteClient"
                 or "getClientTelemetryDetail"
@@ -5110,10 +5413,23 @@ namespace Xeno.Server
                     String.Equals(operationId, "createPermission", StringComparison.Ordinal) ? "Permission create request." : "Permission update request.",
                     ObjectSchema(
                         Property("resourceType", StringSchema()),
-                        Property("operationType", StringEnumSchema("Read", "Write", "Delete", "Admin")),
+                        Property("operationType", StringEnumSchema("Read", "Write", "Delete", "Admin", "Execute")),
                         Property("permit", BooleanSchema()),
                         Property("active", BooleanSchema())),
                     new Dictionary<string, object> { ["resourceType"] = "Clients", ["operationType"] = "Read", ["permit"] = true, ["active"] = true });
+            }
+
+            if (String.Equals(operationId, "createRoleAssignment", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Role assignment create request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("roleId", StringSchema()),
+                        Property("principalType", StringEnumSchema("User", "Credential")),
+                        Property("principalId", StringSchema()),
+                        Property("active", BooleanSchema())),
+                    new Dictionary<string, object> { ["roleId"] = "role_example", ["principalType"] = "User", ["principalId"] = "usr_example", ["active"] = true });
             }
 
             if (String.Equals(operationId, "deleteClientModel", StringComparison.Ordinal))
@@ -5338,6 +5654,21 @@ namespace Xeno.Server
                 {
                     ["accessKeyAuth"] = Array.Empty<string>(),
                     ["secretKeyAuth"] = Array.Empty<string>()
+                }
+            };
+        }
+
+        private static Dictionary<string, object> ErrorResponse(string description)
+        {
+            return new Dictionary<string, object>
+            {
+                ["description"] = description,
+                ["content"] = new Dictionary<string, object>
+                {
+                    ["application/json"] = new Dictionary<string, object>
+                    {
+                        ["schema"] = SchemaRef("ErrorResponse")
+                    }
                 }
             };
         }

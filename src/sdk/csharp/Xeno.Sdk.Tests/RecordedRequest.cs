@@ -16,6 +16,10 @@ namespace Xeno.Sdk.Tests
 
         public string? AuthorizationParameter { get; set; }
 
+        public string? AccessKey { get; set; }
+
+        public string? SecretKey { get; set; }
+
         public string? TenantId { get; set; }
 
         public CancellationToken CancellationToken { get; set; }

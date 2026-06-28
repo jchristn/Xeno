@@ -53,9 +53,13 @@ namespace Xeno.Sdk.Tests
                 await client.CreateRoleAsync(new { name = "Operator" });
                 await client.UpdateRoleAsync("role_1", new { permissionIds = new[] { "perm_1" } });
                 await client.DeleteRoleAsync("role_1");
+                await client.ListGrantablePermissionsAsync();
                 await client.CreatePermissionAsync(new { resourceType = "Clients", operationType = "Read" });
                 await client.UpdatePermissionAsync("perm_1", new { permit = false });
                 await client.DeletePermissionAsync("perm_1");
+                await client.ListRoleAssignmentsAsync();
+                await client.CreateRoleAssignmentAsync(new { roleId = "role_1", principalType = "User", principalId = "usr_1" });
+                await client.DeleteRoleAssignmentAsync("rassn_1");
                 await client.CreateRoutingPolicyAsync(new { name = "Policy", modelName = "*", clientName = "*" });
                 await client.UpdateRoutingPolicyAsync("rpol_1", new { loadBalancingMode = "Random" });
                 await client.DeleteRoutingPolicyAsync("rpol_1");
@@ -74,9 +78,13 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/roles", "\"name\":\"Operator\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/roles/role_1", "\"permissionIds\":[\"perm_1\"]"),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/roles/role_1"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/permissions/grantable"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/permissions", "\"resourceType\":\"Clients\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/permissions/perm_1", "\"permit\":false"),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/permissions/perm_1"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/role-assignments"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/role-assignments", "\"principalId\":\"usr_1\""),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/role-assignments/rassn_1"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/routing-policies", "\"modelName\":\"*\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/routing-policies/rpol_1", "\"loadBalancingMode\":\"Random\""),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/routing-policies/rpol_1"));
@@ -103,6 +111,59 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/embeddings", "\"input\":\"hello\""),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"));
+            }
+        }
+
+        [Fact]
+        public async Task CredentialOptions_SendTenantAndCredentialHeaders()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient(new XenoClientOptions
+            {
+                BaseUrl = "https://xeno.local",
+                AccessKey = "xeno_access",
+                SecretKey = "secret-123",
+                TenantId = "ten_123",
+                HttpClient = httpClient
+            }))
+            {
+                await client.ListOpenAiModelsAsync();
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                Assert.Equal("xeno_access", request.AccessKey);
+                Assert.Equal("secret-123", request.SecretKey);
+                Assert.Equal("ten_123", request.TenantId);
+            }
+        }
+
+        [Fact]
+        public async Task OpenAiErrors_SurfaceAuthenticationAndAuthorizationStatus()
+        {
+            RecordingHandler anonymousHandler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                Content = new StringContent("{\"error\":\"Unauthenticated\",\"message\":\"Authentication is required.\"}", Encoding.UTF8, "application/json")
+            });
+            using (HttpClient anonymousHttpClient = new HttpClient(anonymousHandler))
+            using (XenoClient anonymousClient = new XenoClient("https://xeno.local", httpClient: anonymousHttpClient))
+            {
+                XenoApiException unauthenticated = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await anonymousClient.ListOpenAiModelsAsync());
+                Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+                Assert.Equal("/v1/models", unauthenticated.Endpoint);
+            }
+
+            RecordingHandler deniedHandler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent("{\"error\":\"PermissionDenied\",\"message\":\"Permission denied.\"}", Encoding.UTF8, "application/json")
+            });
+            using (HttpClient deniedHttpClient = new HttpClient(deniedHandler))
+            using (XenoClient deniedClient = new XenoClient("https://xeno.local", "token-123", "ten_123", deniedHttpClient))
+            {
+                XenoApiException denied = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await deniedClient.CreateChatCompletionAsync(new { model = "llama3.2:latest" }));
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+                Assert.Equal("/v1/chat/completions", denied.Endpoint);
             }
         }
 

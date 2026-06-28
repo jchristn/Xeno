@@ -35,6 +35,11 @@ namespace Xeno.Core.Models
         public bool Permit { get; set; } = true;
 
         /// <summary>
+        /// Whether this permission is built in and protected from mutation.
+        /// </summary>
+        public bool BuiltIn { get; set; } = false;
+
+        /// <summary>
         /// Created timestamp.
         /// </summary>
         public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;

@@ -120,7 +120,8 @@ namespace Xeno.Core.Services
                 TenantId = tenant.Id,
                 ResourceType = "*",
                 OperationType = Xeno.Core.Enums.OperationTypeEnum.Read,
-                Permit = true
+                Permit = true,
+                BuiltIn = true
             };
             Permissions.Add(readPermission);
 
@@ -129,7 +130,8 @@ namespace Xeno.Core.Services
                 TenantId = tenant.Id,
                 ResourceType = "*",
                 OperationType = Xeno.Core.Enums.OperationTypeEnum.Write,
-                Permit = true
+                Permit = true,
+                BuiltIn = true
             };
             Permissions.Add(writePermission);
 
@@ -138,16 +140,48 @@ namespace Xeno.Core.Services
                 TenantId = tenant.Id,
                 ResourceType = "*",
                 OperationType = Xeno.Core.Enums.OperationTypeEnum.Delete,
-                Permit = true
+                Permit = true,
+                BuiltIn = true
             };
             Permissions.Add(deletePermission);
+
+            Permission executePermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "*",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Execute,
+                Permit = true,
+                BuiltIn = true
+            };
+            Permissions.Add(executePermission);
+
+            Permission inferenceReadPermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "Inference",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Read,
+                Permit = true,
+                BuiltIn = true
+            };
+            Permissions.Add(inferenceReadPermission);
+
+            Permission inferenceExecutePermission = new Permission
+            {
+                TenantId = tenant.Id,
+                ResourceType = "Inference",
+                OperationType = Xeno.Core.Enums.OperationTypeEnum.Execute,
+                Permit = true,
+                BuiltIn = true
+            };
+            Permissions.Add(inferenceExecutePermission);
 
             Permission adminPermission = new Permission
             {
                 TenantId = tenant.Id,
                 ResourceType = "Admin",
                 OperationType = Xeno.Core.Enums.OperationTypeEnum.Admin,
-                Permit = true
+                Permit = true,
+                BuiltIn = true
             };
             Permissions.Add(adminPermission);
 
@@ -156,7 +190,7 @@ namespace Xeno.Core.Services
                 TenantId = tenant.Id,
                 Name = "TenantAdmin",
                 BuiltIn = true,
-                PermissionIds = new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, adminPermission.Id }
+                PermissionIds = new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, adminPermission.Id }
             };
             Roles.Add(tenantAdmin);
 
@@ -440,8 +474,11 @@ namespace Xeno.Core.Services
             Permission readPermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Read);
             Permission writePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Write);
             Permission deletePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Delete);
+            Permission executePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Execute);
+            Permission inferenceReadPermission = EnsurePermission(tenantId, "Inference", OperationTypeEnum.Read);
+            Permission inferenceExecutePermission = EnsurePermission(tenantId, "Inference", OperationTypeEnum.Execute);
             Permission adminPermission = EnsurePermission(tenantId, "Admin", OperationTypeEnum.Admin);
-            Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, adminPermission.Id });
+            Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, adminPermission.Id });
             EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
             EnsureRole(tenantId, "TenantMember", new List<string> { readPermission.Id });
 
@@ -472,6 +509,7 @@ namespace Xeno.Core.Services
             {
                 permission.Permit = true;
                 permission.Active = true;
+                permission.BuiltIn = true;
                 return permission;
             }
 
@@ -481,6 +519,7 @@ namespace Xeno.Core.Services
                 ResourceType = resourceType,
                 OperationType = operationType,
                 Permit = true,
+                BuiltIn = true,
                 Active = true
             };
             Permissions.Add(permission);

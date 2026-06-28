@@ -24,6 +24,8 @@ class XenoClient:
         self,
         base_url: str = "http://localhost:9000",
         bearer_token: str | None = None,
+        access_key: str | None = None,
+        secret_key: str | None = None,
         tenant_id: str = "ten_default",
         opener: Any | None = None,
     ) -> None:
@@ -32,6 +34,8 @@ class XenoClient:
 
         self.base_url = base_url.rstrip("/")
         self.bearer_token = bearer_token
+        self.access_key = access_key
+        self.secret_key = secret_key
         self.tenant_id = tenant_id
         self.opener = opener or build_opener()
 
@@ -110,6 +114,9 @@ class XenoClient:
     def list_permissions(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/permissions")
 
+    def list_grantable_permissions(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/v1.0/api/permissions/grantable")
+
     def create_permission(self, permission: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1.0/api/permissions", permission)
 
@@ -121,6 +128,15 @@ class XenoClient:
 
     def list_effective_permissions(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/effective-permissions")
+
+    def list_role_assignments(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/v1.0/api/role-assignments")
+
+    def create_role_assignment(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/role-assignments", assignment)
+
+    def delete_role_assignment(self, assignment_id: str) -> None:
+        return self._request("DELETE", f"/v1.0/api/role-assignments/{assignment_id}")
 
     def list_audit_records(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/audit")
@@ -246,6 +262,10 @@ class XenoClient:
             request.add_header("Content-Type", "application/json")
         if self.bearer_token:
             request.add_header("Authorization", f"Bearer {self.bearer_token}")
+        if self.access_key:
+            request.add_header("x-access-key", self.access_key)
+        if self.secret_key:
+            request.add_header("x-secret-key", self.secret_key)
         if self.tenant_id:
             request.add_header("x-tenant-guid", self.tenant_id)
 

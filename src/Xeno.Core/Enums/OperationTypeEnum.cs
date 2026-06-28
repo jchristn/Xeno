@@ -24,6 +24,11 @@ namespace Xeno.Core.Enums
         /// <summary>
         /// Administrative operation.
         /// </summary>
-        Admin = 3
+        Admin = 3,
+
+        /// <summary>
+        /// Execute operation.
+        /// </summary>
+        Execute = 4
     }
 }

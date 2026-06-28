@@ -2,7 +2,7 @@
 
 Base URL: `http://localhost:9000`
 
-The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-scoped calls accept `x-tenant-guid`; if omitted, the seeded `ten_default` tenant is used. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, access key, and secret key material into Try it out requests.
+The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-scoped calls accept `x-tenant-guid`; if omitted, the seeded `ten_default` tenant is used. Tenant headers do not authenticate a caller. Protected routes require bearer auth, matching `x-token`, or direct `x-access-key` plus `x-secret-key` credentials. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, access key, and secret key material into Try it out requests.
 
 The REST API is the operator and application surface for a federated accelerator fleet. Applications use the OpenAI-compatible routes so they can call one endpoint regardless of which connected machine ultimately serves the request. Operators use the management routes to inspect clients, advertised models, telemetry, request history, routing policy, tenants, credentials, and settings for the controller.
 
@@ -78,6 +78,20 @@ Login accepts `username`, `password`, and optional `tenantId`. It returns a gene
 
 Dashboard login is a multistep flow. The dashboard first resolves the server URL and user email, retrieves matching tenants, prompts for tenant only when more than one tenant is available, and then submits the password.
 
+Tenant membership is one tenant per user record. The same email address may
+exist as separate user rows in multiple tenants; non-system-admin users switch
+tenants by logging out and logging back in to the desired tenant.
+
+Protected REST calls return 401 when authentication is missing or invalid and
+403 when the caller is authenticated but lacks authority. System admins can
+administer all tenants. Tenant admins can administer only their own tenant and
+cannot change `isAdmin`. RBAC users and credentials can use only permissions
+assigned through active roles in their own tenant.
+
+Password login, dashboard login, and token creation are rate limited by source
+IP. The setting is `Auth.MaxLoginRequestsPerMinute` in the server JSON settings
+file. When the limit is exceeded the server returns 429 with `RateLimited`.
+
 ## Administration
 
 `GET /v1.0/api/tenants`
@@ -114,6 +128,8 @@ Dashboard login is a multistep flow. The dashboard first resolves the server URL
 
 `GET /v1.0/api/permissions`
 
+`GET /v1.0/api/permissions/grantable`
+
 `POST /v1.0/api/permissions`
 
 `PUT /v1.0/api/permissions/{id}`
@@ -121,6 +137,12 @@ Dashboard login is a multistep flow. The dashboard first resolves the server URL
 `DELETE /v1.0/api/permissions/{id}`
 
 `GET /v1.0/api/effective-permissions`
+
+`GET /v1.0/api/role-assignments`
+
+`POST /v1.0/api/role-assignments`
+
+`DELETE /v1.0/api/role-assignments/{id}`
 
 `GET /v1.0/api/audit`
 
@@ -162,8 +184,18 @@ Create and update request bodies:
 - User create/update: `username`, `email`, `isAdmin`, `isTenantAdmin`, `active`, and `password`. Password is required on create and optional on update. User responses are redacted and do not expose password material.
 - Credential create/update: `userId`, `accessKey`, `secretKey`, and `active`. Create generates access/secret keys when omitted and returns the secret once. List/update responses redact the secret key.
 - Role create/update: `name`, `permissionIds`, and `active`.
-- Permission create/update: `resourceType`, `operationType` (`Read`, `Write`, `Delete`, `Admin`), `permit`, and `active`.
+- Permission create/update: `resourceType`, `operationType` (`Read`, `Write`, `Delete`, `Admin`, `Execute`), `permit`, and `active`.
+- Role assignment create: `tenantId`, `roleId`, `principalType` (`User` or `Credential`), `principalId`, and `active`.
 - Routing policy create/update: `name`, `modelName`, `clientName`, `requestTimeoutMs`, `loadBalancingMode`, `adaptive`, and `active`. Use `*` for `modelName` or `clientName` to match all values. Each tenant has an undeletable default `*/*` policy using `LeastRecentlyUsed`.
+
+Admin flags are privileged security fields. Only system admins can change
+`isAdmin`. System admins and same-tenant tenant admins can change
+`isTenantAdmin`. Role, permission, and role-assignment writes enforce a grantor
+ceiling: the caller cannot grant a permission tuple they do not already possess,
+except system admins and same-tenant tenant admins inside their authority.
+Seeded built-in roles and permissions are read-only through the management API.
+`GET /v1.0/api/permissions/grantable` returns the permission items the caller
+can assign to roles or principals.
 
 Legacy dashboard aliases under `/api/v1/...` are also registered for administration, clients, token bootstrap, settings, request history, and OpenAI-compatible routes.
 
@@ -178,6 +210,15 @@ Legacy dashboard aliases under `/api/v1/...` are also registered for administrat
 `POST /v1/embeddings`
 
 OpenAI-compatible aliases are also available under `/api/v1/openai/v1/...`.
+
+OpenAI-compatible routes are protected application APIs. `GET /v1/models`
+requires `Inference.Read`. `POST /v1/chat/completions`,
+`POST /v1/completions`, and `POST /v1/embeddings` require
+`Inference.Execute`. Authentication can use `Authorization: Bearer ...`,
+matching `x-token`, or `x-access-key` plus `x-secret-key`; the tenant header
+must match the authenticated session or credential tenant unless the caller is a
+system admin. Anonymous requests receive 401 and cannot dispatch to a connected
+client.
 
 Routed OpenAI-compatible responses include Xeno trace headers for debugging model placement and node selection:
 

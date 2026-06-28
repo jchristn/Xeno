@@ -15,7 +15,7 @@ dotnet add <your-project>.csproj reference .\src\sdk\csharp\Xeno.Sdk\Xeno.Sdk.cs
 ```csharp
 using Xeno.Sdk;
 
-using (XenoClient client = new XenoClient("http://localhost:9000", tenantId: "ten_default"))
+using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token, tenantId: "ten_default"))
 {
     XenoApiResponse health = await client.GetHealthAsync();
     XenoApiResponse models = await client.ListOpenAiModelsAsync();
@@ -32,6 +32,25 @@ using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: 
 }
 ```
 
+OpenAI-compatible routes also accept tenant-bound access credentials:
+
+```csharp
+using (XenoClient client = new XenoClient(new XenoClientOptions
+{
+    BaseUrl = "http://localhost:9000",
+    TenantId = "ten_default",
+    AccessKey = accessKey,
+    SecretKey = secretKey
+}))
+{
+    XenoApiResponse models = await client.ListOpenAiModelsAsync();
+}
+```
+
+Use least-privilege credentials with `Inference.Read` and `Inference.Execute`
+for application traffic. Tenant headers select tenant context; they do not
+authenticate the request.
+
 ## Interactive Console
 
 ```powershell
@@ -45,7 +64,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 The SDK includes methods for:
 
 - authentication and token helpers;
-- tenants, users, credentials, roles, permissions, effective permissions, and audit;
+- tenants, users, credentials, roles, permissions, grantable permissions, role assignments, effective permissions, and audit;
 - clients and advertised client models;
 - model definitions, configurations, and routing policies;
 - OpenAI-compatible models, chat completions, completions, and embeddings;

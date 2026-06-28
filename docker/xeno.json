@@ -3,7 +3,7 @@
     "Hostname": "0.0.0.0",
     "Port": 9000,
     "Ssl": false,
-    "RequireAuthentication": false
+    "RequireAuthentication": true
   },
   "Cors": {
     "Enabled": true,
@@ -24,7 +24,8 @@
   "Auth": {
     "Issuer": "xeno",
     "SigningKey": "development-only-change-me",
-    "SessionMinutes": 60
+    "SessionMinutes": 60,
+    "MaxLoginRequestsPerMinute": 20
   },
   "TelemetryCollection": {
     "Enabled": true,

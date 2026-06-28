@@ -29,6 +29,12 @@ In both models, applications call the server. They do not need to know where a m
 - A client credential access key and secret key, or a user account that can log in and receive a client credential.
 - At least one model provider reachable from the machine running `xeno`, such as Ollama, OpenAI, Gemini, vLLM, or another OpenAI-compatible endpoint.
 
+Client credentials are tenant-bound. Use least-privilege credentials for
+application inference traffic: grant `Inference.Read` for model listing and
+`Inference.Execute` for completions, chat completions, and embeddings. Do not
+use a system-admin credential or seeded development credential for shared
+application traffic.
+
 The client stores its settings in:
 
 ```text

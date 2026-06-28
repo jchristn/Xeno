@@ -18,6 +18,16 @@ namespace Xeno.Sdk
         public string? BearerToken { get; set; }
 
         /// <summary>
+        /// Gets or sets an optional tenant-bound credential access key.
+        /// </summary>
+        public string? AccessKey { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional tenant-bound credential secret key.
+        /// </summary>
+        public string? SecretKey { get; set; }
+
+        /// <summary>
         /// Gets or sets the tenant identifier sent as <c>x-tenant-guid</c>. Default value is <c>ten_default</c>.
         /// </summary>
         public string TenantId { get; set; } = "ten_default";

@@ -76,6 +76,7 @@ namespace Xeno.Core.Services
 
             string tokenHash = HashToken(token);
             DateTime now = DateTime.UtcNow;
+            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
             AuthSession? session = platform.AuthSessions.FirstOrDefault(item =>
                 item.TenantId == tenantId &&
                 item.Active &&
@@ -116,7 +117,9 @@ namespace Xeno.Core.Services
                 item.Active &&
                 String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal));
             if (credential == null) return null;
-            return FixedTimeEquals(credential.SecretKey, secretKey) ? credential : null;
+            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
+            if (!platform.Users.Any(item => item.Id == credential.UserId && item.TenantId == tenantId && item.Active)) return null;
+            return ValidateStoredSecret(credential.SecretKey, secretKey) ? credential : null;
         }
 
         /// <summary>
@@ -154,6 +157,7 @@ namespace Xeno.Core.Services
                 (String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase) ||
                  String.Equals(item.Email, username, StringComparison.OrdinalIgnoreCase)));
             if (user == null) return null;
+            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
             if (String.IsNullOrWhiteSpace(user.PasswordSalt) || String.IsNullOrWhiteSpace(user.PasswordHash)) return null;
 
             string candidateHash = HashPassword(user.PasswordSalt, password);
@@ -200,7 +204,8 @@ namespace Xeno.Core.Services
                     new EffectivePermission { ResourceType = "*", OperationType = OperationTypeEnum.Read, Permit = true, SourceRole = "TenantAdmin" },
                     new EffectivePermission { ResourceType = "*", OperationType = OperationTypeEnum.Write, Permit = true, SourceRole = "TenantAdmin" },
                     new EffectivePermission { ResourceType = "*", OperationType = OperationTypeEnum.Delete, Permit = true, SourceRole = "TenantAdmin" },
-                    new EffectivePermission { ResourceType = "Admin", OperationType = OperationTypeEnum.Admin, Permit = true, SourceRole = "TenantAdmin" }
+                    new EffectivePermission { ResourceType = "Admin", OperationType = OperationTypeEnum.Admin, Permit = true, SourceRole = "TenantAdmin" },
+                    new EffectivePermission { ResourceType = "*", OperationType = OperationTypeEnum.Execute, Permit = true, SourceRole = "TenantAdmin" }
                 };
             }
 
@@ -269,6 +274,8 @@ namespace Xeno.Core.Services
         /// <param name="allowed">Whether access was allowed.</param>
         /// <param name="reasonCode">Reason code.</param>
         /// <param name="statusCode">HTTP status code.</param>
+        /// <param name="targetTenantId">Optional target tenant ID.</param>
+        /// <param name="targetResourceId">Optional target resource ID.</param>
         /// <returns>Audit record.</returns>
         public AuditRecord AppendAudit(
             XenoPlatform platform,
@@ -277,7 +284,9 @@ namespace Xeno.Core.Services
             OperationTypeEnum operationType,
             bool allowed,
             string reasonCode,
-            int statusCode)
+            int statusCode,
+            string? targetTenantId = null,
+            string? targetResourceId = null)
         {
             if (platform == null) throw new ArgumentNullException(nameof(platform));
             if (context == null) throw new ArgumentNullException(nameof(context));
@@ -285,6 +294,8 @@ namespace Xeno.Core.Services
             AuditRecord record = new AuditRecord
             {
                 TenantId = context.TenantId,
+                TargetTenantId = targetTenantId,
+                TargetResourceId = targetResourceId,
                 RequestId = context.RequestId,
                 PrincipalType = context.PrincipalType,
                 PrincipalId = context.PrincipalId,
@@ -322,11 +333,33 @@ namespace Xeno.Core.Services
             return Convert.ToBase64String(hash);
         }
 
+        /// <summary>
+        /// Hash a credential secret for storage.
+        /// </summary>
+        /// <param name="secret">Plaintext secret.</param>
+        /// <returns>Stored secret hash.</returns>
+        public string HashCredentialSecret(string secret)
+        {
+            if (String.IsNullOrWhiteSpace(secret)) throw new ArgumentException("Secret is required.", nameof(secret));
+            return "sha256:" + HashToken(secret);
+        }
+
         private string HashPassword(string salt, string password)
         {
             if (String.IsNullOrWhiteSpace(salt)) throw new ArgumentException("Salt is required.", nameof(salt));
             if (password == null) throw new ArgumentNullException(nameof(password));
             return HashToken(salt + ":" + password);
+        }
+
+        private bool ValidateStoredSecret(string storedSecret, string suppliedSecret)
+        {
+            if (String.IsNullOrWhiteSpace(storedSecret) || String.IsNullOrWhiteSpace(suppliedSecret)) return false;
+            if (storedSecret.StartsWith("sha256:", StringComparison.Ordinal))
+            {
+                return FixedTimeEquals(storedSecret, HashCredentialSecret(suppliedSecret));
+            }
+
+            return FixedTimeEquals(storedSecret, suppliedSecret);
         }
 
         private static bool Matches(string candidate, string resourceType)

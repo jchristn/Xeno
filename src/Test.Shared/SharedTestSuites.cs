@@ -914,8 +914,90 @@ namespace Test.Shared
                             auth.AppendAudit(platform, context, "Admin", OperationTypeEnum.Admin, false, "PermissionDenied", 403);
                             if (platform.AuditRecords.Count != 1) throw new InvalidOperationException("Audit record was not persisted.");
                             if (platform.AuditRecords[0].ReasonCode != "PermissionDenied") throw new InvalidOperationException("Audit reason mismatch.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Authentication",
+                        "AuthorizationKernelContracts",
+                        "Authorization kernel enforces system admin, tenant admin, RBAC permit, implicit deny, and explicit deny",
+                        executeAsync: async delegate
+                        {
+                            await RunAuthorizationKernelContractsAsync().ConfigureAwait(false);
                         })
                 });
+        }
+
+        private static async Task RunAuthorizationKernelContractsAsync()
+        {
+            XenoPlatform platform = new XenoPlatform();
+            await platform.InitializeAsync().ConfigureAwait(false);
+            AuthorizationService authorization = new AuthorizationService();
+            Tenant defaultTenant = platform.GetDefaultTenant();
+            Tenant otherTenant = new Tenant { Id = "ten_security_other", Name = "Security Other", Active = true };
+            platform.Tenants.Add(otherTenant);
+            platform.EnsureTenantDefaults(otherTenant.Id);
+
+            User systemAdmin = platform.Users.First(item => item.TenantId == defaultTenant.Id && item.IsAdmin);
+            User tenantAdmin = new User
+            {
+                TenantId = defaultTenant.Id,
+                Username = "tenant-admin-security",
+                Email = "tenant-admin-security@xeno",
+                IsAdmin = false,
+                IsTenantAdmin = true,
+                Active = true
+            };
+            platform.Users.Add(tenantAdmin);
+            User rbacUser = new User
+            {
+                TenantId = defaultTenant.Id,
+                Username = "rbac-security",
+                Email = "rbac-security@xeno",
+                IsAdmin = false,
+                IsTenantAdmin = false,
+                Active = true
+            };
+            platform.Users.Add(rbacUser);
+
+            Permission readUsers = new Permission { TenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Permit = true };
+            Permission denyUsers = new Permission { TenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Permit = false };
+            platform.Permissions.Add(readUsers);
+            platform.Permissions.Add(denyUsers);
+            Role reader = new Role { TenantId = defaultTenant.Id, Name = "Security Reader", PermissionIds = new List<string> { readUsers.Id } };
+            Role deniedReader = new Role { TenantId = defaultTenant.Id, Name = "Security Denied Reader", PermissionIds = new List<string> { readUsers.Id, denyUsers.Id } };
+            platform.Roles.Add(reader);
+            platform.Roles.Add(deniedReader);
+            platform.RoleAssignments.Add(new RoleAssignment { TenantId = defaultTenant.Id, RoleId = reader.Id, PrincipalType = PrincipalTypeEnum.User, PrincipalId = rbacUser.Id });
+
+            RequestContext systemContext = new RequestContext { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
+            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = systemContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Delete }), "System admin should access other tenant.");
+
+            RequestContext tenantAdminContext = new RequestContext { TenantId = defaultTenant.Id, UserId = tenantAdmin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
+            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = tenantAdminContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Delete }), "Tenant admin should access own tenant.");
+            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = tenantAdminContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "TenantMismatch");
+
+            RequestContext rbacContext = new RequestContext { TenantId = defaultTenant.Id, UserId = rbacUser.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
+            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "RBAC read should be allowed.");
+            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Write }), "PermissionDenied");
+
+            platform.RoleAssignments.Clear();
+            platform.RoleAssignments.Add(new RoleAssignment { TenantId = defaultTenant.Id, RoleId = deniedReader.Id, PrincipalType = PrincipalTypeEnum.User, PrincipalId = rbacUser.Id });
+            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "PermissionDeniedExplicit");
+
+            Credential adminOwnedCredential = new Credential { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, AccessKey = "admin-owned", SecretKey = "secret", Active = true };
+            platform.Credentials.Add(adminOwnedCredential);
+            RequestContext credentialContext = new RequestContext { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, CredentialId = adminOwnedCredential.Id, PrincipalType = PrincipalTypeEnum.Credential, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Credential };
+            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = credentialContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "TenantMismatch");
+        }
+
+        private static void AssertAllowed(AuthorizationDecision decision, string message)
+        {
+            if (!decision.Allowed) throw new InvalidOperationException(message + " Decision: " + decision.ReasonCode + " " + decision.Message);
+        }
+
+        private static void AssertDenied(AuthorizationDecision decision, string expectedReasonCode)
+        {
+            if (decision.Allowed) throw new InvalidOperationException("Authorization unexpectedly succeeded.");
+            if (!String.Equals(decision.ReasonCode, expectedReasonCode, StringComparison.Ordinal)) throw new InvalidOperationException("Expected denial reason " + expectedReasonCode + " but got " + decision.ReasonCode + ".");
         }
 
         /// <summary>
@@ -1648,6 +1730,16 @@ namespace Test.Shared
                         executeAsync: delegate { return RunManagementUpdateSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
+                        "SecurityManagementContracts",
+                        "Security-sensitive management and OpenAI routes enforce admin flags, tenant fences, RBAC, and authentication",
+                        executeAsync: delegate { return RunSecurityManagementContractsAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "AuthRateLimitContracts",
+                        "Authentication login endpoints enforce source IP rate limits and return 429",
+                        executeAsync: delegate { return RunAuthRateLimitContractsAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
                         "PascalCaseClientInventoryModelsAreRegistered",
                         "PascalCase client inventory registers advertised models",
                         executeAsync: delegate { return RunPascalCaseClientInventorySmokeAsync(); })
@@ -1684,46 +1776,48 @@ namespace Test.Shared
                     await WaitForHealthAsync(port).ConfigureAwait(false);
                     using (HttpClient httpClient = new HttpClient())
                     {
-                        string settingsBody = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/settings").ConfigureAwait(false);
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                        string settingsBody = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/settings").ConfigureAwait(false);
                         if (!settingsBody.Contains("settingsFile", StringComparison.Ordinal)) throw new InvalidOperationException("Settings response missing settingsFile.");
 
-                        using (HttpResponseMessage saveSettingsResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1.0/api/settings", JsonUtil.Serialize(settings)).ConfigureAwait(false))
+                        using (HttpResponseMessage saveSettingsResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/settings", JsonUtil.Serialize(settings)).ConfigureAwait(false))
                         {
                             string saveSettingsBody = await saveSettingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!saveSettingsResponse.IsSuccessStatusCode || !File.Exists(settingsFile)) throw new InvalidOperationException("Settings save failed: " + saveSettingsBody);
                         }
 
-                        string backup = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/backup").ConfigureAwait(false);
+                        string backup = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/backup").ConfigureAwait(false);
                         if (!backup.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Backup did not include advertised model.");
 
-                        string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
+                        string clients = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
                         if (!clients.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Clients response missing advertised model.");
 
-                        string routingPolicies = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/routing-policies").ConfigureAwait(false);
+                        string routingPolicies = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/routing-policies").ConfigureAwait(false);
                         if (!routingPolicies.Contains("Default Routing Policy", StringComparison.Ordinal)) throw new InvalidOperationException("Routing policies response missing default policy.");
 
-                        string analytics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/analytics/overview").ConfigureAwait(false);
+                        string analytics = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/analytics/overview").ConfigureAwait(false);
                         if (!analytics.Contains("failureRate", StringComparison.Ordinal)) throw new InvalidOperationException("Analytics overview missing failureRate.");
 
-                        using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, "http://127.0.0.1:" + port + "/v1/chat/completions", "{\"model\":\"missing-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}").ConfigureAwait(false))
+                        using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1/chat/completions", "{\"model\":\"missing-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}").ConfigureAwait(false))
                         {
                             string completionBody = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if ((int)completionResponse.StatusCode < 400 || !completionBody.Contains("ModelNotFound", StringComparison.Ordinal)) throw new InvalidOperationException("Expected missing model request to be recorded as a failed request: " + completionBody);
                         }
 
-                        string summary = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/request-history/summary").ConfigureAwait(false);
+                        string summary = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history/summary").ConfigureAwait(false);
                         if (!summary.Contains("\"count\"", StringComparison.Ordinal) || !summary.Contains("\"errors\"", StringComparison.Ordinal) || !summary.Contains("\"success\"", StringComparison.Ordinal) || !summary.Contains("\"failed\"", StringComparison.Ordinal))
                         {
                             throw new InvalidOperationException("Request history summary missing chart bucket fields: " + summary);
                         }
 
-                        string requestHistory = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/request-history").ConfigureAwait(false);
+                        string requestHistory = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history").ConfigureAwait(false);
                         if (!requestHistory.Contains("/v1/chat/completions", StringComparison.Ordinal) || !requestHistory.Contains("ModelNotFound", StringComparison.Ordinal))
                         {
                             throw new InvalidOperationException("Request history list missing recorded OpenAI request: " + requestHistory);
                         }
 
-                        string metrics = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/metrics").ConfigureAwait(false);
+                        string metrics = await httpClient.GetStringAsync(baseUrl + "/metrics").ConfigureAwait(false);
                         if (!metrics.Contains("xeno_connected_clients", StringComparison.Ordinal)) throw new InvalidOperationException("Metrics output missing connected clients.");
                     }
                 }
@@ -1742,6 +1836,232 @@ namespace Test.Shared
                     server.Dispose();
                     await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
                     await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunSecurityManagementContractsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-security-contracts-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+
+                    using (HttpClient anonymousClient = new HttpClient())
+                    using (HttpResponseMessage anonymousModels = await anonymousClient.GetAsync(baseUrl + "/v1/models").ConfigureAwait(false))
+                    {
+                        if ((int)anonymousModels.StatusCode != 401) throw new InvalidOperationException("Anonymous OpenAI model list should return 401.");
+                    }
+
+                    using (HttpClient systemClient = new HttpClient())
+                    {
+                        await AuthenticateSeedAdminAsync(systemClient, baseUrl).ConfigureAwait(false);
+
+                        using (HttpResponseMessage grantableResponse = await systemClient.GetAsync(baseUrl + "/v1.0/api/permissions/grantable").ConfigureAwait(false))
+                        {
+                            string grantableJson = await grantableResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!grantableResponse.IsSuccessStatusCode) throw new InvalidOperationException("System admin could not list grantable permissions: " + grantableJson);
+                            if (!grantableJson.Contains("Inference", StringComparison.Ordinal) || !grantableJson.Contains("Execute", StringComparison.Ordinal)) throw new InvalidOperationException("Grantable permissions missing inference execute permission: " + grantableJson);
+                        }
+
+                        string permissionsJson = await systemClient.GetStringAsync(baseUrl + "/v1.0/api/permissions").ConfigureAwait(false);
+                        List<Permission> permissions = DeserializeRequired<List<Permission>>(permissionsJson);
+                        Permission? builtInPermission = permissions.FirstOrDefault(item => item.BuiltIn);
+                        if (builtInPermission == null) throw new InvalidOperationException("Seeded platform did not expose a built-in permission.");
+                        using (HttpResponseMessage updateBuiltInPermission = await PutJsonAsync(systemClient, baseUrl + "/v1.0/api/permissions/" + Uri.EscapeDataString(builtInPermission.Id), JsonUtil.Serialize(new
+                        {
+                            active = false
+                        })).ConfigureAwait(false))
+                        {
+                            if ((int)updateBuiltInPermission.StatusCode != 403) throw new InvalidOperationException("Built-in permission update should return 403: " + (int)updateBuiltInPermission.StatusCode);
+                        }
+
+                        using (HttpResponseMessage deleteBuiltInPermission = await systemClient.DeleteAsync(baseUrl + "/v1.0/api/permissions/" + Uri.EscapeDataString(builtInPermission.Id)).ConfigureAwait(false))
+                        {
+                            if ((int)deleteBuiltInPermission.StatusCode != 403) throw new InvalidOperationException("Built-in permission delete should return 403: " + (int)deleteBuiltInPermission.StatusCode);
+                        }
+
+                        string tenantBId;
+                        using (HttpResponseMessage createTenantB = await PostJsonAsync(systemClient, baseUrl + "/v1.0/api/tenants", JsonUtil.Serialize(new { name = "Security Tenant B", active = true })).ConfigureAwait(false))
+                        {
+                            string tenantBJson = await createTenantB.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!createTenantB.IsSuccessStatusCode) throw new InvalidOperationException("System admin could not create tenant B: " + tenantBJson);
+                            tenantBId = FirstRecordId("[" + tenantBJson + "]");
+                        }
+
+                        string tenantAdminAId = await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "tenant-admin-a@security.test", "password", false, true).ConfigureAwait(false);
+                        string noAccessUserId = await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "no-access@security.test", "password", false, false).ConfigureAwait(false);
+                        string rbacUserId = await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "rbac-writer@security.test", "password", false, false).ConfigureAwait(false);
+                        await CreateUserViaApiAsync(systemClient, baseUrl, tenantBId, "tenant-b-user@security.test", "password", false, false).ConfigureAwait(false);
+
+                        using (HttpResponseMessage systemModels = await systemClient.GetAsync(baseUrl + "/v1/models").ConfigureAwait(false))
+                        {
+                            string systemModelsJson = await systemModels.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!systemModels.IsSuccessStatusCode) throw new InvalidOperationException("System admin OpenAI model list failed: " + systemModelsJson);
+                        }
+
+                        using (HttpClient tenantAdminClient = new HttpClient())
+                        {
+                            await AuthenticateUserAsync(tenantAdminClient, baseUrl, Constants.DefaultTenantId, "tenant-admin-a@security.test", "password").ConfigureAwait(false);
+
+                            using (HttpResponseMessage createForeignUser = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/users", JsonUtil.Serialize(new
+                            {
+                                tenantId = tenantBId,
+                                username = "foreign-create@security.test",
+                                email = "foreign-create@security.test",
+                                password = "password",
+                                active = true
+                            })).ConfigureAwait(false))
+                            {
+                                string createForeignUserJson = await createForeignUser.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if ((int)createForeignUser.StatusCode != 403) throw new InvalidOperationException("Tenant admin should not create users in another tenant: " + (int)createForeignUser.StatusCode + " " + createForeignUserJson);
+                            }
+
+                            using (HttpResponseMessage createTenantAdmin = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/users", JsonUtil.Serialize(new
+                            {
+                                tenantId = Constants.DefaultTenantId,
+                                username = "tenant-admin-created@security.test",
+                                email = "tenant-admin-created@security.test",
+                                password = "password",
+                                isTenantAdmin = true,
+                                active = true
+                            })).ConfigureAwait(false))
+                            {
+                                string createTenantAdminJson = await createTenantAdmin.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!createTenantAdmin.IsSuccessStatusCode) throw new InvalidOperationException("Tenant admin should grant tenant admin in own tenant: " + createTenantAdminJson);
+                            }
+
+                            using (HttpResponseMessage createSystemAdmin = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/users", JsonUtil.Serialize(new
+                            {
+                                tenantId = Constants.DefaultTenantId,
+                                username = "system-admin-denied@security.test",
+                                email = "system-admin-denied@security.test",
+                                password = "password",
+                                isAdmin = true,
+                                active = true
+                            })).ConfigureAwait(false))
+                            {
+                                if ((int)createSystemAdmin.StatusCode != 403) throw new InvalidOperationException("Tenant admin should not grant system admin: " + (int)createSystemAdmin.StatusCode);
+                            }
+
+                            tenantAdminClient.DefaultRequestHeaders.Remove("x-tenant-guid");
+                            tenantAdminClient.DefaultRequestHeaders.Add("x-tenant-guid", tenantBId);
+                            using (HttpResponseMessage tenantMismatchModels = await tenantAdminClient.GetAsync(baseUrl + "/v1/models").ConfigureAwait(false))
+                            {
+                                if ((int)tenantMismatchModels.StatusCode != 401) throw new InvalidOperationException("Tenant-mismatched bearer token should fail authentication.");
+                            }
+                        }
+
+                        string usersWritePermissionId = await CreatePermissionViaApiAsync(systemClient, baseUrl, "Users", "Write").ConfigureAwait(false);
+                        string usersWriteRoleId = await CreateRoleViaApiAsync(systemClient, baseUrl, "Security Users Writer", usersWritePermissionId).ConfigureAwait(false);
+                        await AssignRoleViaApiAsync(systemClient, baseUrl, usersWriteRoleId, PrincipalTypeEnum.User, rbacUserId).ConfigureAwait(false);
+
+                        using (HttpClient rbacClient = new HttpClient())
+                        {
+                            await AuthenticateUserAsync(rbacClient, baseUrl, Constants.DefaultTenantId, "rbac-writer@security.test", "password").ConfigureAwait(false);
+                            using (HttpResponseMessage rbacAdminFlag = await PutJsonAsync(rbacClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(noAccessUserId), JsonUtil.Serialize(new
+                            {
+                                isTenantAdmin = true
+                            })).ConfigureAwait(false))
+                            {
+                                if ((int)rbacAdminFlag.StatusCode != 403) throw new InvalidOperationException("RBAC user should not change tenant admin flag: " + (int)rbacAdminFlag.StatusCode);
+                            }
+                        }
+
+                        using (HttpClient noAccessClient = new HttpClient())
+                        {
+                            await AuthenticateUserAsync(noAccessClient, baseUrl, Constants.DefaultTenantId, "no-access@security.test", "password").ConfigureAwait(false);
+                            using (HttpResponseMessage noAccessModels = await noAccessClient.GetAsync(baseUrl + "/v1/models").ConfigureAwait(false))
+                            {
+                                if ((int)noAccessModels.StatusCode != 403) throw new InvalidOperationException("User without inference permission should get 403 from OpenAI model list.");
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunAuthRateLimitContractsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-auth-rate-limit-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Auth = new AuthSettings
+                {
+                    MaxLoginRequestsPerMinute = 1
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string loginBody = JsonUtil.Serialize(new AuthLoginRequest
+                        {
+                            TenantId = Constants.DefaultTenantId,
+                            Email = "admin@xeno",
+                            Password = "wrong-password"
+                        });
+                        using (HttpResponseMessage firstLogin = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/login", loginBody).ConfigureAwait(false))
+                        {
+                            if ((int)firstLogin.StatusCode == 429) throw new InvalidOperationException("First login attempt should not be rate limited.");
+                        }
+
+                        using (HttpResponseMessage secondLogin = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/login", loginBody).ConfigureAwait(false))
+                        {
+                            string secondLoginJson = await secondLogin.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)secondLogin.StatusCode != 429) throw new InvalidOperationException("Second login attempt should return 429: " + (int)secondLogin.StatusCode + " " + secondLoginJson);
+                            if (!secondLogin.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfterValues) || !retryAfterValues.Contains("60")) throw new InvalidOperationException("Rate limited login response missing Retry-After: " + secondLoginJson);
+                            if (!secondLoginJson.Contains("RateLimited", StringComparison.Ordinal)) throw new InvalidOperationException("Rate limited login response missing reason code: " + secondLoginJson);
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
         }
@@ -1878,6 +2198,7 @@ namespace Test.Shared
                     using (HttpClient httpClient = new HttpClient())
                     {
                         string baseUrl = "http://127.0.0.1:" + port;
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
                         if (!openApi.Contains("client-model", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("clientmodels", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing client model delete route.");
                         if (!openApi.Contains("request-history", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("requesthistory", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing request history delete route.");
@@ -1943,6 +2264,7 @@ namespace Test.Shared
                             throw new InvalidOperationException("Swagger UI does not include Xeno authentication loading support.");
                         }
 
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}").ConfigureAwait(false))
                         {
                             _ = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -2085,6 +2407,7 @@ namespace Test.Shared
                             if (!OpenApiHasMethod(openApi, route, "post")) throw new InvalidOperationException("OpenAPI missing POST " + route + ".");
                         }
 
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         using (HttpResponseMessage createTenantResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/tenants", JsonUtil.Serialize(new { name = "Touchstone Created Tenant", active = true })).ConfigureAwait(false))
                         {
                             string createTenantJson = await createTenantResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -2118,6 +2441,7 @@ namespace Test.Shared
                             if (!createCredentialResponse.IsSuccessStatusCode || !createCredentialJson.Contains("touchstone-create-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Credential create failed or did not return one-time secret: " + createCredentialJson);
                         }
 
+                        string createdPermissionId = String.Empty;
                         using (HttpResponseMessage createPermissionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/permissions", JsonUtil.Serialize(new
                         {
                             resourceType = "TouchstoneCreate",
@@ -2128,8 +2452,10 @@ namespace Test.Shared
                         {
                             string createPermissionJson = await createPermissionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!createPermissionResponse.IsSuccessStatusCode || !createPermissionJson.Contains("TouchstoneCreate", StringComparison.Ordinal)) throw new InvalidOperationException("Permission create failed: " + createPermissionJson);
+                            createdPermissionId = FirstRecordId("[" + createPermissionJson + "]");
                         }
 
+                        string createdRoleId = String.Empty;
                         using (HttpResponseMessage createRoleResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/roles", JsonUtil.Serialize(new
                         {
                             name = "Touchstone Created Role",
@@ -2139,6 +2465,7 @@ namespace Test.Shared
                         {
                             string createRoleJson = await createRoleResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!createRoleResponse.IsSuccessStatusCode || !createRoleJson.Contains("Touchstone Created Role", StringComparison.Ordinal)) throw new InvalidOperationException("Role create failed: " + createRoleJson);
+                            createdRoleId = FirstRecordId("[" + createRoleJson + "]");
                         }
 
                         string routingPolicyId = String.Empty;
@@ -2230,8 +2557,8 @@ namespace Test.Shared
                             if (!tokenResponse.IsSuccessStatusCode || !tokenJson.Contains("token", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Updated credential did not validate: " + tokenJson);
                         }
 
-                        string roleId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/roles").ConfigureAwait(false);
-                        string permissionId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/permissions").ConfigureAwait(false);
+                        string roleId = createdRoleId;
+                        string permissionId = createdPermissionId;
                         using (HttpResponseMessage roleResponse = await PutJsonAsync(httpClient, baseUrl + "/v1.0/api/roles/" + Uri.EscapeDataString(roleId), JsonUtil.Serialize(new
                         {
                             name = "Touchstone Role",
@@ -2354,10 +2681,12 @@ namespace Test.Shared
 
                     using (HttpClient httpClient = new HttpClient())
                     {
-                        string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                        string clients = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
                         if (!clients.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("Updated client models did not include inventory update model: " + clients);
 
-                        string models = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1/models").ConfigureAwait(false);
+                        string models = await httpClient.GetStringAsync(baseUrl + "/v1/models").ConfigureAwait(false);
                         if (!models.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include inventory update model: " + models);
                     }
                 }
@@ -2531,6 +2860,7 @@ namespace Test.Shared
                         using (HttpClient httpClient = new HttpClient())
                         using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/v1/chat/completions"))
                         {
+                            await AuthenticateSeedAdminAsync(httpClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
                             request.Content = new StringContent(
                                 "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
                                 Encoding.UTF8,
@@ -2710,6 +3040,7 @@ namespace Test.Shared
                         using (HttpClient httpClient = new HttpClient())
                         using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/v1/chat/completions"))
                         {
+                            await AuthenticateSeedAdminAsync(httpClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
                             request.Content = new StringContent(
                                 "{\"model\":\"llama3.2:latest\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
                                 Encoding.UTF8,
@@ -2986,6 +3317,7 @@ namespace Test.Shared
         {
             using (HttpClient httpClient = new HttpClient())
             {
+                await AuthenticateSeedAdminAsync(httpClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
                 for (int i = 0; i < 50; i++)
                 {
                     using (HttpResponseMessage response = await httpClient.GetAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false))
@@ -3036,6 +3368,98 @@ namespace Test.Shared
             socket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
             socket.Options.SetRequestHeader("x-access-key", accessKey);
             socket.Options.SetRequestHeader("x-secret-key", secretKey);
+        }
+
+        private static async Task AuthenticateSeedAdminAsync(HttpClient httpClient, string baseUrl)
+        {
+            await AuthenticateUserAsync(httpClient, baseUrl, Constants.DefaultTenantId, "admin@xeno", "password").ConfigureAwait(false);
+        }
+
+        private static async Task AuthenticateUserAsync(HttpClient httpClient, string baseUrl, string tenantId, string email, string password)
+        {
+            string loginBody = JsonUtil.Serialize(new AuthLoginRequest
+            {
+                TenantId = tenantId,
+                Email = email,
+                Password = password
+            });
+            using (HttpResponseMessage loginResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/dashboard/login", loginBody).ConfigureAwait(false))
+            {
+                string loginJson = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!loginResponse.IsSuccessStatusCode) throw new InvalidOperationException("Authentication failed for " + email + ": " + loginJson);
+                AuthDashboardLoginResponse login = DeserializeRequired<AuthDashboardLoginResponse>(loginJson);
+                httpClient.DefaultRequestHeaders.Remove("Authorization");
+                httpClient.DefaultRequestHeaders.Remove("x-token");
+                httpClient.DefaultRequestHeaders.Remove("x-tenant-guid");
+                httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + login.Token);
+                httpClient.DefaultRequestHeaders.Add("x-token", login.Token);
+                httpClient.DefaultRequestHeaders.Add("x-tenant-guid", login.TenantId);
+            }
+        }
+
+        private static async Task<string> CreateUserViaApiAsync(HttpClient httpClient, string baseUrl, string tenantId, string email, string password, bool isAdmin, bool isTenantAdmin)
+        {
+            using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/users", JsonUtil.Serialize(new
+            {
+                tenantId,
+                username = email,
+                email,
+                password,
+                isAdmin,
+                isTenantAdmin,
+                active = true
+            })).ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("User create failed for " + email + ": " + json);
+                return FirstRecordId("[" + json + "]");
+            }
+        }
+
+        private static async Task<string> CreatePermissionViaApiAsync(HttpClient httpClient, string baseUrl, string resourceType, string operationType)
+        {
+            using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/permissions", JsonUtil.Serialize(new
+            {
+                resourceType,
+                operationType,
+                permit = true,
+                active = true
+            })).ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Permission create failed: " + json);
+                return FirstRecordId("[" + json + "]");
+            }
+        }
+
+        private static async Task<string> CreateRoleViaApiAsync(HttpClient httpClient, string baseUrl, string name, string permissionId)
+        {
+            using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/roles", JsonUtil.Serialize(new
+            {
+                name,
+                permissionIds = new[] { permissionId },
+                active = true
+            })).ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Role create failed: " + json);
+                return FirstRecordId("[" + json + "]");
+            }
+        }
+
+        private static async Task AssignRoleViaApiAsync(HttpClient httpClient, string baseUrl, string roleId, PrincipalTypeEnum principalType, string principalId)
+        {
+            using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/role-assignments", JsonUtil.Serialize(new
+            {
+                roleId,
+                principalType = principalType.ToString(),
+                principalId,
+                active = true
+            })).ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Role assignment failed: " + json);
+            }
         }
 
         private static async Task<HttpResponseMessage> PostJsonAsync(HttpClient httpClient, string url, string json)
@@ -3282,6 +3706,7 @@ namespace Test.Shared
                     using (HttpClient httpClient = new HttpClient())
                     {
                         string baseUrl = "http://127.0.0.1:" + port;
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         RoutingPolicySaveRequest invalidRequest = new RoutingPolicySaveRequest
                         {
                             Name = "Invalid telemetry policy",

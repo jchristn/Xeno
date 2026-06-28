@@ -31,7 +31,7 @@ namespace Xeno.Core.Models
         public string AccessKey { get; set; } = "default";
 
         /// <summary>
-        /// Secret key for development mode.
+        /// Secret key hash. Legacy plaintext development credentials are still accepted during validation.
         /// </summary>
         public string SecretKey { get; set; } = "default";
 

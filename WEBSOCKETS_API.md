@@ -54,6 +54,8 @@ The current protocol version is the Xeno application version:
 The WebSocket connection is authenticated during the HTTP upgrade request.
 The client must send tenant-bound credential headers. User passwords and
 dashboard bearer tokens are not valid for client WebSocket authentication.
+Bearer dashboard tokens are accepted only on REST routes, never on the client
+WebSocket control plane.
 
 Required headers:
 

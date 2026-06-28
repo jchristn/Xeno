@@ -140,6 +140,12 @@ namespace Xeno.Core.Services
                 SelectedClientId = decision.SelectedClientId,
                 StatusCode = decision.HttpStatusCode,
                 DurationMs = Math.Max(0, (long)(DateTime.UtcNow - context.StartedUtc).TotalMilliseconds),
+                SourceIp = context.SourceIp,
+                UserId = context.UserId,
+                CredentialId = context.CredentialId,
+                SessionId = context.SessionId,
+                PrincipalType = context.PrincipalType,
+                AuthScheme = context.AuthScheme,
                 RoutingDecision = decision
             };
             _Platform.RequestHistory.Add(entry);
