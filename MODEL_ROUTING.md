@@ -61,19 +61,20 @@ The default policy cannot be deleted. Its `modelName`, `clientName`, and `active
 
 For each routed request:
 
-1. Xeno resolves the effective model.
-2. Xeno builds the candidate client list from connected, healthy, tenant-scoped clients that advertise the model and support the request type.
-3. Xeno evaluates active policies for the request tenant.
-4. Policies match when:
+1. Xeno authenticates the caller and verifies the tenant-scoped inference permission required by the OpenAI-compatible route.
+2. Xeno resolves the effective model.
+3. Xeno builds the candidate client list from connected, healthy, tenant-scoped clients that advertise the model and support the request type.
+4. Xeno evaluates active policies for the request tenant.
+5. Policies match when:
    - `modelName` equals the effective model, case-insensitive, or is `*`.
    - `clientName` equals at least one candidate client name, case-insensitive, or is `*`.
-5. The closest match wins:
+6. The closest match wins:
    - exact model + exact client
    - exact model + `*`
    - `*` + exact client
    - `*` + `*`
-6. Ties at the same specificity use the most recently updated policy.
-7. If no policy is found, Xeno uses an in-memory fallback equivalent to the default `*/*` LeastRecentlyUsed policy.
+7. Ties at the same specificity use the most recently updated policy.
+8. If no policy is found, Xeno uses an in-memory fallback equivalent to the default `*/*` LeastRecentlyUsed policy.
 
 After policy matching, an exact `clientName` policy narrows the candidate list to that client name. If that client is disconnected, unhealthy, overloaded, or does not advertise the model, the request fails with `NoEligibleClients`.
 

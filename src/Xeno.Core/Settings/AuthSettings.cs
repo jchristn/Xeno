@@ -23,5 +23,10 @@ namespace Xeno.Core.Settings
         /// Session lifetime in minutes.
         /// </summary>
         public int SessionMinutes { get; set; } = 60;
+
+        /// <summary>
+        /// Maximum login or token-creation attempts per source IP per minute.
+        /// </summary>
+        public int MaxLoginRequestsPerMinute { get; set; } = 20;
     }
 }

@@ -66,6 +66,21 @@ namespace Xeno.Core.Models
         public string? CredentialId { get; set; } = null;
 
         /// <summary>
+        /// Authenticated session ID.
+        /// </summary>
+        public string? SessionId { get; set; } = null;
+
+        /// <summary>
+        /// Principal type used for the request.
+        /// </summary>
+        public PrincipalTypeEnum PrincipalType { get; set; } = PrincipalTypeEnum.None;
+
+        /// <summary>
+        /// Authentication scheme used for the request.
+        /// </summary>
+        public AuthSchemeEnum AuthScheme { get; set; } = AuthSchemeEnum.None;
+
+        /// <summary>
         /// Created timestamp.
         /// </summary>
         public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;

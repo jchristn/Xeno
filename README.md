@@ -62,7 +62,7 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 3. The client stores an access key and secret key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
 4. The client connects to `/ws/v1/clients`, authenticates with its access credential, and advertises machine inventory, provider endpoints, and models.
 5. Applications call the Xeno OpenAI-compatible API.
-6. The server resolves the tenant's effective routing policy, then selects a connected client that advertises the requested model.
+6. The server authenticates the caller, verifies tenant-scoped inference permission, resolves the tenant's effective routing policy, then selects a connected client that advertises the requested model.
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
 8. The server returns the model response to the caller and persists request history for dashboard inspection.
 9. When enabled, the client also writes local request history to SQLite and exposes a local dashboard for inspecting what that specific machine processed.
@@ -262,10 +262,11 @@ inventory, and safe response-header metadata.
 
 ## Calling The API
 
-The default alpha Docker and source configs set `Rest.RequireAuthentication` to
-`false` for local development, so anonymous calls may work until you enable
-authentication. In any shared, hosted, or production-like deployment, set
-`Rest.RequireAuthentication` to `true` and call the API with a bearer token.
+OpenAI-compatible routes and management routes require an authenticated caller
+with permission in the selected tenant. The local source config keeps
+`Rest.RequireAuthentication` set to `false` for development health/bootstrap
+workflows, but protected routes still reject anonymous callers. The Docker
+sample sets `Rest.RequireAuthentication` to `true`.
 
 Create a bearer token from a tenant-bound credential:
 
@@ -324,6 +325,28 @@ connections are different: they authenticate with `x-access-key`,
 `x-secret-key`, and `x-tenant-guid`, not bearer tokens. Use the dashboard,
 Swagger UI, Postman collection, or SDK console apps to explore the full API
 surface.
+
+### Security Model
+
+Xeno authorization has three layers:
+
+- System admins are users with `isAdmin = true`; they can administer all tenants and can change the system-admin flag.
+- Tenant admins are users with `isTenantAdmin = true`; they can administer only their own tenant and cannot change `isAdmin`.
+- RBAC users and credentials receive tenant-scoped permissions through roles. A grantor cannot create permissions, roles, or role assignments that exceed their own effective authority.
+- Built-in roles and seeded permissions are protected from management API mutation.
+
+Every protected request is tenant fenced. A caller authenticated for tenant A
+cannot use tenant B records unless the caller is a system admin using an
+explicit cross-tenant administrative path. OpenAI-compatible requests require
+`Inference.Read` for model listing and `Inference.Execute` for completions,
+chat completions, and embeddings. Request history records tenant and principal
+identity fields for usage reporting.
+
+Tenant membership is one tenant per user row. The same email address may be
+present in multiple tenant-specific user records; non-system-admin users switch
+tenants by logging out and logging in to the desired tenant. Password login,
+dashboard login, and token creation are rate limited by source IP with
+`Auth.MaxLoginRequestsPerMinute` in the JSON settings file.
 
 ## Dashboard
 
@@ -436,8 +459,10 @@ The test projects follow the Touchstone package pattern used by the reference ap
 Xeno is alpha software. Do not expose a development deployment directly to the public internet without a deliberate production hardening pass.
 
 - Put public deployments behind TLS and a trusted reverse proxy.
+- Keep `Rest.RequireAuthentication` enabled outside local development.
 - Rotate seeded development credentials before real use.
 - Store client access keys and secret keys carefully.
+- Use least-privilege inference credentials for application traffic instead of system-admin credentials.
 - Avoid committing provider credentials or private endpoints.
 - Use least-privilege database credentials in non-development deployments.
 - Treat request body and response body capture as sensitive because prompts, completions, and embeddings input may contain private data.

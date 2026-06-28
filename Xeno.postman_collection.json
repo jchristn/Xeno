@@ -41,8 +41,16 @@
                          "value":  "role_..."
                      },
                      {
+                         "key":  "roleAssignmentId",
+                         "value":  "rassn_..."
+                     },
+                     {
                          "key":  "permissionId",
                          "value":  "perm_..."
+                     },
+                     {
+                         "key":  "foreignTenantId",
+                         "value":  "ten_other"
                      },
                      {
                          "key":  "routingPolicyId",
@@ -130,6 +138,10 @@
                                      "method":  "GET",
                                      "header":  [
                                                     {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{bearerToken}}"
+                                                    },
+                                                    {
                                                         "key":  "x-tenant-guid",
                                                         "value":  "{{tenantId}}"
                                                     }
@@ -164,6 +176,10 @@
                                      "method":  "POST",
                                      "header":  [
                                                     {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{bearerToken}}"
+                                                    },
+                                                    {
                                                         "key":  "x-tenant-guid",
                                                         "value":  "{{tenantId}}"
                                                     },
@@ -197,6 +213,10 @@
                      "request":  {
                                      "method":  "POST",
                                      "header":  [
+                                                    {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{bearerToken}}"
+                                                    },
                                                     {
                                                         "key":  "x-tenant-guid",
                                                         "value":  "{{tenantId}}"
@@ -355,6 +375,19 @@
                                                     }
                                                 ],
                                      "url":  "{{baseUrl}}/v1.0/api/permissions"
+                                 }
+                 },
+                 {
+                     "name":  "Grantable Permissions",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "x-tenant-guid",
+                                                        "value":  "{{tenantId}}"
+                                                    }
+                                                ],
+                                     "url":  "{{baseUrl}}/v1.0/api/permissions/grantable"
                                  }
                  },
                  {
@@ -907,6 +940,10 @@
                                      "method":  "POST",
                                      "url":  "{{baseUrl}}/v1/completions",
                                      "header":  [
+                                                    {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{bearerToken}}"
+                                                    },
                                                     {
                                                         "key":  "x-tenant-guid",
                                                         "value":  "{{tenantId}}"
@@ -2124,6 +2161,142 @@
                                                                                            }
                                                                                }
                                                                }
+                                                  }
+                                  }
+                              ]
+                 }
+                 ,
+                 {
+                     "name":  "Security RBAC Examples",
+                     "item":  [
+                                  {
+                                      "name":  "Denied - anonymous OpenAI models",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1/models"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Allowed - authenticated OpenAI chat",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+                                                               },
+                                                      "url":  "{{baseUrl}}/v1/chat/completions"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Denied - tenant mismatch OpenAI models",
+                                      "request":  {
+                                                      "method":  "GET",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{foreignTenantId}}"
+                                                                     }
+                                                                 ],
+                                                      "url":  "{{baseUrl}}/v1/models"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Denied - regular user sets tenant admin flag",
+                                      "request":  {
+                                                      "method":  "PUT",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\"isTenantAdmin\":true}"
+                                                               },
+                                                      "url":  "{{baseUrl}}/v1.0/api/users/{{userId}}"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Allowed - create role assignment",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\"tenantId\":\"{{tenantId}}\",\"roleId\":\"{{roleId}}\",\"principalType\":\"User\",\"principalId\":\"{{userId}}\",\"active\":true}"
+                                                               },
+                                                      "url":  "{{baseUrl}}/v1.0/api/role-assignments"
+                                                  }
+                                  },
+                                  {
+                                      "name":  "Denied - role grant above authority",
+                                      "request":  {
+                                                      "method":  "POST",
+                                                      "header":  [
+                                                                     {
+                                                                         "key":  "Authorization",
+                                                                         "value":  "Bearer {{bearerToken}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "x-tenant-guid",
+                                                                         "value":  "{{tenantId}}"
+                                                                     },
+                                                                     {
+                                                                         "key":  "Content-Type",
+                                                                         "value":  "application/json"
+                                                                     }
+                                                                 ],
+                                                      "body":  {
+                                                                   "mode":  "raw",
+                                                                   "raw":  "{\"name\":\"Denied Admin Grant\",\"permissionIds\":[\"{{permissionId}}\"],\"active\":true}"
+                                                               },
+                                                      "url":  "{{baseUrl}}/v1.0/api/roles"
                                                   }
                                   }
                               ]

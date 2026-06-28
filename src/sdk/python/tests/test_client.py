@@ -64,9 +64,13 @@ class XenoClientTests(unittest.TestCase):
         client.create_role({"name": "Operator"})
         client.update_role("role_1", {"permissionIds": ["perm_1"]})
         client.delete_role("role_1")
+        client.list_grantable_permissions()
         client.create_permission({"resourceType": "Clients", "operationType": "Read"})
         client.update_permission("perm_1", {"permit": False})
         client.delete_permission("perm_1")
+        client.list_role_assignments()
+        client.create_role_assignment({"roleId": "role_1", "principalType": "User", "principalId": "usr_1"})
+        client.delete_role_assignment("rassn_1")
         client.create_routing_policy({"name": "Policy", "modelName": "*", "clientName": "*"})
         client.update_routing_policy("rpol_1", {"loadBalancingMode": "Random"})
         client.delete_routing_policy("rpol_1")
@@ -86,9 +90,13 @@ class XenoClientTests(unittest.TestCase):
                 ("POST", "https://xeno.local/v1.0/api/roles"),
                 ("PUT", "https://xeno.local/v1.0/api/roles/role_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/roles/role_1"),
+                ("GET", "https://xeno.local/v1.0/api/permissions/grantable"),
                 ("POST", "https://xeno.local/v1.0/api/permissions"),
                 ("PUT", "https://xeno.local/v1.0/api/permissions/perm_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/permissions/perm_1"),
+                ("GET", "https://xeno.local/v1.0/api/role-assignments"),
+                ("POST", "https://xeno.local/v1.0/api/role-assignments"),
+                ("DELETE", "https://xeno.local/v1.0/api/role-assignments/rassn_1"),
                 ("POST", "https://xeno.local/v1.0/api/routing-policies"),
                 ("PUT", "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
@@ -96,7 +104,8 @@ class XenoClientTests(unittest.TestCase):
         )
         self.assertIn('"name": "Tenant"', opener.calls[0]["body"])
         self.assertIn('"permissionIds": ["perm_1"]', opener.calls[10]["body"])
-        self.assertIn('"modelName": "*"', opener.calls[15]["body"])
+        self.assertIn('"principalId": "usr_1"', opener.calls[17]["body"])
+        self.assertIn('"modelName": "*"', opener.calls[19]["body"])
 
     def test_openai_and_request_history_methods_use_expected_routes(self):
         opener = FakeOpener()
@@ -118,6 +127,46 @@ class XenoClientTests(unittest.TestCase):
                 ("GET", "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"),
             ],
         )
+
+    def test_credential_options_send_tenant_and_credential_headers(self):
+        opener = FakeOpener()
+        client = XenoClient("https://xeno.local", access_key="xeno_access", secret_key="secret-123", tenant_id="ten_123", opener=opener)
+
+        client.list_openai_models()
+
+        request = opener.calls[0]["request"]
+        self.assertEqual(request.headers["X-access-key"], "xeno_access")
+        self.assertEqual(request.headers["X-secret-key"], "secret-123")
+        self.assertEqual(request.headers["X-tenant-guid"], "ten_123")
+
+    def test_openai_errors_surface_authentication_and_authorization_status(self):
+        unauthenticated_error = HTTPError(
+            "https://xeno.local/v1/models",
+            401,
+            "Unauthorized",
+            {},
+            FakeResponse('{"error":"Unauthenticated","message":"Authentication is required."}', 401),
+        )
+        anonymous_opener = FakeOpener(lambda request: unauthenticated_error)
+        anonymous_client = XenoClient("https://xeno.local", opener=anonymous_opener)
+        with self.assertRaises(XenoApiError) as unauthenticated_context:
+            anonymous_client.list_openai_models()
+        self.assertEqual(unauthenticated_context.exception.status, 401)
+        self.assertEqual(unauthenticated_context.exception.endpoint, "/v1/models")
+
+        denied_error = HTTPError(
+            "https://xeno.local/v1/chat/completions",
+            403,
+            "Forbidden",
+            {},
+            FakeResponse('{"error":"PermissionDenied","message":"Permission denied."}', 403),
+        )
+        denied_opener = FakeOpener(lambda request: denied_error)
+        denied_client = XenoClient("https://xeno.local", bearer_token="token-123", tenant_id="ten_123", opener=denied_opener)
+        with self.assertRaises(XenoApiError) as denied_context:
+            denied_client.create_chat_completion({"model": "llama3.2:latest"})
+        self.assertEqual(denied_context.exception.status, 403)
+        self.assertEqual(denied_context.exception.endpoint, "/v1/chat/completions")
 
     def test_client_telemetry_methods_use_expected_routes_and_bodies(self):
         opener = FakeOpener(lambda request: FakeResponse("{}", 204 if request.get_method() == "DELETE" else 200))

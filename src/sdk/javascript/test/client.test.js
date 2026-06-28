@@ -58,9 +58,13 @@ test('management CRUD methods use expected routes and bodies', async () => {
   await client.createRole({ name: 'Operator' });
   await client.updateRole('role_1', { permissionIds: ['perm_1'] });
   await client.deleteRole('role_1');
+  await client.listGrantablePermissions();
   await client.createPermission({ resourceType: 'Clients', operationType: 'Read' });
   await client.updatePermission('perm_1', { permit: false });
   await client.deletePermission('perm_1');
+  await client.listRoleAssignments();
+  await client.createRoleAssignment({ roleId: 'role_1', principalType: 'User', principalId: 'usr_1' });
+  await client.deleteRoleAssignment('rassn_1');
   await client.createRoutingPolicy({ name: 'Policy', modelName: '*', clientName: '*' });
   await client.updateRoutingPolicy('rpol_1', { loadBalancingMode: 'Random' });
   await client.deleteRoutingPolicy('rpol_1');
@@ -78,16 +82,21 @@ test('management CRUD methods use expected routes and bodies', async () => {
     ['POST', 'https://xeno.local/v1.0/api/roles'],
     ['PUT', 'https://xeno.local/v1.0/api/roles/role_1'],
     ['DELETE', 'https://xeno.local/v1.0/api/roles/role_1'],
+    ['GET', 'https://xeno.local/v1.0/api/permissions/grantable'],
     ['POST', 'https://xeno.local/v1.0/api/permissions'],
     ['PUT', 'https://xeno.local/v1.0/api/permissions/perm_1'],
     ['DELETE', 'https://xeno.local/v1.0/api/permissions/perm_1'],
+    ['GET', 'https://xeno.local/v1.0/api/role-assignments'],
+    ['POST', 'https://xeno.local/v1.0/api/role-assignments'],
+    ['DELETE', 'https://xeno.local/v1.0/api/role-assignments/rassn_1'],
     ['POST', 'https://xeno.local/v1.0/api/routing-policies'],
     ['PUT', 'https://xeno.local/v1.0/api/routing-policies/rpol_1'],
     ['DELETE', 'https://xeno.local/v1.0/api/routing-policies/rpol_1']
   ]);
   assert.match(fetchImpl.calls[0].options.body, /"name":"Tenant"/);
   assert.match(fetchImpl.calls[10].options.body, /"permissionIds":\["perm_1"\]/);
-  assert.match(fetchImpl.calls[15].options.body, /"modelName":"\*"/);
+  assert.match(fetchImpl.calls[17].options.body, /"principalId":"usr_1"/);
+  assert.match(fetchImpl.calls[19].options.body, /"modelName":"\*"/);
 });
 
 test('OpenAI and request history methods use expected routes', async () => {
@@ -107,6 +116,43 @@ test('OpenAI and request history methods use expected routes', async () => {
     ['GET', 'https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest'],
     ['GET', 'https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60']
   ]);
+});
+
+test('credential options send tenant and credential headers', async () => {
+  const fetchImpl = createFetch();
+  const client = new XenoClient({
+    baseUrl: 'https://xeno.local',
+    accessKey: 'xeno_access',
+    secretKey: 'secret-123',
+    tenantId: 'ten_123',
+    fetchImpl
+  });
+
+  await client.listOpenAiModels();
+
+  assert.equal(fetchImpl.calls[0].options.headers['x-access-key'], 'xeno_access');
+  assert.equal(fetchImpl.calls[0].options.headers['x-secret-key'], 'secret-123');
+  assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], 'ten_123');
+});
+
+test('OpenAI errors surface authentication and authorization status', async () => {
+  const anonymousFetch = createFetch(() => jsonResponse({ error: 'Unauthenticated', message: 'Authentication is required.' }, 401));
+  const anonymousClient = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl: anonymousFetch });
+  await assert.rejects(() => anonymousClient.listOpenAiModels(), (error) => {
+    assert.ok(error instanceof XenoApiError);
+    assert.equal(error.status, 401);
+    assert.equal(error.endpoint, '/v1/models');
+    return true;
+  });
+
+  const deniedFetch = createFetch(() => jsonResponse({ error: 'PermissionDenied', message: 'Permission denied.' }, 403));
+  const deniedClient = new XenoClient({ baseUrl: 'https://xeno.local', bearerToken: 'token-123', tenantId: 'ten_123', fetchImpl: deniedFetch });
+  await assert.rejects(() => deniedClient.createChatCompletion({ model: 'llama3.2:latest' }), (error) => {
+    assert.ok(error instanceof XenoApiError);
+    assert.equal(error.status, 403);
+    assert.equal(error.endpoint, '/v1/chat/completions');
+    return true;
+  });
 });
 
 test('client telemetry methods use expected routes and bodies', async () => {

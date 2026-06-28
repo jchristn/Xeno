@@ -12,6 +12,8 @@ export class XenoClient {
   constructor({
     baseUrl = 'http://localhost:9000',
     bearerToken = null,
+    accessKey = null,
+    secretKey = null,
     tenantId = 'ten_default',
     fetchImpl = globalThis.fetch
   } = {}) {
@@ -25,6 +27,8 @@ export class XenoClient {
 
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.bearerToken = bearerToken;
+    this.accessKey = accessKey;
+    this.secretKey = secretKey;
     this.tenantId = tenantId;
     this.fetchImpl = fetchImpl;
   }
@@ -129,6 +133,10 @@ export class XenoClient {
     return this.#request('GET', '/v1.0/api/permissions');
   }
 
+  async listGrantablePermissions() {
+    return this.#request('GET', '/v1.0/api/permissions/grantable');
+  }
+
   async createPermission(permission = {}) {
     return this.#request('POST', '/v1.0/api/permissions', permission);
   }
@@ -143,6 +151,18 @@ export class XenoClient {
 
   async listEffectivePermissions() {
     return this.#request('GET', '/v1.0/api/effective-permissions');
+  }
+
+  async listRoleAssignments() {
+    return this.#request('GET', '/v1.0/api/role-assignments');
+  }
+
+  async createRoleAssignment(assignment = {}) {
+    return this.#request('POST', '/v1.0/api/role-assignments', assignment);
+  }
+
+  async deleteRoleAssignment(id) {
+    return this.#request('DELETE', `/v1.0/api/role-assignments/${encodeURIComponent(id)}`);
   }
 
   async listAuditRecords() {
@@ -309,6 +329,14 @@ export class XenoClient {
 
     if (this.bearerToken) {
       headers.Authorization = `Bearer ${this.bearerToken}`;
+    }
+
+    if (this.accessKey) {
+      headers['x-access-key'] = this.accessKey;
+    }
+
+    if (this.secretKey) {
+      headers['x-secret-key'] = this.secretKey;
     }
 
     if (this.tenantId) {

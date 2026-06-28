@@ -24,6 +24,8 @@ namespace Xeno.Sdk.Tests
                 : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
             request.Headers.TryGetValues("x-tenant-guid", out IEnumerable<string>? tenantValues);
+            request.Headers.TryGetValues("x-access-key", out IEnumerable<string>? accessKeyValues);
+            request.Headers.TryGetValues("x-secret-key", out IEnumerable<string>? secretKeyValues);
             Requests.Add(new RecordedRequest
             {
                 Method = request.Method,
@@ -31,6 +33,8 @@ namespace Xeno.Sdk.Tests
                 Body = body,
                 AuthorizationScheme = request.Headers.Authorization?.Scheme,
                 AuthorizationParameter = request.Headers.Authorization?.Parameter,
+                AccessKey = accessKeyValues == null ? null : String.Join(",", accessKeyValues),
+                SecretKey = secretKeyValues == null ? null : String.Join(",", secretKeyValues),
                 TenantId = tenantValues == null ? null : String.Join(",", tenantValues),
                 CancellationToken = cancellationToken
             });

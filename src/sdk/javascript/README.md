@@ -17,6 +17,7 @@ import { XenoClient } from '@xeno-control-plane/sdk';
 
 const client = new XenoClient({
   baseUrl: 'http://localhost:9000',
+  bearerToken: token,
   tenantId: 'ten_default'
 });
 
@@ -31,6 +32,21 @@ Authenticated servers can pass a bearer token:
 const client = new XenoClient({ baseUrl, bearerToken: token });
 ```
 
+OpenAI-compatible routes also accept tenant-bound access credentials:
+
+```javascript
+const client = new XenoClient({
+  baseUrl,
+  tenantId: 'ten_default',
+  accessKey,
+  secretKey
+});
+```
+
+Use least-privilege credentials with `Inference.Read` and `Inference.Execute`
+for application traffic. Tenant headers select tenant context; they do not
+authenticate the request.
+
 ## Interactive Console
 
 ```bash
@@ -41,7 +57,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, tenants, users, credentials, roles, permissions, clients, advertised models, routing policies, OpenAI-compatible inference, server-collected client telemetry, request history, analytics, settings, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, server-collected client telemetry, request history, analytics, settings, backup, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

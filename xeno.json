@@ -32,7 +32,8 @@
     "Issuer": "xeno",
     "SigningKey": "development-only-change-me",
     "AdminApiKey": "xenoadmin",
-    "SessionMinutes": 60
+    "SessionMinutes": 60,
+    "MaxLoginRequestsPerMinute": 20
   },
   "RequestHistory": {
     "Enabled": true,

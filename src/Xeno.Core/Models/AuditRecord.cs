@@ -20,6 +20,16 @@ namespace Xeno.Core.Models
         public string TenantId { get; set; } = Constants.DefaultTenantId;
 
         /// <summary>
+        /// Target tenant ID for the audited operation.
+        /// </summary>
+        public string? TargetTenantId { get; set; } = null;
+
+        /// <summary>
+        /// Target resource ID for the audited operation.
+        /// </summary>
+        public string? TargetResourceId { get; set; } = null;
+
+        /// <summary>
         /// Request ID.
         /// </summary>
         public string RequestId { get; set; } = String.Empty;

@@ -231,7 +231,7 @@ function navTooltipKey(key) {
   return mapped[key] || 'tooltipGenericLink';
 }
 
-function Shell({ onLogout, onToggleTheme, theme }) {
+function Shell({ onLogout, onToggleTheme, session, theme }) {
   const { t } = useTranslation();
   const location = useLocation();
   const meta = pageMeta[location.pathname] || pageMeta['/dashboard/home'];
@@ -307,7 +307,7 @@ function Shell({ onLogout, onToggleTheme, theme }) {
             <Route path="requests" element={<RequestHistoryView />} />
             <Route path="explorer" element={<ApiExplorerView />} />
             <Route path="tenants" element={<TenantsView />} />
-            <Route path="users" element={<UsersView />} />
+            <Route path="users" element={<UsersView session={session} />} />
             <Route path="credentials" element={<CredentialsView />} />
             <Route path="security" element={<SecurityView />} />
             <Route path="clients" element={<ClientsView />} />
@@ -1030,7 +1030,7 @@ function RequestHistoryView() {
         <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
       </Panel>
       <DataTable
-        columns={['statusCode', 'method', 'path', 'model', 'selectedClientId', 'durationMs', 'createdUtc']}
+        columns={['statusCode', 'method', 'path', 'model', 'principalType', 'userId', 'credentialId', 'authScheme', 'selectedClientId', 'durationMs', 'createdUtc']}
         onDelete={(row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
           return deleteRecord(requestHistoryEndpoint, row);
@@ -1269,12 +1269,30 @@ function SecurityView() {
   const { t } = useTranslation();
   const roles = useResource('/api/v1/roles', []);
   const permissions = useResource('/api/v1/permissions', []);
+  const grantablePermissions = useResource('/api/v1/permissions/grantable', []);
+  const roleAssignments = useResource('/api/v1/roleassignments', []);
+  const users = useResource('/api/v1/users', []);
+  const credentials = useResource('/api/v1/credentials', []);
   const effective = useResource('/api/v1/effective-permissions', []);
   const audit = useResource('/api/v1/audit', []);
   const [selectedRole, setSelectedRole] = useState(null);
   const [selectedPermission, setSelectedPermission] = useState(null);
   const [creatingRole, setCreatingRole] = useState(false);
   const [creatingPermission, setCreatingPermission] = useState(false);
+  const [creatingRoleAssignment, setCreatingRoleAssignment] = useState(false);
+  const roleAssignmentRows = useMemo(() => roleAssignments.data.map((assignment) => {
+    const role = roles.data.find((item) => recordId(item) === value(assignment, 'roleId'));
+    const rolePermissionIds = Array.isArray(value(role, 'permissionIds')) ? value(role, 'permissionIds') : [];
+    const effectivePermissionItems = rolePermissionIds
+      .map((permissionId) => permissions.data.find((permission) => recordId(permission) === permissionId))
+      .filter(Boolean)
+      .map(describePermission);
+    return {
+      ...assignment,
+      roleName: value(role, 'name') || value(assignment, 'roleId'),
+      effectivePermissions: effectivePermissionItems
+    };
+  }), [permissions.data, roleAssignments.data, roles.data]);
 
   async function saveRole(roleId, payload) {
     const result = roleId
@@ -1284,6 +1302,7 @@ function SecurityView() {
     setSelectedRole(result);
     setCreatingRole(false);
     roles.refresh();
+    grantablePermissions.refresh();
     effective.refresh();
   }
 
@@ -1295,6 +1314,15 @@ function SecurityView() {
     setSelectedPermission(result);
     setCreatingPermission(false);
     permissions.refresh();
+    grantablePermissions.refresh();
+    effective.refresh();
+  }
+
+  async function saveRoleAssignment(payload) {
+    const result = await api.post('/api/v1/roleassignments', payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setCreatingRoleAssignment(false);
+    roleAssignments.refresh();
     effective.refresh();
   }
 
@@ -1303,6 +1331,7 @@ function SecurityView() {
       <div className="metric-grid compact">
         <MetricCard icon={<LockKeyhole size={18} />} label={t('roles')} value={formatNumber(roles.data.length)} />
         <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
+        <MetricCard icon={<KeyRound size={18} />} label={t('roleAssignments')} value={formatNumber(roleAssignments.data.length)} tone="info" />
         <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" />
       </div>
       <DataTable
@@ -1321,7 +1350,7 @@ function SecurityView() {
       <DataTable
         title={t('permissions')}
         rows={permissions.data}
-        columns={['id', 'tenantId', 'resourceType', 'operationType', 'permit', 'active']}
+        columns={['id', 'tenantId', 'resourceType', 'operationType', 'permit', 'builtIn', 'active']}
         onDelete={(row) => {
           if (recordId(selectedPermission) === recordId(row)) setSelectedPermission(null);
           return deleteRecord('/api/v1/permissions', row);
@@ -1331,19 +1360,45 @@ function SecurityView() {
         rowActionLabel={t('edit')}
         actions={<IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} tooltip={t('tooltipCreatePermission')} icon={<Plus size={16} />} variant="primary" />}
       />
+      <DataTable
+        title={t('roleAssignments')}
+        rows={roleAssignmentRows}
+        columns={[
+          'id',
+          'tenantId',
+          'roleId',
+          'roleName',
+          'principalType',
+          'principalId',
+          { key: 'effectivePermissions', label: 'effectivePermissions' },
+          'active'
+        ]}
+        onDelete={(row) => deleteRecord('/api/v1/roleassignments', row)}
+        onRefresh={roleAssignments.refresh}
+        actions={<IconButton onClick={() => setCreatingRoleAssignment(true)} label={t('createRoleAssignment')} tooltip={t('tooltipCreateRoleAssignment')} icon={<Plus size={16} />} variant="primary" />}
+      />
       <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} onRefresh={effective.refresh} />
       <DataTable
-        columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode']}
+        columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode', 'principalType', 'principalId', 'targetTenantId']}
         onDelete={(row) => deleteRecord('/api/v1/audit', row)}
         onRefresh={audit.refresh}
         rows={audit.data}
         subtitle={t('auditSubtitle')}
         title={t('audit')}
       />
-      {creatingRole && <RoleEditModal data={null} mode="create" onClose={() => setCreatingRole(false)} onSave={saveRole} permissions={permissions.data} />}
-      {selectedRole && <RoleEditModal data={selectedRole} onClose={() => setSelectedRole(null)} onSave={saveRole} permissions={permissions.data} />}
+      {creatingRole && <RoleEditModal data={null} mode="create" onClose={() => setCreatingRole(false)} onSave={saveRole} permissions={grantablePermissions.data} />}
+      {selectedRole && <RoleEditModal data={selectedRole} onClose={() => setSelectedRole(null)} onSave={saveRole} permissions={grantablePermissions.data} />}
       {creatingPermission && <PermissionEditModal data={null} mode="create" onClose={() => setCreatingPermission(false)} onSave={savePermission} />}
       {selectedPermission && <PermissionEditModal data={selectedPermission} onClose={() => setSelectedPermission(null)} onSave={savePermission} />}
+      {creatingRoleAssignment && (
+        <RoleAssignmentEditModal
+          credentials={credentials.data}
+          onClose={() => setCreatingRoleAssignment(false)}
+          onSave={saveRoleAssignment}
+          roles={roles.data}
+          users={users.data}
+        />
+      )}
     </div>
   );
 }
@@ -1386,7 +1441,7 @@ function TenantsView() {
   );
 }
 
-function UsersView() {
+function UsersView({ session }) {
   const { t } = useTranslation();
   const users = useResource('/api/v1/users', []);
   const [selected, setSelected] = useState(null);
@@ -1418,8 +1473,8 @@ function UsersView() {
         title={t('users')}
         actions={<IconButton onClick={() => setCreating(true)} label={t('createUser')} tooltip={t('tooltipCreateUser')} icon={<Plus size={16} />} variant="primary" />}
       />
-      {creating && <UserEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveUser} />}
-      {selected && <UserEditModal data={selected} onClose={() => setSelected(null)} onSave={saveUser} />}
+      {creating && <UserEditModal actorUser={users.data.find((item) => recordId(item) === session?.userId)} data={null} mode="create" onClose={() => setCreating(false)} onSave={saveUser} session={session} />}
+      {selected && <UserEditModal actorUser={users.data.find((item) => recordId(item) === session?.userId)} data={selected} onClose={() => setSelected(null)} onSave={saveUser} session={session} />}
     </div>
   );
 }
@@ -2713,7 +2768,7 @@ function EditRecordModal({ title, data, onClose }) {
   );
 }
 
-function UserEditModal({ data, mode = 'edit', onClose, onSave }) {
+function UserEditModal({ actorUser, data, mode = 'edit', onClose, onSave, session }) {
   const { t } = useTranslation();
   const userId = recordId(data);
   const isCreate = mode === 'create';
@@ -2728,6 +2783,11 @@ function UserEditModal({ data, mode = 'edit', onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [statusTone, setStatusTone] = useState('success');
+  const targetTenantId = value(data, 'tenantId') || session?.tenantId;
+  const actorIsSystemAdmin = value(actorUser, 'isAdmin') === true;
+  const actorIsTenantAdmin = value(actorUser, 'isTenantAdmin') === true && value(actorUser, 'tenantId') === targetTenantId;
+  const canEditSystemAdmin = actorIsSystemAdmin;
+  const canEditTenantAdmin = actorIsSystemAdmin || actorIsTenantAdmin;
 
   function updateField(key, fieldValue) {
     setDraft((current) => ({ ...current, [key]: fieldValue }));
@@ -2743,10 +2803,10 @@ function UserEditModal({ data, mode = 'edit', onClose, onSave }) {
       const payload = {
         username: draft.username,
         email: draft.email,
-        isAdmin: draft.isAdmin,
-        isTenantAdmin: draft.isTenantAdmin,
         active: draft.active
       };
+      if (canEditSystemAdmin) payload.isAdmin = draft.isAdmin;
+      if (canEditTenantAdmin) payload.isTenantAdmin = draft.isTenantAdmin;
       if (draft.password.trim()) payload.password = draft.password;
       await onSave(isCreate ? null : userId, payload);
       setDraft((current) => ({ ...current, password: '' }));
@@ -2794,11 +2854,11 @@ function UserEditModal({ data, mode = 'edit', onClose, onSave }) {
             <span>{t('active')}</span>
           </label>
           <label className="toggle-field">
-            <input checked={draft.isTenantAdmin} onChange={(event) => updateField('isTenantAdmin', event.target.checked)} type="checkbox" />
+            <input checked={draft.isTenantAdmin} disabled={!canEditTenantAdmin} onChange={(event) => updateField('isTenantAdmin', event.target.checked)} type="checkbox" />
             <span>{t('isTenantAdmin')}</span>
           </label>
           <label className="toggle-field">
-            <input checked={draft.isAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
+            <input checked={draft.isAdmin} disabled={!canEditSystemAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
             <span>{t('isAdmin')}</span>
           </label>
         </div>
@@ -3080,6 +3140,105 @@ function RoleEditModal({ data, mode = 'edit', onClose, onSave, permissions }) {
   );
 }
 
+function RoleAssignmentEditModal({ credentials, onClose, onSave, roles, users }) {
+  const { t } = useTranslation();
+  const roleRows = Array.isArray(roles) ? roles : [];
+  const userRows = Array.isArray(users) ? users : [];
+  const credentialRows = Array.isArray(credentials) ? credentials : [];
+  const [draft, setDraft] = useState(() => ({
+    roleId: recordId(roleRows[0]) || '',
+    principalType: 'User',
+    principalId: recordId(userRows[0]) || '',
+    active: true
+  }));
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState('success');
+  const principalRows = draft.principalType === 'Credential' ? credentialRows : userRows;
+
+  function updateField(key, fieldValue) {
+    setDraft((current) => ({ ...current, [key]: fieldValue }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  function updatePrincipalType(principalType) {
+    const nextRows = principalType === 'Credential' ? credentialRows : userRows;
+    setDraft((current) => ({
+      ...current,
+      principalType,
+      principalId: recordId(nextRows[0]) || ''
+    }));
+    setStatus('');
+    setStatusTone('success');
+  }
+
+  async function save() {
+    if (saving || !draft.roleId || !draft.principalId) return;
+    setSaving(true);
+    setStatus('');
+    try {
+      await onSave(draft);
+      setStatusTone('success');
+      setStatus(t('roleAssignmentSaved'));
+    } catch (error) {
+      setStatusTone('danger');
+      setStatus(error instanceof Error ? error.message : t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={saving || !draft.roleId || !draft.principalId} onClick={save} title={t('tooltipFormSave')} type="button">
+            {saving ? t('saving') : t('save')}
+          </button>
+        </>
+      )}
+      headerActions={<CopyButton label={t('copyJson')} value={stringifyJson(draft)} />}
+      onClose={onClose}
+      open
+      subtitle={t('createRoleAssignmentSubtitle')}
+      title={t('createRoleAssignment')}
+    >
+      <div className="form-stack">
+        <label className="form-field">
+          <span>{t('role')}</span>
+          <select value={draft.roleId} onChange={(event) => updateField('roleId', event.target.value)}>
+            {roleRows.map((role) => <option key={recordId(role)} value={recordId(role)}>{value(role, 'name') || recordId(role)}</option>)}
+          </select>
+        </label>
+        <label className="form-field">
+          <span>{t('principalType')}</span>
+          <select value={draft.principalType} onChange={(event) => updatePrincipalType(event.target.value)}>
+            <option value="User">{t('user')}</option>
+            <option value="Credential">{t('credential')}</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>{t('principalId')}</span>
+          <select value={draft.principalId} onChange={(event) => updateField('principalId', event.target.value)}>
+            {principalRows.map((principal) => (
+              <option key={recordId(principal)} value={recordId(principal)}>
+                {value(principal, 'email') || value(principal, 'username') || value(principal, 'accessKey') || recordId(principal)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="toggle-field">
+          <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+          <span>{t('active')}</span>
+        </label>
+        {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
+      </div>
+    </Modal>
+  );
+}
+
 function PermissionEditModal({ data, mode = 'edit', onClose, onSave }) {
   const { t } = useTranslation();
   const permissionId = recordId(data);
@@ -3093,7 +3252,7 @@ function PermissionEditModal({ data, mode = 'edit', onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [statusTone, setStatusTone] = useState('success');
-  const operationTypes = ['Read', 'Write', 'Delete', 'Admin'];
+  const operationTypes = ['Read', 'Write', 'Delete', 'Execute', 'Admin'];
 
   function updateField(key, fieldValue) {
     setDraft((current) => ({ ...current, [key]: fieldValue }));
@@ -4499,7 +4658,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
-      <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} theme={theme} /> : <Navigate replace to="/" />} />
+      <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
     </Routes>
   );
 }

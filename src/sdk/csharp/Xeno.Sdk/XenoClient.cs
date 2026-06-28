@@ -60,6 +60,16 @@ namespace Xeno.Sdk
                 _HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.BearerToken);
             }
 
+            if (!String.IsNullOrWhiteSpace(options.AccessKey) && !_HttpClient.DefaultRequestHeaders.Contains("x-access-key"))
+            {
+                _HttpClient.DefaultRequestHeaders.Add("x-access-key", options.AccessKey);
+            }
+
+            if (!String.IsNullOrWhiteSpace(options.SecretKey) && !_HttpClient.DefaultRequestHeaders.Contains("x-secret-key"))
+            {
+                _HttpClient.DefaultRequestHeaders.Add("x-secret-key", options.SecretKey);
+            }
+
             if (!String.IsNullOrWhiteSpace(options.TenantId) && !_HttpClient.DefaultRequestHeaders.Contains("x-tenant-guid"))
             {
                 _HttpClient.DefaultRequestHeaders.Add("x-tenant-guid", options.TenantId);
@@ -338,6 +348,16 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
+        /// Lists permissions the current caller may grant.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Permission array JSON.</returns>
+        public async Task<XenoApiResponse> ListGrantablePermissionsAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/permissions/grantable", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Creates a permission.
         /// </summary>
         /// <param name="permission">Permission payload.</param>
@@ -379,6 +399,38 @@ namespace Xeno.Sdk
         public async Task<XenoApiResponse> ListEffectivePermissionsAsync(CancellationToken token = default)
         {
             return await GetJsonAsync("/v1.0/api/effective-permissions", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Lists role assignments.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Role assignment array JSON.</returns>
+        public async Task<XenoApiResponse> ListRoleAssignmentsAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync("/v1.0/api/role-assignments", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates a role assignment for a user or credential principal.
+        /// </summary>
+        /// <param name="assignment">Role assignment payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Role assignment JSON.</returns>
+        public async Task<XenoApiResponse> CreateRoleAssignmentAsync(object assignment, CancellationToken token = default)
+        {
+            return await PostJsonAsync("/v1.0/api/role-assignments", assignment ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Deletes a role assignment.
+        /// </summary>
+        /// <param name="id">Role assignment identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public async Task DeleteRoleAssignmentAsync(string id, CancellationToken token = default)
+        {
+            await DeleteAsync("/v1.0/api/role-assignments/" + Escape(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
