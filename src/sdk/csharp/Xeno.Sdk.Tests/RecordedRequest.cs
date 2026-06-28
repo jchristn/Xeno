@@ -18,8 +18,6 @@ namespace Xeno.Sdk.Tests
 
         public string? AccessKey { get; set; }
 
-        public string? SecretKey { get; set; }
-
         public string? TenantId { get; set; }
 
         public CancellationToken CancellationToken { get; set; }

@@ -2,7 +2,7 @@
 
 Base URL: `http://localhost:9000`
 
-The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-scoped calls accept `x-tenant-guid`; if omitted, the seeded `ten_default` tenant is used. Tenant headers do not authenticate a caller. Protected routes require bearer auth, matching `x-token`, or direct `x-access-key` plus `x-secret-key` credentials. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, access key, and secret key material into Try it out requests.
+The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-scoped calls accept `x-tenant-guid`; if omitted, the seeded `ten_default` tenant is used. Tenant headers do not authenticate a caller. Protected routes require bearer auth, matching `x-token`, or direct `x-access-key` credentials. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, and access key material into Try it out requests.
 
 The REST API is the operator and application surface for a federated accelerator fleet. Applications use the OpenAI-compatible routes so they can call one endpoint regardless of which connected machine ultimately serves the request. Operators use the management routes to inspect clients, advertised models, telemetry, request history, routing policy, tenants, credentials, and settings for the controller.
 
@@ -74,7 +74,7 @@ All client telemetry routes are tenant-scoped and require authentication. Canoni
 
 Token issuance accepts direct credential fields. Bearer and `x-token` values must match when both are supplied.
 
-Login accepts `username`, `password`, and optional `tenantId`. It returns a generated `accessKey` and `secretKey` for client use. The user password is only accepted by the login endpoint and is never accepted on the WebSocket control plane.
+Login accepts `username`, `password`, and optional `tenantId`. It returns a generated `accessKey` for client use. The user password is only accepted by the login endpoint and is never accepted on the WebSocket control plane.
 
 Dashboard login is a multistep flow. The dashboard first resolves the server URL and user email, retrieves matching tenants, prompts for tenant only when more than one tenant is available, and then submits the password.
 
@@ -182,7 +182,7 @@ Create and update request bodies:
 
 - Tenant create/update: `name`, `active`. Create may also include `id`; if omitted, the server generates a compact PrettyId with `ten_` prefix.
 - User create/update: `username`, `email`, `isAdmin`, `isTenantAdmin`, `active`, and `password`. Password is required on create and optional on update. User responses are redacted and do not expose password material.
-- Credential create/update: `userId`, `accessKey`, `secretKey`, and `active`. Create generates access/secret keys when omitted and returns the secret once. List/update responses redact the secret key.
+- Credential create/update: `userId`, `accessKey`, and `active`. Create generates an access key when omitted. Secret keys are not accepted for credential authentication or credential updates.
 - Role create/update: `name`, `permissionIds`, and `active`.
 - Permission create/update: `resourceType`, `operationType` (`Read`, `Write`, `Delete`, `Admin`, `Execute`), `permit`, and `active`.
 - Role assignment create: `tenantId`, `roleId`, `principalType` (`User` or `Credential`), `principalId`, and `active`.
@@ -215,7 +215,7 @@ OpenAI-compatible routes are protected application APIs. `GET /v1/models`
 requires `Inference.Read`. `POST /v1/chat/completions`,
 `POST /v1/completions`, and `POST /v1/embeddings` require
 `Inference.Execute`. Authentication can use `Authorization: Bearer ...`,
-matching `x-token`, or `x-access-key` plus `x-secret-key`; the tenant header
+matching `x-token`, or `x-access-key`; the tenant header
 must match the authenticated session or credential tenant unless the caller is a
 system admin. Anonymous requests receive 401 and cannot dispatch to a connected
 client.
@@ -354,4 +354,4 @@ Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `
 Upgrades to WebSocket. Clients send `client.register` and periodic `client.heartbeat` envelopes. Server-dispatched inference requests use `server.request`; clients respond with `client.response`.
 Streaming requests use `client.response.start`, `client.response.chunk`, and `client.response.complete` frames so the server can relay chunks and persist final telemetry.
 The server waits `WebSocket.RequestTimeoutMs` for each routed inference response before returning a `504 ClientTimeout`.
-The WebSocket handshake requires `x-access-key` plus `x-secret-key`, with `x-tenant-guid`. Bearer session tokens and user passwords are rejected for client control-plane connections.
+The WebSocket handshake requires `x-access-key` with `x-tenant-guid`. Bearer session tokens, user passwords, and `x-secret-key` are rejected for client control-plane connections.

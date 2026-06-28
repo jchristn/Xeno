@@ -13,10 +13,5 @@ namespace Test.Shared
         [JsonPropertyName("accessKey")]
         public string? AccessKey { get; set; } = null;
 
-        /// <summary>
-        /// Issued secret key.
-        /// </summary>
-        [JsonPropertyName("secretKey")]
-        public string? SecretKey { get; set; } = null;
     }
 }

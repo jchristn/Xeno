@@ -378,7 +378,6 @@ namespace Test.Shared
                                 };
                                 settings.Server.Url = "ws://127.0.0.1:9000/ws/v1/clients";
                                 settings.Server.AccessKey = "default";
-                                settings.Server.SecretKey = "default";
 
                                 ClientConnectionState.MarkStarted(settings, false);
                                 ClientConnectionState started = ClientConnectionState.Load();
@@ -800,7 +799,6 @@ namespace Test.Shared
                                     clientSettings.Server.Url = "ws://127.0.0.1:" + port + settings.WebSocket.Path;
                                     clientSettings.Server.RestUrl = "http://127.0.0.1:" + port;
                                     clientSettings.Server.AccessKey = "default";
-                                    clientSettings.Server.SecretKey = "default";
                                     clientSettings.LocalDashboard.Enabled = true;
                                     clientSettings.LocalDashboard.Host = "127.0.0.1";
                                     clientSettings.LocalDashboard.Port = port;
@@ -866,15 +864,15 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "Authentication",
                         "CredentialValidation",
-                        "Direct credentials validate with constant-time secret comparison",
+                        "Direct credentials validate by tenant-bound access key",
                         executeAsync: async delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
                             await platform.InitializeAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
                             Credential credential = platform.Credentials[0];
-                            if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey, credential.SecretKey) == null) throw new InvalidOperationException("Credential did not validate.");
-                            if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey, "wrong") != null) throw new InvalidOperationException("Invalid credential validated.");
+                            if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey) == null) throw new InvalidOperationException("Credential did not validate.");
+                            if (auth.ValidateCredential(platform, credential.TenantId, "wrong") != null) throw new InvalidOperationException("Invalid credential validated.");
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
@@ -2224,7 +2222,6 @@ namespace Test.Shared
                         {
                             new OpenApiSecuritySchemeExpectation { Scheme = "xTokenAuth", Header = "x-token" },
                             new OpenApiSecuritySchemeExpectation { Scheme = "accessKeyAuth", Header = "x-access-key" },
-                            new OpenApiSecuritySchemeExpectation { Scheme = "secretKeyAuth", Header = "x-secret-key" },
                             new OpenApiSecuritySchemeExpectation { Scheme = "tenantHeader", Header = "x-tenant-guid" },
                             new OpenApiSecuritySchemeExpectation { Scheme = "tenantIdHeader", Header = "x-tenant-id" }
                         })
@@ -2451,12 +2448,12 @@ namespace Test.Shared
                         using (HttpResponseMessage createCredentialResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/credentials", JsonUtil.Serialize(new
                         {
                             accessKey = "touchstone-create-access",
-                            secretKey = "touchstone-create-secret",
                             active = true
                         })).ConfigureAwait(false))
                         {
                             string createCredentialJson = await createCredentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            if (!createCredentialResponse.IsSuccessStatusCode || !createCredentialJson.Contains("touchstone-create-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Credential create failed or did not return one-time secret: " + createCredentialJson);
+                            if (!createCredentialResponse.IsSuccessStatusCode || !createCredentialJson.Contains("touchstone-create-access", StringComparison.Ordinal)) throw new InvalidOperationException("Credential create failed: " + createCredentialJson);
+                            if (createCredentialJson.Contains("secretKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Credential create response exposed secret key material.");
                         }
 
                         string createdPermissionId = String.Empty;
@@ -2552,7 +2549,8 @@ namespace Test.Shared
                         })).ConfigureAwait(false))
                         {
                             string loginJson = await loginResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            if (!loginResponse.IsSuccessStatusCode || !loginJson.Contains("secretKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Updated user password did not validate: " + loginJson);
+                            if (!loginResponse.IsSuccessStatusCode || !loginJson.Contains("accessKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Updated user password did not validate: " + loginJson);
+                            if (loginJson.Contains("secretKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Login response exposed secret key material: " + loginJson);
                         }
 
                         string credentialId = await FirstRecordIdAsync(httpClient, baseUrl + "/v1.0/api/credentials").ConfigureAwait(false);
@@ -2560,7 +2558,6 @@ namespace Test.Shared
                         {
                             userId,
                             accessKey = "touchstone-access",
-                            secretKey = "touchstone-secret",
                             active = true
                         })).ConfigureAwait(false))
                         {
@@ -2569,7 +2566,7 @@ namespace Test.Shared
                             if (credentialJson.Contains("touchstone-secret", StringComparison.Ordinal)) throw new InvalidOperationException("Credential update response exposed raw secret key.");
                         }
 
-                        using (HttpResponseMessage tokenResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"touchstone-access\",\"secretKey\":\"touchstone-secret\"}").ConfigureAwait(false))
+                        using (HttpResponseMessage tokenResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/token", "{\"accessKey\":\"touchstone-access\"}").ConfigureAwait(false))
                         {
                             string tokenJson = await tokenResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!tokenResponse.IsSuccessStatusCode || !tokenJson.Contains("token", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Updated credential did not validate: " + tokenJson);
@@ -2753,7 +2750,6 @@ namespace Test.Shared
                     clientSettings.Server.Url = "ws://127.0.0.1:" + port + settings.WebSocket.Path;
                     clientSettings.Server.RestUrl = "http://127.0.0.1:" + port;
                     clientSettings.Server.AccessKey = "default";
-                    clientSettings.Server.SecretKey = "default";
                     clientSettings.LocalDashboard.Enabled = true;
                     clientSettings.LocalDashboard.Host = "127.0.0.1";
                     clientSettings.LocalDashboard.Port = dashboardPort;
@@ -3154,10 +3150,10 @@ namespace Test.Shared
                         using (ClientWebSocket socket = new ClientWebSocket())
                         {
                             string accessKey = login.AccessKey ?? String.Empty;
-                            string secretKey = login.SecretKey ?? String.Empty;
-                            if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey)) throw new InvalidOperationException("Login did not return a credential.");
+                            if (String.IsNullOrWhiteSpace(accessKey)) throw new InvalidOperationException("Login did not return a credential.");
+                            if (responseBody.Contains("secretKey", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Login response exposed secret key material.");
 
-                            ApplyCredentialHeaders(socket, accessKey, secretKey);
+                            ApplyCredentialHeaders(socket, accessKey);
                             await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
                             string? connected = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
                             if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Authenticated WebSocket did not connect: " + connected);
@@ -3385,14 +3381,13 @@ namespace Test.Shared
 
         private static void ApplySeedCredentialHeaders(ClientWebSocket socket)
         {
-            ApplyCredentialHeaders(socket, "default", "default");
+            ApplyCredentialHeaders(socket, "default");
         }
 
-        private static void ApplyCredentialHeaders(ClientWebSocket socket, string accessKey, string secretKey)
+        private static void ApplyCredentialHeaders(ClientWebSocket socket, string accessKey)
         {
             socket.Options.SetRequestHeader("x-tenant-guid", Constants.DefaultTenantId);
             socket.Options.SetRequestHeader("x-access-key", accessKey);
-            socket.Options.SetRequestHeader("x-secret-key", secretKey);
         }
 
         private static async Task AuthenticateSeedAdminAsync(HttpClient httpClient, string baseUrl)

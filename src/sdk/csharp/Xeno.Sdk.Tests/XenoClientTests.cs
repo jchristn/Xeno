@@ -123,7 +123,6 @@ namespace Xeno.Sdk.Tests
             {
                 BaseUrl = "https://xeno.local",
                 AccessKey = "xeno_access",
-                SecretKey = "secret-123",
                 TenantId = "ten_123",
                 HttpClient = httpClient
             }))
@@ -132,7 +131,6 @@ namespace Xeno.Sdk.Tests
 
                 RecordedRequest request = Assert.Single(handler.Requests);
                 Assert.Equal("xeno_access", request.AccessKey);
-                Assert.Equal("secret-123", request.SecretKey);
                 Assert.Equal("ten_123", request.TenantId);
             }
         }

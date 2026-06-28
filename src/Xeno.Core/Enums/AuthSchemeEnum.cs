@@ -17,7 +17,7 @@ namespace Xeno.Core.Enums
         Bearer = 1,
 
         /// <summary>
-        /// Direct access key and secret key credential.
+        /// Direct access key credential.
         /// </summary>
         Credential = 2,
 

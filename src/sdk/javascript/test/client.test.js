@@ -118,12 +118,11 @@ test('OpenAI and request history methods use expected routes', async () => {
   ]);
 });
 
-test('credential options send tenant and credential headers', async () => {
+test('credential options send tenant and access key headers', async () => {
   const fetchImpl = createFetch();
   const client = new XenoClient({
     baseUrl: 'https://xeno.local',
     accessKey: 'xeno_access',
-    secretKey: 'secret-123',
     tenantId: 'ten_123',
     fetchImpl
   });
@@ -131,7 +130,7 @@ test('credential options send tenant and credential headers', async () => {
   await client.listOpenAiModels();
 
   assert.equal(fetchImpl.calls[0].options.headers['x-access-key'], 'xeno_access');
-  assert.equal(fetchImpl.calls[0].options.headers['x-secret-key'], 'secret-123');
+  assert.equal(fetchImpl.calls[0].options.headers['x-secret-key'], undefined);
   assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], 'ten_123');
 });
 

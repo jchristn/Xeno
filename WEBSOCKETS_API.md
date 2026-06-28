@@ -63,7 +63,6 @@ Required headers:
 | --- | --- | --- |
 | `x-tenant-guid` | yes | Tenant ID for the client session. |
 | `x-access-key` | yes | Client credential access key. |
-| `x-secret-key` | yes | Client credential secret key. |
 
 Alternative tenant header:
 
@@ -71,8 +70,9 @@ Alternative tenant header:
 | --- | --- |
 | `x-tenant-id` | Accepted as an alias for `x-tenant-guid`. |
 
-Authentication succeeds only when the access key and secret key belong to the
-same tenant as the supplied tenant header.
+Authentication succeeds only when the access key belongs to the same tenant as
+the supplied tenant header. The `x-secret-key` header is rejected and must not be
+sent.
 
 If authentication fails, the server sends an error frame when possible and then
 closes the socket with a policy violation close status.
@@ -82,7 +82,7 @@ Unauthorized frame:
 ```json
 {
   "type": "server.unauthorized",
-  "message": "WebSocket authentication requires a client access key and secret key."
+  "message": "WebSocket authentication requires a client access key."
 }
 ```
 
@@ -886,8 +886,7 @@ Completed request req_mqtzhioy_ckNhBWiqCZ8Kd7u1znO for 172.18.0.1: POST /v1/chat
 
 A custom client must:
 
-1. Open the configured WebSocket URL with `x-tenant-guid`, `x-access-key`, and
-   `x-secret-key`.
+1. Open the configured WebSocket URL with `x-tenant-guid` and `x-access-key`.
 2. Wait for `server.connected`.
 3. Send `client.register` with tenant ID, client ID if known, name, providers,
    and models.

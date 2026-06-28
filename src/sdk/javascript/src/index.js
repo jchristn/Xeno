@@ -13,7 +13,6 @@ export class XenoClient {
     baseUrl = 'http://localhost:9000',
     bearerToken = null,
     accessKey = null,
-    secretKey = null,
     tenantId = 'ten_default',
     fetchImpl = globalThis.fetch
   } = {}) {
@@ -28,7 +27,6 @@ export class XenoClient {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.bearerToken = bearerToken;
     this.accessKey = accessKey;
-    this.secretKey = secretKey;
     this.tenantId = tenantId;
     this.fetchImpl = fetchImpl;
   }
@@ -49,8 +47,8 @@ export class XenoClient {
     return this.#request('POST', '/v1.0/api/auth/login', { username, password, tenantId });
   }
 
-  async createToken(accessKey, secretKey) {
-    return this.#request('POST', '/v1.0/api/auth/token', { accessKey, secretKey });
+  async createToken(accessKey) {
+    return this.#request('POST', '/v1.0/api/auth/token', { accessKey });
   }
 
   async getTokenDetails() {
@@ -333,10 +331,6 @@ export class XenoClient {
 
     if (this.accessKey) {
       headers['x-access-key'] = this.accessKey;
-    }
-
-    if (this.secretKey) {
-      headers['x-secret-key'] = this.secretKey;
     }
 
     if (this.tenantId) {

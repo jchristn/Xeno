@@ -105,12 +105,11 @@ namespace Xeno.Core.Services
         /// <param name="platform">Platform state.</param>
         /// <param name="tenantId">Tenant ID.</param>
         /// <param name="accessKey">Access key.</param>
-        /// <param name="secretKey">Secret key.</param>
         /// <returns>Credential when valid.</returns>
-        public Credential? ValidateCredential(XenoPlatform platform, string tenantId, string accessKey, string secretKey)
+        public Credential? ValidateCredential(XenoPlatform platform, string tenantId, string accessKey)
         {
             if (platform == null) throw new ArgumentNullException(nameof(platform));
-            if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey)) return null;
+            if (String.IsNullOrWhiteSpace(accessKey)) return null;
 
             Credential? credential = platform.Credentials.FirstOrDefault(item =>
                 item.TenantId == tenantId &&
@@ -119,7 +118,7 @@ namespace Xeno.Core.Services
             if (credential == null) return null;
             if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
             if (!platform.Users.Any(item => item.Id == credential.UserId && item.TenantId == tenantId && item.Active)) return null;
-            return ValidateStoredSecret(credential.SecretKey, secretKey) ? credential : null;
+            return credential;
         }
 
         /// <summary>

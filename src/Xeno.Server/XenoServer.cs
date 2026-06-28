@@ -212,13 +212,6 @@ namespace Xeno.Server
                 Name = "x-access-key",
                 Description = "Tenant-bound Xeno credential access key."
             };
-            schemes["secretKeyAuth"] = new OpenApiSecurityScheme
-            {
-                Type = "apiKey",
-                In = "header",
-                Name = "x-secret-key",
-                Description = "Tenant-bound Xeno credential secret key."
-            };
             schemes["tenantHeader"] = new OpenApiSecurityScheme
             {
                 Type = "apiKey",
@@ -498,16 +491,14 @@ namespace Xeno.Server
             if (method == HttpMethod.POST && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
             {
                 return JsonBody(
-                    "Credential token request. Access and secret keys may also be supplied as x-access-key and x-secret-key headers.",
+                    "Credential token request. The access key may also be supplied as an x-access-key header.",
                     ObjectSchemaMetadata(
                         "Credential token request.",
-                        new[] { "accessKey", "secretKey" },
-                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Client access key.")),
-                        SchemaProperty("secretKey", OpenApiSchemaMetadata.String("Client secret key."))),
+                        new[] { "accessKey" },
+                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Client access key."))),
                     new Dictionary<string, object>
                     {
-                        ["accessKey"] = "default",
-                        ["secretKey"] = "default"
+                        ["accessKey"] = "default"
                     });
             }
 
@@ -592,20 +583,18 @@ namespace Xeno.Server
             if (method == HttpMethod.POST && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
             {
                 return JsonBody(
-                    "Credential create request. The secret key is returned once.",
+                    "Credential create request.",
                     ObjectSchemaMetadata(
                         "Credential create request.",
                         Array.Empty<string>(),
                         SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Tenant identifier.")),
                         SchemaProperty("userId", OpenApiSchemaMetadata.String("Owning user ID.")),
                         SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Optional access key. Generated when omitted.")),
-                        SchemaProperty("secretKey", OpenApiSchemaMetadata.String("Optional secret key. Generated when omitted.")),
                         SchemaProperty("active", BooleanSchemaMetadata("Whether the credential is active."))),
                     new Dictionary<string, object>
                     {
                         ["userId"] = "usr_example",
                         ["accessKey"] = "default",
-                        ["secretKey"] = "default",
                         ["active"] = true
                     });
             }
@@ -619,7 +608,6 @@ namespace Xeno.Server
                         Array.Empty<string>(),
                         SchemaProperty("userId", OpenApiSchemaMetadata.String("Owning user ID.")),
                         SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Access key.")),
-                        SchemaProperty("secretKey", OpenApiSchemaMetadata.String("Optional replacement secret key.")),
                         SchemaProperty("active", BooleanSchemaMetadata("Whether the credential is active."))),
                     new Dictionary<string, object>
                     {
@@ -1382,7 +1370,7 @@ namespace Xeno.Server
             if (method == "POST" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
             {
                 await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                Credential credential = CreateCredential(requestContext, context, out string plainSecretKey);
+                Credential credential = CreateCredential(requestContext, context);
                 RequirePlatform().Credentials.Add(credential);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new
@@ -1391,9 +1379,7 @@ namespace Xeno.Server
                     credential.TenantId,
                     credential.UserId,
                     credential.AccessKey,
-                    SecretKey = plainSecretKey,
-                    credential.Active,
-                    warning = "SecretKey is shown once. Store it securely."
+                    credential.Active
                 }).ConfigureAwait(false);
                 return;
             }
@@ -3551,9 +3537,10 @@ namespace Xeno.Server
             AuthTokenRequest body = ReadJsonBody<AuthTokenRequest>(context);
             string accessKey = FirstNonEmpty(body.AccessKey, context.Request.Headers.Get("x-access-key"));
             string secretKey = FirstNonEmpty(body.SecretKey, context.Request.Headers.Get("x-secret-key"));
+            if (!String.IsNullOrWhiteSpace(secretKey)) throw new UnauthorizedAccessException("Secret keys are not accepted for credential token authentication.");
 
             XenoPlatform platform = RequirePlatform();
-            Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey, secretKey);
+            Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey);
             if (credential == null)
             {
                 _Authentication.AppendAudit(platform, requestContext, "Authentication", OperationTypeEnum.Read, false, "InvalidCredential", 401);
@@ -3603,13 +3590,12 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Invalid username or password.");
             }
 
-            string secretKey = _Authentication.GenerateSecret();
             Credential credential = new Credential
             {
                 TenantId = tenantId,
                 UserId = user.Id,
                 AccessKey = IdGenerator.NewId("xeno_"),
-                SecretKey = _Authentication.HashCredentialSecret(secretKey),
+                SecretKey = _Authentication.HashCredentialSecret(_Authentication.GenerateSecret()),
                 Active = true
             };
             platform.Credentials.Add(credential);
@@ -3621,9 +3607,7 @@ namespace Xeno.Server
                 tenantId = credential.TenantId,
                 userId = credential.UserId,
                 accessKey = credential.AccessKey,
-                secretKey = secretKey,
-                authScheme = "Credential",
-                warning = "SecretKey is shown once. The Xeno client stores this credential; it does not store the user's password."
+                authScheme = "Credential"
             }).ConfigureAwait(false);
         }
 
@@ -3856,10 +3840,11 @@ namespace Xeno.Server
             return user;
         }
 
-        private Credential CreateCredential(RequestContext requestContext, HttpContextBase context, out string plainSecretKey)
+        private Credential CreateCredential(RequestContext requestContext, HttpContextBase context)
         {
             XenoPlatform platform = RequirePlatform();
             CredentialSaveRequest body = ReadJsonBody<CredentialSaveRequest>(context);
+            if (!String.IsNullOrWhiteSpace(body.SecretKey)) throw new ArgumentException("Secret keys are not accepted for credential creation.");
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
             if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
             string userId = FirstNonEmpty(body.UserId, requestContext.UserId);
@@ -3874,14 +3859,12 @@ namespace Xeno.Server
 
             string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
             if (platform.Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
-            string secretKey = FirstNonEmpty(body.SecretKey, _Authentication.GenerateSecret());
-            plainSecretKey = secretKey;
             Credential credential = new Credential
             {
                 TenantId = tenantId,
                 UserId = userId,
                 AccessKey = accessKey,
-                SecretKey = _Authentication.HashCredentialSecret(secretKey),
+                SecretKey = _Authentication.HashCredentialSecret(_Authentication.GenerateSecret()),
                 Active = true
             };
             if (body.Active.HasValue) credential.Active = body.Active.Value;
@@ -4209,8 +4192,7 @@ namespace Xeno.Server
                 credential.AccessKey = accessKey.Trim();
             }
 
-            string? secretKey = body.SecretKey;
-            if (!String.IsNullOrWhiteSpace(secretKey)) credential.SecretKey = _Authentication.HashCredentialSecret(secretKey);
+            if (!String.IsNullOrWhiteSpace(body.SecretKey)) throw new ArgumentException("Secret keys are not accepted for credential updates.");
             if (body.Active.HasValue) credential.Active = body.Active.Value;
             return credential;
         }
@@ -4433,6 +4415,7 @@ namespace Xeno.Server
             string sessionToken = FirstNonEmpty(bearerToken, tokenHeader);
             string accessKey = context.Request.Headers.Get("x-access-key") ?? String.Empty;
             string secretKey = context.Request.Headers.Get("x-secret-key") ?? String.Empty;
+            if (!String.IsNullOrWhiteSpace(secretKey)) throw new UnauthorizedAccessException("x-secret-key is not accepted for authentication.");
 
             RequestContext requestContext = new RequestContext
             {
@@ -4455,9 +4438,9 @@ namespace Xeno.Server
                 return requestContext;
             }
 
-            if (!String.IsNullOrWhiteSpace(accessKey) || !String.IsNullOrWhiteSpace(secretKey))
+            if (!String.IsNullOrWhiteSpace(accessKey))
             {
-                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey, secretKey);
+                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey);
                 if (credential == null) throw new UnauthorizedAccessException("Invalid credential.");
                 requestContext.IsAuthenticated = true;
                 requestContext.CredentialId = credential.Id;
@@ -4482,11 +4465,12 @@ namespace Xeno.Server
             string tokenHeader = context.Request.Headers.Get("x-token") ?? String.Empty;
             if (!String.IsNullOrWhiteSpace(authorization) || !String.IsNullOrWhiteSpace(tokenHeader))
             {
-                throw new UnauthorizedAccessException("WebSocket clients must authenticate with x-access-key/x-secret-key, not bearer tokens or user passwords.");
+                throw new UnauthorizedAccessException("WebSocket clients must authenticate with x-access-key, not bearer tokens or user passwords.");
             }
 
             string accessKey = context.Request.Headers.Get("x-access-key") ?? String.Empty;
             string secretKey = context.Request.Headers.Get("x-secret-key") ?? String.Empty;
+            if (!String.IsNullOrWhiteSpace(secretKey)) throw new UnauthorizedAccessException("x-secret-key is not accepted for WebSocket authentication.");
             RequestContext requestContext = new RequestContext
             {
                 TenantId = tenantId,
@@ -4494,9 +4478,9 @@ namespace Xeno.Server
                 IsAuthenticated = false
             };
 
-            if (!String.IsNullOrWhiteSpace(accessKey) || !String.IsNullOrWhiteSpace(secretKey))
+            if (!String.IsNullOrWhiteSpace(accessKey))
             {
-                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey, secretKey);
+                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey);
                 if (credential == null) throw new UnauthorizedAccessException("Invalid WebSocket credential.");
                 requestContext.IsAuthenticated = true;
                 requestContext.CredentialId = credential.Id;
@@ -4506,7 +4490,7 @@ namespace Xeno.Server
                 return requestContext;
             }
 
-            throw new UnauthorizedAccessException("WebSocket authentication requires a client access key and secret key.");
+            throw new UnauthorizedAccessException("WebSocket authentication requires a client access key.");
         }
 
         private static string ResolveTenantId(HttpContextBase context, string? bodyTenantId)
@@ -4564,14 +4548,12 @@ namespace Xeno.Server
 
         private static object RedactCredential(Credential credential)
         {
-            string suffix = credential.SecretKey.Length > 4 ? credential.SecretKey.Substring(credential.SecretKey.Length - 4) : credential.SecretKey;
             return new
             {
                 credential.Id,
                 credential.TenantId,
                 credential.UserId,
                 credential.AccessKey,
-                secretKey = "****" + suffix,
                 credential.Active
             };
         }
@@ -4807,8 +4789,8 @@ namespace Xeno.Server
                     ["/v1.0/api/tenants/{id}"] = Path(Operation("put", "updateTenant", "Tenants", "Update tenant", "Updates tenant name and active state.", "Tenant", true), Operation("delete", "deleteTenant", "Tenants", "Delete tenant", "Deletes a tenant and its scoped records.", "GenericObject", true)),
                     ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true), Operation("post", "createUser", "Tenants", "Create user", "Creates a tenant user with a required password.", "User", true)),
                     ["/v1.0/api/users/{id}"] = Path(Operation("put", "updateUser", "Tenants", "Update user", "Updates tenant user profile, admin flags, active state, and optional password.", "User", true), Operation("delete", "deleteUser", "Tenants", "Delete user", "Deletes a tenant user and related sessions or credentials.", "GenericObject", true)),
-                    ["/v1.0/api/credentials"] = Path(Operation("get", "listCredentials", "Tenants", "List credentials", "Lists tenant credentials with redacted secrets.", "CredentialArray", true), Operation("post", "createCredential", "Tenants", "Create credential", "Creates a tenant credential and returns the secret once.", "Credential", true)),
-                    ["/v1.0/api/credentials/{id}"] = Path(Operation("put", "updateCredential", "Tenants", "Update credential", "Updates credential user, access key, optional secret key, and active state.", "Credential", true), Operation("delete", "deleteCredential", "Tenants", "Delete credential", "Deletes a credential and related sessions.", "GenericObject", true)),
+                    ["/v1.0/api/credentials"] = Path(Operation("get", "listCredentials", "Tenants", "List credentials", "Lists tenant credentials.", "CredentialArray", true), Operation("post", "createCredential", "Tenants", "Create credential", "Creates a tenant credential.", "Credential", true)),
+                    ["/v1.0/api/credentials/{id}"] = Path(Operation("put", "updateCredential", "Tenants", "Update credential", "Updates credential user, access key, and active state.", "Credential", true), Operation("delete", "deleteCredential", "Tenants", "Delete credential", "Deletes a credential and related sessions.", "GenericObject", true)),
                     ["/v1.0/api/roles"] = Path(Operation("get", "listRoles", "Authorization", "List roles", "Lists tenant roles.", "RoleArray", true), Operation("post", "createRole", "Authorization", "Create role", "Creates a tenant role.", "Role", true)),
                     ["/v1.0/api/roles/{id}"] = Path(Operation("put", "updateRole", "Authorization", "Update role", "Updates role name, permission assignments, and active state.", "Role", true), Operation("delete", "deleteRole", "Authorization", "Delete role", "Deletes a tenant role and related assignments.", "GenericObject", true)),
                     ["/v1.0/api/permissions"] = Path(Operation("get", "listPermissions", "Authorization", "List permissions", "Lists tenant permissions.", "PermissionArray", true), Operation("post", "createPermission", "Authorization", "Create permission", "Creates a tenant permission.", "Permission", true)),
@@ -4863,14 +4845,13 @@ namespace Xeno.Server
                         ["bearerAuth"] = new { type = "http", scheme = "bearer", bearerFormat = "Xeno token", description = "Bearer token returned by /v1.0/api/auth/token." },
                         ["xTokenAuth"] = new { type = "apiKey", @in = "header", name = "x-token", description = "Xeno bearer token supplied as an x-token header." },
                         ["accessKeyAuth"] = new { type = "apiKey", @in = "header", name = "x-access-key", description = "Tenant-bound Xeno credential access key." },
-                        ["secretKeyAuth"] = new { type = "apiKey", @in = "header", name = "x-secret-key", description = "Tenant-bound Xeno credential secret key." },
                         ["tenantHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-guid", description = "Optional tenant identifier. Defaults to ten_default when omitted." },
                         ["tenantIdHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-id", description = "Alternate optional tenant identifier header." }
                     },
                     schemas = new Dictionary<string, object>
                     {
                         ["HealthResponse"] = ObjectSchema(Property("status", StringSchema()), Property("product", StringSchema()), Property("version", StringSchema())),
-                        ["CredentialLoginResponse"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("userId", StringSchema()), Property("accessKey", StringSchema()), Property("secretKey", StringSchema()), Property("authScheme", StringSchema())),
+                        ["CredentialLoginResponse"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("userId", StringSchema()), Property("accessKey", StringSchema()), Property("authScheme", StringSchema())),
                         ["TokenResponse"] = ObjectSchema(Property("token", StringSchema()), Property("tokenType", StringSchema()), Property("tenantId", StringSchema()), Property("expiresUtc", StringSchema("date-time"))),
                         ["TenantArray"] = ArraySchema("Tenant"),
                         ["UserArray"] = ArraySchema("User"),
@@ -5111,8 +5092,7 @@ namespace Xeno.Server
         tenantId: 'xeno-tenant-id',
         bearerToken: 'xeno-bearer-token',
         xToken: 'xeno-token',
-        accessKey: 'xeno-access-key',
-        secretKey: 'xeno-secret-key'
+        accessKey: 'xeno-access-key'
       };
 
       function loadAuth() {
@@ -5171,7 +5151,6 @@ namespace Xeno.Server
         if (auth.bearerToken) request.headers.Authorization = bearerHeader(auth.bearerToken);
         if (auth.xToken) request.headers['x-token'] = auth.xToken;
         if (auth.accessKey) request.headers['x-access-key'] = auth.accessKey;
-        if (auth.secretKey) request.headers['x-secret-key'] = auth.secretKey;
         return request;
       }
 
@@ -5181,7 +5160,6 @@ namespace Xeno.Server
         if (auth.bearerToken) ui.preauthorizeApiKey('bearerAuth', auth.bearerToken.replace(/^Bearer\s+/i, ''));
         if (auth.xToken) ui.preauthorizeApiKey('xTokenAuth', auth.xToken);
         if (auth.accessKey) ui.preauthorizeApiKey('accessKeyAuth', auth.accessKey);
-        if (auth.secretKey) ui.preauthorizeApiKey('secretKeyAuth', auth.secretKey);
         if (auth.tenantId) ui.preauthorizeApiKey('tenantHeader', auth.tenantId);
       }
 
@@ -5342,11 +5320,10 @@ namespace Xeno.Server
             {
                 return JsonRequestBody(
                     "Credential token request.",
-                    ObjectSchema(Property("accessKey", StringSchema()), Property("secretKey", StringSchema())),
+                    ObjectSchema(Property("accessKey", StringSchema())),
                     new Dictionary<string, object>
                     {
-                        ["accessKey"] = "default",
-                        ["secretKey"] = "default"
+                        ["accessKey"] = "default"
                     });
             }
 
@@ -5397,13 +5374,11 @@ namespace Xeno.Server
                         Property("tenantId", StringSchema()),
                         Property("userId", StringSchema()),
                         Property("accessKey", StringSchema()),
-                        Property("secretKey", StringSchema()),
                         Property("active", BooleanSchema())),
                     new Dictionary<string, object>
                     {
                         ["userId"] = "usr_example",
                         ["accessKey"] = "default",
-                        ["secretKey"] = "default",
                         ["active"] = true
                     });
             }
@@ -5664,8 +5639,7 @@ namespace Xeno.Server
                 new Dictionary<string, object> { ["xTokenAuth"] = Array.Empty<string>() },
                 new Dictionary<string, object>
                 {
-                    ["accessKeyAuth"] = Array.Empty<string>(),
-                    ["secretKeyAuth"] = Array.Empty<string>()
+                    ["accessKeyAuth"] = Array.Empty<string>()
                 }
             };
         }

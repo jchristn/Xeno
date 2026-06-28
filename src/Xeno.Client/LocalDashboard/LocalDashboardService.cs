@@ -551,14 +551,13 @@ namespace Xeno.Client.LocalDashboard
                     Url = _Settings.Server.Url,
                     RestUrl = _Settings.Server.RestUrl,
                     AccessKey = _Settings.Server.AccessKey,
-                    SecretKey = _Settings.Server.SecretKey,
+                    SecretKey = null,
                     Token = _Settings.Server.Token
                 },
                 LocalDashboard = _Settings.LocalDashboard,
                 Telemetry = _Settings.Telemetry,
                 Providers = _Settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList()
             };
-            copy.Server.SecretKey = String.IsNullOrWhiteSpace(copy.Server.SecretKey) ? null : "configured";
             copy.Server.Token = String.IsNullOrWhiteSpace(copy.Server.Token) ? null : "configured";
             return copy;
         }

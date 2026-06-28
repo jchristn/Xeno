@@ -38,8 +38,7 @@ OpenAI-compatible routes also accept tenant-bound access credentials:
 const client = new XenoClient({
   baseUrl,
   tenantId: 'ten_default',
-  accessKey,
-  secretKey
+  accessKey
 });
 ```
 

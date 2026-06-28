@@ -59,7 +59,7 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 
 1. The Xeno server starts a REST API, OpenAPI/Swagger endpoint, dashboard-facing management API, database layer, and WebSocket endpoint.
 2. A user logs in through the `xeno` client. The password is used only to bootstrap a tenant-bound client credential.
-3. The client stores an access key and secret key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
+3. The client stores an access key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
 4. The client connects to `/ws/v1/clients`, authenticates with its access credential, and advertises machine inventory, provider endpoints, and models.
 5. Applications call the Xeno OpenAI-compatible API.
 6. The server authenticates the caller, verifies tenant-scoped inference permission, resolves the tenant's effective routing policy, then selects a connected client that advertises the requested model.
@@ -101,7 +101,6 @@ Seeded alpha credentials:
 - Dashboard/server user: `admin@xeno`
 - Password: `password`
 - Default client access key: `default`
-- Default client secret key: `default`
 
 The Docker images are:
 
@@ -275,8 +274,7 @@ curl http://localhost:9000/v1.0/api/auth/token \
   -H "Content-Type: application/json" \
   -H "x-tenant-guid: ten_default" \
   -d '{
-    "accessKey": "default",
-    "secretKey": "default"
+    "accessKey": "default"
   }'
 ```
 
@@ -321,8 +319,8 @@ curl http://localhost:9000/v1/chat/completions \
 ```
 
 The same bearer token is used for management APIs. Client WebSocket
-connections are different: they authenticate with `x-access-key`,
-`x-secret-key`, and `x-tenant-guid`, not bearer tokens. Use the dashboard,
+connections are different: they authenticate with `x-access-key` and
+`x-tenant-guid`, not bearer tokens. Use the dashboard,
 Swagger UI, Postman collection, or SDK console apps to explore the full API
 surface.
 
@@ -461,7 +459,7 @@ Xeno is alpha software. Do not expose a development deployment directly to the p
 - Put public deployments behind TLS and a trusted reverse proxy.
 - Keep `Rest.RequireAuthentication` enabled outside local development.
 - Rotate seeded development credentials before real use.
-- Store client access keys and secret keys carefully.
+- Store client access keys carefully.
 - Use least-privilege inference credentials for application traffic instead of system-admin credentials.
 - Avoid committing provider credentials or private endpoints.
 - Use least-privilege database credentials in non-development deployments.

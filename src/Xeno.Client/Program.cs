@@ -509,13 +509,13 @@ namespace Xeno.Client
             {
                 settings.Server.Token = args[2];
                 settings.Save();
-                WriteWarning("Saved a REST token. WebSocket connections require xeno login or xeno set-auth --access-key/--secret-key.");
+                WriteWarning("Saved a REST token. WebSocket connections require xeno login or xeno set-auth --access-key.");
                 return 0;
             }
 
-            if (args.Length >= 4 && args[1] == "set-credential")
+            if (args.Length >= 3 && args[1] == "set-credential")
             {
-                return HandleSetAuth(new[] { "set-auth", "--access-key", args[2], "--secret-key", args[3] }, settings);
+                return HandleSetAuth(new[] { "set-auth", "--access-key", args[2] }, settings);
             }
 
             PrintAuthHelp();
@@ -525,13 +525,11 @@ namespace Xeno.Client
         private static int HandleSetAuth(string[] args, ClientSettings settings)
         {
             string? accessKey = null;
-            string? secretKey = null;
             bool clear = false;
 
-            if (args.Length == 3 && !args[1].StartsWith("-", StringComparison.Ordinal) && !args[2].StartsWith("-", StringComparison.Ordinal))
+            if (args.Length >= 2 && !args[1].StartsWith("-", StringComparison.Ordinal))
             {
                 accessKey = args[1];
-                secretKey = args[2];
             }
 
             for (int i = 1; i < args.Length; i++)
@@ -548,12 +546,6 @@ namespace Xeno.Client
                     continue;
                 }
 
-                if (args[i] == "--secret-key" && i + 1 < args.Length)
-                {
-                    secretKey = args[++i];
-                    continue;
-                }
-
             }
 
             if (clear)
@@ -566,13 +558,13 @@ namespace Xeno.Client
                 return 0;
             }
 
-            if (!String.IsNullOrWhiteSpace(accessKey) && !String.IsNullOrWhiteSpace(secretKey))
+            if (!String.IsNullOrWhiteSpace(accessKey))
             {
                 settings.Server.AccessKey = accessKey;
-                settings.Server.SecretKey = secretKey;
+                settings.Server.SecretKey = null;
                 settings.Server.Token = null;
                 settings.Save();
-                WriteSuccess("Saved access key and secret key for server authentication.");
+                WriteSuccess("Saved access key for server authentication.");
                 return 0;
             }
 
@@ -652,9 +644,8 @@ namespace Xeno.Client
 
                     LoginCredentialResponse? credential = JsonUtil.Deserialize<LoginCredentialResponse>(responseBody);
                     string? accessKey = credential?.AccessKey;
-                    string? secretKey = credential?.SecretKey;
                     string? returnedTenantId = credential?.TenantId;
-                    if (String.IsNullOrWhiteSpace(accessKey) || String.IsNullOrWhiteSpace(secretKey))
+                    if (String.IsNullOrWhiteSpace(accessKey))
                     {
                         WriteError("Login response did not include a client credential.");
                         return 1;
@@ -662,7 +653,7 @@ namespace Xeno.Client
 
                     settings.TenantId = String.IsNullOrWhiteSpace(returnedTenantId) ? tenantId : returnedTenantId;
                     settings.Server.AccessKey = accessKey;
-                    settings.Server.SecretKey = secretKey;
+                    settings.Server.SecretKey = null;
                     settings.Server.Token = null;
                     settings.Save();
                 }
@@ -1042,7 +1033,7 @@ namespace Xeno.Client
             EnsureClientId(settings);
             if (!HasWebSocketCredential(settings))
             {
-                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key and secret key before connecting.");
+                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key before connecting.");
             }
 
             ClientConnectionState existing = ClientConnectionState.Load();
@@ -1158,7 +1149,7 @@ namespace Xeno.Client
             EnsureClientId(settings);
             if (!HasWebSocketCredential(settings))
             {
-                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key and secret key before connecting.");
+                throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key before connecting.");
             }
 
             WriteConnectionAttempt(settings);
@@ -1655,19 +1646,12 @@ namespace Xeno.Client
                 socket.Options.SetRequestHeader("x-access-key", settings.Server.AccessKey);
             }
 
-            if (!String.IsNullOrWhiteSpace(settings.Server.SecretKey))
-            {
-                socket.Options.SetRequestHeader("x-secret-key", settings.Server.SecretKey);
-            }
-
             socket.Options.SetRequestHeader("x-tenant-guid", settings.TenantId);
         }
 
         private static bool HasWebSocketCredential(ClientSettings settings)
         {
-            bool hasDirectCredential = !String.IsNullOrWhiteSpace(settings.Server.AccessKey) &&
-                                       !String.IsNullOrWhiteSpace(settings.Server.SecretKey);
-            return hasDirectCredential;
+            return !String.IsNullOrWhiteSpace(settings.Server.AccessKey);
         }
 
         private static string EnsureClientId(ClientSettings settings)
@@ -2205,7 +2189,6 @@ namespace Xeno.Client
             Console.WriteLine("  WebSocket:  " + settings.Server.Url);
             Console.WriteLine("  REST:       " + DisplayValue(settings.Server.RestUrl, "(derived from WebSocket URL)"));
             Console.WriteLine("  Access key: " + DisplayValue(settings.Server.AccessKey, "(not set)"));
-            Console.WriteLine("  Secret key: " + MaskSecret(settings.Server.SecretKey));
             Console.WriteLine("  REST token: " + MaskSecret(settings.Server.Token));
             WritePlainHeading("Local Dashboard");
             Console.WriteLine("  Enabled:    " + FormatBool(settings.LocalDashboard.Enabled));
@@ -2602,7 +2585,7 @@ namespace Xeno.Client
 
         private static string DescribeAuth(ClientSettings settings)
         {
-            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey) && !String.IsNullOrWhiteSpace(settings.Server.SecretKey))
+            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey))
             {
                 return "access key " + settings.Server.AccessKey;
             }
@@ -2764,8 +2747,8 @@ namespace Xeno.Client
         {
             WriteInfoHeading("Authentication commands");
             Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
-            Console.WriteLine("      Prompt for a password and store only the returned access key/secret.");
-            Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
+            Console.WriteLine("      Prompt for a password and store only the returned access key.");
+            Console.WriteLine("  xeno set-auth --access-key <key>");
             Console.WriteLine("      Store an existing client credential for WebSocket and API use.");
             Console.WriteLine("  xeno set-auth --clear");
             Console.WriteLine("      Remove stored authentication.");
@@ -2933,7 +2916,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
             WritePlainHeading("Authentication:");
             Console.WriteLine("  xeno login -u <username> [--tenant <tenant-id>] [--server <rest-url>]");
-            Console.WriteLine("  xeno set-auth --access-key <key> --secret-key <secret>");
+            Console.WriteLine("  xeno set-auth --access-key <key>");
             Console.WriteLine("  xeno set-auth --clear");
             WritePlainHeading("Providers:");
             Console.WriteLine("  xeno provider list");
@@ -2964,7 +2947,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno reset --force");
             Console.WriteLine();
-            Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key/secret.");
+            Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key.");
         }
     }
 }

@@ -1507,7 +1507,7 @@ function CredentialsView() {
       </div>
       {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
       <DataTable
-        columns={['id', 'tenantId', 'userId', 'accessKey', 'secretKey', 'active']}
+        columns={['id', 'tenantId', 'userId', 'accessKey', 'active']}
         onDelete={(row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
           return deleteRecord('/api/v1/credentials', row);
@@ -2955,7 +2955,6 @@ function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
   const [draft, setDraft] = useState(() => ({
     userId: value(data, 'userId') || '',
     accessKey: value(data, 'accessKey') || '',
-    secretKey: '',
     active: value(data, 'active') !== false
   }));
   const [saving, setSaving] = useState(false);
@@ -2978,9 +2977,7 @@ function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
         accessKey: draft.accessKey,
         active: draft.active
       };
-      if (draft.secretKey.trim()) payload.secretKey = draft.secretKey;
       await onSave(isCreate ? null : credentialId, payload);
-      setDraft((current) => ({ ...current, secretKey: '' }));
       setStatusTone('success');
       setStatus(t('credentialSaved'));
     } catch (error) {
@@ -3019,16 +3016,6 @@ function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
             <input value={draft.accessKey} onChange={(event) => updateField('accessKey', event.target.value)} />
           </label>
         </div>
-        <label className="form-field">
-          <span>{t('secretKey')}</span>
-          <input
-            autoComplete="new-password"
-            placeholder={isCreate ? t('secretKeyGeneratedOptional') : t('secretKeyOptional')}
-            type="password"
-            value={draft.secretKey}
-            onChange={(event) => updateField('secretKey', event.target.value)}
-          />
-        </label>
         <label className="toggle-field">
           <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
           <span>{t('active')}</span>
@@ -4143,8 +4130,7 @@ function exampleBodyForOperation(operation, model) {
       };
     case 'createToken':
       return {
-        accessKey: 'default',
-        secretKey: 'default'
+        accessKey: 'default'
       };
     case 'refreshToken':
     case 'logout':
@@ -4183,14 +4169,12 @@ function exampleBodyForOperation(operation, model) {
         tenantId: 'ten_default',
         userId: 'usr_replace_me',
         accessKey: '',
-        secretKey: '',
         active: true
       };
     case 'updateCredential':
       return {
         userId: 'usr_replace_me',
         accessKey: 'default',
-        secretKey: '',
         active: true
       };
     case 'createRole':

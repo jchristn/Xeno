@@ -34,7 +34,6 @@ client = XenoClient(
     "http://localhost:9000",
     tenant_id="ten_default",
     access_key=access_key,
-    secret_key=secret_key,
 )
 ```
 

@@ -128,15 +128,15 @@ class XenoClientTests(unittest.TestCase):
             ],
         )
 
-    def test_credential_options_send_tenant_and_credential_headers(self):
+    def test_credential_options_send_tenant_and_access_key_headers(self):
         opener = FakeOpener()
-        client = XenoClient("https://xeno.local", access_key="xeno_access", secret_key="secret-123", tenant_id="ten_123", opener=opener)
+        client = XenoClient("https://xeno.local", access_key="xeno_access", tenant_id="ten_123", opener=opener)
 
         client.list_openai_models()
 
         request = opener.calls[0]["request"]
         self.assertEqual(request.headers["X-access-key"], "xeno_access")
-        self.assertEqual(request.headers["X-secret-key"], "secret-123")
+        self.assertNotIn("X-secret-key", request.headers)
         self.assertEqual(request.headers["X-tenant-guid"], "ten_123")
 
     def test_openai_errors_surface_authentication_and_authorization_status(self):

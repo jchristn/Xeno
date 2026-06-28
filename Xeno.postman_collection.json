@@ -25,10 +25,6 @@
                          "value":  "default"
                      },
                      {
-                         "key":  "secretKey",
-                         "value":  "default"
-                     },
-                     {
                          "key":  "userId",
                          "value":  "usr_..."
                      },
@@ -304,7 +300,7 @@
                                                 ],
                                      "body":  {
                                                   "mode":  "raw",
-                                                  "raw":  "{\"userId\":\"{{userId}}\",\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"\",\"active\":true}"
+                                                  "raw":  "{\"userId\":\"{{userId}}\",\"accessKey\":\"{{accessKey}}\",\"active\":true}"
                                               },
                                      "url":  "{{baseUrl}}/v1.0/api/credentials/{{credentialId}}"
                                  }
@@ -631,7 +627,7 @@
                                                 ],
                                      "body":  {
                                                   "mode":  "raw",
-                                                  "raw":  "{\"accessKey\":\"{{accessKey}}\",\"secretKey\":\"{{secretKey}}\"}"
+                                                  "raw":  "{\"accessKey\":\"{{accessKey}}\"}"
                                               },
                                      "url":  "{{baseUrl}}/v1.0/api/auth/token"
                                  }

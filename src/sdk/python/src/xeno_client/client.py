@@ -25,7 +25,6 @@ class XenoClient:
         base_url: str = "http://localhost:9000",
         bearer_token: str | None = None,
         access_key: str | None = None,
-        secret_key: str | None = None,
         tenant_id: str = "ten_default",
         opener: Any | None = None,
     ) -> None:
@@ -35,7 +34,6 @@ class XenoClient:
         self.base_url = base_url.rstrip("/")
         self.bearer_token = bearer_token
         self.access_key = access_key
-        self.secret_key = secret_key
         self.tenant_id = tenant_id
         self.opener = opener or build_opener()
 
@@ -51,8 +49,8 @@ class XenoClient:
     def login(self, username: str, password: str, tenant_id: str | None = None) -> dict[str, Any]:
         return self._request("POST", "/v1.0/api/auth/login", {"username": username, "password": password, "tenantId": tenant_id or self.tenant_id})
 
-    def create_token(self, access_key: str, secret_key: str) -> dict[str, Any]:
-        return self._request("POST", "/v1.0/api/auth/token", {"accessKey": access_key, "secretKey": secret_key})
+    def create_token(self, access_key: str) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/auth/token", {"accessKey": access_key})
 
     def get_token_details(self) -> dict[str, Any]:
         return self._request("GET", "/v1.0/api/auth/token/details")
@@ -264,8 +262,6 @@ class XenoClient:
             request.add_header("Authorization", f"Bearer {self.bearer_token}")
         if self.access_key:
             request.add_header("x-access-key", self.access_key)
-        if self.secret_key:
-            request.add_header("x-secret-key", self.secret_key)
         if self.tenant_id:
             request.add_header("x-tenant-guid", self.tenant_id)
 

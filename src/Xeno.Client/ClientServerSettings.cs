@@ -26,7 +26,7 @@ namespace Xeno.Client
         public string? AccessKey { get; set; } = null;
 
         /// <summary>
-        /// Secret key.
+        /// Legacy secret key. This value is not sent to the server.
         /// </summary>
         public string? SecretKey { get; set; } = null;
 

@@ -14,12 +14,6 @@ namespace Xeno.Client
         public string? AccessKey { get; set; } = null;
 
         /// <summary>
-        /// Secret key issued by the Xeno server.
-        /// </summary>
-        [JsonPropertyName("secretKey")]
-        public string? SecretKey { get; set; } = null;
-
-        /// <summary>
         /// Tenant ID returned by the server.
         /// </summary>
         [JsonPropertyName("tenantId")]

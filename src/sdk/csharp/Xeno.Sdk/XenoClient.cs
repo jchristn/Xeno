@@ -65,11 +65,6 @@ namespace Xeno.Sdk
                 _HttpClient.DefaultRequestHeaders.Add("x-access-key", options.AccessKey);
             }
 
-            if (!String.IsNullOrWhiteSpace(options.SecretKey) && !_HttpClient.DefaultRequestHeaders.Contains("x-secret-key"))
-            {
-                _HttpClient.DefaultRequestHeaders.Add("x-secret-key", options.SecretKey);
-            }
-
             if (!String.IsNullOrWhiteSpace(options.TenantId) && !_HttpClient.DefaultRequestHeaders.Contains("x-tenant-guid"))
             {
                 _HttpClient.DefaultRequestHeaders.Add("x-tenant-guid", options.TenantId);
@@ -123,12 +118,11 @@ namespace Xeno.Sdk
         /// Creates a bearer token from a direct access credential.
         /// </summary>
         /// <param name="accessKey">Access key.</param>
-        /// <param name="secretKey">Secret key.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Token response JSON.</returns>
-        public async Task<XenoApiResponse> CreateTokenAsync(string accessKey, string secretKey, CancellationToken token = default)
+        public async Task<XenoApiResponse> CreateTokenAsync(string accessKey, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/auth/token", new { accessKey, secretKey }, token).ConfigureAwait(false);
+            return await PostJsonAsync("/v1.0/api/auth/token", new { accessKey }, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -250,7 +244,7 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
-        /// Lists credentials with redacted secrets.
+        /// Lists credentials.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Credential array JSON.</returns>
@@ -260,7 +254,7 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
-        /// Creates a credential and returns the secret once.
+        /// Creates a credential.
         /// </summary>
         /// <param name="credential">Credential payload.</param>
         /// <param name="token">Cancellation token.</param>

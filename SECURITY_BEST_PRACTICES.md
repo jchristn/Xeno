@@ -9,10 +9,10 @@ Treat the Xeno server as a privileged coordinator. It receives API requests, aut
 Xeno uses tenant-scoped identity and authorization. Every protected request resolves to a tenant, authenticates a principal, and then checks whether that principal may perform the requested operation. The important split is between users, credentials, and sessions:
 
 - Users represent people. Users may authenticate with username or email plus password through login endpoints. Passwords are stored as salted SHA-256 hashes.
-- Credentials represent non-interactive access. A credential has an access key and secret key, belongs to a tenant, and is owned by a user.
+- Credentials represent non-interactive access. A credential has an access key, belongs to a tenant, and is owned by a user.
 - Sessions represent short-lived API access. Bearer tokens are issued from user login or credential exchange, stored server-side as token hashes, and expire according to `Auth.SessionMinutes`.
 
-The REST API accepts bearer tokens through `Authorization: Bearer ...` or `x-token`. It also accepts direct credential authentication through `x-access-key` and `x-secret-key`. The client WebSocket is stricter: Xeno clients must authenticate with `x-access-key`, `x-secret-key`, and a tenant header. A WebSocket client may not authenticate with a bearer token or user password.
+The REST API accepts bearer tokens through `Authorization: Bearer ...` or `x-token`. It also accepts direct credential authentication through `x-access-key`. The client WebSocket is stricter: Xeno clients must authenticate with `x-access-key` and a tenant header. A WebSocket client may not authenticate with a bearer token, user password, or `x-secret-key`.
 
 Authorization is role based. Roles contain permissions, permissions name a resource type and operation, and role assignments bind users or credentials to roles. Xeno also has administrator bypasses for users marked `IsAdmin` or `IsTenantAdmin`. Explicit deny permissions override permits, and no matching permission means access is denied.
 
@@ -32,13 +32,13 @@ The database is the persistence boundary. Xeno stores platform state, users, cre
 
 Xeno supports several authentication flows because different actors need different credentials.
 
-Dashboard and user login use `/v1.0/api/auth/dashboard/login` or `/v1.0/api/auth/login`. A user supplies tenant information plus username/email and password. On dashboard login, Xeno issues a bearer token for that user. On client login, Xeno issues a tenant-bound client credential and returns the secret once so the client can store it in `~/.xeno/client.json`.
+Dashboard and user login use `/v1.0/api/auth/dashboard/login` or `/v1.0/api/auth/login`. A user supplies tenant information plus username/email and password. On dashboard login, Xeno issues a bearer token for that user. On client login, Xeno issues a tenant-bound client access key so the client can store it in `~/.xeno/client.json`.
 
-Credential token exchange uses `/v1.0/api/auth/token`. A caller submits an access key and secret key, and Xeno returns a bearer token. Bearer tokens carry the tenant and principal identity through a server-side session record; the raw token is not stored. The stored session contains a token hash, principal type, user or credential reference, tenant ID, expiration time, and active flag.
+Credential token exchange uses `/v1.0/api/auth/token`. A caller submits an access key, and Xeno returns a bearer token. Bearer tokens carry the tenant and principal identity through a server-side session record; the raw token is not stored. The stored session contains a token hash, principal type, user or credential reference, tenant ID, expiration time, and active flag.
 
-Direct credential authentication is accepted on REST requests by sending `x-access-key`, `x-secret-key`, and the tenant header. The SDKs can use either bearer tokens or direct credential headers. Direct credentials are convenient for automation, but bearer tokens are better for short-lived sessions and revocation workflows.
+Direct credential authentication is accepted on REST requests by sending `x-access-key` and the tenant header. The SDKs can use either bearer tokens or direct credential headers. Direct credentials are convenient for automation, but bearer tokens are better for short-lived sessions and revocation workflows.
 
-Client WebSocket authentication always uses direct credentials. A client connects to the configured WebSocket path, normally `/ws/v1/clients`, and supplies `x-access-key`, `x-secret-key`, and `x-tenant-guid`. The server rejects bearer-token WebSocket authentication to keep user sessions and machine agents separate.
+Client WebSocket authentication always uses direct credentials. A client connects to the configured WebSocket path, normally `/ws/v1/clients`, and supplies `x-access-key` and `x-tenant-guid`. The server rejects bearer-token and `x-secret-key` WebSocket authentication to keep user sessions and machine agents separate.
 
 ### Required Headers
 
@@ -49,7 +49,6 @@ Use these headers consistently:
 | `Authorization: Bearer <token>` | Primary REST session token carrier. |
 | `x-token` | Alternate REST session token carrier. If both bearer and `x-token` are present, they must match. |
 | `x-access-key` | Public credential identifier. |
-| `x-secret-key` | Credential secret. |
 | `x-tenant-guid` | Tenant identifier. |
 | `x-tenant-id` | Alternate tenant identifier. |
 
@@ -78,7 +77,7 @@ Credentials do not receive user administrator bypasses. A credential authenticat
 
 ## Built-In And Seeded Credentials
 
-Local development and factory assets may include seeded credentials such as `default` / `default`, `password`, or `development-only-change-me`. They are development conveniences, not deployment secrets.
+Local development and factory assets may include seeded credentials such as the `default` access key, `password`, or `development-only-change-me`. They are development conveniences, not deployment secrets.
 
 Before using Xeno outside a private local development loop:
 
@@ -93,15 +92,13 @@ The Docker deployment under `docker/xeno.json` currently enables REST authentica
 
 ## Passwords, Secrets, And Tokens
 
-User passwords are salted and hashed. Credential secrets created through the API are hashed with a `sha256:` prefix before storage, and legacy plaintext development credentials are still accepted for compatibility. Secret comparisons use fixed-time comparison.
+User passwords are salted and hashed. Credential records retain a legacy secret field for compatibility with existing state files, but credential authentication does not depend on that field and clients must not send it.
 
 Bearer tokens are generated from cryptographically random bytes and stored only as hashes in auth session records. Sessions have an expiration time, an active flag, and a principal reference. Logout revokes the current session. Token refresh issues a new token and revokes the prior session when the prior session is known.
 
-Credential creation returns the raw secret once. Store it immediately in a secure location. Later API responses redact credentials and show only a masked secret suffix. If a secret is lost, rotate it rather than trying to recover it.
-
 Recommended handling:
 
-- Store server signing keys, client secrets, and provider API keys in a secrets manager or protected host configuration.
+- Store server signing keys, client access keys, and provider API keys in a secrets manager or protected host configuration.
 - Avoid committing `client.json`, `xeno.json`, `.env`, SQLite databases, or backups that contain real credentials.
 - Use separate credentials for dashboard users, API integrations, clients, and automation.
 - Rotate credentials after staff changes, machine retirement, accidental exposure, or suspicious logs.
@@ -295,7 +292,7 @@ Classify Xeno data before onboarding real workloads:
 | Data | Sensitivity |
 | --- | --- |
 | User passwords | Secret; stored as salted hashes. |
-| Credential secret keys | Secret; raw value shown once and should be stored externally. |
+| Credential access keys | Sensitive; usable for direct credential authentication. |
 | Bearer tokens | Secret; short-lived but immediately usable. |
 | Client provider credentials | Secret; stored in client configuration when configured. |
 | Request bodies and response bodies | Potentially sensitive or regulated content. |
@@ -350,7 +347,7 @@ Xeno is still intentionally practical for local development. That means some def
 
 - Factory Docker configuration may disable REST authentication.
 - Development signing keys and seeded credentials exist for bootstrap.
-- Legacy plaintext development credential validation is accepted during secret checking.
+- Legacy credential secret fields may exist in older state files, but they are ignored for authentication.
 - Request history can persist prompts, responses, and headers.
 - Local dashboard databases live on the client machine.
 - Telemetry can reveal topology and model inventory.

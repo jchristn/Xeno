@@ -26,7 +26,7 @@ namespace Xeno.Core.Models
         public string? AccessKey { get; set; } = null;
 
         /// <summary>
-        /// Secret key.
+        /// Legacy secret key. Supplying this value is rejected.
         /// </summary>
         [JsonPropertyName("secretKey")]
         public string? SecretKey { get; set; } = null;

@@ -26,7 +26,7 @@ In both models, applications call the server. They do not need to know where a m
 ## Prerequisites
 
 - A running Xeno server.
-- A client credential access key and secret key, or a user account that can log in and receive a client credential.
+- A client credential access key, or a user account that can log in and receive a client credential.
 - At least one model provider reachable from the machine running `xeno`, such as Ollama, OpenAI, Gemini, vLLM, or another OpenAI-compatible endpoint.
 
 Client credentials are tenant-bound. Use least-privilege credentials for
@@ -352,7 +352,7 @@ xeno server set-rest-url https://xeno.example.com
 
 ## Authenticate
 
-The WebSocket connection requires a client access key and secret key. User passwords are accepted only by `xeno login` and are not stored by the client.
+The WebSocket connection requires a client access key. User passwords are accepted only by `xeno login` and are not stored by the client.
 
 ### Option 1: Login with a User
 
@@ -373,17 +373,16 @@ tenant:   ten_default
 ### Option 2: Store an Existing Client Credential
 
 ```powershell
-xeno set-auth --access-key default --secret-key default
+xeno set-auth --access-key default
 ```
 
 The default development credential uses:
 
 ```text
 access key: default
-secret key: default
 ```
 
-There is no Xeno client API key mode. Use a client access key and secret key.
+There is no Xeno client API key mode. Use a client access key.
 
 Clear stored authentication when needed:
 
@@ -605,8 +604,7 @@ The current settings file uses `Providers` for configured provider endpoints and
   "UseColors": true,
   "Server": {
     "Url": "ws://localhost:9000/ws/v1/clients",
-    "AccessKey": "default",
-    "SecretKey": "default"
+    "AccessKey": "default"
   },
   "Providers": [
     {

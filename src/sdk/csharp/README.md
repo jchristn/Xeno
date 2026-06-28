@@ -39,8 +39,7 @@ using (XenoClient client = new XenoClient(new XenoClientOptions
 {
     BaseUrl = "http://localhost:9000",
     TenantId = "ten_default",
-    AccessKey = accessKey,
-    SecretKey = secretKey
+    AccessKey = accessKey
 }))
 {
     XenoApiResponse models = await client.ListOpenAiModelsAsync();
