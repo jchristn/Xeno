@@ -19,6 +19,21 @@ namespace Xeno.Client.LocalDashboard.Models
         public string? TenantId { get; set; } = null;
 
         /// <summary>
+        /// Tenant identifier of the authenticated requestor.
+        /// </summary>
+        public string? RequestorTenantId { get; set; } = null;
+
+        /// <summary>
+        /// Resolved principal type of the authenticated requestor.
+        /// </summary>
+        public string? RequestorPrincipalType { get; set; } = null;
+
+        /// <summary>
+        /// Resolved principal identifier of the authenticated requestor.
+        /// </summary>
+        public string? RequestorPrincipalId { get; set; } = null;
+
+        /// <summary>
         /// Client identifier.
         /// </summary>
         public string? ClientId { get; set; } = null;

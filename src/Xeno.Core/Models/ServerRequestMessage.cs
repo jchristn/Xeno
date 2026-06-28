@@ -9,6 +9,8 @@ namespace Xeno.Core.Models
     /// </summary>
     public class ServerRequestMessage : WebSocketMessageEnvelope
     {
+        private Dictionary<string, string> _Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
         /// Xeno request ID.
         /// </summary>
@@ -20,6 +22,24 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("tenantId")]
         public string TenantId { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Tenant ID of the authenticated requestor.
+        /// </summary>
+        [JsonPropertyName("requestorTenantId")]
+        public string? RequestorTenantId { get; set; } = null;
+
+        /// <summary>
+        /// Resolved principal type of the authenticated requestor.
+        /// </summary>
+        [JsonPropertyName("requestorPrincipalType")]
+        public string? RequestorPrincipalType { get; set; } = null;
+
+        /// <summary>
+        /// Resolved principal ID of the authenticated requestor.
+        /// </summary>
+        [JsonPropertyName("requestorPrincipalId")]
+        public string? RequestorPrincipalId { get; set; } = null;
 
         /// <summary>
         /// Selected client ID.
@@ -113,12 +133,35 @@ namespace Xeno.Core.Models
         /// Forwarded headers to apply to the upstream request.
         /// </summary>
         [JsonPropertyName("headers")]
-        public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
+        public Dictionary<string, string> Headers
+        {
+            get
+            {
+                return _Headers;
+            }
+            set
+            {
+                _Headers = NormalizeHeaders(value);
+            }
+        }
 
         /// <summary>
         /// JSON request body to forward upstream.
         /// </summary>
         [JsonPropertyName("body")]
         public string Body { get; set; } = "{}";
+
+        private static Dictionary<string, string> NormalizeHeaders(Dictionary<string, string>? headers)
+        {
+            Dictionary<string, string> normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (headers == null) return normalized;
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                if (String.IsNullOrWhiteSpace(header.Key)) continue;
+                normalized[header.Key] = header.Value;
+            }
+
+            return normalized;
+        }
     }
 }

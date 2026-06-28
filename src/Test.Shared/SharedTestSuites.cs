@@ -497,6 +497,9 @@ namespace Test.Shared
                                 {
                                     Id = "req_local_1",
                                     TenantId = Constants.DefaultTenantId,
+                                    RequestorTenantId = Constants.DefaultTenantId,
+                                    RequestorPrincipalType = "User",
+                                    RequestorPrincipalId = "usr_local_requestor",
                                     ClientId = "xcl_local",
                                     ReceivedUtc = DateTime.UtcNow.AddMinutes(-1),
                                     CompletedUtc = DateTime.UtcNow,
@@ -519,6 +522,9 @@ namespace Test.Shared
 
                                 LocalRequestHistoryEntry? loaded = await history.GetAsync("req_local_1", CancellationToken.None).ConfigureAwait(false);
                                 if (loaded == null) throw new InvalidOperationException("History entry was not loaded.");
+                                if (!String.Equals(loaded.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Requestor tenant ID was not persisted.");
+                                if (!String.Equals(loaded.RequestorPrincipalType, "User", StringComparison.Ordinal)) throw new InvalidOperationException("Requestor principal type was not persisted.");
+                                if (!String.Equals(loaded.RequestorPrincipalId, "usr_local_requestor", StringComparison.Ordinal)) throw new InvalidOperationException("Requestor principal ID was not persisted.");
                                 if (!String.Equals(loaded.RequestHeaders["Authorization"], "redacted", StringComparison.Ordinal)) throw new InvalidOperationException("Redacted header was not persisted.");
                                 if (loaded.RequestBody == null || loaded.RequestBody.Length > 8) throw new InvalidOperationException("Request body was not truncated according to retention settings.");
 
@@ -1598,10 +1604,22 @@ namespace Test.Shared
                         {
                             XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
                             RoutingService routing = new RoutingService(platform);
-                            RequestContext context = new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true };
+                            Credential credential = platform.Credentials[0];
+                            RequestContext context = new RequestContext
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                UserId = credential.UserId,
+                                CredentialId = credential.Id,
+                                PrincipalType = PrincipalTypeEnum.Credential,
+                                AuthScheme = AuthSchemeEnum.Credential,
+                                IsAuthenticated = true
+                            };
                             RoutingDecision decision = await routing.RouteAsync(context, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             RequestHistoryEntry entry = routing.RecordHistory(context, "/v1/chat/completions", "POST", decision);
+                            if (!String.Equals(entry.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Request history missing requestor tenant ID.");
+                            if (entry.RequestorPrincipalType != PrincipalTypeEnum.Credential) throw new InvalidOperationException("Request history missing credential requestor principal type.");
+                            if (!String.Equals(entry.RequestorPrincipalId, credential.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Request history missing credential requestor principal ID.");
                             if (entry.RoutingDecision == null) throw new InvalidOperationException("Request history missing routing decision.");
                             if (String.IsNullOrWhiteSpace(entry.RoutingDecision.RoutingPolicyId)) throw new InvalidOperationException("Request history missing routing policy ID.");
                             if (entry.RoutingDecision.RoutingPolicyRequestTimeoutMs != 300000) throw new InvalidOperationException("Request history missing routing policy timeout.");
@@ -3068,6 +3086,10 @@ namespace Test.Shared
                                     if (!responseBody.Contains("stream-", StringComparison.OrdinalIgnoreCase) || !responseBody.Contains("\"ok\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming response body was not captured.");
                                     if (root.RequestHeaders.Count == 0) throw new InvalidOperationException("Streaming request headers were not captured.");
                                     if (root.ResponseHeaders.Count == 0) throw new InvalidOperationException("Streaming response headers were not captured.");
+                                    if (!String.Equals(root.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Streaming request history did not capture requestor tenant ID.");
+                                    if (root.RequestorPrincipalType != PrincipalTypeEnum.User) throw new InvalidOperationException("Streaming request history did not resolve the bearer requestor as a user principal.");
+                                    if (String.IsNullOrWhiteSpace(root.RequestorPrincipalId) || !String.Equals(root.RequestorPrincipalId, root.UserId, StringComparison.Ordinal)) throw new InvalidOperationException("Streaming request history did not capture the resolved requestor principal ID.");
+                                    if (root.AuthScheme != AuthSchemeEnum.Bearer) throw new InvalidOperationException("Streaming request history did not capture bearer authentication.");
                                     if (root.Telemetry == null) throw new InvalidOperationException("Streaming telemetry was not captured.");
                                     if (root.Telemetry.TotalTokens != 7) throw new InvalidOperationException("Streaming total tokens were not persisted.");
                                     if (root.Telemetry.StreamChunkCount != 2) throw new InvalidOperationException("Streaming chunk count was not persisted.");
@@ -3176,6 +3198,9 @@ namespace Test.Shared
                 string requestId = String.IsNullOrWhiteSpace(serverRequest.RequestId) ? Guid.NewGuid().ToString("N") : serverRequest.RequestId;
                 string requestorIp = serverRequest.RequestorIp ?? String.Empty;
                 if (String.IsNullOrWhiteSpace(requestorIp)) throw new InvalidOperationException("Server request did not include requestorIp.");
+                if (!String.Equals(serverRequest.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Server request did not include requestor tenant ID.");
+                if (!String.Equals(serverRequest.RequestorPrincipalType, PrincipalTypeEnum.User.ToString(), StringComparison.Ordinal)) throw new InvalidOperationException("Server request did not resolve requestor principal type.");
+                if (String.IsNullOrWhiteSpace(serverRequest.RequestorPrincipalId)) throw new InvalidOperationException("Server request did not include requestor principal ID.");
                 Dictionary<string, string> headers = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 string forwardedFor = headers.TryGetValue("X-Forwarded-For", out string? forwardedForValue) ? forwardedForValue : String.Empty;
                 if (!forwardedFor.Contains(requestorIp, StringComparison.Ordinal)) throw new InvalidOperationException("X-Forwarded-For did not include requestor IP.");

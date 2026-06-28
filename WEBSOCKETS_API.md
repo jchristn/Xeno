@@ -236,6 +236,9 @@ Schema:
 | `type` | string | yes | Always `server.request`. |
 | `requestId` | string | yes | Request ID used for correlation. |
 | `tenantId` | string | yes | Authenticated tenant. |
+| `requestorTenantId` | string | no | Tenant ID resolved for the authenticated API requestor. |
+| `requestorPrincipalType` | string | no | Resolved requestor principal type, such as `User` or `Credential`. |
+| `requestorPrincipalId` | string | no | Resolved requestor principal ID. |
 | `clientId` | string | yes | Selected client ID. |
 | `clientName` | string | no | Selected client name. |
 | `apiType` | string | no | Upstream API type selected by routing. |
@@ -269,6 +272,9 @@ Example:
   "type": "server.request",
   "requestId": "req_mqtyav17_WK4Y6RpiyDZ6SfDPO16",
   "tenantId": "ten_default",
+  "requestorTenantId": "ten_default",
+  "requestorPrincipalType": "User",
+  "requestorPrincipalId": "usr_mqty7n0j_e64jYPPoJ33J",
   "clientId": "xcl_mqty9z4a_7jJS1gNtyq7m",
   "clientName": "THINKPAD",
   "apiType": "Ollama",

@@ -57,6 +57,9 @@ const modelsResponse = {
 const requestEntry = {
   id: 'req_local_1',
   tenantId: 'ten_default',
+  requestorTenantId: 'ten_default',
+  requestorPrincipalType: 'User',
+  requestorPrincipalId: 'usr_local_requestor',
   clientId: 'xcl_local_test',
   receivedUtc: '2026-06-26T08:00:00Z',
   completedUtc: '2026-06-26T08:00:01Z',
@@ -139,6 +142,7 @@ test('local dashboard renders and follows interaction expectations', async ({ pa
   expect(requestDetailsBox.width).toBeGreaterThan(1200);
   expect(requestDetailsBox.height).toBeGreaterThan(800);
   await expect(page.getByText('Request Headers')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('usr_local_requestor')).toBeVisible();
   await expect(page.getByText('Response Body')).toBeVisible();
   await page.getByTitle('Close this modal without applying unsaved changes.').click();
 

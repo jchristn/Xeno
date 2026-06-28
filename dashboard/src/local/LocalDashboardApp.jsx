@@ -479,7 +479,7 @@ function Requests({ range, refresh, requests, setModal, setRange, summary }) {
       actions={(row) => [
           { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalRequest') }
         ]}
-        columns={['id', 'receivedUtc', 'method', 'path', 'modelName', 'providerName', 'statusCode', 'outcome']}
+        columns={['id', 'receivedUtc', 'method', 'path', 'modelName', 'requestorPrincipalId', 'providerName', 'statusCode', 'outcome']}
         headerActions={<button className="action-button danger icon-only" onClick={clear} title={t('tooltipClearLocalHistory')} type="button"><Trash2 size={16} /><span className="sr-only">{t('clear')}</span></button>}
         onRefresh={refresh}
         onRowClick={details}
@@ -1157,7 +1157,7 @@ function RequestDetails({ entry }) {
   const { t } = useTranslation();
   return (
     <div className="details-stack">
-      <RecordTable fields={['id', 'tenantId', 'clientId', 'requestorIp', 'providerName', 'apiType', 'modelName', 'outcome', 'statusCode']} record={entry} />
+      <RecordTable fields={['id', 'tenantId', 'requestorTenantId', 'requestorPrincipalType', 'requestorPrincipalId', 'clientId', 'requestorIp', 'providerName', 'apiType', 'modelName', 'outcome', 'statusCode']} record={entry} />
       {['requestHeaders', 'requestBody', 'responseHeaders', 'responseBody', 'telemetry', 'timeline'].map((field) => (
         <details key={field} open>
           <summary>{title(field, t)} <CopyButton label={t('copyValue')} value={typeof entry[field] === 'string' ? entry[field] : JSON.stringify(entry[field] || {}, null, 2)} /></summary>

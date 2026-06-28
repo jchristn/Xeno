@@ -243,6 +243,9 @@ namespace Xeno.Client.LocalDashboard
             {
                 Id = requestId,
                 TenantId = request.TenantId,
+                RequestorTenantId = request.RequestorTenantId,
+                RequestorPrincipalType = request.RequestorPrincipalType,
+                RequestorPrincipalId = request.RequestorPrincipalId,
                 ClientId = request.ClientId,
                 ReceivedUtc = DateTime.UtcNow,
                 Method = method,

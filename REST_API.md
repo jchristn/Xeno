@@ -261,7 +261,7 @@ Requests relayed from the Xeno server to a connected `xeno` client also include 
 
 `GET /api/v1/requesthistory`
 
-The request history detail response includes routing metadata, selected client metadata, request and response headers, bounded request and response bodies, telemetry fields, and timeline events. Streaming responses include stream chunk and stream event counters when the client reports them.
+The request history detail response includes routing metadata, selected client metadata, resolved requestor tenant/principal fields, request and response headers, bounded request and response bodies, telemetry fields, and timeline events. Streaming responses include stream chunk and stream event counters when the client reports them.
 
 ## Xeno Client Local Dashboard API
 

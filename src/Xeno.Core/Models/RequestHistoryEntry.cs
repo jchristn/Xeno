@@ -21,6 +21,11 @@ namespace Xeno.Core.Models
         public string TenantId { get; set; } = Constants.DefaultTenantId;
 
         /// <summary>
+        /// Tenant ID of the authenticated requestor.
+        /// </summary>
+        public string RequestorTenantId { get; set; } = Constants.DefaultTenantId;
+
+        /// <summary>
         /// Request path.
         /// </summary>
         public string Path { get; set; } = String.Empty;
@@ -74,6 +79,16 @@ namespace Xeno.Core.Models
         /// Principal type used for the request.
         /// </summary>
         public PrincipalTypeEnum PrincipalType { get; set; } = PrincipalTypeEnum.None;
+
+        /// <summary>
+        /// Resolved principal type of the authenticated requestor.
+        /// </summary>
+        public PrincipalTypeEnum RequestorPrincipalType { get; set; } = PrincipalTypeEnum.None;
+
+        /// <summary>
+        /// Resolved principal ID of the authenticated requestor.
+        /// </summary>
+        public string? RequestorPrincipalId { get; set; } = null;
 
         /// <summary>
         /// Authentication scheme used for the request.

@@ -134,6 +134,7 @@ namespace Xeno.Core.Services
             RequestHistoryEntry entry = new RequestHistoryEntry
             {
                 TenantId = context.TenantId,
+                RequestorTenantId = context.TenantId,
                 Path = path,
                 Method = method,
                 Model = decision.EffectiveModel,
@@ -145,6 +146,8 @@ namespace Xeno.Core.Services
                 CredentialId = context.CredentialId,
                 SessionId = context.SessionId,
                 PrincipalType = context.PrincipalType,
+                RequestorPrincipalType = context.PrincipalType,
+                RequestorPrincipalId = context.PrincipalId,
                 AuthScheme = context.AuthScheme,
                 RoutingDecision = decision
             };

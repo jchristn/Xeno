@@ -19,7 +19,9 @@ namespace Xeno.Client.LocalDashboard
             if (headers == null) return redacted;
             foreach (KeyValuePair<string, string> header in headers)
             {
-                redacted[header.Key] = IsSensitive(header.Key) ? "redacted" : header.Value;
+                string name = CanonicalizeHeaderName(header.Key);
+                if (String.IsNullOrWhiteSpace(name)) continue;
+                redacted[name] = IsSensitive(name) ? "redacted" : header.Value;
             }
 
             return redacted;
@@ -55,6 +57,19 @@ namespace Xeno.Client.LocalDashboard
                 || normalized.Contains("token", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("cookie", StringComparison.OrdinalIgnoreCase)
                 || normalized.Contains("credential", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string CanonicalizeHeaderName(string name)
+        {
+            if (String.IsNullOrWhiteSpace(name)) return String.Empty;
+            if (String.Equals(name, "x-forwarded-for", StringComparison.OrdinalIgnoreCase)) return "X-Forwarded-For";
+            if (String.Equals(name, "x-real-ip", StringComparison.OrdinalIgnoreCase)) return "X-Real-IP";
+            if (String.Equals(name, "x-xeno-request-id", StringComparison.OrdinalIgnoreCase)) return "X-Xeno-Request-ID";
+            if (String.Equals(name, "x-xeno-requestor-ip", StringComparison.OrdinalIgnoreCase)) return "X-Xeno-Requestor-IP";
+            if (String.Equals(name, "x-xeno-tenant-id", StringComparison.OrdinalIgnoreCase)) return "X-Xeno-Tenant-ID";
+            if (String.Equals(name, "content-type", StringComparison.OrdinalIgnoreCase)) return "Content-Type";
+            if (String.Equals(name, "authorization", StringComparison.OrdinalIgnoreCase)) return "Authorization";
+            return name.Trim();
         }
     }
 }

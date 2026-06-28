@@ -1030,7 +1030,7 @@ function RequestHistoryView() {
         <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
       </Panel>
       <DataTable
-        columns={['statusCode', 'method', 'path', 'model', 'principalType', 'userId', 'credentialId', 'authScheme', 'selectedClientId', 'durationMs', 'createdUtc']}
+        columns={['statusCode', 'method', 'path', 'model', 'requestorPrincipalType', 'requestorPrincipalId', 'requestorTenantId', 'authScheme', 'selectedClientId', 'durationMs', 'createdUtc']}
         onDelete={(row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
           return deleteRecord(requestHistoryEndpoint, row);
@@ -2559,6 +2559,10 @@ function RequestDetailsModal({ data, onClose }) {
   const candidateClientIds = value(routing, 'candidateClientIds');
   const routingRows = [
     { label: t('tenant', 'Tenant'), value: value(record, 'tenantId'), copy: true },
+    { label: t('requestorTenantId', 'Requestor Tenant ID'), value: value(record, 'requestorTenantId') || value(record, 'tenantId'), copy: true },
+    { label: t('requestorPrincipalType', 'Requestor Principal Type'), value: value(record, 'requestorPrincipalType') || value(record, 'principalType') },
+    { label: t('requestorPrincipalId', 'Requestor Principal ID'), value: value(record, 'requestorPrincipalId') || value(record, 'credentialId') || value(record, 'userId'), copy: true },
+    { label: t('authScheme', 'Auth Scheme'), value: value(record, 'authScheme') },
     { label: t('client', 'Client'), value: value(record, 'selectedClientId') || value(routing, 'selectedClientId'), copy: true },
     { label: t('selectedClientName', 'Selected client name'), value: value(routing, 'selectedClientName') },
     { label: t('model', 'Model'), value: value(record, 'model') || value(routing, 'effectiveModel') },

@@ -52,7 +52,7 @@ namespace Xeno.Client.LocalDashboard.Database
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
 
-                await EnsureProviderTelemetryColumnsAsync(connection, token).ConfigureAwait(false);
+                await EnsureRequestHistoryColumnsAsync(connection, token).ConfigureAwait(false);
             }
         }
 
@@ -86,8 +86,11 @@ namespace Xeno.Client.LocalDashboard.Database
             }
         }
 
-        private static async Task EnsureProviderTelemetryColumnsAsync(SqliteConnection connection, CancellationToken token)
+        private static async Task EnsureRequestHistoryColumnsAsync(SqliteConnection connection, CancellationToken token)
         {
+            await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN requestor_tenant_id TEXT NULL;", token).ConfigureAwait(false);
+            await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN requestor_principal_type TEXT NULL;", token).ConfigureAwait(false);
+            await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN requestor_principal_id TEXT NULL;", token).ConfigureAwait(false);
             await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN provider_telemetry_sample_id TEXT NULL;", token).ConfigureAwait(false);
             await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN provider_telemetry_health_status TEXT NULL;", token).ConfigureAwait(false);
             await TryAlterAsync(connection, "ALTER TABLE local_request_history ADD COLUMN provider_telemetry_queued_requests REAL NULL;", token).ConfigureAwait(false);
@@ -416,6 +419,7 @@ ON CONFLICT(key) DO UPDATE SET
 INSERT INTO local_request_history
 (
     id, tenant_id, client_id, received_utc, completed_utc, method, path, requestor_ip,
+    requestor_tenant_id, requestor_principal_type, requestor_principal_id,
     provider_name, api_type, model_name, provider_telemetry_sample_id,
     provider_telemetry_health_status, provider_telemetry_queued_requests,
     status_code, outcome, error, streamed, duration_ms,
@@ -424,6 +428,7 @@ INSERT INTO local_request_history
 VALUES
 (
     $id, $tenantId, $clientId, $receivedUtc, $completedUtc, $method, $path, $requestorIp,
+    $requestorTenantId, $requestorPrincipalType, $requestorPrincipalId,
     $providerName, $apiType, $modelName, $providerTelemetrySampleId,
     $providerTelemetryHealthStatus, $providerTelemetryQueuedRequests,
     $statusCode, $outcome, $error, $streamed, $durationMs,
@@ -436,6 +441,9 @@ ON CONFLICT(id) DO UPDATE SET
     method = excluded.method,
     path = excluded.path,
     requestor_ip = excluded.requestor_ip,
+    requestor_tenant_id = excluded.requestor_tenant_id,
+    requestor_principal_type = excluded.requestor_principal_type,
+    requestor_principal_id = excluded.requestor_principal_id,
     provider_name = excluded.provider_name,
     api_type = excluded.api_type,
     model_name = excluded.model_name,
@@ -457,6 +465,9 @@ ON CONFLICT(id) DO UPDATE SET
                 command.Parameters.AddWithValue("$method", entry.Method);
                 command.Parameters.AddWithValue("$path", entry.Path);
                 command.Parameters.AddWithValue("$requestorIp", DbValue(entry.RequestorIp));
+                command.Parameters.AddWithValue("$requestorTenantId", DbValue(entry.RequestorTenantId));
+                command.Parameters.AddWithValue("$requestorPrincipalType", DbValue(entry.RequestorPrincipalType));
+                command.Parameters.AddWithValue("$requestorPrincipalId", DbValue(entry.RequestorPrincipalId));
                 command.Parameters.AddWithValue("$providerName", DbValue(entry.ProviderName));
                 command.Parameters.AddWithValue("$apiType", DbValue(entry.ApiType));
                 command.Parameters.AddWithValue("$modelName", DbValue(entry.ModelName));
@@ -489,7 +500,8 @@ ON CONFLICT(id) DO UPDATE SET
 
         private static async Task InsertHeadersAsync(SqliteConnection connection, SqliteTransaction transaction, string table, string requestId, Dictionary<string, string> headers, CancellationToken token)
         {
-            foreach (KeyValuePair<string, string> header in headers)
+            Dictionary<string, string> normalized = NormalizeHeaders(headers);
+            foreach (KeyValuePair<string, string> header in normalized)
             {
                 using (SqliteCommand command = connection.CreateCommand())
                 {
@@ -501,6 +513,33 @@ ON CONFLICT(id) DO UPDATE SET
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
             }
+        }
+
+        private static Dictionary<string, string> NormalizeHeaders(Dictionary<string, string>? headers)
+        {
+            Dictionary<string, string> normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (headers == null) return normalized;
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                string name = CanonicalizeHeaderName(header.Key);
+                if (String.IsNullOrWhiteSpace(name)) continue;
+                normalized[name] = header.Value;
+            }
+
+            return normalized;
+        }
+
+        private static string CanonicalizeHeaderName(string name)
+        {
+            if (String.IsNullOrWhiteSpace(name)) return String.Empty;
+            if (String.Equals(name, "x-forwarded-for", StringComparison.OrdinalIgnoreCase)) return "X-Forwarded-For";
+            if (String.Equals(name, "x-real-ip", StringComparison.OrdinalIgnoreCase)) return "X-Real-IP";
+            if (String.Equals(name, "x-xeno-request-id", StringComparison.OrdinalIgnoreCase)) return "X-Xeno-Request-ID";
+            if (String.Equals(name, "x-xeno-requestor-ip", StringComparison.OrdinalIgnoreCase)) return "X-Xeno-Requestor-IP";
+            if (String.Equals(name, "x-xeno-tenant-id", StringComparison.OrdinalIgnoreCase)) return "X-Xeno-Tenant-ID";
+            if (String.Equals(name, "content-type", StringComparison.OrdinalIgnoreCase)) return "Content-Type";
+            if (String.Equals(name, "authorization", StringComparison.OrdinalIgnoreCase)) return "Authorization";
+            return name.Trim();
         }
 
         private static async Task InsertBodyAsync(SqliteConnection connection, SqliteTransaction transaction, string table, string requestId, string? body, CancellationToken token)
@@ -693,6 +732,9 @@ WHERE id IN
                 Method = GetString(reader, "method"),
                 Path = GetString(reader, "path"),
                 RequestorIp = GetNullableString(reader, "requestor_ip"),
+                RequestorTenantId = GetNullableString(reader, "requestor_tenant_id"),
+                RequestorPrincipalType = GetNullableString(reader, "requestor_principal_type"),
+                RequestorPrincipalId = GetNullableString(reader, "requestor_principal_id"),
                 ProviderName = GetNullableString(reader, "provider_name"),
                 ApiType = GetNullableString(reader, "api_type"),
                 ModelName = GetNullableString(reader, "model_name"),
@@ -810,6 +852,9 @@ CREATE TABLE IF NOT EXISTS local_request_history
     method TEXT NOT NULL,
     path TEXT NOT NULL,
     requestor_ip TEXT NULL,
+    requestor_tenant_id TEXT NULL,
+    requestor_principal_type TEXT NULL,
+    requestor_principal_id TEXT NULL,
     provider_name TEXT NULL,
     api_type TEXT NULL,
     model_name TEXT NULL,

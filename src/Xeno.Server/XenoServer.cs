@@ -2000,6 +2000,9 @@ namespace Xeno.Server
                     Type = "server.request",
                     RequestId = requestId,
                     TenantId = requestContext.TenantId,
+                    RequestorTenantId = requestContext.TenantId,
+                    RequestorPrincipalType = requestContext.PrincipalType.ToString(),
+                    RequestorPrincipalId = requestContext.PrincipalId,
                     ClientId = client.Id,
                     ClientName = client.Name,
                     ApiType = selectedModel?.Provider.ToString(),
@@ -3165,6 +3168,12 @@ namespace Xeno.Server
             DateTime completedUtc = DateTime.UtcNow;
             entry.UserId = requestContext.UserId;
             entry.CredentialId = requestContext.CredentialId;
+            entry.SessionId = requestContext.SessionId;
+            entry.PrincipalType = requestContext.PrincipalType;
+            entry.RequestorTenantId = requestContext.TenantId;
+            entry.RequestorPrincipalType = requestContext.PrincipalType;
+            entry.RequestorPrincipalId = requestContext.PrincipalId;
+            entry.AuthScheme = requestContext.AuthScheme;
             entry.SourceIp = requestContext.SourceIp;
             entry.CompletedUtc = completedUtc;
             entry.DurationMs = Math.Max(0, (long)(completedUtc - requestContext.StartedUtc).TotalMilliseconds);
@@ -5020,6 +5029,9 @@ namespace Xeno.Server
                         ["RequestHistoryEntry"] = ObjectSchema(
                             Property("id", StringSchema()),
                             Property("tenantId", StringSchema()),
+                            Property("requestorTenantId", StringSchema()),
+                            Property("requestorPrincipalType", StringSchema()),
+                            Property("requestorPrincipalId", StringSchema()),
                             Property("path", StringSchema()),
                             Property("method", StringSchema()),
                             Property("model", StringSchema()),
