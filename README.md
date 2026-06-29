@@ -1,6 +1,6 @@
 # Xeno
 
-![Xeno logo](assets/logo.png)
+<img src="assets/logo.png" alt="Xeno logo" width="192" height="192">
 
 **Version:** v0.1.0
 
