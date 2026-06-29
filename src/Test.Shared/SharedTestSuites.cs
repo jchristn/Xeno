@@ -2367,6 +2367,7 @@ namespace Test.Shared
                             string tenantJson = await tenantResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!tenantResponse.IsSuccessStatusCode) throw new InvalidOperationException("Tenant lookup failed: " + tenantJson);
                             AuthTenantLookupResponse lookup = DeserializeRequired<AuthTenantLookupResponse>(tenantJson);
+                            if (lookup.Email != "admin@xeno") throw new InvalidOperationException("Tenant lookup returned an encoded email value.");
                             if (lookup.Tenants.Count != 1) throw new InvalidOperationException("Tenant lookup did not return exactly one tenant.");
                             if (lookup.Tenants[0].Id != Constants.DefaultTenantId) throw new InvalidOperationException("Tenant lookup returned the wrong tenant.");
                         }

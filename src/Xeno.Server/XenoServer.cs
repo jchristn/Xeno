@@ -5,6 +5,7 @@ namespace Xeno.Server
     using System.Globalization;
     using System.IO;
     using System.Linq;
+    using System.Net;
     using System.Net.WebSockets;
     using System.Security.Cryptography;
     using System.Text;
@@ -237,8 +238,12 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/health", "Health check", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/dashboard/login", "Dashboard login", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/dashboard/login", "Dashboard login", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/onboarding/signup", "Create tenant and first administrator", "Onboarding");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/onboarding/signup", "Create tenant and first administrator", "Onboarding");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token", "Create token", "Authentication");
@@ -471,6 +476,20 @@ namespace Xeno.Server
                     });
             }
 
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
+            {
+                return JsonBody(
+                    "Tenant lookup request. The email address is used to discover tenant login options.",
+                    ObjectSchemaMetadata(
+                        "Tenant lookup request.",
+                        new[] { "email" },
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("User email address."))),
+                    new Dictionary<string, object>
+                    {
+                        ["email"] = "admin@xeno"
+                    });
+            }
+
             if (method == HttpMethod.POST && IsPath(path, "/api/v1/auth/dashboard/login", "/v1.0/api/auth/dashboard/login"))
             {
                 return JsonBody(
@@ -485,6 +504,27 @@ namespace Xeno.Server
                     {
                         ["tenantId"] = Constants.DefaultTenantId,
                         ["email"] = "admin@xeno",
+                        ["password"] = "password"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/onboarding/signup", "/v1.0/api/onboarding/signup"))
+            {
+                return JsonBody(
+                    "Onboarding request. Creates a tenant, first tenant administrator, initial credential, and dashboard session.",
+                    ObjectSchemaMetadata(
+                        "Onboarding signup request.",
+                        new[] { "tenantName", "email", "password" },
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional tenant identifier.")),
+                        SchemaProperty("tenantName", OpenApiSchemaMetadata.String("Tenant display name.")),
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("First administrator email address.")),
+                        SchemaProperty("username", OpenApiSchemaMetadata.String("Optional username. Defaults to email.")),
+                        SchemaProperty("password", OpenApiSchemaMetadata.String("Initial password.")),
+                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Optional initial credential access key."))),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantName"] = "Example Company",
+                        ["email"] = "admin@example.com",
                         ["password"] = "password"
                     });
             }
@@ -1110,33 +1150,33 @@ namespace Xeno.Server
 
         private async Task PreflightRouteAsync(HttpContextBase context)
         {
-            ApplyCors(context.Response);
+            ApplyCors(context);
             context.Response.StatusCode = 204;
             await context.Response.Send(context.Token).ConfigureAwait(false);
         }
 
         private async Task PostRoutingRouteAsync(HttpContextBase context)
         {
-            ApplyCors(context.Response);
+            ApplyCors(context);
             await Task.CompletedTask.ConfigureAwait(false);
         }
 
         private async Task OpenApiRouteAsync(HttpContextBase context)
         {
-            ApplyCors(context.Response);
+            ApplyCors(context);
             await SendJsonAsync(context, BuildOpenApi()).ConfigureAwait(false);
         }
 
         private async Task SwaggerRouteAsync(HttpContextBase context)
         {
-            ApplyCors(context.Response);
+            ApplyCors(context);
             context.Response.ContentType = "text/html";
             await context.Response.Send(SwaggerHtml(), context.Token).ConfigureAwait(false);
         }
 
         private async Task ExceptionRouteAsync(HttpContextBase context, Exception exception)
         {
-            ApplyCors(context.Response);
+            ApplyCors(context);
             context.Response.StatusCode = 500;
             await SendJsonAsync(context, new { error = "InternalServerError", message = exception.Message }).ConfigureAwait(false);
         }
@@ -1148,7 +1188,7 @@ namespace Xeno.Server
 
             try
             {
-                ApplyCors(context.Response);
+                ApplyCors(context);
                 await HandleRestAsync(context, method, path, context.Token).ConfigureAwait(false);
             }
             catch (AuthorizationDeniedException ex)
@@ -1222,7 +1262,7 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "GET" && IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
+            if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
             {
                 await HandleLoginTenantLookupAsync(context).ConfigureAwait(false);
                 return;
@@ -1232,6 +1272,13 @@ namespace Xeno.Server
             {
                 if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
                 await HandleDashboardLoginAsync(context, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/onboarding/signup", "/v1.0/api/onboarding/signup"))
+            {
+                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
+                await HandleOnboardingSignupAsync(context, token).ConfigureAwait(false);
                 return;
             }
 
@@ -3684,7 +3731,8 @@ namespace Xeno.Server
 
         private async Task HandleLoginTenantLookupAsync(HttpContextBase context)
         {
-            string email = Uri.UnescapeDataString(FirstNonEmpty(context.Request.Query.Elements.Get("email"))).Trim();
+            AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
+            string email = FirstNonEmpty(body.Email, body.Username, DecodeQueryValue(context.Request.Query.Elements.Get("email"))).Trim();
             if (String.IsNullOrWhiteSpace(email))
             {
                 throw new ArgumentException("Email is required.");
@@ -3769,6 +3817,117 @@ namespace Xeno.Server
                 ExpiresUtc = tokenResult.ExpiresUtc
             };
             await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        private async Task HandleOnboardingSignupAsync(HttpContextBase context, CancellationToken token)
+        {
+            AuthOnboardingRequest body = ReadJsonBody<AuthOnboardingRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId, IdGenerator.NewId("ten_")).Trim();
+            string tenantName = FirstNonEmpty(body.TenantName).Trim();
+            string email = FirstNonEmpty(body.Email).Trim();
+            string username = FirstNonEmpty(body.Username, email).Trim();
+            string password = FirstNonEmpty(body.Password);
+            if (String.IsNullOrWhiteSpace(tenantName)) throw new ArgumentException("Tenant name is required.");
+            if (String.IsNullOrWhiteSpace(email)) throw new ArgumentException("Email is required.");
+            if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
+            if (String.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password is required.");
+
+            XenoPlatform platform = RequirePlatform();
+            if (platform.Tenants.Any(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Tenant ID already exists.");
+
+            Tenant tenant = new Tenant
+            {
+                Id = tenantId,
+                Name = tenantName,
+                Active = true,
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+            platform.Tenants.Add(tenant);
+            platform.EnsureTenantDefaults(tenant.Id);
+            RemoveSeedDevelopmentPrincipal(platform, tenant.Id);
+
+            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Username already exists in the tenant.");
+            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Email already exists in the tenant.");
+
+            User user = new User
+            {
+                TenantId = tenant.Id,
+                Username = username,
+                Email = email,
+                IsAdmin = false,
+                IsTenantAdmin = true,
+                Active = true
+            };
+            _Authentication.SetUserPassword(user, password);
+            platform.Users.Add(user);
+
+            string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
+            if (platform.Credentials.Any(item => item.TenantId == tenant.Id && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
+            Credential credential = new Credential
+            {
+                TenantId = tenant.Id,
+                UserId = user.Id,
+                AccessKey = accessKey,
+                SecretKey = _Authentication.HashCredentialSecret(_Authentication.GenerateSecret()),
+                Active = true
+            };
+            platform.Credentials.Add(credential);
+
+            Role? tenantAdminRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantAdmin", StringComparison.OrdinalIgnoreCase) && item.Active);
+            if (tenantAdminRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantAdminRole.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == user.Id))
+            {
+                platform.RoleAssignments.Add(new RoleAssignment
+                {
+                    TenantId = tenant.Id,
+                    RoleId = tenantAdminRole.Id,
+                    PrincipalType = PrincipalTypeEnum.User,
+                    PrincipalId = user.Id,
+                    Active = true,
+                    CreatedUtc = DateTime.UtcNow,
+                    LastUpdateUtc = DateTime.UtcNow
+                });
+            }
+
+            RequestContext signupContext = new RequestContext
+            {
+                TenantId = tenant.Id,
+                SourceIp = context.Request.Source.IpAddress,
+                PrincipalType = PrincipalTypeEnum.User,
+                UserId = user.Id,
+                IsAuthenticated = true,
+                AuthScheme = AuthSchemeEnum.Password
+            };
+            AuthTokenResult tokenResult = _Authentication.IssueToken(platform, _Settings.Auth, tenant.Id, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Bearer);
+            _Authentication.AppendAudit(platform, signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+
+            await SendJsonAsync(context, new
+            {
+                token = tokenResult.Token,
+                tokenType = tokenResult.TokenType,
+                tenantId = tokenResult.TenantId,
+                tenantName = tenant.Name,
+                userId = user.Id,
+                email = user.Email,
+                sessionId = tokenResult.SessionId,
+                expiresUtc = tokenResult.ExpiresUtc,
+                credentialId = credential.Id,
+                accessKey = credential.AccessKey
+            }).ConfigureAwait(false);
+        }
+
+        private static void RemoveSeedDevelopmentPrincipal(XenoPlatform platform, string tenantId)
+        {
+            List<string> seedUserIds = platform.Users
+                .Where(item => item.TenantId == tenantId && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Id)
+                .ToList();
+            if (seedUserIds.Count == 0) return;
+
+            platform.Credentials.RemoveAll(item => item.TenantId == tenantId && (seedUserIds.Contains(item.UserId) || String.Equals(item.AccessKey, "default", StringComparison.Ordinal)));
+            platform.RoleAssignments.RemoveAll(item => item.TenantId == tenantId && item.PrincipalType == PrincipalTypeEnum.User && seedUserIds.Contains(item.PrincipalId));
+            platform.Users.RemoveAll(item => item.TenantId == tenantId && seedUserIds.Contains(item.Id));
         }
 
         private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
@@ -4798,13 +4957,29 @@ namespace Xeno.Server
             await context.Response.Send(context.Token).ConfigureAwait(false);
         }
 
-        private void ApplyCors(HttpResponseBase response)
+        private void ApplyCors(HttpContextBase context)
         {
             if (!_Settings.Cors.Enabled) return;
-            response.Headers.Add("Access-Control-Allow-Origin", String.Join(",", _Settings.Cors.AllowedOrigins));
+            HttpResponseBase response = context.Response;
+            string requestOrigin = FirstNonEmpty(context.Request.Headers.Get("Origin"), context.Request.Headers.Get("origin"));
+            string allowedOrigin = ResolveCorsOrigin(requestOrigin);
+            if (!String.IsNullOrWhiteSpace(allowedOrigin)) response.Headers.Add("Access-Control-Allow-Origin", allowedOrigin);
+            response.Headers.Add("Vary", "Origin");
             response.Headers.Add("Access-Control-Allow-Headers", String.Join(",", _Settings.Cors.AllowedHeaders));
             response.Headers.Add("Access-Control-Allow-Methods", String.Join(",", _Settings.Cors.AllowedMethods));
             response.Headers.Add("Access-Control-Expose-Headers", "Content-Type, Authorization, x-token, x-tenant-guid, " + RoutingTraceExposeHeaders);
+        }
+
+        private string ResolveCorsOrigin(string requestOrigin)
+        {
+            List<string> allowedOrigins = _Settings.Cors.AllowedOrigins ?? new List<string>();
+            if (allowedOrigins.Any(item => String.Equals(item, "*", StringComparison.Ordinal))) return "*";
+            if (!String.IsNullOrWhiteSpace(requestOrigin) && allowedOrigins.Any(item => String.Equals(item, requestOrigin, StringComparison.OrdinalIgnoreCase)))
+            {
+                return requestOrigin;
+            }
+
+            return allowedOrigins.Count == 1 ? allowedOrigins[0] : String.Empty;
         }
 
         private XenoPlatform RequirePlatform()
@@ -4837,6 +5012,12 @@ namespace Xeno.Server
             return null;
         }
 
+        private static string DecodeQueryValue(string? value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return String.Empty;
+            return WebUtility.UrlDecode(value) ?? value;
+        }
+
         private static string FirstNonEmpty(params string?[] values)
         {
             foreach (string? value in values)
@@ -4865,7 +5046,9 @@ namespace Xeno.Server
                     ["/v1.0/api/health"] = Path(Operation("get", "apiHealth", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
                     ["/metrics"] = Path(Operation("get", "metrics", "Health", "Prometheus metrics", "Returns Prometheus-style metrics.", "GenericObject", false)),
                     ["/openapi.json"] = Path(Operation("get", "openApi", "Health", "OpenAPI document", "Returns the OpenAPI document.", "GenericObject", false)),
+                    ["/v1.0/api/auth/tenants"] = Path(Operation("get", "lookupLoginTenants", "Authentication", "Lookup login tenants", "Returns active tenants for a login email query string.", "GenericObject", false), Operation("post", "lookupLoginTenantsByBody", "Authentication", "Lookup login tenants", "Returns active tenants for a login email request body.", "GenericObject", false)),
                     ["/v1.0/api/auth/login"] = Path(Operation("post", "login", "Authentication", "Login", "Validates a user password and returns a one-time-visible client credential for WebSocket use.", "CredentialLoginResponse", false)),
+                    ["/v1.0/api/onboarding/signup"] = Path(Operation("post", "signup", "Onboarding", "Sign up", "Creates a tenant, first tenant administrator, initial credential, and dashboard session.", "GenericObject", false)),
                     ["/v1.0/api/auth/token"] = Path(Operation("post", "createToken", "Authentication", "Create token", "Creates a development session token.", "TokenResponse", false)),
                     ["/v1.0/api/auth/token/details"] = Path(Operation("get", "tokenDetails", "Authentication", "Token details", "Returns details for the current token.", "GenericObject", true)),
                     ["/v1.0/api/auth/token/refresh"] = Path(Operation("post", "refreshToken", "Authentication", "Refresh token", "Refreshes the current bearer token.", "TokenResponse", true)),
@@ -5345,6 +5528,11 @@ namespace Xeno.Server
                 parameters.Add(Parameter("bucketMinutes", "query", false, "Bucket width in minutes.", IntegerSchema()));
             }
 
+            if (String.Equals(operationId, "lookupLoginTenants", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("email", "query", true, "Email address used to discover tenant login options.", StringSchema()));
+            }
+
             return parameters;
         }
 
@@ -5396,6 +5584,36 @@ namespace Xeno.Server
                     {
                         ["tenantId"] = Constants.DefaultTenantId,
                         ["username"] = "admin",
+                        ["password"] = "password"
+                    });
+            }
+
+            if (String.Equals(operationId, "lookupLoginTenantsByBody", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Tenant lookup request.",
+                    ObjectSchema(Property("email", StringSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["email"] = "admin@xeno"
+                    });
+            }
+
+            if (String.Equals(operationId, "signup", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Onboarding signup request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("tenantName", StringSchema()),
+                        Property("email", StringSchema()),
+                        Property("username", StringSchema()),
+                        Property("password", StringSchema()),
+                        Property("accessKey", StringSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantName"] = "Example Company",
+                        ["email"] = "admin@example.com",
                         ["password"] = "password"
                     });
             }

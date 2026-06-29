@@ -18,8 +18,8 @@ namespace Xeno.Sdk.Tests
             using (HttpClient httpClient = new HttpClient(handler))
             using (XenoClient client = new XenoClient("https://xeno.local", "token-123", "ten_123", httpClient))
             {
-                XenoApiResponse response = await client.ListTenantsAsync();
-                Assert.Equal("[]", response.Body);
+                List<Tenant> response = await client.ListTenantsAsync();
+                Assert.Empty(response);
 
                 RecordedRequest request = Assert.Single(handler.Requests);
                 Assert.Equal(HttpMethod.Get, request.Method);
@@ -36,6 +36,7 @@ namespace Xeno.Sdk.Tests
             RecordingHandler handler = new RecordingHandler(request =>
             {
                 if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.NoContent);
+                if (request.Method == HttpMethod.Get) return JsonResponse("[]");
                 return JsonResponse("{}");
             });
             using (HttpClient httpClient = new HttpClient(handler))
@@ -61,6 +62,7 @@ namespace Xeno.Sdk.Tests
                 await client.CreateRoleAssignmentAsync(new { roleId = "role_1", principalType = "User", principalId = "usr_1" });
                 await client.DeleteRoleAssignmentAsync("rassn_1");
                 await client.CreateRoutingPolicyAsync(new { name = "Policy", modelName = "*", clientName = "*" });
+                await client.ValidateRoutingPolicyAsync(new { name = "Policy", modelName = "*", clientName = "*" });
                 await client.UpdateRoutingPolicyAsync("rpol_1", new { loadBalancingMode = "Random" });
                 await client.DeleteRoutingPolicyAsync("rpol_1");
 
@@ -86,6 +88,7 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/role-assignments", "\"principalId\":\"usr_1\""),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/role-assignments/rassn_1"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/routing-policies", "\"modelName\":\"*\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/routing-policies/validate", "\"modelName\":\"*\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/routing-policies/rpol_1", "\"loadBalancingMode\":\"Random\""),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/routing-policies/rpol_1"));
             }
@@ -94,7 +97,11 @@ namespace Xeno.Sdk.Tests
         [Fact]
         public async Task OpenAiAndHistoryMethods_UseExpectedRoutes()
         {
-            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            RecordingHandler handler = new RecordingHandler(request =>
+            {
+                if (request.RequestUri?.AbsolutePath.Equals("/v1.0/api/request-history", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("[]");
+                return JsonResponse("{}");
+            });
             using (HttpClient httpClient = new HttpClient(handler))
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
             {
@@ -171,39 +178,51 @@ namespace Xeno.Sdk.Tests
             RecordingHandler handler = new RecordingHandler(request =>
             {
                 if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.NoContent);
+                if (request.RequestUri?.AbsolutePath.EndsWith("/rollups", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("[]");
+                if (request.RequestUri?.AbsolutePath.EndsWith("/providers/latest", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("[]");
+                if (request.RequestUri?.AbsolutePath.EndsWith("/collection-attempts", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("[]");
+                if (request.RequestUri?.AbsolutePath.EndsWith("/metrics", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("[]");
                 return JsonResponse("{}");
             });
             using (HttpClient httpClient = new HttpClient(handler))
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
             {
                 await client.GetClientTelemetryStatusAsync();
-                await client.GetLatestClientTelemetryAsync();
+                await client.GetLatestClientTelemetryAsync(new Dictionary<string, string> { ["clientId"] = "xcl_1", ["empty"] = "" });
                 await client.CollectClientTelemetryAsync(new { clientId = "xcl_1", collectHostTelemetry = true });
+                await client.CollectClientProviderTelemetryAsync(new { clientId = "xcl_1" });
                 await client.SearchClientTelemetryAsync(new { clientId = "xcl_1", metric = "telemetry.cpu.utilizationPercent" });
                 await client.GetClientTelemetryRollupsAsync(new { metric = "telemetry.cpu.utilizationPercent" });
                 await client.GetClientTelemetryDetailAsync("ctel_1");
                 await client.DeleteClientTelemetryAsync("ctel_1");
-                await client.GetLatestClientProviderTelemetryAsync();
+                await client.BulkDeleteClientTelemetryAsync(new { clientId = "xcl_1" });
+                await client.GetLatestClientProviderTelemetryAsync(new Dictionary<string, string> { ["clientId"] = "xcl_1" });
                 await client.SearchClientProviderTelemetryAsync(new { providerName = "ollama" });
                 await client.GetClientProviderTelemetryRollupsAsync(new { metric = "provider.queuedRequests" });
                 await client.GetClientProviderTelemetryDetailAsync("cptel_1");
                 await client.DeleteClientProviderTelemetryAsync("cptel_1");
+                await client.BulkDeleteClientProviderTelemetryAsync(new { providerName = "ollama" });
+                await client.ListClientTelemetryCollectionAttemptsAsync();
                 await client.GetClientTelemetryMetricCatalogAsync();
 
                 Assert.Collection(
                     handler.Requests,
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/status"),
-                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/latest"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/latest?clientId=xcl_1"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/collect", "\"clientId\":\"xcl_1\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/providers/collect", "\"clientId\":\"xcl_1\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/history/search", "\"metric\":\"telemetry.cpu.utilizationPercent\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/history/rollups", "\"metric\":\"telemetry.cpu.utilizationPercent\""),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/history/ctel_1"),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/client-telemetry/history/ctel_1"),
-                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/providers/latest"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/history/delete", "\"clientId\":\"xcl_1\""),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/providers/latest?clientId=xcl_1"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/providers/history/search", "\"providerName\":\"ollama\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/providers/history/rollups", "\"metric\":\"provider.queuedRequests\""),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1"),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/client-telemetry/providers/history/cptel_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-telemetry/providers/history/delete", "\"providerName\":\"ollama\""),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/collection-attempts"),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/client-telemetry/metrics"));
             }
         }
@@ -252,10 +271,24 @@ namespace Xeno.Sdk.Tests
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
             using (CancellationTokenSource source = new CancellationTokenSource())
             {
-                XenoApiResponse response = await client.GetSettingsAsync(source.Token);
-                Assert.Equal("{}", response.Body);
+                SettingsResponse response = await client.GetSettingsAsync(source.Token);
+                Assert.NotNull(response);
 
                 Assert.True(handler.Requests[0].CancellationToken.CanBeCanceled);
+            }
+        }
+
+        [Fact]
+        public async Task TypedResponses_AreMaterialized()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.1.0\"}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                HealthResponse response = await client.GetHealthAsync();
+
+                Assert.Equal("ok", response.Status);
+                Assert.Equal("Xeno", response.Product);
             }
         }
 

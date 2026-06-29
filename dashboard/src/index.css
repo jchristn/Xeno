@@ -228,12 +228,6 @@ textarea {
   font-size: 14px;
 }
 
-.login-logo {
-  width: 58px;
-  height: 58px;
-  object-fit: contain;
-}
-
 .default-credentials {
   display: grid;
   gap: 8px;

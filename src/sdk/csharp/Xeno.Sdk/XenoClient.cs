@@ -1,4 +1,4 @@
-namespace Xeno.Sdk
+﻿namespace Xeno.Sdk
 {
     using System;
     using System.Collections.Generic;
@@ -6,6 +6,7 @@ namespace Xeno.Sdk
     using System.Net.Http;
     using System.Net.Http.Headers;
     using System.Text;
+    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
 
@@ -76,9 +77,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Health response JSON.</returns>
-        public async Task<XenoApiResponse> GetHealthAsync(CancellationToken token = default)
+        public async Task<HealthResponse> GetHealthAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/health", token).ConfigureAwait(false);
+            return await GetJsonAsync<HealthResponse>("/health", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -86,9 +87,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>OpenAPI response JSON.</returns>
-        public async Task<XenoApiResponse> GetOpenApiAsync(CancellationToken token = default)
+        public async Task<XenoObjectResponse> GetOpenApiAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/openapi.json", token).ConfigureAwait(false);
+            return await GetJsonAsync<XenoObjectResponse>("/openapi.json", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -109,9 +110,9 @@ namespace Xeno.Sdk
         /// <param name="tenantId">Tenant identifier.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Credential response JSON.</returns>
-        public async Task<XenoApiResponse> LoginAsync(string username, string password, string tenantId = "ten_default", CancellationToken token = default)
+        public async Task<CredentialLoginResponse> LoginAsync(string username, string password, string tenantId = "ten_default", CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/auth/login", new { username, password, tenantId }, token).ConfigureAwait(false);
+            return await PostJsonAsync<CredentialLoginResponse>("/v1.0/api/auth/login", new { username, password, tenantId }, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -120,9 +121,9 @@ namespace Xeno.Sdk
         /// <param name="accessKey">Access key.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Token response JSON.</returns>
-        public async Task<XenoApiResponse> CreateTokenAsync(string accessKey, CancellationToken token = default)
+        public async Task<TokenResponse> CreateTokenAsync(string accessKey, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/auth/token", new { accessKey }, token).ConfigureAwait(false);
+            return await PostJsonAsync<TokenResponse>("/v1.0/api/auth/token", new { accessKey }, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -130,9 +131,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Token details JSON.</returns>
-        public async Task<XenoApiResponse> GetTokenDetailsAsync(CancellationToken token = default)
+        public async Task<XenoObjectResponse> GetTokenDetailsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/auth/token/details", token).ConfigureAwait(false);
+            return await GetJsonAsync<XenoObjectResponse>("/v1.0/api/auth/token/details", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -140,9 +141,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>New token response JSON.</returns>
-        public async Task<XenoApiResponse> RefreshTokenAsync(CancellationToken token = default)
+        public async Task<TokenResponse> RefreshTokenAsync(CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/auth/token/refresh", new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<TokenResponse>("/v1.0/api/auth/token/refresh", new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -150,9 +151,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Logout response JSON.</returns>
-        public async Task<XenoApiResponse> LogoutAsync(CancellationToken token = default)
+        public async Task<XenoObjectResponse> LogoutAsync(CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/auth/logout", new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/auth/logout", new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -160,9 +161,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Tenant array JSON.</returns>
-        public async Task<XenoApiResponse> ListTenantsAsync(CancellationToken token = default)
+        public async Task<List<Tenant>> ListTenantsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/tenants", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<Tenant>>("/v1.0/api/tenants", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -171,9 +172,9 @@ namespace Xeno.Sdk
         /// <param name="tenant">Tenant payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Tenant JSON.</returns>
-        public async Task<XenoApiResponse> CreateTenantAsync(object tenant, CancellationToken token = default)
+        public async Task<Tenant> CreateTenantAsync(object tenant, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/tenants", tenant ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<Tenant>("/v1.0/api/tenants", tenant ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -183,9 +184,9 @@ namespace Xeno.Sdk
         /// <param name="tenant">Tenant payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Tenant JSON.</returns>
-        public async Task<XenoApiResponse> UpdateTenantAsync(string id, object tenant, CancellationToken token = default)
+        public async Task<Tenant> UpdateTenantAsync(string id, object tenant, CancellationToken token = default)
         {
-            return await PutJsonAsync("/v1.0/api/tenants/" + Escape(id), tenant ?? new object(), token).ConfigureAwait(false);
+            return await PutJsonAsync<Tenant>("/v1.0/api/tenants/" + Escape(id), tenant ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -204,9 +205,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>User array JSON.</returns>
-        public async Task<XenoApiResponse> ListUsersAsync(CancellationToken token = default)
+        public async Task<List<User>> ListUsersAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/users", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<User>>("/v1.0/api/users", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -215,9 +216,9 @@ namespace Xeno.Sdk
         /// <param name="user">User payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>User JSON.</returns>
-        public async Task<XenoApiResponse> CreateUserAsync(object user, CancellationToken token = default)
+        public async Task<User> CreateUserAsync(object user, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/users", user ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<User>("/v1.0/api/users", user ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -227,9 +228,9 @@ namespace Xeno.Sdk
         /// <param name="user">User payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>User JSON.</returns>
-        public async Task<XenoApiResponse> UpdateUserAsync(string id, object user, CancellationToken token = default)
+        public async Task<User> UpdateUserAsync(string id, object user, CancellationToken token = default)
         {
-            return await PutJsonAsync("/v1.0/api/users/" + Escape(id), user ?? new object(), token).ConfigureAwait(false);
+            return await PutJsonAsync<User>("/v1.0/api/users/" + Escape(id), user ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -248,9 +249,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Credential array JSON.</returns>
-        public async Task<XenoApiResponse> ListCredentialsAsync(CancellationToken token = default)
+        public async Task<List<Credential>> ListCredentialsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/credentials", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<Credential>>("/v1.0/api/credentials", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -259,9 +260,9 @@ namespace Xeno.Sdk
         /// <param name="credential">Credential payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Credential JSON.</returns>
-        public async Task<XenoApiResponse> CreateCredentialAsync(object credential, CancellationToken token = default)
+        public async Task<Credential> CreateCredentialAsync(object credential, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/credentials", credential ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<Credential>("/v1.0/api/credentials", credential ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -271,9 +272,9 @@ namespace Xeno.Sdk
         /// <param name="credential">Credential payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Credential JSON.</returns>
-        public async Task<XenoApiResponse> UpdateCredentialAsync(string id, object credential, CancellationToken token = default)
+        public async Task<Credential> UpdateCredentialAsync(string id, object credential, CancellationToken token = default)
         {
-            return await PutJsonAsync("/v1.0/api/credentials/" + Escape(id), credential ?? new object(), token).ConfigureAwait(false);
+            return await PutJsonAsync<Credential>("/v1.0/api/credentials/" + Escape(id), credential ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -292,9 +293,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Role array JSON.</returns>
-        public async Task<XenoApiResponse> ListRolesAsync(CancellationToken token = default)
+        public async Task<List<Role>> ListRolesAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/roles", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<Role>>("/v1.0/api/roles", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -303,9 +304,9 @@ namespace Xeno.Sdk
         /// <param name="role">Role payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Role JSON.</returns>
-        public async Task<XenoApiResponse> CreateRoleAsync(object role, CancellationToken token = default)
+        public async Task<Role> CreateRoleAsync(object role, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/roles", role ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<Role>("/v1.0/api/roles", role ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -315,9 +316,9 @@ namespace Xeno.Sdk
         /// <param name="role">Role payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Role JSON.</returns>
-        public async Task<XenoApiResponse> UpdateRoleAsync(string id, object role, CancellationToken token = default)
+        public async Task<Role> UpdateRoleAsync(string id, object role, CancellationToken token = default)
         {
-            return await PutJsonAsync("/v1.0/api/roles/" + Escape(id), role ?? new object(), token).ConfigureAwait(false);
+            return await PutJsonAsync<Role>("/v1.0/api/roles/" + Escape(id), role ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -336,9 +337,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Permission array JSON.</returns>
-        public async Task<XenoApiResponse> ListPermissionsAsync(CancellationToken token = default)
+        public async Task<List<Permission>> ListPermissionsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/permissions", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<Permission>>("/v1.0/api/permissions", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -346,9 +347,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Permission array JSON.</returns>
-        public async Task<XenoApiResponse> ListGrantablePermissionsAsync(CancellationToken token = default)
+        public async Task<List<Permission>> ListGrantablePermissionsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/permissions/grantable", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<Permission>>("/v1.0/api/permissions/grantable", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -357,9 +358,9 @@ namespace Xeno.Sdk
         /// <param name="permission">Permission payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Permission JSON.</returns>
-        public async Task<XenoApiResponse> CreatePermissionAsync(object permission, CancellationToken token = default)
+        public async Task<Permission> CreatePermissionAsync(object permission, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/permissions", permission ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<Permission>("/v1.0/api/permissions", permission ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -369,9 +370,9 @@ namespace Xeno.Sdk
         /// <param name="permission">Permission payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Permission JSON.</returns>
-        public async Task<XenoApiResponse> UpdatePermissionAsync(string id, object permission, CancellationToken token = default)
+        public async Task<Permission> UpdatePermissionAsync(string id, object permission, CancellationToken token = default)
         {
-            return await PutJsonAsync("/v1.0/api/permissions/" + Escape(id), permission ?? new object(), token).ConfigureAwait(false);
+            return await PutJsonAsync<Permission>("/v1.0/api/permissions/" + Escape(id), permission ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -390,9 +391,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Effective permission array JSON.</returns>
-        public async Task<XenoApiResponse> ListEffectivePermissionsAsync(CancellationToken token = default)
+        public async Task<List<EffectivePermission>> ListEffectivePermissionsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/effective-permissions", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<EffectivePermission>>("/v1.0/api/effective-permissions", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -400,9 +401,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Role assignment array JSON.</returns>
-        public async Task<XenoApiResponse> ListRoleAssignmentsAsync(CancellationToken token = default)
+        public async Task<List<RoleAssignment>> ListRoleAssignmentsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/role-assignments", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<RoleAssignment>>("/v1.0/api/role-assignments", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -411,9 +412,9 @@ namespace Xeno.Sdk
         /// <param name="assignment">Role assignment payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Role assignment JSON.</returns>
-        public async Task<XenoApiResponse> CreateRoleAssignmentAsync(object assignment, CancellationToken token = default)
+        public async Task<RoleAssignment> CreateRoleAssignmentAsync(object assignment, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/role-assignments", assignment ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<RoleAssignment>("/v1.0/api/role-assignments", assignment ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -432,9 +433,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Audit array JSON.</returns>
-        public async Task<XenoApiResponse> ListAuditRecordsAsync(CancellationToken token = default)
+        public async Task<List<AuditRecord>> ListAuditRecordsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/audit", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<AuditRecord>>("/v1.0/api/audit", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -453,9 +454,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Client array JSON.</returns>
-        public async Task<XenoApiResponse> ListClientsAsync(CancellationToken token = default)
+        public async Task<List<XenoClientRecord>> ListClientsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/clients", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<XenoClientRecord>>("/v1.0/api/clients", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -475,9 +476,9 @@ namespace Xeno.Sdk
         /// <param name="model">Client model delete payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Delete response JSON.</returns>
-        public async Task<XenoApiResponse> DeleteClientModelAsync(object model, CancellationToken token = default)
+        public async Task<XenoObjectResponse> DeleteClientModelAsync(object model, CancellationToken token = default)
         {
-            return await DeleteJsonAsync("/v1.0/api/client-models", model ?? new object(), token).ConfigureAwait(false);
+            return await DeleteJsonAsync<XenoObjectResponse>("/v1.0/api/client-models", model ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -485,19 +486,20 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Telemetry status JSON.</returns>
-        public async Task<XenoApiResponse> GetClientTelemetryStatusAsync(CancellationToken token = default)
+        public async Task<ServerClientTelemetryCollectionStatusResponse> GetClientTelemetryStatusAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/client-telemetry/status", token).ConfigureAwait(false);
+            return await GetJsonAsync<ServerClientTelemetryCollectionStatusResponse>("/v1.0/api/client-telemetry/status", token).ConfigureAwait(false);
         }
 
         /// <summary>
         /// Gets latest server-collected host and provider telemetry.
         /// </summary>
+        /// <param name="filters">Optional query-string filters.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Latest telemetry JSON.</returns>
-        public async Task<XenoApiResponse> GetLatestClientTelemetryAsync(CancellationToken token = default)
+        public async Task<ServerClientTelemetryLatestResponse> GetLatestClientTelemetryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/client-telemetry/latest", token).ConfigureAwait(false);
+            return await GetJsonAsync<ServerClientTelemetryLatestResponse>("/v1.0/api/client-telemetry/latest" + QueryString(filters), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -506,9 +508,20 @@ namespace Xeno.Sdk
         /// <param name="request">Collection request.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Collection trigger response JSON.</returns>
-        public async Task<XenoApiResponse> CollectClientTelemetryAsync(object request, CancellationToken token = default)
+        public async Task<ServerClientTelemetryCollectResponse> CollectClientTelemetryAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/client-telemetry/collect", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<ServerClientTelemetryCollectResponse>("/v1.0/api/client-telemetry/collect", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Triggers immediate provider telemetry collection.
+        /// </summary>
+        /// <param name="request">Collection request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Collection response.</returns>
+        public async Task<ServerClientTelemetryCollectResponse> CollectClientProviderTelemetryAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<ServerClientTelemetryCollectResponse>("/v1.0/api/client-telemetry/providers/collect", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -517,9 +530,9 @@ namespace Xeno.Sdk
         /// <param name="request">Search request.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Search result JSON.</returns>
-        public async Task<XenoApiResponse> SearchClientTelemetryAsync(object request, CancellationToken token = default)
+        public async Task<ServerClientTelemetrySearchResult> SearchClientTelemetryAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/client-telemetry/history/search", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<ServerClientTelemetrySearchResult>("/v1.0/api/client-telemetry/history/search", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -528,9 +541,9 @@ namespace Xeno.Sdk
         /// <param name="request">Rollup request.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Rollup JSON.</returns>
-        public async Task<XenoApiResponse> GetClientTelemetryRollupsAsync(object request, CancellationToken token = default)
+        public async Task<List<ServerClientTelemetryRollupBucket>> GetClientTelemetryRollupsAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/client-telemetry/history/rollups", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<List<ServerClientTelemetryRollupBucket>>("/v1.0/api/client-telemetry/history/rollups", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -539,9 +552,9 @@ namespace Xeno.Sdk
         /// <param name="id">Sample identifier.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Telemetry detail JSON.</returns>
-        public async Task<XenoApiResponse> GetClientTelemetryDetailAsync(string id, CancellationToken token = default)
+        public async Task<ServerClientTelemetrySampleDetail> GetClientTelemetryDetailAsync(string id, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/client-telemetry/history/" + Escape(id), token).ConfigureAwait(false);
+            return await GetJsonAsync<ServerClientTelemetrySampleDetail>("/v1.0/api/client-telemetry/history/" + Escape(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -556,13 +569,25 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
+        /// Bulk deletes host telemetry samples by filter.
+        /// </summary>
+        /// <param name="filter">Delete filter.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Delete response.</returns>
+        public async Task<XenoObjectResponse> BulkDeleteClientTelemetryAsync(object filter, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/client-telemetry/history/delete", filter ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets latest server-collected provider telemetry.
         /// </summary>
+        /// <param name="filters">Optional query-string filters.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Latest provider telemetry JSON.</returns>
-        public async Task<XenoApiResponse> GetLatestClientProviderTelemetryAsync(CancellationToken token = default)
+        public async Task<List<ServerProviderTelemetrySampleRecord>> GetLatestClientProviderTelemetryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/client-telemetry/providers/latest", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<ServerProviderTelemetrySampleRecord>>("/v1.0/api/client-telemetry/providers/latest" + QueryString(filters), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -571,9 +596,9 @@ namespace Xeno.Sdk
         /// <param name="request">Search request.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Search result JSON.</returns>
-        public async Task<XenoApiResponse> SearchClientProviderTelemetryAsync(object request, CancellationToken token = default)
+        public async Task<ServerProviderTelemetrySearchResult> SearchClientProviderTelemetryAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/client-telemetry/providers/history/search", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<ServerProviderTelemetrySearchResult>("/v1.0/api/client-telemetry/providers/history/search", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -582,9 +607,9 @@ namespace Xeno.Sdk
         /// <param name="request">Rollup request.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Rollup JSON.</returns>
-        public async Task<XenoApiResponse> GetClientProviderTelemetryRollupsAsync(object request, CancellationToken token = default)
+        public async Task<List<ServerProviderTelemetryRollupBucket>> GetClientProviderTelemetryRollupsAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/client-telemetry/providers/history/rollups", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<List<ServerProviderTelemetryRollupBucket>>("/v1.0/api/client-telemetry/providers/history/rollups", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -593,9 +618,9 @@ namespace Xeno.Sdk
         /// <param name="id">Sample identifier.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Provider telemetry detail JSON.</returns>
-        public async Task<XenoApiResponse> GetClientProviderTelemetryDetailAsync(string id, CancellationToken token = default)
+        public async Task<ServerProviderTelemetrySampleDetail> GetClientProviderTelemetryDetailAsync(string id, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/client-telemetry/providers/history/" + Escape(id), token).ConfigureAwait(false);
+            return await GetJsonAsync<ServerProviderTelemetrySampleDetail>("/v1.0/api/client-telemetry/providers/history/" + Escape(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -610,13 +635,34 @@ namespace Xeno.Sdk
         }
 
         /// <summary>
+        /// Bulk deletes provider telemetry samples by filter.
+        /// </summary>
+        /// <param name="filter">Delete filter.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Delete response.</returns>
+        public async Task<XenoObjectResponse> BulkDeleteClientProviderTelemetryAsync(object filter, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/client-telemetry/providers/history/delete", filter ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Lists recent client telemetry collection attempts.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Collection attempt records.</returns>
+        public async Task<List<ServerClientTelemetryCollectionAttemptRecord>> ListClientTelemetryCollectionAttemptsAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync<List<ServerClientTelemetryCollectionAttemptRecord>>("/v1.0/api/client-telemetry/collection-attempts", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets telemetry metric catalog.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Metric catalog JSON.</returns>
-        public async Task<XenoApiResponse> GetClientTelemetryMetricCatalogAsync(CancellationToken token = default)
+        public async Task<List<RoutingPolicyMetricDefinition>> GetClientTelemetryMetricCatalogAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/client-telemetry/metrics", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<RoutingPolicyMetricDefinition>>("/v1.0/api/client-telemetry/metrics", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -624,9 +670,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Model definition array JSON.</returns>
-        public async Task<XenoApiResponse> ListModelDefinitionsAsync(CancellationToken token = default)
+        public async Task<List<ModelDefinition>> ListModelDefinitionsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/model-definitions", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<ModelDefinition>>("/v1.0/api/model-definitions", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -634,9 +680,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Model configuration array JSON.</returns>
-        public async Task<XenoApiResponse> ListModelConfigurationsAsync(CancellationToken token = default)
+        public async Task<List<ModelConfiguration>> ListModelConfigurationsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/model-configurations", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<ModelConfiguration>>("/v1.0/api/model-configurations", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -644,9 +690,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Routing policy array JSON.</returns>
-        public async Task<XenoApiResponse> ListRoutingPoliciesAsync(CancellationToken token = default)
+        public async Task<List<RoutingPolicy>> ListRoutingPoliciesAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/routing-policies", token).ConfigureAwait(false);
+            return await GetJsonAsync<List<RoutingPolicy>>("/v1.0/api/routing-policies", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -655,9 +701,20 @@ namespace Xeno.Sdk
         /// <param name="policy">Routing policy payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Routing policy JSON.</returns>
-        public async Task<XenoApiResponse> CreateRoutingPolicyAsync(object policy, CancellationToken token = default)
+        public async Task<RoutingPolicy> CreateRoutingPolicyAsync(object policy, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/routing-policies", policy ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<RoutingPolicy>("/v1.0/api/routing-policies", policy ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Validates a routing policy without saving it.
+        /// </summary>
+        /// <param name="policy">Routing policy payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Validation result.</returns>
+        public async Task<RoutingPolicyValidationResult> ValidateRoutingPolicyAsync(object policy, CancellationToken token = default)
+        {
+            return await PostJsonAsync<RoutingPolicyValidationResult>("/v1.0/api/routing-policies/validate", policy ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -667,9 +724,9 @@ namespace Xeno.Sdk
         /// <param name="policy">Routing policy payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Routing policy JSON.</returns>
-        public async Task<XenoApiResponse> UpdateRoutingPolicyAsync(string id, object policy, CancellationToken token = default)
+        public async Task<RoutingPolicy> UpdateRoutingPolicyAsync(string id, object policy, CancellationToken token = default)
         {
-            return await PutJsonAsync("/v1.0/api/routing-policies/" + Escape(id), policy ?? new object(), token).ConfigureAwait(false);
+            return await PutJsonAsync<RoutingPolicy>("/v1.0/api/routing-policies/" + Escape(id), policy ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -688,9 +745,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>OpenAI model list JSON.</returns>
-        public async Task<XenoApiResponse> ListOpenAiModelsAsync(CancellationToken token = default)
+        public async Task<OpenAiModelList> ListOpenAiModelsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1/models", token).ConfigureAwait(false);
+            return await GetJsonAsync<OpenAiModelList>("/v1/models", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -699,9 +756,9 @@ namespace Xeno.Sdk
         /// <param name="request">Chat completion payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Completion response JSON.</returns>
-        public async Task<XenoApiResponse> CreateChatCompletionAsync(object request, CancellationToken token = default)
+        public async Task<OpenAiChatCompletion> CreateChatCompletionAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1/chat/completions", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<OpenAiChatCompletion>("/v1/chat/completions", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -710,9 +767,9 @@ namespace Xeno.Sdk
         /// <param name="request">Completion payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Completion response JSON.</returns>
-        public async Task<XenoApiResponse> CreateCompletionAsync(object request, CancellationToken token = default)
+        public async Task<OpenAiChatCompletion> CreateCompletionAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1/completions", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<OpenAiChatCompletion>("/v1/completions", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -721,9 +778,9 @@ namespace Xeno.Sdk
         /// <param name="request">Embedding payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Embedding response JSON.</returns>
-        public async Task<XenoApiResponse> CreateEmbeddingAsync(object request, CancellationToken token = default)
+        public async Task<OpenAiEmbeddingList> CreateEmbeddingAsync(object request, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1/embeddings", request ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<OpenAiEmbeddingList>("/v1/embeddings", request ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -732,9 +789,9 @@ namespace Xeno.Sdk
         /// <param name="filters">Optional query-string filters.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Request history array JSON.</returns>
-        public async Task<XenoApiResponse> ListRequestHistoryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
+        public async Task<List<RequestHistoryEntry>> ListRequestHistoryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/request-history" + QueryString(filters), token).ConfigureAwait(false);
+            return await GetJsonAsync<List<RequestHistoryEntry>>("/v1.0/api/request-history" + QueryString(filters), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -743,9 +800,9 @@ namespace Xeno.Sdk
         /// <param name="id">Request history identifier.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Request history entry JSON.</returns>
-        public async Task<XenoApiResponse> GetRequestHistoryAsync(string id, CancellationToken token = default)
+        public async Task<RequestHistoryEntry> GetRequestHistoryAsync(string id, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/request-history/" + Escape(id), token).ConfigureAwait(false);
+            return await GetJsonAsync<RequestHistoryEntry>("/v1.0/api/request-history/" + Escape(id), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -765,9 +822,9 @@ namespace Xeno.Sdk
         /// <param name="filters">Optional query-string filters.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Summary JSON.</returns>
-        public async Task<XenoApiResponse> GetRequestHistorySummaryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
+        public async Task<RequestHistorySummary> GetRequestHistorySummaryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/request-history/summary" + QueryString(filters), token).ConfigureAwait(false);
+            return await GetJsonAsync<RequestHistorySummary>("/v1.0/api/request-history/summary" + QueryString(filters), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -775,9 +832,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Overview JSON.</returns>
-        public async Task<XenoApiResponse> GetRequestAnalyticsOverviewAsync(CancellationToken token = default)
+        public async Task<XenoObjectResponse> GetRequestAnalyticsOverviewAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/request-history/analytics/overview", token).ConfigureAwait(false);
+            return await GetJsonAsync<XenoObjectResponse>("/v1.0/api/request-history/analytics/overview", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -786,9 +843,9 @@ namespace Xeno.Sdk
         /// <param name="filter">Delete filter.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Delete response JSON.</returns>
-        public async Task<XenoApiResponse> BulkDeleteRequestHistoryAsync(object filter, CancellationToken token = default)
+        public async Task<XenoObjectResponse> BulkDeleteRequestHistoryAsync(object filter, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/request-history/bulk", filter ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/request-history/bulk", filter ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -796,9 +853,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Overview JSON.</returns>
-        public async Task<XenoApiResponse> GetAnalyticsOverviewAsync(CancellationToken token = default)
+        public async Task<XenoObjectResponse> GetAnalyticsOverviewAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/analytics/overview", token).ConfigureAwait(false);
+            return await GetJsonAsync<XenoObjectResponse>("/v1.0/api/analytics/overview", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -806,9 +863,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Settings response JSON.</returns>
-        public async Task<XenoApiResponse> GetSettingsAsync(CancellationToken token = default)
+        public async Task<SettingsResponse> GetSettingsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/settings", token).ConfigureAwait(false);
+            return await GetJsonAsync<SettingsResponse>("/v1.0/api/settings", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -817,9 +874,9 @@ namespace Xeno.Sdk
         /// <param name="settings">Settings payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Settings response JSON.</returns>
-        public async Task<XenoApiResponse> UpdateSettingsAsync(object settings, CancellationToken token = default)
+        public async Task<SettingsResponse> UpdateSettingsAsync(object settings, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/settings", settings ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<SettingsResponse>("/v1.0/api/settings", settings ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -827,9 +884,9 @@ namespace Xeno.Sdk
         /// </summary>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Backup JSON.</returns>
-        public async Task<XenoApiResponse> GetBackupAsync(CancellationToken token = default)
+        public async Task<XenoObjectResponse> GetBackupAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync("/v1.0/api/backup", token).ConfigureAwait(false);
+            return await GetJsonAsync<XenoObjectResponse>("/v1.0/api/backup", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -838,9 +895,9 @@ namespace Xeno.Sdk
         /// <param name="backup">Backup payload.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Restore response JSON.</returns>
-        public async Task<XenoApiResponse> RestoreBackupAsync(object backup, CancellationToken token = default)
+        public async Task<XenoObjectResponse> RestoreBackupAsync(object backup, CancellationToken token = default)
         {
-            return await PostJsonAsync("/v1.0/api/restore", backup ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/restore", backup ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -859,28 +916,28 @@ namespace Xeno.Sdk
             _Disposed = true;
         }
 
-        private async Task<XenoApiResponse> GetJsonAsync(string endpoint, CancellationToken token)
+        private async Task<T> GetJsonAsync<T>(string endpoint, CancellationToken token)
         {
             string json = await SendTextAsync(HttpMethod.Get, endpoint, null, token).ConfigureAwait(false);
-            return new XenoApiResponse { Body = json };
+            return DeserializeResponse<T>(json, endpoint);
         }
 
-        private async Task<XenoApiResponse> PostJsonAsync(string endpoint, object body, CancellationToken token)
+        private async Task<T> PostJsonAsync<T>(string endpoint, object body, CancellationToken token)
         {
             string json = await SendTextAsync(HttpMethod.Post, endpoint, body, token).ConfigureAwait(false);
-            return new XenoApiResponse { Body = json };
+            return DeserializeResponse<T>(json, endpoint);
         }
 
-        private async Task<XenoApiResponse> PutJsonAsync(string endpoint, object body, CancellationToken token)
+        private async Task<T> PutJsonAsync<T>(string endpoint, object body, CancellationToken token)
         {
             string json = await SendTextAsync(HttpMethod.Put, endpoint, body, token).ConfigureAwait(false);
-            return new XenoApiResponse { Body = json };
+            return DeserializeResponse<T>(json, endpoint);
         }
 
-        private async Task<XenoApiResponse> DeleteJsonAsync(string endpoint, object body, CancellationToken token)
+        private async Task<T> DeleteJsonAsync<T>(string endpoint, object body, CancellationToken token)
         {
             string json = await SendTextAsync(HttpMethod.Delete, endpoint, body, token).ConfigureAwait(false);
-            return new XenoApiResponse { Body = json };
+            return DeserializeResponse<T>(json, endpoint);
         }
 
         private async Task DeleteAsync(string endpoint, CancellationToken token)
@@ -912,6 +969,23 @@ namespace Xeno.Sdk
 
                     return String.IsNullOrWhiteSpace(responseBody) ? "{}" : responseBody;
                 }
+            }
+        }
+
+        private static T DeserializeResponse<T>(string json, string endpoint)
+        {
+            if (typeof(T) == typeof(XenoObjectResponse))
+            {
+                return (T)(object)XenoObjectResponse.FromJson(json);
+            }
+
+            try
+            {
+                return XenoSdkJson.Deserialize<T>(json);
+            }
+            catch (JsonException ex)
+            {
+                throw new XenoApiException("Xeno API response from " + endpoint + " could not be deserialized as " + typeof(T).Name + ": " + ex.Message, System.Net.HttpStatusCode.OK, endpoint, json);
             }
         }
 

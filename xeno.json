@@ -8,7 +8,7 @@
   },
   "Cors": {
     "Enabled": true,
-    "AllowedOrigins": ["http://localhost:9100"],
+    "AllowedOrigins": ["http://localhost:9100", "http://localhost:9200", "https://portal.xenocloud.ai"],
     "AllowedHeaders": ["Authorization", "Content-Type", "x-token", "x-tenant-guid", "x-tenant-id", "x-access-key", "x-admin-key", "x-signature"],
     "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   },

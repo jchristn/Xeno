@@ -53,6 +53,7 @@ import Pagination from './components/Pagination.jsx';
 
 const api = new ApiClient();
 const dashboardSessionKey = 'xeno.dashboard.session';
+const portalSessionHashKey = 'xeno-portal-session';
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
 const analyticsRanges = [
@@ -193,6 +194,12 @@ function describeInteractiveElement(t, element, label) {
 }
 
 function readDashboardSession() {
+  const portalSession = readPortalSessionFromHash();
+  if (portalSession) {
+    writeDashboardSession(portalSession);
+    return portalSession;
+  }
+
   try {
     const json = window.localStorage.getItem(dashboardSessionKey);
     if (!json) return null;
@@ -202,6 +209,31 @@ function readDashboardSession() {
   } catch {
     return null;
   }
+}
+
+function readPortalSessionFromHash() {
+  const hash = window.location.hash || '';
+  if (!hash.includes(portalSessionHashKey)) return null;
+
+  try {
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    const encoded = params.get(portalSessionHashKey);
+    if (!encoded) return null;
+
+    const session = JSON.parse(decodeBase64Json(encoded));
+    if (!session?.token || !session?.tenantId || !session?.serverUrl) return null;
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    return session;
+  } catch {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    return null;
+  }
+}
+
+function decodeBase64Json(encoded) {
+  const binary = window.atob(encoded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function writeDashboardSession(session) {
@@ -726,7 +758,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
     setLoading(true);
     try {
       api.setBaseUrl(serverUrl);
-      const result = await api.get(`/api/v1/auth/tenants?email=${encodeURIComponent(email.trim())}`, { skipAuth: true });
+      const result = await api.post('/api/v1/auth/tenants', { email: email.trim() }, { skipAuth: true });
       if (result?.error) throw new Error(result.message || result.error);
 
       const tenantList = Array.isArray(result.tenants) ? result.tenants : [];
@@ -820,7 +852,6 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
             </button>
           </div>
           <div className="login-card-header">
-            <img className="login-logo" src="/logo.png" alt={t('appTitle')} />
             <div>
               <span className="eyebrow">{t('dashboard')}</span>
               <h2>{t('signInToDashboard')}</h2>

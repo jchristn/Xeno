@@ -19,6 +19,167 @@ class XenoApiError(Exception):
         return self.message
 
 
+class XenoModel:
+    def __init__(self, **data: Any) -> None:
+        self.raw = dict(data)
+        for key, value in data.items():
+            setattr(self, key, value)
+            setattr(self, self._snake_case(key), value)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "XenoModel":
+        return cls(**data)
+
+    @staticmethod
+    def _snake_case(value: str) -> str:
+        chars: list[str] = []
+        for index, char in enumerate(value):
+            if char.isupper() and index > 0:
+                chars.append("_")
+            chars.append(char.lower())
+        return "".join(chars)
+
+
+class AuditRecord(XenoModel):
+    pass
+
+
+class Credential(XenoModel):
+    pass
+
+
+class CredentialLoginResponse(XenoModel):
+    pass
+
+
+class EffectivePermission(XenoModel):
+    pass
+
+
+class HealthResponse(XenoModel):
+    pass
+
+
+class ModelConfiguration(XenoModel):
+    pass
+
+
+class ModelDefinition(XenoModel):
+    pass
+
+
+class OpenAiChatCompletion(XenoModel):
+    pass
+
+
+class OpenAiEmbeddingList(XenoModel):
+    pass
+
+
+class OpenAiModelList(XenoModel):
+    pass
+
+
+class Permission(XenoModel):
+    pass
+
+
+class RequestHistoryEntry(XenoModel):
+    pass
+
+
+class RequestHistorySummary(XenoModel):
+    pass
+
+
+class Role(XenoModel):
+    pass
+
+
+class RoleAssignment(XenoModel):
+    pass
+
+
+class RoutingPolicy(XenoModel):
+    pass
+
+
+class RoutingPolicyMetricDefinition(XenoModel):
+    pass
+
+
+class RoutingPolicyValidationResult(XenoModel):
+    pass
+
+
+class ServerClientTelemetryCollectionAttemptRecord(XenoModel):
+    pass
+
+
+class ServerClientTelemetryCollectionStatusResponse(XenoModel):
+    pass
+
+
+class ServerClientTelemetryCollectResponse(XenoModel):
+    pass
+
+
+class ServerClientTelemetryLatestResponse(XenoModel):
+    pass
+
+
+class ServerClientTelemetryRollupBucket(XenoModel):
+    pass
+
+
+class ServerClientTelemetrySampleDetail(XenoModel):
+    pass
+
+
+class ServerClientTelemetrySearchResult(XenoModel):
+    pass
+
+
+class ServerProviderTelemetryRollupBucket(XenoModel):
+    pass
+
+
+class ServerProviderTelemetrySampleDetail(XenoModel):
+    pass
+
+
+class ServerProviderTelemetrySampleRecord(XenoModel):
+    pass
+
+
+class ServerProviderTelemetrySearchResult(XenoModel):
+    pass
+
+
+class SettingsResponse(XenoModel):
+    pass
+
+
+class Tenant(XenoModel):
+    pass
+
+
+class TokenResponse(XenoModel):
+    pass
+
+
+class User(XenoModel):
+    pass
+
+
+class XenoClientRecord(XenoModel):
+    pass
+
+
+class XenoObjectResponse(XenoModel):
+    pass
+
+
 class XenoClient:
     def __init__(
         self,

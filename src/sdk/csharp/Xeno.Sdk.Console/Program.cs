@@ -1,6 +1,7 @@
 namespace Xeno.Sdk.Console
 {
     using System;
+    using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Sdk;
@@ -74,7 +75,7 @@ namespace Xeno.Sdk.Console
         {
             string username = Prompt("Username", "admin@xeno");
             string password = Prompt("Password", "password");
-            XenoApiResponse response = await client.LoginAsync(username, password, _TenantId, token).ConfigureAwait(false);
+            CredentialLoginResponse response = await client.LoginAsync(username, password, _TenantId, token).ConfigureAwait(false);
             await PrintJsonAsync(response).ConfigureAwait(false);
         }
 
@@ -82,7 +83,7 @@ namespace Xeno.Sdk.Console
         {
             string model = Prompt("Model", "llama3.2:latest");
             string prompt = Prompt("Prompt", "hello");
-            XenoApiResponse response = await client.CreateChatCompletionAsync(new
+            OpenAiChatCompletion response = await client.CreateChatCompletionAsync(new
             {
                 model,
                 messages = new[]
@@ -100,9 +101,9 @@ namespace Xeno.Sdk.Console
             return String.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim();
         }
 
-        private static Task PrintJsonAsync(XenoApiResponse response)
+        private static Task PrintJsonAsync<T>(T response)
         {
-            System.Console.WriteLine(response.Body);
+            System.Console.WriteLine(JsonSerializer.Serialize(response, new JsonSerializerOptions { WriteIndented = true }));
             return Task.CompletedTask;
         }
 
