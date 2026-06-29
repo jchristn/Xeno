@@ -4215,6 +4215,7 @@ namespace Xeno.Server
             if (body.IsAdmin.HasValue && body.IsAdmin.Value != user.IsAdmin)
             {
                 EnsureCanChangeSystemAdminFlag(requestContext);
+                EnsureCanDisableSystemAdminFlag(requestContext, user, body.IsAdmin.Value);
                 user.IsAdmin = body.IsAdmin.Value;
             }
 
@@ -4237,6 +4238,19 @@ namespace Xeno.Server
             if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
             _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, requestContext.TenantId, null);
             throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can change the system administrator flag.");
+        }
+
+        private void EnsureCanDisableSystemAdminFlag(RequestContext requestContext, User user, bool requestedIsAdmin)
+        {
+            if (requestedIsAdmin) return;
+            if (!user.IsAdmin) return;
+            if (!String.Equals(requestContext.UserId, user.Id, StringComparison.Ordinal)) return;
+
+            int activeSystemAdminCount = RequirePlatform().Users.Count(item => item.Active && item.IsAdmin);
+            if (activeSystemAdminCount > 1) return;
+
+            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "LastSystemAdminProtected", 403, user.TenantId, user.Id);
+            throw new AuthorizationDeniedException(403, "LastSystemAdminProtected", "The last active system administrator cannot remove their own system administrator flag.");
         }
 
         private void EnsureCanChangeTenantAdminFlag(RequestContext requestContext, string tenantId)

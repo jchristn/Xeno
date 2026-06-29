@@ -1969,6 +1969,29 @@ namespace Test.Shared
                             if ((int)deleteBuiltInPermission.StatusCode != 403) throw new InvalidOperationException("Built-in permission delete should return 403: " + (int)deleteBuiltInPermission.StatusCode);
                         }
 
+                        string seededAdminId = await FirstRecordIdAsync(systemClient, baseUrl + "/v1.0/api/users").ConfigureAwait(false);
+                        using (HttpResponseMessage lastAdminSelfDemotion = await PutJsonAsync(systemClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(seededAdminId), JsonUtil.Serialize(new
+                        {
+                            isAdmin = false
+                        })).ConfigureAwait(false))
+                        {
+                            string lastAdminSelfDemotionJson = await lastAdminSelfDemotion.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)lastAdminSelfDemotion.StatusCode != 403) throw new InvalidOperationException("Last system admin should not self-demote: " + (int)lastAdminSelfDemotion.StatusCode + " " + lastAdminSelfDemotionJson);
+                            if (!lastAdminSelfDemotionJson.Contains("LastSystemAdminProtected", StringComparison.Ordinal)) throw new InvalidOperationException("Last system admin self-demotion did not return the expected reason: " + lastAdminSelfDemotionJson);
+                        }
+
+                        await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "backup-system-admin@security.test", "password", true, false).ConfigureAwait(false);
+                        using (HttpResponseMessage allowedSelfDemotion = await PutJsonAsync(systemClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(seededAdminId), JsonUtil.Serialize(new
+                        {
+                            isAdmin = false
+                        })).ConfigureAwait(false))
+                        {
+                            string allowedSelfDemotionJson = await allowedSelfDemotion.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!allowedSelfDemotion.IsSuccessStatusCode) throw new InvalidOperationException("System admin self-demotion should be allowed when another system admin exists: " + allowedSelfDemotionJson);
+                        }
+
+                        await AuthenticateUserAsync(systemClient, baseUrl, Constants.DefaultTenantId, "backup-system-admin@security.test", "password").ConfigureAwait(false);
+
                         string tenantBId;
                         using (HttpResponseMessage createTenantB = await PostJsonAsync(systemClient, baseUrl + "/v1.0/api/tenants", JsonUtil.Serialize(new { name = "Security Tenant B", active = true })).ConfigureAwait(false))
                         {
