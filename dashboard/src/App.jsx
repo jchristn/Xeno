@@ -568,6 +568,7 @@ function ClientTelemetryView() {
           { key: 'memoryUtilizationPercent', label: t('memory', 'Memory'), render: (item) => formatPercent(Number(value(item, 'memoryUtilizationPercent') || 0) / 100) },
           { key: 'gpuAverageUtilizationPercent', label: t('gpu', 'GPU'), render: (item) => formatPercent(Number(value(item, 'gpuAverageUtilizationPercent') || 0) / 100) }
         ]}
+        loading={loading}
         rows={hostRows}
         subtitle={t('latestHostTelemetrySubtitle', 'Latest host telemetry samples collected by the server.')}
         title={t('latestHostTelemetry', 'Latest Host Telemetry')}
@@ -582,6 +583,7 @@ function ClientTelemetryView() {
           { key: 'queuedRequests', label: t('queuedRequests', 'Queued'), render: (item) => formatOptionalNumber(value(item, 'queuedRequests')) },
           { key: 'latencyP95Ms', label: t('latencyP95', 'Latency p95'), render: (item) => formatDuration(value(item, 'latencyP95Ms')) }
         ]}
+        loading={loading}
         rows={providerRows}
         subtitle={t('latestProviderTelemetrySubtitle', 'Latest provider telemetry samples collected by the server.')}
         title={t('latestProviderTelemetry', 'Latest Provider Telemetry')}
@@ -595,6 +597,7 @@ function ClientTelemetryView() {
           { key: 'elapsedMs', label: t('elapsed', 'Elapsed'), render: (item) => formatDuration(value(item, 'elapsedMs')) },
           { key: 'providerSampleCount', label: t('providerSamples', 'Provider Samples'), render: (item) => formatOptionalNumber(value(item, 'providerSampleCount')) }
         ]}
+        loading={loading}
         rows={attempts}
         subtitle={t('collectionAttemptsSubtitle', 'Recent server telemetry collection attempts.')}
         title={t('collectionAttempts', 'Collection Attempts')}
@@ -1079,6 +1082,7 @@ function RequestHistoryView() {
         }}
         onRowClick={setSelected}
         onRefresh={refreshAll}
+        loading={history.loading}
         rows={history.data}
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
@@ -1386,6 +1390,7 @@ function SecurityView() {
         }}
         onRefresh={roles.refresh}
         onRowClick={setSelectedRole}
+        loading={roles.loading}
         rowActionLabel={t('edit')}
         actions={<IconButton onClick={() => setCreatingRole(true)} label={t('createRole')} tooltip={t('tooltipCreateRole')} icon={<Plus size={16} />} variant="primary" />}
       />
@@ -1399,6 +1404,7 @@ function SecurityView() {
         }}
         onRefresh={permissions.refresh}
         onRowClick={setSelectedPermission}
+        loading={permissions.loading}
         rowActionLabel={t('edit')}
         actions={<IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} tooltip={t('tooltipCreatePermission')} icon={<Plus size={16} />} variant="primary" />}
       />
@@ -1417,13 +1423,15 @@ function SecurityView() {
         ]}
         onDelete={(row) => deleteRecord('/api/v1/roleassignments', row)}
         onRefresh={roleAssignments.refresh}
+        loading={roleAssignments.loading || roles.loading}
         actions={<IconButton onClick={() => setCreatingRoleAssignment(true)} label={t('createRoleAssignment')} tooltip={t('tooltipCreateRoleAssignment')} icon={<Plus size={16} />} variant="primary" />}
       />
-      <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} onRefresh={effective.refresh} />
+      <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} loading={effective.loading} onRefresh={effective.refresh} />
       <DataTable
         columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode', 'principalType', 'principalId', 'targetTenantId']}
         onDelete={(row) => deleteRecord('/api/v1/audit', row)}
         onRefresh={audit.refresh}
+        loading={audit.loading}
         rows={audit.data}
         subtitle={t('auditSubtitle')}
         title={t('audit')}
@@ -1471,6 +1479,7 @@ function TenantsView() {
         }}
         onRowClick={setSelected}
         onRefresh={tenants.refresh}
+        loading={tenants.loading}
         rows={tenants.data}
         rowActionLabel={t('edit')}
         subtitle={t('tenantsTableSubtitle')}
@@ -1509,6 +1518,7 @@ function UsersView({ session }) {
         }}
         onRowClick={setSelected}
         onRefresh={users.refresh}
+        loading={users.loading}
         rows={users.data}
         rowActionLabel={t('edit')}
         subtitle={t('usersTableSubtitle')}
@@ -1556,6 +1566,7 @@ function CredentialsView() {
         }}
         onRowClick={setSelected}
         onRefresh={credentials.refresh}
+        loading={credentials.loading}
         rows={credentials.data}
         rowActionLabel={t('edit')}
         subtitle={t('credentialsTableSubtitle')}
@@ -1602,6 +1613,7 @@ function ClientsView() {
             onSelect: () => navigate(`/dashboard/client-telemetry?clientId=${encodeURIComponent(clientId)}`)
           }];
         }}
+        loading={clients.loading}
         rows={clients.data}
         subtitle={t('clientsTableSubtitle')}
         title={t('clients')}
@@ -1660,6 +1672,7 @@ function AdvertisedModelsView() {
         }}
         onRefresh={clients.refresh}
         onRowClick={setSelectedModel}
+        loading={clients.loading}
         rows={filteredModels}
         subtitle={t('advertisedModelsTableSubtitle')}
         title={t('advertisedModels')}
@@ -1717,6 +1730,7 @@ function RoutingPoliciesView() {
         }}
         onRefresh={policies.refresh}
         onRowClick={setSelected}
+        loading={policies.loading}
         rows={policies.data}
         rowActionLabel={t('edit')}
         subtitle={t('routingPoliciesTableSubtitle')}
@@ -1775,8 +1789,8 @@ function AnalyticsView() {
         <ActivityChart onRangeChange={updateAnalyticsRange} onRefresh={refreshAnalytics} range={analyticsRange} showControls={false} summary={summary.data} />
       </Panel>
       <div className="workspace-grid">
-        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
-        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
+        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} loading={history.loading} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
+        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} loading={history.loading} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
       </div>
       <Panel
         actions={<IconButton iconOnly onClick={metrics.refresh} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
@@ -2150,32 +2164,37 @@ function GitHubMark({ size = 17 }) {
 
 function useResource(path, fallback) {
   const [data, setData] = useState(fallback);
+  const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState(0);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    setLoading(true);
     api.get(path)
       .then((result) => {
         if (!alive) return;
         if (result?.error) {
           setData(fallback);
           setUpdatedAt(Date.now());
+          setLoading(false);
           return;
         }
 
         setData(result);
         setUpdatedAt(Date.now());
+        setLoading(false);
       })
       .catch(() => {
         if (!alive) return;
         setData(fallback);
         setUpdatedAt(Date.now());
+        setLoading(false);
       });
     return () => { alive = false; };
   }, [path, version]);
 
-  return { data, refresh: () => setVersion((current) => current + 1), updatedAt };
+  return { data, loading, refresh: () => setVersion((current) => current + 1), updatedAt };
 }
 
 function useTextResource(path, fallback) {
@@ -2292,7 +2311,7 @@ function IconButton({ disabled = false, icon, iconOnly = false, label, onClick, 
   );
 }
 
-function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, getRowActions, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, title }) {
+function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, getRowActions, loading = false, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
@@ -2522,7 +2541,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
             {pagedRows.length === 0 && (
               <tr>
                 <td className="empty-cell" colSpan={normalizedColumns.length + 1}>
-                  <EmptyState message={t('emptyTableMessage')} title={t('noData')} />
+                  {loading ? <TableLoadingState /> : <EmptyState message={t('emptyTableMessage')} title={t('noData')} />}
                 </td>
               </tr>
             )}
@@ -2552,6 +2571,16 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
         title={deleteTitle || t('deleteRecordTitle')}
       />
     </section>
+  );
+}
+
+function TableLoadingState() {
+  const { t } = useTranslation();
+  return (
+    <div aria-live="polite" className="table-loading-state" role="status">
+      <div aria-hidden="true" className="table-loading-spinner" />
+      <strong>{t('loading')}</strong>
+    </div>
   );
 }
 
@@ -2903,10 +2932,12 @@ function UserEditModal({ actorUser, data, mode = 'edit', onClose, onSave, sessio
             <input checked={draft.isTenantAdmin} disabled={!canEditTenantAdmin} onChange={(event) => updateField('isTenantAdmin', event.target.checked)} type="checkbox" />
             <span>{t('isTenantAdmin')}</span>
           </label>
-          <label className="toggle-field">
-            <input checked={draft.isAdmin} disabled={!canEditSystemAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
-            <span>{t('isAdmin')}</span>
-          </label>
+          {canEditSystemAdmin ? (
+            <label className="toggle-field">
+              <input checked={draft.isAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
+              <span>{t('isAdmin')}</span>
+            </label>
+          ) : null}
         </div>
         <label className="form-field">
           <span>{t('newPassword')}</span>

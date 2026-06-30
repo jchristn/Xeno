@@ -1340,7 +1340,8 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
             {
                 await RequirePermissionAsync(requestContext, "Tenants", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Tenants).ConfigureAwait(false);
+                List<Tenant> visibleTenants = RequirePlatform().Tenants.Where(item => IsTenantVisible(requestContext, item.Id)).ToList();
+                await SendJsonAsync(context, visibleTenants).ConfigureAwait(false);
                 return;
             }
 

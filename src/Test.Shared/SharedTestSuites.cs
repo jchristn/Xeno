@@ -2000,6 +2000,16 @@ namespace Test.Shared
                             tenantBId = FirstRecordId("[" + tenantBJson + "]");
                         }
 
+                        using (HttpResponseMessage systemTenants = await systemClient.GetAsync(baseUrl + "/v1.0/api/tenants").ConfigureAwait(false))
+                        {
+                            string systemTenantsJson = await systemTenants.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!systemTenants.IsSuccessStatusCode) throw new InvalidOperationException("System admin could not list tenants: " + systemTenantsJson);
+                            List<Tenant> visibleTenants = DeserializeRequired<List<Tenant>>(systemTenantsJson);
+                            if (visibleTenants.Count != 2) throw new InvalidOperationException("System admin should see all tenants.");
+                            if (!visibleTenants.Any(item => item.Id == Constants.DefaultTenantId)) throw new InvalidOperationException("System admin tenant list omitted the default tenant.");
+                            if (!visibleTenants.Any(item => item.Id == tenantBId)) throw new InvalidOperationException("System admin tenant list omitted tenant B.");
+                        }
+
                         string tenantAdminAId = await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "tenant-admin-a@security.test", "password", false, true).ConfigureAwait(false);
                         string noAccessUserId = await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "no-access@security.test", "password", false, false).ConfigureAwait(false);
                         string rbacUserId = await CreateUserViaApiAsync(systemClient, baseUrl, Constants.DefaultTenantId, "rbac-writer@security.test", "password", false, false).ConfigureAwait(false);
@@ -2014,6 +2024,15 @@ namespace Test.Shared
                         using (HttpClient tenantAdminClient = new HttpClient())
                         {
                             await AuthenticateUserAsync(tenantAdminClient, baseUrl, Constants.DefaultTenantId, "tenant-admin-a@security.test", "password").ConfigureAwait(false);
+
+                            using (HttpResponseMessage tenantAdminTenants = await tenantAdminClient.GetAsync(baseUrl + "/v1.0/api/tenants").ConfigureAwait(false))
+                            {
+                                string tenantAdminTenantsJson = await tenantAdminTenants.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!tenantAdminTenants.IsSuccessStatusCode) throw new InvalidOperationException("Tenant admin could not list visible tenants: " + tenantAdminTenantsJson);
+                                List<Tenant> visibleTenants = DeserializeRequired<List<Tenant>>(tenantAdminTenantsJson);
+                                if (visibleTenants.Count != 1) throw new InvalidOperationException("Tenant admin should see only one tenant.");
+                                if (visibleTenants[0].Id != Constants.DefaultTenantId) throw new InvalidOperationException("Tenant admin should only see their own tenant.");
+                            }
 
                             using (HttpResponseMessage createForeignUser = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/users", JsonUtil.Serialize(new
                             {
@@ -2411,6 +2430,31 @@ namespace Test.Shared
                                     if (!settingsJson.Contains("settingsFile", StringComparison.Ordinal)) throw new InvalidOperationException("Authenticated settings response missing settingsFile.");
                                 }
                             }
+                        }
+
+                        AuthDashboardLoginResponse signup;
+                        using (HttpResponseMessage signupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        {
+                            TenantName = "Dashboard Signup Tenant",
+                            Email = "tenant-admin@signup.test",
+                            Username = "tenant-admin@signup.test",
+                            Password = "password"
+                        })).ConfigureAwait(false))
+                        {
+                            string signupJson = await signupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!signupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Onboarding signup failed: " + signupJson);
+                            signup = DeserializeRequired<AuthDashboardLoginResponse>(signupJson);
+                            if (String.IsNullOrWhiteSpace(signup.TenantId)) throw new InvalidOperationException("Onboarding signup did not return a tenant ID.");
+                        }
+
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                        using (HttpResponseMessage usersResponse = await httpClient.GetAsync(baseUrl + "/v1.0/api/users").ConfigureAwait(false))
+                        {
+                            string usersJson = await usersResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!usersResponse.IsSuccessStatusCode) throw new InvalidOperationException("System admin could not inspect users after onboarding: " + usersJson);
+                            List<User> users = DeserializeRequired<List<User>>(usersJson);
+                            bool copiedSeedAdmin = users.Any(item => item.TenantId == signup.TenantId && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase));
+                            if (copiedSeedAdmin) throw new InvalidOperationException("Onboarding should not create admin@xeno in the new tenant.");
                         }
                     }
                 }

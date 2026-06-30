@@ -1658,6 +1658,35 @@ html[data-theme='dark'] .primitive-list-item {
   text-align: center;
 }
 
+.table-loading-state {
+  min-height: 150px;
+  display: inline-grid;
+  place-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--color-muted);
+}
+
+.table-loading-state strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.table-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 999px;
+  animation: table-loading-spin 0.8s linear infinite;
+}
+
+@keyframes table-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .actions-cell {
   width: 58px;
   text-align: right;

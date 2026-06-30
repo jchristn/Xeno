@@ -442,24 +442,8 @@ namespace Xeno.Core.Services
 
         private void EnsureDefaultTenantSecurity(string tenantId)
         {
-            AuthenticationService authentication = new AuthenticationService();
             User? adminUser = Users.FirstOrDefault(item => item.TenantId == tenantId && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase));
-            if (adminUser == null)
-            {
-                adminUser = new User
-                {
-                    TenantId = tenantId,
-                    Username = "admin",
-                    Email = "admin@xeno",
-                    IsAdmin = true,
-                    IsTenantAdmin = true,
-                    Active = true
-                };
-                authentication.SetUserPassword(adminUser, "password");
-                Users.Add(adminUser);
-            }
-
-            if (!Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, "default", StringComparison.Ordinal)))
+            if (adminUser != null && !Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, "default", StringComparison.Ordinal)))
             {
                 Credentials.Add(new Credential
                 {
@@ -482,20 +466,23 @@ namespace Xeno.Core.Services
             EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
             EnsureRole(tenantId, "TenantMember", new List<string> { readPermission.Id });
 
-            bool hasAssignment = RoleAssignments.Any(item =>
-                item.TenantId == tenantId &&
-                item.RoleId == tenantAdmin.Id &&
-                item.PrincipalType == PrincipalTypeEnum.User &&
-                item.PrincipalId == adminUser.Id);
-            if (!hasAssignment)
+            if (adminUser != null)
             {
-                RoleAssignments.Add(new RoleAssignment
+                bool hasAssignment = RoleAssignments.Any(item =>
+                    item.TenantId == tenantId &&
+                    item.RoleId == tenantAdmin.Id &&
+                    item.PrincipalType == PrincipalTypeEnum.User &&
+                    item.PrincipalId == adminUser.Id);
+                if (!hasAssignment)
                 {
-                    TenantId = tenantId,
-                    RoleId = tenantAdmin.Id,
-                    PrincipalType = PrincipalTypeEnum.User,
-                    PrincipalId = adminUser.Id
-                });
+                    RoleAssignments.Add(new RoleAssignment
+                    {
+                        TenantId = tenantId,
+                        RoleId = tenantAdmin.Id,
+                        PrincipalType = PrincipalTypeEnum.User,
+                        PrincipalId = adminUser.Id
+                    });
+                }
             }
         }
 
