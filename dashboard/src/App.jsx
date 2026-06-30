@@ -236,6 +236,17 @@ function decodeBase64Json(encoded) {
   return new TextDecoder().decode(bytes);
 }
 
+function safeLogoutUrl(value) {
+  if (!value) return '';
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.href;
+  } catch {
+    return '';
+  }
+}
+
 function writeDashboardSession(session) {
   if (!session) {
     window.localStorage.removeItem(dashboardSessionKey);
@@ -4619,8 +4630,25 @@ function isReactNode(input) {
   return input && typeof input === 'object' && '$$typeof' in input;
 }
 
+function LogoutOverlay() {
+  const { t } = useTranslation();
+
+  return (
+    <div aria-labelledby="logout-overlay-title" aria-modal="true" className="logout-overlay" role="alertdialog">
+      <div className="logout-dialog">
+        <div aria-hidden="true" className="logout-spinner" />
+        <div>
+          <h2 id="logout-overlay-title">{t('signingOut')}</h2>
+          <p>{t('logoutInProgress')}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppRoutes() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('xeno.theme') || 'light');
+  const [loggingOut, setLoggingOut] = useState(false);
   const [session, setSession] = useState(() => {
     const storedSession = readDashboardSession();
     const configuredServerUrl = storedSession?.serverUrl || window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000';
@@ -4664,6 +4692,10 @@ function AppRoutes() {
   }
 
   async function logout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+    const logoutUrl = safeLogoutUrl(session?.logoutUrl);
     try {
       await api.post('/api/v1/auth/logout');
     } catch {
@@ -4672,13 +4704,22 @@ function AppRoutes() {
     writeDashboardSession(null);
     api.clearAuth();
     setSession(null);
+    if (logoutUrl) {
+      window.location.assign(logoutUrl);
+      return;
+    }
+
+    setLoggingOut(false);
   }
 
   return (
-    <Routes>
-      <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
-      <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
+        <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
+      </Routes>
+      {loggingOut ? <LogoutOverlay /> : null}
+    </>
   );
 }
 
