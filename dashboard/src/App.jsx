@@ -2230,6 +2230,20 @@ function defaultServerSettings() {
       LoadBalancingMode: 'RoundRobin',
       Adaptive: { SampleCount: 2, CapacityWeight: 45, InFlightWeight: 30, ClientWeight: 15, HeartbeatWeight: 10 }
     },
+    TelemetryCollection: {
+      Enabled: true,
+      CollectionIntervalSeconds: 60,
+      RequestTimeoutMs: 5000,
+      RetentionDays: 30,
+      PruneIntervalMinutes: 60,
+      CollectHostTelemetry: true,
+      CollectProviderTelemetry: true,
+      PersistRawSnapshots: true,
+      MaxRawSnapshotBytes: 262144,
+      MaxSamplesPerClientResponse: 1,
+      MaxProviderMetricRowsPerResponse: 1000,
+      MaxConcurrentClientRequests: 8
+    },
     Database: { Type: 'Sqlite', Filename: 'data/xeno.db', Server: '', Port: 0, DatabaseName: '', Username: '', Password: '', ConnectionString: '' },
     Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' }
   };
@@ -2258,6 +2272,10 @@ function normalizeSettings(input) {
         ...defaults.Routing.Adaptive,
         ...((source.Routing || source.routing || {}).Adaptive || (source.Routing || source.routing || {}).adaptive || {})
       }
+    },
+    TelemetryCollection: {
+      ...defaults.TelemetryCollection,
+      ...(source.TelemetryCollection || source.telemetryCollection || {})
     },
     Database: { ...defaults.Database, ...(source.Database || source.database || {}) },
     Logging: { ...defaults.Logging, ...(source.Logging || source.logging || {}) }
