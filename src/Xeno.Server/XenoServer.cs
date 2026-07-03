@@ -933,7 +933,12 @@ namespace Xeno.Server
                             new Dictionary<string, object> { ["role"] = "user", ["content"] = "Hello! Can you give me a brief explanation of how an inverted index works?" }
                         },
                         ["temperature"] = 0.7,
-                        ["max_tokens"] = 150
+                        ["max_output_tokens"] = 2000,
+                        ["stream"] = true,
+                        ["stream_options"] = new Dictionary<string, object>
+                        {
+                            ["include_usage"] = true
+                        }
                     });
             }
 
@@ -947,7 +952,12 @@ namespace Xeno.Server
                         ["model"] = "gpt-oss:120b",
                         ["prompt"] = "Explain how an inverted index works in two concise paragraphs.",
                         ["temperature"] = 0.7,
-                        ["max_tokens"] = 150
+                        ["max_output_tokens"] = 2000,
+                        ["stream"] = true,
+                        ["stream_options"] = new Dictionary<string, object>
+                        {
+                            ["include_usage"] = true
+                        }
                     });
             }
 
@@ -1125,7 +1135,9 @@ namespace Xeno.Server
                 SchemaProperty("messages", ArraySchemaMetadata("Chat messages.", messageSchema)),
                 SchemaProperty("temperature", NumberSchemaMetadata("Sampling temperature.")),
                 SchemaProperty("max_tokens", IntegerSchemaMetadata("Maximum output tokens.")),
-                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")));
+                SchemaProperty("max_output_tokens", IntegerSchemaMetadata("Maximum output tokens.")),
+                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")),
+                SchemaProperty("stream_options", StreamOptionsSchemaMetadata()));
         }
 
         private static OpenApiSchemaMetadata CompletionBodySchema()
@@ -1137,7 +1149,17 @@ namespace Xeno.Server
                 SchemaProperty("prompt", OpenApiSchemaMetadata.String("Prompt text.")),
                 SchemaProperty("temperature", NumberSchemaMetadata("Sampling temperature.")),
                 SchemaProperty("max_tokens", IntegerSchemaMetadata("Maximum output tokens.")),
-                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")));
+                SchemaProperty("max_output_tokens", IntegerSchemaMetadata("Maximum output tokens.")),
+                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")),
+                SchemaProperty("stream_options", StreamOptionsSchemaMetadata()));
+        }
+
+        private static OpenApiSchemaMetadata StreamOptionsSchemaMetadata()
+        {
+            return ObjectSchemaMetadata(
+                "Streaming options.",
+                Array.Empty<string>(),
+                SchemaProperty("include_usage", BooleanSchemaMetadata("Whether streamed responses should include provider usage telemetry.")));
         }
 
         private static OpenApiSchemaMetadata EmbeddingsBodySchema()
@@ -6016,7 +6038,9 @@ namespace Xeno.Server
                         }),
                         Property("temperature", NumberSchema()),
                         Property("max_tokens", IntegerSchema()),
-                        Property("stream", BooleanSchema())),
+                        Property("max_output_tokens", IntegerSchema()),
+                        Property("stream", BooleanSchema()),
+                        Property("stream_options", ObjectSchema(Property("include_usage", BooleanSchema())))),
                     new Dictionary<string, object>
                     {
                         ["model"] = "gpt-oss:120b",
@@ -6026,7 +6050,12 @@ namespace Xeno.Server
                             new Dictionary<string, object> { ["role"] = "user", ["content"] = "Hello! Can you give me a brief explanation of how an inverted index works?" }
                         },
                         ["temperature"] = 0.7,
-                        ["max_tokens"] = 150
+                        ["max_output_tokens"] = 2000,
+                        ["stream"] = true,
+                        ["stream_options"] = new Dictionary<string, object>
+                        {
+                            ["include_usage"] = true
+                        }
                     });
             }
 
@@ -6039,13 +6068,20 @@ namespace Xeno.Server
                         Property("prompt", StringSchema()),
                         Property("temperature", NumberSchema()),
                         Property("max_tokens", IntegerSchema()),
-                        Property("stream", BooleanSchema())),
+                        Property("max_output_tokens", IntegerSchema()),
+                        Property("stream", BooleanSchema()),
+                        Property("stream_options", ObjectSchema(Property("include_usage", BooleanSchema())))),
                     new Dictionary<string, object>
                     {
                         ["model"] = "gpt-oss:120b",
                         ["prompt"] = "Explain how an inverted index works in two concise paragraphs.",
                         ["temperature"] = 0.7,
-                        ["max_tokens"] = 150
+                        ["max_output_tokens"] = 2000,
+                        ["stream"] = true,
+                        ["stream_options"] = new Dictionary<string, object>
+                        {
+                            ["include_usage"] = true
+                        }
                     });
             }
 

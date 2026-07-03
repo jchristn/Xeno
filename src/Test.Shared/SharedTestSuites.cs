@@ -2625,6 +2625,11 @@ namespace Test.Shared
                             if (!OpenApiHasRequestBody(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing editable request body on " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
                         }
 
+                        if (!openApi.Contains("\"stream_options\"", StringComparison.Ordinal) || !openApi.Contains("\"include_usage\"", StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("OpenAPI completion request bodies do not include streamed usage telemetry options.");
+                        }
+
                         string swagger = await httpClient.GetStringAsync(baseUrl + "/swagger").ConfigureAwait(false);
                         if (!swagger.Contains("xeno-auth-panel", StringComparison.Ordinal) || !swagger.Contains("xeno.swagger.auth", StringComparison.Ordinal) || !swagger.Contains("requestInterceptor", StringComparison.Ordinal))
                         {

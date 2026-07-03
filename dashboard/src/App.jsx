@@ -4507,7 +4507,10 @@ function exampleBodyForOperation(operation, model) {
         messages: openAiChatMessages(),
         temperature: 0.7,
         max_output_tokens: 2000,
-        stream: true
+        stream: true,
+        stream_options: {
+          include_usage: true
+        }
       };
     case 'createCompletion':
       return {
@@ -4515,7 +4518,10 @@ function exampleBodyForOperation(operation, model) {
         prompt: 'Write a concise explanation of how an inverted index works in search engines.',
         temperature: 0.7,
         max_output_tokens: 2000,
-        stream: true
+        stream: true,
+        stream_options: {
+          include_usage: true
+        }
       };
     case 'createGeneration':
       return {

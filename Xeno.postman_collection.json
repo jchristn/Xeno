@@ -539,7 +539,7 @@
                                                 ],
                                      "body":  {
                                                   "mode":  "raw",
-                                                  "raw":  "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+                                                  "raw":  "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_output_tokens\":2000}"
                                               },
                                      "url":  "{{baseUrl}}/v1/chat/completions"
                                  }
@@ -2199,7 +2199,7 @@
                                                                  ],
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}"
+                                                                   "raw":  "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_output_tokens\":2000}"
                                                                },
                                                       "url":  "{{baseUrl}}/v1/chat/completions"
                                                   }
