@@ -505,7 +505,8 @@ Schema is the same as `client.response`, except:
 
 - `type` is `client.response.start`.
 - `body` is usually omitted or empty.
-- Telemetry normally contains header timing but not final token counts.
+- Telemetry normally contains header timing; final token counts are reported on
+  `client.response.complete` after the provider stream ends.
 
 Example:
 
@@ -589,6 +590,14 @@ Schema is the same as `client.response`, except:
 - `type` is `client.response.complete`.
 - `body` should contain the complete captured streamed body when practical.
 - Telemetry should contain final token counts and stream timings.
+
+For streamed OpenAI-compatible completion and chat requests, the Xeno client
+requests provider usage telemetry by forwarding `stream_options.include_usage = true`
+to Ollama, OpenAI, vLLM, and generic OpenAI-compatible providers. Token
+capture accepts OpenAI-style `usage.prompt_tokens`,
+`usage.completion_tokens`, and `usage.total_tokens`; it also normalizes
+Ollama-native `prompt_eval_count` and `eval_count` when those fields are
+returned by a provider.
 
 Example:
 

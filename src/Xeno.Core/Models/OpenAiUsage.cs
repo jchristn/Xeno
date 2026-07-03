@@ -44,12 +44,24 @@ namespace Xeno.Core.Models
         public int? TotalTokensCamel { get; set; } = null;
 
         /// <summary>
+        /// Ollama-native prompt evaluation token count.
+        /// </summary>
+        [JsonPropertyName("prompt_eval_count")]
+        public int? PromptEvalCount { get; set; } = null;
+
+        /// <summary>
+        /// Ollama-native response evaluation token count.
+        /// </summary>
+        [JsonPropertyName("eval_count")]
+        public int? EvalCount { get; set; } = null;
+
+        /// <summary>
         /// Effective prompt token count.
         /// </summary>
         [JsonIgnore]
         public int? PromptTokens
         {
-            get { return PromptTokensSnake ?? PromptTokensCamel; }
+            get { return PromptTokensSnake ?? PromptTokensCamel ?? PromptEvalCount; }
         }
 
         /// <summary>
@@ -58,7 +70,7 @@ namespace Xeno.Core.Models
         [JsonIgnore]
         public int? CompletionTokens
         {
-            get { return CompletionTokensSnake ?? CompletionTokensCamel; }
+            get { return CompletionTokensSnake ?? CompletionTokensCamel ?? EvalCount; }
         }
 
         /// <summary>
@@ -67,7 +79,13 @@ namespace Xeno.Core.Models
         [JsonIgnore]
         public int? TotalTokens
         {
-            get { return TotalTokensSnake ?? TotalTokensCamel; }
+            get
+            {
+                if (TotalTokensSnake.HasValue) return TotalTokensSnake;
+                if (TotalTokensCamel.HasValue) return TotalTokensCamel;
+                if (!PromptTokens.HasValue && !CompletionTokens.HasValue) return null;
+                return (PromptTokens ?? 0) + (CompletionTokens ?? 0);
+            }
         }
 
         /// <summary>

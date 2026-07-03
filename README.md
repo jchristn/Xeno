@@ -316,9 +316,18 @@ curl http://localhost:9000/v1/chat/completions \
       }
     ],
     "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
     "max_output_tokens": 2000
   }'
 ```
+
+When a streamed completion or chat request is routed through a connected client,
+Xeno also requests provider usage telemetry from Ollama, OpenAI, vLLM, and
+generic OpenAI-compatible endpoints. Request history captures OpenAI `usage`
+token fields and normalizes Ollama-native `prompt_eval_count` and `eval_count`
+into input, output, and total token telemetry.
 
 The same bearer token is used for management APIs. Client WebSocket
 connections are different: they authenticate with `x-access-key` and

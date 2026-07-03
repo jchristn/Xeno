@@ -236,7 +236,14 @@ Routed OpenAI-compatible responses include Xeno trace headers for debugging mode
 - `X-Xeno-Selected-Client-Name`, `X-Xeno-Selected-API-Type`, `X-Xeno-Selected-Provider` (backward-compatible), and `X-Xeno-Selected-Source`: selected node and advertised model source metadata.
 - `X-Xeno-Selected-In-Flight`, `X-Xeno-Selected-Max-Parallel`, `X-Xeno-Selected-Weight`, and `X-Xeno-Selected-Last-Heartbeat-UTC`: selected node load and health inputs.
 - `X-Xeno-Client-Roundtrip-Ms` and `X-Xeno-Request-Duration-Ms`: relay timing.
+- `X-Xeno-Total-Tokens`: provider-reported or normalized total token count when available.
 - `X-Xeno-Routing-Timeline`: comma-separated routing steps.
+
+For streamed completion and chat requests, the selected `xeno` client requests
+provider usage chunks with `stream_options.include_usage = true` for Ollama,
+OpenAI, vLLM, and generic OpenAI-compatible endpoints. Request history stores
+OpenAI `usage` token fields and normalizes Ollama-native `prompt_eval_count`
+and `eval_count` into prompt, completion, and total token telemetry.
 
 Requests relayed from the Xeno server to a connected `xeno` client also include a forwarded requestor identity header set. The client forwards these headers to its configured provider endpoint and prints the requestor IP in `xeno connect` logs:
 

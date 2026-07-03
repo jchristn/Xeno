@@ -423,6 +423,9 @@ xeno provider add --name vllm `
 
 The `--type` value is the upstream API type, such as `Ollama`, `OpenAI`, `Gemini`, `vLLM`, or `OpenAICompatible`.
 The optional provider credential is sent to the upstream provider as a bearer token.
+For streamed completion and chat requests, the client asks Ollama, OpenAI,
+vLLM, and generic OpenAI-compatible providers to include usage telemetry and
+normalizes returned token counts into request history.
 
 Adding a provider with an existing name or endpoint is ignored so the same provider is not duplicated.
 

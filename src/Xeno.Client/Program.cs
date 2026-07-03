@@ -8,6 +8,8 @@ namespace Xeno.Client
     using System.Net.Http;
     using System.Net.WebSockets;
     using System.Text;
+    using System.Text.Json;
+    using System.Text.Json.Nodes;
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Client.LocalDashboard;
@@ -1396,7 +1398,11 @@ namespace Xeno.Client
             }
 
             Dictionary<string, string> forwardedHeaders = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string body = String.IsNullOrWhiteSpace(serverRequest.Body) ? "{}" : serverRequest.Body;
+            string body = PrepareUpstreamRequestBody(
+                runner.ApiType,
+                relativePath,
+                String.IsNullOrWhiteSpace(serverRequest.Body) ? "{}" : serverRequest.Body,
+                stream);
             string endpoint = runner.Endpoint.TrimEnd('/') + "/" + relativePath.TrimStart('/');
             using (HttpClient httpClient = new HttpClient())
             using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
@@ -1550,6 +1556,58 @@ namespace Xeno.Client
             return headers;
         }
 
+        private static string PrepareUpstreamRequestBody(string apiType, string relativePath, string body, bool stream)
+        {
+            if (!ShouldRequestUsageTelemetry(apiType, relativePath, stream)) return body;
+
+            try
+            {
+                JsonNode? node = JsonNode.Parse(body);
+                JsonObject? root = node as JsonObject;
+                if (root == null) return body;
+
+                JsonObject? streamOptions = root["stream_options"] as JsonObject;
+                if (streamOptions == null)
+                {
+                    streamOptions = new JsonObject();
+                    root["stream_options"] = streamOptions;
+                }
+
+                streamOptions["include_usage"] = true;
+                return root.ToJsonString();
+            }
+            catch (JsonException)
+            {
+                return body;
+            }
+            catch (InvalidOperationException)
+            {
+                return body;
+            }
+        }
+
+        private static bool ShouldRequestUsageTelemetry(string apiType, string relativePath, bool stream)
+        {
+            if (!stream) return false;
+            if (String.IsNullOrWhiteSpace(relativePath)) return false;
+
+            string normalized = relativePath.Trim().ToLowerInvariant();
+            if (!normalized.Contains("/v1/", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!normalized.EndsWith("/completions", StringComparison.OrdinalIgnoreCase)) return false;
+
+            return IsUsageTelemetryProvider(apiType);
+        }
+
+        private static bool IsUsageTelemetryProvider(string apiType)
+        {
+            if (String.IsNullOrWhiteSpace(apiType)) return true;
+            if (String.Equals(apiType, "OpenAI", StringComparison.OrdinalIgnoreCase)) return true;
+            if (String.Equals(apiType, "OpenAICompatible", StringComparison.OrdinalIgnoreCase)) return true;
+            if (String.Equals(apiType, "vLLM", StringComparison.OrdinalIgnoreCase)) return true;
+            if (String.Equals(apiType, "Ollama", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         private static RequestHistoryTelemetry BuildTelemetry(
             string requestBody,
             string responseBody,
@@ -1636,7 +1694,7 @@ namespace Xeno.Client
         private static OpenAiUsage ExtractTokenUsageFromJson(string json)
         {
             if (!JsonUtil.TryDeserialize<OpenAiUsageEnvelope>(json, out OpenAiUsageEnvelope? envelope)) return new OpenAiUsage();
-            return envelope?.Usage ?? new OpenAiUsage();
+            return envelope?.EffectiveUsage ?? new OpenAiUsage();
         }
 
         private static void ApplyServerAuthentication(ClientWebSocket socket, ClientSettings settings)

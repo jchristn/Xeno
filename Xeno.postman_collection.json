@@ -952,7 +952,7 @@
                                                 ],
                                      "body":  {
                                                   "mode":  "raw",
-                                                  "raw":  "{\"model\":\"llama3.2:latest\",\"prompt\":\"Say hello in one sentence.\",\"stream\":true,\"max_output_tokens\":2000}"
+                                                  "raw":  "{\"model\":\"llama3.2:latest\",\"prompt\":\"Say hello in one sentence.\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_output_tokens\":2000}"
                                               }
                                  }
                  },

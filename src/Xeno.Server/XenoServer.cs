@@ -3317,7 +3317,7 @@ namespace Xeno.Server
         {
             if (String.IsNullOrWhiteSpace(body)) return new OpenAiUsage();
             if (!JsonUtil.TryDeserialize<OpenAiUsageEnvelope>(body, out OpenAiUsageEnvelope? envelope)) return new OpenAiUsage();
-            return envelope?.Usage ?? new OpenAiUsage();
+            return envelope?.EffectiveUsage ?? new OpenAiUsage();
         }
 
         private static List<RequestHistoryTimelineEvent> BuildTimeline(RequestContext requestContext, RoutingDecision decision, RequestHistoryTelemetry telemetry, DateTime completedUtc)

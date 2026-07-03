@@ -8,6 +8,7 @@ namespace Test.Shared
     using System.Net.Http;
     using System.Net.Sockets;
     using System.Net.WebSockets;
+    using System.Reflection;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -256,6 +257,53 @@ namespace Test.Shared
                 "Client CLI",
                 new List<TestCaseDescriptor>
                 {
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientProviderUsageTelemetryPreparedAndParsed",
+                        "Client provider usage telemetry is requested and parsed",
+                        executeAsync: delegate
+                        {
+                            MethodInfo? prepare = typeof(Xeno.Client.Program).GetMethod("PrepareUpstreamRequestBody", BindingFlags.NonPublic | BindingFlags.Static);
+                            if (prepare == null) throw new InvalidOperationException("PrepareUpstreamRequestBody was not found.");
+
+                            object? preparedBodyObject = prepare.Invoke(null, new object[] { "OpenAICompatible", "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"stream\":true,\"messages\":[]}", true });
+                            string preparedBody = preparedBodyObject?.ToString() ?? String.Empty;
+                            if (!preparedBody.Contains("\"stream_options\"", StringComparison.Ordinal)) throw new InvalidOperationException("Prepared streaming request did not include stream_options: " + preparedBody);
+                            if (!preparedBody.Contains("\"include_usage\":true", StringComparison.Ordinal)) throw new InvalidOperationException("Prepared streaming request did not request usage telemetry: " + preparedBody);
+
+                            object? overriddenBodyObject = prepare.Invoke(null, new object[] { "Ollama", "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"stream\":true,\"stream_options\":{\"include_usage\":false}}", true });
+                            string overriddenBody = overriddenBodyObject?.ToString() ?? String.Empty;
+                            if (!overriddenBody.Contains("\"include_usage\":true", StringComparison.Ordinal)) throw new InvalidOperationException("Prepared Ollama-compatible streaming request did not force usage telemetry: " + overriddenBody);
+
+                            object? embeddingBodyObject = prepare.Invoke(null, new object[] { "OpenAI", "/v1/embeddings", "{\"model\":\"embed\"}", true });
+                            string embeddingBody = embeddingBodyObject?.ToString() ?? String.Empty;
+                            if (embeddingBody.Contains("stream_options", StringComparison.Ordinal)) throw new InvalidOperationException("Prepared embedding request should not include stream_options: " + embeddingBody);
+
+                            MethodInfo? buildTelemetry = typeof(Xeno.Client.Program).GetMethod("BuildTelemetry", BindingFlags.NonPublic | BindingFlags.Static);
+                            if (buildTelemetry == null) throw new InvalidOperationException("BuildTelemetry was not found.");
+
+                            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                            object? telemetryObject = buildTelemetry.Invoke(null, new object?[]
+                            {
+                                "{}",
+                                "{\"model\":\"llama3.2:latest\",\"done\":true,\"prompt_eval_count\":5,\"eval_count\":9}",
+                                headers,
+                                12.0,
+                                null,
+                                null,
+                                0,
+                                0,
+                                false
+                            });
+
+                            RequestHistoryTelemetry? telemetry = telemetryObject as RequestHistoryTelemetry;
+                            if (telemetry == null) throw new InvalidOperationException("BuildTelemetry did not return request telemetry.");
+                            if (telemetry.PromptTokens != 5) throw new InvalidOperationException("Ollama prompt token telemetry was not parsed.");
+                            if (telemetry.CompletionTokens != 9) throw new InvalidOperationException("Ollama completion token telemetry was not parsed.");
+                            if (telemetry.TotalTokens != 14) throw new InvalidOperationException("Ollama total token telemetry was not computed.");
+
+                            return Task.CompletedTask;
+                        }),
                     new TestCaseDescriptor(
                         "ClientCli",
                         "ClientResetRestoresFactoryDefaults",
