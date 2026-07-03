@@ -2980,6 +2980,7 @@ namespace Xeno.Server
                 platform.Clients.Add(client);
             }
 
+            BindClientOwner(client, requestContext);
             client.TenantId = tenantId;
             client.Name = name;
             client.Connected = true;
@@ -3008,6 +3009,7 @@ namespace Xeno.Server
                 ?? throw new ArgumentException("Client is not registered.");
 
             client.LastHeartbeatUtc = DateTime.UtcNow;
+            BindClientOwner(client, requestContext);
             if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
         }
 
@@ -3089,8 +3091,29 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(clientId)) return;
             XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
             if (client == null) return;
+            BindClientOwner(client, requestContext);
             client.Connected = true;
             client.LastHeartbeatUtc = DateTime.UtcNow;
+        }
+
+        private static void BindClientOwner(XenoClientRecord client, RequestContext requestContext)
+        {
+            if (client == null) throw new ArgumentNullException(nameof(client));
+            if (requestContext == null) throw new ArgumentNullException(nameof(requestContext));
+            if (!requestContext.IsAuthenticated || String.IsNullOrWhiteSpace(requestContext.UserId))
+            {
+                throw new UnauthorizedAccessException("Client ownership requires an authenticated user context.");
+            }
+
+            if (!String.IsNullOrWhiteSpace(client.OwnerUserId) &&
+                !String.Equals(client.OwnerUserId, requestContext.UserId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException("Client ID is already bound to a different user.");
+            }
+
+            client.OwnerUserId = requestContext.UserId;
+            client.OwnerCredentialId = requestContext.CredentialId;
+            client.OwnerPrincipalType = requestContext.PrincipalType;
         }
 
         private void StartClientResponse(ClientResponseMessage message)
@@ -5164,7 +5187,7 @@ namespace Xeno.Server
                         ["RoleAssignment"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("roleId", StringSchema()), Property("principalType", StringSchema()), Property("principalId", StringSchema()), Property("active", BooleanSchema())),
                         ["EffectivePermission"] = ObjectSchema(Property("resourceType", StringSchema()), Property("sourceRole", StringSchema())),
                         ["AuditRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("reasonCode", StringSchema())),
-                        ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
+                        ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("ownerUserId", StringSchema()), Property("ownerCredentialId", StringSchema()), Property("ownerPrincipalType", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ServerClientTelemetryCollectionStatusResponse"] = ObjectSchema(
                             Property("enabled", BooleanSchema()),
                             Property("running", BooleanSchema()),

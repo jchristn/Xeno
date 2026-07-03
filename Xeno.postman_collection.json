@@ -430,6 +430,7 @@
                  },
                  {
                      "name":  "Clients",
+                     "description":  "Lists registered clients, including ownerUserId, ownerCredentialId, and ownerPrincipalType after a client authenticates and registers over WebSocket.",
                      "request":  {
                                      "method":  "GET",
                                      "header":  [

@@ -24,6 +24,21 @@
         public string Name { get; set; } = String.Empty;
 
         /// <summary>
+        /// Gets or sets the owner user id.
+        /// </summary>
+        public string? OwnerUserId { get; set; } = null;
+
+        /// <summary>
+        /// Gets or sets the owner credential id.
+        /// </summary>
+        public string? OwnerCredentialId { get; set; } = null;
+
+        /// <summary>
+        /// Gets or sets the owner principal type.
+        /// </summary>
+        public string? OwnerPrincipalType { get; set; } = null;
+
+        /// <summary>
         /// Gets or sets the connected.
         /// </summary>
         public bool Connected { get; set; }

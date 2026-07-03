@@ -150,7 +150,7 @@ file. When the limit is exceeded the server returns 429 with `RateLimited`.
 
 `GET /v1.0/api/clients`
 
-The clients response includes connection state, capacity fields, and each client's advertised `models` inventory.
+The clients response includes connection state, capacity fields, authenticated owner context, and each client's advertised `models` inventory. Owner fields are set when a WebSocket client registers: `ownerUserId`, `ownerCredentialId`, and `ownerPrincipalType`.
 
 `DELETE /v1.0/api/clients/{id}`
 

@@ -62,7 +62,7 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 1. The Xeno server starts a REST API, OpenAPI/Swagger endpoint, dashboard-facing management API, database layer, and WebSocket endpoint.
 2. A user logs in through the `xeno` client. The password is used only to bootstrap a tenant-bound client credential.
 3. The client stores an access key in `~/.xeno/client.json`; it does not store or use the user's password for the WebSocket connection.
-4. The client connects to `/ws/v1/clients`, authenticates with its access credential, and advertises machine inventory, provider endpoints, and models.
+4. The client connects to `/ws/v1/clients`, authenticates with its access credential, binds the registered client record to the credential's owning user, and advertises machine inventory, provider endpoints, and models.
 5. Applications call the Xeno OpenAI-compatible API.
 6. The server authenticates the caller, verifies tenant-scoped inference permission, resolves the tenant's effective routing policy, then selects a connected client that advertises the requested model.
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
@@ -322,7 +322,10 @@ curl http://localhost:9000/v1/chat/completions \
 
 The same bearer token is used for management APIs. Client WebSocket
 connections are different: they authenticate with `x-access-key` and
-`x-tenant-guid`, not bearer tokens. Use the dashboard,
+`x-tenant-guid`, not bearer tokens. When a client registers, the server stores
+the authenticated owner context on the client record as `ownerUserId`,
+`ownerCredentialId`, and `ownerPrincipalType`; a different user in the same
+tenant cannot claim that registered client ID. Use the dashboard,
 Swagger UI, Postman collection, or SDK console apps to explore the full API
 surface.
 
@@ -354,6 +357,7 @@ The dashboard is the primary administration surface for Xeno. It includes:
 
 - Home charts for request activity and connected clients.
 - Connected client and advertised model views.
+- Client owner context showing which user and credential authenticated the client connection.
 - Routing policy management for model/client matching and load-balancing behavior.
 - Request history with telemetry, headers, bodies, streaming details, and routing decisions.
 - Tenant, user, credential, role, and permission create/edit/delete workflows.

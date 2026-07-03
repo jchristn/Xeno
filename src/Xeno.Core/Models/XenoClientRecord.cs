@@ -26,6 +26,21 @@ namespace Xeno.Core.Models
         public string Name { get; set; } = "local-client";
 
         /// <summary>
+        /// User ID that owns the client registration. Set from the authenticated WebSocket credential when the client connects.
+        /// </summary>
+        public string? OwnerUserId { get; set; } = null;
+
+        /// <summary>
+        /// Credential ID used for the latest owner-authenticated client connection.
+        /// </summary>
+        public string? OwnerCredentialId { get; set; } = null;
+
+        /// <summary>
+        /// Principal type used for the latest owner-authenticated client connection.
+        /// </summary>
+        public PrincipalTypeEnum OwnerPrincipalType { get; set; } = PrincipalTypeEnum.None;
+
+        /// <summary>
         /// Whether the client is connected.
         /// </summary>
         public bool Connected { get; set; } = true;

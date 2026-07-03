@@ -35,6 +35,12 @@ application inference traffic: grant `Inference.Read` for model listing and
 use a system-admin credential or seeded development credential for shared
 application traffic.
 
+When a client connects and sends `client.register`, the server persists the
+credential's owning user and the credential used for the connection on the
+registered client record. Reconnecting with another credential owned by the same
+user is allowed, but a different user in the same tenant cannot claim that
+client ID.
+
 The client stores its settings in:
 
 ```text

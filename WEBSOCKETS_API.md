@@ -858,8 +858,13 @@ instead of streamed.
 
 - WebSocket clients authenticate with client credentials, not user passwords.
 - Client credentials are tenant-bound.
+- Successful `client.register` frames persist the authenticated credential's
+  `userId`, credential ID, and principal type onto the server-side client
+  record as owner context.
 - The server rejects registration messages whose tenant ID does not match the
   authenticated tenant.
+- The server rejects registration, heartbeat, and inventory update frames when
+  the referenced client ID is already bound to a different user.
 - Request and response history redacts sensitive headers before persistence.
 - Client implementations should not log upstream secrets.
 - Operators should use `wss://` in production.

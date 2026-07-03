@@ -3359,6 +3359,63 @@ namespace Test.Shared
                         if (String.IsNullOrWhiteSpace(registerMessage) || !registerMessage.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Wrong-tenant registration frame was not rejected: " + registerMessage);
                     }
 
+                    string otherOwnerAccessKey;
+                    using (HttpClient adminClient = new HttpClient())
+                    {
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        await AuthenticateSeedAdminAsync(adminClient, baseUrl).ConfigureAwait(false);
+                        string otherOwnerUserId = await CreateUserViaApiAsync(adminClient, baseUrl, Constants.DefaultTenantId, "client-owner@example.com", "password", false, false).ConfigureAwait(false);
+                        using (HttpResponseMessage credentialResponse = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/credentials", JsonUtil.Serialize(new
+                        {
+                            userId = otherOwnerUserId,
+                            accessKey = "owner-access-" + Guid.NewGuid().ToString("N"),
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string credentialJson = await credentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!credentialResponse.IsSuccessStatusCode) throw new InvalidOperationException("Owner credential create failed: " + credentialJson);
+                            Credential credential = DeserializeRequired<Credential>(credentialJson);
+                            otherOwnerAccessKey = credential.AccessKey;
+                        }
+                    }
+
+                    using (ClientWebSocket ownerSocket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(ownerSocket);
+                        await ownerSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? connected = await ReceiveWebSocketTextAsync(ownerSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Owner WebSocket did not connect: " + connected);
+                        await SendWebSocketJsonAsync(ownerSocket, new { type = "client.register", clientId = "xcl_owner_security", tenantId = Constants.DefaultTenantId, name = "owned-client", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? registered = await ReceiveWebSocketTextAsync(ownerSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(registered) || !registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Owner WebSocket did not register: " + registered);
+
+                        using (HttpClient adminClient = new HttpClient())
+                        {
+                            await AuthenticateSeedAdminAsync(adminClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
+                            string clientsJson = await adminClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
+                            List<XenoClientRecord> clients = DeserializeRequired<List<XenoClientRecord>>(clientsJson);
+                            XenoClientRecord? ownedClient = clients.FirstOrDefault(item => String.Equals(item.Id, "xcl_owner_security", StringComparison.OrdinalIgnoreCase));
+                            if (ownedClient == null) throw new InvalidOperationException("Owned client was not returned by management API.");
+                            if (String.IsNullOrWhiteSpace(ownedClient.OwnerUserId)) throw new InvalidOperationException("Owned client was missing owner user ID.");
+                            if (String.IsNullOrWhiteSpace(ownedClient.OwnerCredentialId)) throw new InvalidOperationException("Owned client was missing owner credential ID.");
+                            if (ownedClient.OwnerPrincipalType != PrincipalTypeEnum.Credential) throw new InvalidOperationException("Owned client principal type mismatch.");
+                        }
+
+                        await ownerSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "owner test complete", clientTokenSource.Token).ConfigureAwait(false);
+                        await Task.Delay(100, clientTokenSource.Token).ConfigureAwait(false);
+                    }
+
+                    using (ClientWebSocket otherOwnerSocket = new ClientWebSocket())
+                    {
+                        ApplyCredentialHeaders(otherOwnerSocket, otherOwnerAccessKey);
+                        await otherOwnerSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? connected = await ReceiveWebSocketTextAsync(otherOwnerSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Other owner WebSocket did not connect: " + connected);
+                        await SendWebSocketJsonAsync(otherOwnerSocket, new { type = "client.register", clientId = "xcl_owner_security", tenantId = Constants.DefaultTenantId, name = "owned-client-stolen", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? stolenRegister = await ReceiveWebSocketTextAsync(otherOwnerSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(stolenRegister) || !stolenRegister.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Different user was able to claim an owned client ID: " + stolenRegister);
+                    }
+
                     using (ClientWebSocket firstDuplicateSocket = new ClientWebSocket())
                     using (ClientWebSocket secondDuplicateSocket = new ClientWebSocket())
                     {
