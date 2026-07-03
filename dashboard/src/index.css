@@ -1278,6 +1278,36 @@ html[data-theme='dark'] .primitive-list-item {
   margin-top: 2px;
 }
 
+.telemetry-collapsible-chart {
+  overflow: hidden;
+}
+
+.telemetry-collapsible-chart > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.telemetry-collapsible-chart > summary::-webkit-details-marker {
+  display: none;
+}
+
+.telemetry-collapsible-summary {
+  user-select: none;
+}
+
+.telemetry-collapsible-summary p {
+  margin: 4px 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.compact-spinner {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
 .telemetry-kpi-grid {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }

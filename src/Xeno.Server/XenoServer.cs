@@ -4001,8 +4001,11 @@ namespace Xeno.Server
             if (String.Equals(decision.MatchedSource, "SystemAdmin", StringComparison.Ordinal) || String.Equals(decision.MatchedSource, "TenantAdmin", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref _PrivilegedBypassCount);
-                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, true, decision.MatchedSource ?? "PrivilegedBypass", 200, targetTenantId, null);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                if (operationType != OperationTypeEnum.Read)
+                {
+                    _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, true, decision.MatchedSource ?? "PrivilegedBypass", 200, targetTenantId, null);
+                    await SavePlatformAsync(token).ConfigureAwait(false);
+                }
             }
         }
 

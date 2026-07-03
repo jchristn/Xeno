@@ -63,6 +63,24 @@ const analyticsRanges = [
   { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, bucketMinutes: 120 },
   { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, bucketMinutes: 480 }
 ];
+const telemetryChartOpenDefaults = {
+  cpu: true,
+  memory: false,
+  gpu: false,
+  providerAvailable: true,
+  providerLoaded: false,
+  providerActive: false
+};
+const hostTelemetryChartConfigs = [
+  { color: 'var(--color-info)', key: 'cpu', labelFallback: 'CPU', labelKey: 'cpu', metric: 'CpuUtilizationPercent', titleFallback: 'CPU Telemetry', titleKey: 'cpuTelemetry' },
+  { color: 'var(--color-success)', key: 'memory', labelFallback: 'Memory', labelKey: 'memory', metric: 'MemoryUtilizationPercent', titleFallback: 'Memory Telemetry', titleKey: 'memoryTelemetry' },
+  { color: 'var(--color-warning)', key: 'gpu', labelFallback: 'GPU', labelKey: 'gpu', metric: 'GpuUtilizationPercent', titleFallback: 'GPU Telemetry', titleKey: 'gpuTelemetry' }
+];
+const providerTelemetryChartConfigs = [
+  { color: 'var(--color-success)', key: 'providerAvailable', labelFallback: 'Available Models', labelKey: 'availableModels', metric: 'AvailableModelCount', rollupKey: 'available', titleFallback: 'Available Models Telemetry', titleKey: 'availableModelsTelemetry' },
+  { color: 'var(--color-warning)', key: 'providerLoaded', labelFallback: 'Loaded Models', labelKey: 'loadedModels', metric: 'LoadedModelCount', rollupKey: 'loaded', titleFallback: 'Loaded Models Telemetry', titleKey: 'loadedModelsTelemetry' },
+  { color: 'var(--color-info)', key: 'providerActive', labelFallback: 'Active Requests', labelKey: 'activeRequests', metric: 'ActiveRequests', rollupKey: 'active', titleFallback: 'Active Requests Telemetry', titleKey: 'activeRequestsTelemetry' }
+];
 const defaultOpenAiPrompt = 'Hello! Can you give me a brief explanation of how an inverted index works?';
 const defaultOpenAiSystemPrompt = 'You are a helpful and concise assistant.';
 const defaultEmbeddingInputText = [
@@ -379,7 +397,10 @@ function ClientTelemetryView() {
   const [providerRollups, setProviderRollups] = useState({ active: [], available: [], loaded: [] });
   const [telemetryRange, setTelemetryRange] = useState('lastHour');
   const [rangeAnchor, setRangeAnchor] = useState(Date.now());
-  const [loading, setLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [attemptsLoading, setAttemptsLoading] = useState(true);
+  const [rollupLoading, setRollupLoading] = useState({});
+  const [openTelemetryCharts, setOpenTelemetryCharts] = useState(telemetryChartOpenDefaults);
   const [collecting, setCollecting] = useState(false);
   const telemetryWindow = useMemo(() => buildAnalyticsWindow(telemetryRange, rangeAnchor), [rangeAnchor, telemetryRange]);
   const selectedClientId = searchParams.get('clientId') || 'all';
@@ -399,87 +420,26 @@ function ClientTelemetryView() {
   const averageMemory = average(hostRows.map((item) => value(item, 'memoryUtilizationPercent')));
   const averageGpu = average(hostRows.map((item) => value(item, 'gpuAverageUtilizationPercent')));
   const unhealthyProviders = providerRows.filter((item) => String(value(item, 'healthStatus') || '').toLowerCase() === 'unhealthy').length;
-  const hostChartSeries = [
-    { key: 'cpu', label: t('cpu', 'CPU'), color: 'var(--color-info)', values: telemetryRollupValues(hostRollups.cpu, telemetryWindow) },
-    { key: 'memory', label: t('memory', 'Memory'), color: 'var(--color-success)', values: telemetryRollupValues(hostRollups.memory, telemetryWindow) },
-    { key: 'gpu', label: t('gpu', 'GPU'), color: 'var(--color-warning)', values: telemetryRollupValues(hostRollups.gpu, telemetryWindow) }
-  ];
-  const providerChartSeries = [
-    { key: 'available', label: t('availableModels', 'Available Models'), color: 'var(--color-success)', values: telemetryRollupValues(providerRollups.available, telemetryWindow) },
-    { key: 'loaded', label: t('loadedModels', 'Loaded Models'), color: 'var(--color-warning)', values: telemetryRollupValues(providerRollups.loaded, telemetryWindow) },
-    { key: 'active', label: t('activeRequests', 'Active'), color: 'var(--color-info)', values: telemetryRollupValues(providerRollups.active, telemetryWindow) }
-  ];
-
-  async function refresh(nextAnchor = rangeAnchor) {
-    const nextWindow = buildAnalyticsWindow(telemetryRange, nextAnchor);
-    setLoading(true);
-    try {
-      const clientId = selectedClientId === 'all' ? null : selectedClientId;
-      const rollupBase = {
-        bucketMinutes: nextWindow.bucketMinutes,
-        clientId,
-        fromUtc: nextWindow.fromUtc,
-        toUtc: nextWindow.toUtc
-      };
-      const [
-        nextStatus,
-        nextLatest,
-        nextAttempts,
-        cpuRollups,
-        memoryRollups,
-        gpuRollups,
-        activeRollups,
-        availableRollups,
-        loadedRollups
-      ] = await Promise.all([
-        api.get('/v1.0/api/client-telemetry/status'),
-        api.get(`/v1.0/api/client-telemetry/latest${selectedClientQuery}`),
-        api.get(`/v1.0/api/client-telemetry/collection-attempts${selectedClientQuery}`),
-        api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: 'CpuUtilizationPercent' }),
-        api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: 'MemoryUtilizationPercent' }),
-        api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: 'GpuUtilizationPercent' }),
-        api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: 'ActiveRequests' }),
-        api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: 'AvailableModelCount' }),
-        api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: 'LoadedModelCount' })
-      ]);
-      setStatus(nextStatus || null);
-      setLatest(nextLatest || { hostTelemetry: [], providerTelemetry: [] });
-      setAttempts(Array.isArray(nextAttempts) ? nextAttempts : []);
-      setHostRollups({
-        cpu: Array.isArray(cpuRollups) ? cpuRollups : [],
-        memory: Array.isArray(memoryRollups) ? memoryRollups : [],
-        gpu: Array.isArray(gpuRollups) ? gpuRollups : []
-      });
-      setProviderRollups({
-        active: Array.isArray(activeRollups) ? activeRollups : [],
-        available: Array.isArray(availableRollups) ? availableRollups : [],
-        loaded: Array.isArray(loadedRollups) ? loadedRollups : []
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
+  const openTelemetryChartKeys = Object.keys(openTelemetryCharts).filter((key) => openTelemetryCharts[key]).join('|');
+  const chartLoading = Object.values(rollupLoading).some(Boolean);
 
   function refreshWithCurrentTime() {
-    const nextAnchor = Date.now();
-    setRangeAnchor(nextAnchor);
-    return refresh(nextAnchor);
+    setRangeAnchor(Date.now());
   }
 
   async function collectNow() {
     setCollecting(true);
     try {
       await api.post('/v1.0/api/client-telemetry/collect', { clientId: selectedClientId === 'all' ? null : selectedClientId });
-      await refreshWithCurrentTime();
+      refreshWithCurrentTime();
     } finally {
       setCollecting(false);
     }
   }
 
   function updateTelemetryRange(nextRange) {
-    const nextAnchor = Date.now();
     setTelemetryRange(nextRange);
-    setRangeAnchor(nextAnchor);
+    setRangeAnchor(Date.now());
   }
 
   function updateSelectedClient(clientId) {
@@ -492,9 +452,88 @@ function ClientTelemetryView() {
     setSearchParams({ clientId: nextClientId });
   }
 
+  function updateTelemetryChartOpen(key, open) {
+    setOpenTelemetryCharts((current) => ({ ...current, [key]: open }));
+    if (!open) setRollupLoading((current) => ({ ...current, [key]: false }));
+  }
+
   useEffect(() => {
-    refresh();
-  }, [rangeAnchor, selectedClientQuery, telemetryRange]);
+    let alive = true;
+    setSummaryLoading(true);
+    Promise.allSettled([
+      api.get('/v1.0/api/client-telemetry/status'),
+      api.get(`/v1.0/api/client-telemetry/latest${selectedClientQuery}`)
+    ])
+      .then(([statusResult, latestResult]) => {
+        if (!alive) return;
+        setStatus(statusResult.status === 'fulfilled' ? statusResult.value || null : null);
+        setLatest(latestResult.status === 'fulfilled' ? latestResult.value || { hostTelemetry: [], providerTelemetry: [] } : { hostTelemetry: [], providerTelemetry: [] });
+      })
+      .finally(() => {
+        if (alive) setSummaryLoading(false);
+      });
+    return () => { alive = false; };
+  }, [rangeAnchor, selectedClientQuery]);
+
+  useEffect(() => {
+    let alive = true;
+    setAttemptsLoading(true);
+    api.get(`/v1.0/api/client-telemetry/collection-attempts${selectedClientQuery}`)
+      .then((nextAttempts) => {
+        if (alive) setAttempts(Array.isArray(nextAttempts) ? nextAttempts : []);
+      })
+      .catch(() => {
+        if (alive) setAttempts([]);
+      })
+      .finally(() => {
+        if (alive) setAttemptsLoading(false);
+      });
+    return () => { alive = false; };
+  }, [rangeAnchor, selectedClientQuery]);
+
+  useEffect(() => {
+    let alive = true;
+    const clientId = selectedClientId === 'all' ? null : selectedClientId;
+    const rollupBase = {
+      bucketMinutes: telemetryWindow.bucketMinutes,
+      clientId,
+      fromUtc: telemetryWindow.fromUtc,
+      toUtc: telemetryWindow.toUtc
+    };
+
+    async function loadHost(config) {
+      setRollupLoading((current) => ({ ...current, [config.key]: true }));
+      try {
+        const result = await api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: config.metric });
+        if (alive) setHostRollups((current) => ({ ...current, [config.key]: Array.isArray(result) ? result : [] }));
+      } catch {
+        if (alive) setHostRollups((current) => ({ ...current, [config.key]: [] }));
+      } finally {
+        if (alive) setRollupLoading((current) => ({ ...current, [config.key]: false }));
+      }
+    }
+
+    async function loadProvider(config) {
+      setRollupLoading((current) => ({ ...current, [config.key]: true }));
+      try {
+        const result = await api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: config.metric });
+        if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: Array.isArray(result) ? result : [] }));
+      } catch {
+        if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: [] }));
+      } finally {
+        if (alive) setRollupLoading((current) => ({ ...current, [config.key]: false }));
+      }
+    }
+
+    hostTelemetryChartConfigs
+      .filter((config) => openTelemetryCharts[config.key])
+      .forEach((config) => { loadHost(config); });
+    providerTelemetryChartConfigs
+      .filter((config) => openTelemetryCharts[config.key])
+      .forEach((config) => { loadProvider(config); });
+
+    return () => { alive = false; };
+  }, [openTelemetryChartKeys, rangeAnchor, selectedClientId, telemetryRange]);
 
   return (
     <div className="view-stack client-telemetry-view">
@@ -505,7 +544,7 @@ function ClientTelemetryView() {
         </div>
         <div className="chart-action-row home-range-actions">
           <TimeRangeSelector onChange={updateTelemetryRange} range={telemetryRange} />
-          <IconButton iconOnly disabled={loading} onClick={refreshWithCurrentTime} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+          <IconButton iconOnly disabled={summaryLoading || attemptsLoading || chartLoading} onClick={refreshWithCurrentTime} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
           <IconButton iconOnly disabled={collecting} onClick={collectNow} label={t('collectNow', 'Collect Now')} tooltip={t('collectNow', 'Collect Now')} icon={<Play size={16} />} />
         </div>
       </div>
@@ -544,26 +583,60 @@ function ClientTelemetryView() {
       </div>
 
       <div className="client-telemetry-chart-grid view-stack">
-        <TelemetrySparkChart
-          emptyTitle={t('noData')}
-          loading={loading}
-          loadingLabel={t('loading')}
-          series={hostChartSeries}
-          subtitle={t('latestHostTelemetrySubtitle', 'Latest host telemetry samples collected by the server.')}
-          title={t('latestHostTelemetry', 'Latest Host Telemetry')}
-          totalLabel={t('total')}
-          valueFormatter={(nextValue) => formatPercent(nextValue / 100)}
-        />
-        <TelemetrySparkChart
-          emptyTitle={t('noData')}
-          loading={loading}
-          loadingLabel={t('loading')}
-          series={providerChartSeries}
-          subtitle={t('latestProviderTelemetrySubtitle', 'Latest provider telemetry samples collected by the server.')}
-          title={t('latestProviderTelemetry', 'Latest Provider Telemetry')}
-          totalLabel={t('total')}
-          valueFormatter={(nextValue) => formatOptionalNumber(nextValue)}
-        />
+        {hostTelemetryChartConfigs.map((config) => (
+          <TelemetryChartDisclosure
+            key={config.key}
+            loading={Boolean(rollupLoading[config.key])}
+            onToggle={(open) => updateTelemetryChartOpen(config.key, open)}
+            open={Boolean(openTelemetryCharts[config.key])}
+            subtitle={t('hostTelemetryMetricSubtitle', 'Server-collected host telemetry for the selected time range.')}
+            title={t(config.titleKey, config.titleFallback)}
+          >
+            <TelemetrySparkChart
+              emptyTitle={t('noData')}
+              framed={false}
+              loading={Boolean(rollupLoading[config.key])}
+              loadingLabel={t('loading')}
+              series={[{
+                color: config.color,
+                key: config.key,
+                label: t(config.labelKey, config.labelFallback),
+                values: telemetryRollupValues(hostRollups[config.key], telemetryWindow)
+              }]}
+              subtitle={t('hostTelemetryMetricSubtitle', 'Server-collected host telemetry for the selected time range.')}
+              title={t(config.titleKey, config.titleFallback)}
+              totalLabel={t('total')}
+              valueFormatter={(nextValue) => formatPercent(nextValue / 100)}
+            />
+          </TelemetryChartDisclosure>
+        ))}
+        {providerTelemetryChartConfigs.map((config) => (
+          <TelemetryChartDisclosure
+            key={config.key}
+            loading={Boolean(rollupLoading[config.key])}
+            onToggle={(open) => updateTelemetryChartOpen(config.key, open)}
+            open={Boolean(openTelemetryCharts[config.key])}
+            subtitle={t('providerTelemetryMetricSubtitle', 'Server-collected provider telemetry for the selected time range.')}
+            title={t(config.titleKey, config.titleFallback)}
+          >
+            <TelemetrySparkChart
+              emptyTitle={t('noData')}
+              framed={false}
+              loading={Boolean(rollupLoading[config.key])}
+              loadingLabel={t('loading')}
+              series={[{
+                color: config.color,
+                key: config.key,
+                label: t(config.labelKey, config.labelFallback),
+                values: telemetryRollupValues(providerRollups[config.rollupKey], telemetryWindow)
+              }]}
+              subtitle={t('providerTelemetryMetricSubtitle', 'Server-collected provider telemetry for the selected time range.')}
+              title={t(config.titleKey, config.titleFallback)}
+              totalLabel={t('total')}
+              valueFormatter={(nextValue) => formatOptionalNumber(nextValue)}
+            />
+          </TelemetryChartDisclosure>
+        ))}
       </div>
 
       <DataTable
@@ -575,7 +648,7 @@ function ClientTelemetryView() {
           { key: 'memoryUtilizationPercent', label: t('memory', 'Memory'), render: (item) => formatPercent(Number(value(item, 'memoryUtilizationPercent') || 0) / 100) },
           { key: 'gpuAverageUtilizationPercent', label: t('gpu', 'GPU'), render: (item) => formatPercent(Number(value(item, 'gpuAverageUtilizationPercent') || 0) / 100) }
         ]}
-        loading={loading}
+        loading={summaryLoading}
         rows={hostRows}
         subtitle={t('latestHostTelemetrySubtitle', 'Latest host telemetry samples collected by the server.')}
         title={t('latestHostTelemetry', 'Latest Host Telemetry')}
@@ -590,7 +663,7 @@ function ClientTelemetryView() {
           { key: 'queuedRequests', label: t('queuedRequests', 'Queued'), render: (item) => formatOptionalNumber(value(item, 'queuedRequests')) },
           { key: 'latencyP95Ms', label: t('latencyP95', 'Latency p95'), render: (item) => formatDuration(value(item, 'latencyP95Ms')) }
         ]}
-        loading={loading}
+        loading={summaryLoading}
         rows={providerRows}
         subtitle={t('latestProviderTelemetrySubtitle', 'Latest provider telemetry samples collected by the server.')}
         title={t('latestProviderTelemetry', 'Latest Provider Telemetry')}
@@ -604,7 +677,7 @@ function ClientTelemetryView() {
           { key: 'elapsedMs', label: t('elapsed', 'Elapsed'), render: (item) => formatDuration(value(item, 'elapsedMs')) },
           { key: 'providerSampleCount', label: t('providerSamples', 'Provider Samples'), render: (item) => formatOptionalNumber(value(item, 'providerSampleCount')) }
         ]}
-        loading={loading}
+        loading={attemptsLoading}
         rows={attempts}
         subtitle={t('collectionAttemptsSubtitle', 'Recent server telemetry collection attempts.')}
         title={t('collectionAttempts', 'Collection Attempts')}
@@ -614,7 +687,25 @@ function ClientTelemetryView() {
   );
 }
 
-function TelemetrySparkChart({ emptyTitle, loading = false, loadingLabel = 'Loading...', series, subtitle, title, totalLabel = 'Total', valueFormatter }) {
+function TelemetryChartDisclosure({ children, loading, onToggle, open, subtitle, title }) {
+  return (
+    <details className="workspace-card telemetry-collapsible-chart" onToggle={(event) => onToggle?.(event.currentTarget.open)} open={open}>
+      <summary className="workspace-card-header telemetry-collapsible-summary">
+        <div>
+          <h2>{title}</h2>
+          {subtitle ? <p>{subtitle}</p> : null}
+        </div>
+        <div className="workspace-card-actions">
+          {loading ? <div aria-hidden="true" className="table-loading-spinner compact-spinner" /> : null}
+          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </div>
+      </summary>
+      {open ? <div className="workspace-card-body">{children}</div> : null}
+    </details>
+  );
+}
+
+function TelemetrySparkChart({ emptyTitle, framed = true, loading = false, loadingLabel = 'Loading...', series, subtitle, title, totalLabel = 'Total', valueFormatter }) {
   const canvasRef = useRef(null);
   const [hovered, setHovered] = useState(null);
   const normalizedSeries = series.map((item) => ({
@@ -670,8 +761,8 @@ function TelemetrySparkChart({ emptyTitle, loading = false, loadingLabel = 'Load
     });
   }
 
-  return (
-    <Panel subtitle={subtitle} title={title}>
+  const chartBody = (
+    <>
       {!hasData && !loading ? <EmptyState title={emptyTitle} description={subtitle} /> : (
         <div className="activity-chart-panel compact-chart-panel telemetry-spark-chart-panel">
           <div className="chart-canvas" ref={canvasRef}>
@@ -756,8 +847,11 @@ function TelemetrySparkChart({ emptyTitle, loading = false, loadingLabel = 'Load
           </div>
         </div>
       )}
-    </Panel>
+    </>
   );
+
+  if (!framed) return chartBody;
+  return <Panel title={title}>{chartBody}</Panel>;
 }
 
 function ChartLoadingOverlay({ label }) {
