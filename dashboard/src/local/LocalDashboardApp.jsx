@@ -1206,6 +1206,7 @@ function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = 
   const slot = plotWidth / Math.max(1, buckets.length);
   const barWidth = Math.max(2, Math.min(14, slot - 2));
   const yTicks = buildMetricYAxisTicks(axisMax);
+  const xTicks = buildMetricXAxisTicks(buckets, left, plotWidth);
 
   useEffect(() => {
     refreshRef.current = onRefresh;
@@ -1265,15 +1266,16 @@ function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = 
             const x = left + index * slot + (slot - barWidth) / 2;
             const barHeight = (value / axisMax) * plotHeight;
             const y = baseY - barHeight;
-            const showTick = shouldShowChartTick(index, buckets.length);
             return (
               <g key={`${bucket.label}-${index}`} onMouseLeave={() => setHovered(null)} onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}>
                 <rect x={x} y={top} width={barWidth} height={plotHeight} fill="transparent" />
                 <rect x={x} y={y} width={barWidth} height={barHeight} rx="3" fill="var(--color-accent)" />
-                {showTick ? <text className="axis-label" x={x + barWidth / 2} y={baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
               </g>
             );
           })}
+          {xTicks.map((tick) => (
+            <text className="axis-label" key={tick.key} x={tick.x} y={baseY + 18} textAnchor="middle">{tick.label}</text>
+          ))}
         </svg>
         {hovered ? (
           <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
@@ -1343,9 +1345,17 @@ function desiredChartBuckets(range) {
 function fallbackMetricLabel(range, index, count) {
   if (range === 'lastHour') return `${Math.max(0, count - index - 1)}m`;
   if (range === 'lastDay') return `${Math.max(0, Math.floor(index / 4))}h`;
-  if (range === 'lastWeek') return `D${Math.max(1, Math.floor(index / 12) + 1)}`;
-  if (range === 'lastMonth') return `D${Math.max(1, Math.floor(index / 3) + 1)}`;
+  if (range === 'lastWeek' || range === 'lastMonth') return fallbackMetricDateLabel(range, index, count);
   return String(index + 1);
+}
+
+function fallbackMetricDateLabel(range, index, count) {
+  const durationMs = range === 'lastWeek'
+    ? 7 * 24 * 60 * 60 * 1000
+    : 30 * 24 * 60 * 60 * 1000;
+  const bucketMs = durationMs / Math.max(1, count);
+  const timestamp = Date.now() - durationMs + index * bucketMs + bucketMs / 2;
+  return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 function metricAxisMaximum(max) {
@@ -1368,9 +1378,24 @@ function buildMetricYAxisTicks(max) {
   }));
 }
 
-function shouldShowChartTick(index, count) {
-  const step = Math.max(1, Math.ceil(count / 8));
-  return index % step === 0 || index === count - 1;
+function buildMetricXAxisTicks(buckets, left, plotWidth) {
+  const count = buckets.length;
+  if (count === 0) return [];
+
+  const tickCount = Math.min(8, count);
+  if (tickCount === 1) {
+    return [{ key: 'x-0', label: buckets[0]?.label || '', x: left + plotWidth / 2 }];
+  }
+
+  return Array.from({ length: tickCount }, (_, tickIndex) => {
+    const ratio = tickIndex / (tickCount - 1);
+    const bucketIndex = Math.min(count - 1, Math.max(0, Math.round(ratio * (count - 1))));
+    return {
+      key: `x-${tickIndex}-${bucketIndex}`,
+      label: buckets[bucketIndex]?.label || '',
+      x: left + ratio * plotWidth
+    };
+  });
 }
 
 function tooltipFromPointer(event, element) {

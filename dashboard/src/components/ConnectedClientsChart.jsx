@@ -82,6 +82,7 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
   const yTicks = buildYAxisTicks(axisMax);
   const barSlot = chart.plotWidth / Math.max(1, buckets.length);
   const barWidth = Math.max(2, Math.min(14, barSlot - 2));
+  const xTicks = buildXAxisTicks(buckets, chart.left, chart.plotWidth);
 
   function updateRange(nextRange) {
     if (!range) setLocalRange(nextRange);
@@ -142,7 +143,6 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
             const x = chart.left + index * barSlot + (barSlot - barWidth) / 2;
             const height = (bucket.connected / axisMax) * chart.plotHeight;
             const y = chart.baseY - height;
-            const showTick = shouldShowTick(index, buckets.length);
             return (
               <g
                 key={`${bucket.start}-${index}`}
@@ -155,10 +155,12 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
                 <title>{`${bucket.label}: ${t('connectedClients')} ${bucket.connected}. ${t('tooltipChartRange')}`}</title>
                 <rect x={x} y={chart.top} width={barWidth} height={chart.plotHeight} fill="transparent" />
                 <rect x={x} y={y} width={barWidth} height={height} rx="3" fill="var(--color-info)" />
-                {showTick ? <text className="axis-label" x={x + barWidth / 2} y={chart.baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
               </g>
             );
           })}
+          {xTicks.map((tick) => (
+            <text className="axis-label" key={tick.key} x={tick.x} y={chart.baseY + 18} textAnchor="middle">{tick.label}</text>
+          ))}
         </svg>
         {hovered ? (
           <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
@@ -239,9 +241,24 @@ function formatTime(timestamp, range) {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-function shouldShowTick(index, count) {
-  const step = Math.max(1, Math.ceil(count / 8));
-  return index % step === 0 || index === count - 1;
+function buildXAxisTicks(buckets, left, plotWidth) {
+  const count = buckets.length;
+  if (count === 0) return [];
+
+  const tickCount = Math.min(8, count);
+  if (tickCount === 1) {
+    return [{ key: 'x-0', label: buckets[0]?.label || '', x: left + plotWidth / 2 }];
+  }
+
+  return Array.from({ length: tickCount }, (_, tickIndex) => {
+    const ratio = tickIndex / (tickCount - 1);
+    const bucketIndex = Math.min(count - 1, Math.max(0, Math.round(ratio * (count - 1))));
+    return {
+      key: `x-${tickIndex}-${bucketIndex}`,
+      label: buckets[bucketIndex]?.label || '',
+      x: left + ratio * plotWidth
+    };
+  });
 }
 
 function axisMaximum(max) {

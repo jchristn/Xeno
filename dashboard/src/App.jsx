@@ -622,6 +622,14 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
   const plotHeight = chart.height - chart.top - chart.bottom;
   const hasData = finiteValues.length > 0;
   const bucketCount = Math.max(0, ...normalizedSeries.map((item) => item.values.length));
+  const axisMax = telemetryAxisMaximum(max);
+  const yTicks = buildTelemetryYAxisTicks(axisMax);
+  const bucketSlot = plotWidth / Math.max(1, bucketCount);
+  const seriesCount = Math.max(1, normalizedSeries.length);
+  const groupPadding = Math.min(10, Math.max(2, bucketSlot * 0.18));
+  const barGap = bucketSlot > 18 ? 2 : 1;
+  const groupedBarWidth = Math.max(1, Math.min(10, (bucketSlot - groupPadding - barGap * (seriesCount - 1)) / seriesCount));
+  const xTicks = buildTelemetryXAxisTicks(normalizedSeries, bucketCount, chart.left, plotWidth);
 
   function updateHover(event) {
     if (bucketCount === 0 || !canvasRef.current) {
@@ -632,8 +640,8 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
     const bounds = canvasRef.current.getBoundingClientRect();
     const svgX = (event.clientX - bounds.left) / Math.max(1, bounds.width) * chart.width;
     const boundedX = Math.max(chart.left, Math.min(chart.left + plotWidth, svgX));
-    const index = Math.round(((boundedX - chart.left) / Math.max(1, plotWidth)) * Math.max(1, bucketCount - 1));
-    const x = chart.left + (index / Math.max(1, bucketCount - 1)) * plotWidth;
+    const index = Math.max(0, Math.min(bucketCount - 1, Math.floor(((boundedX - chart.left) / Math.max(1, plotWidth)) * bucketCount)));
+    const x = chart.left + index * bucketSlot + bucketSlot / 2;
     const rows = normalizedSeries.map((item) => {
       const point = item.values[index] || {};
       const pointValue = Number(point.value);
@@ -661,40 +669,50 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
             <svg className="activity-chart" onMouseLeave={() => setHovered(null)} onMouseMove={updateHover} viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={title}>
               <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.top + plotHeight} stroke="var(--color-border)" />
               <line x1={chart.left} y1={chart.top + plotHeight} x2={chart.left + plotWidth} y2={chart.top + plotHeight} stroke="var(--color-border)" />
-              {[1, 0.5, 0].map((ratio) => {
-                const y = chart.top + (1 - ratio) * plotHeight;
+              {yTicks.map((tick) => {
+                const y = chart.top + (1 - tick.ratio) * plotHeight;
                 return (
-                  <g key={ratio}>
+                  <g key={tick.key}>
                     <line x1={chart.left} y1={y} x2={chart.left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" opacity="0.72" />
-                    <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{valueFormatter(max * ratio)}</text>
+                    <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{valueFormatter(tick.value)}</text>
                   </g>
                 );
               })}
-              {normalizedSeries.map((item) => {
-                const points = item.values.map((point, index) => {
-                  const denominator = Math.max(1, item.values.length - 1);
-                  const x = chart.left + (index / denominator) * plotWidth;
-                  const pointValue = Number(point.value);
-                  const y = Number.isFinite(pointValue) ? chart.top + plotHeight - (pointValue / max) * plotHeight : null;
-                  return { ...point, value: pointValue, x, y };
-                });
-                const visiblePoints = points.filter((point) => Number.isFinite(point.value) && point.y !== null);
-                const line = visiblePoints.map((point) => `${point.x},${point.y}`).join(' ');
+              {Array.from({ length: bucketCount }, (_, index) => {
+                const groupX = chart.left + index * bucketSlot + (bucketSlot - (groupedBarWidth * seriesCount + barGap * (seriesCount - 1))) / 2;
                 return (
-                  <g key={item.key}>
-                    {visiblePoints.length > 1 ? <polyline points={line} fill="none" stroke={item.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" /> : null}
-                    {visiblePoints.map((point, index) => (
-                      <g key={`${item.key}-${point.label}-${index}`}>
-                        <title>{`${item.label} ${point.label}: ${valueFormatter(point.value)}`}</title>
-                        <circle cx={point.x} cy={point.y} r="4" fill={item.color} />
-                      </g>
-                    ))}
+                  <g key={`bucket-${index}`}>
+                    <rect x={chart.left + index * bucketSlot} y={chart.top} width={bucketSlot} height={plotHeight} fill="transparent" />
+                    {normalizedSeries.map((item, seriesIndex) => {
+                      const point = item.values[index] || {};
+                      const pointValue = Number(point.value);
+                      if (!Number.isFinite(pointValue)) return null;
+                      const height = Math.max(0, (pointValue / axisMax) * plotHeight);
+                      const x = groupX + seriesIndex * (groupedBarWidth + barGap);
+                      const y = chart.top + plotHeight - height;
+                      return (
+                        <rect
+                          fill={item.color}
+                          height={height}
+                          key={`${item.key}-${index}`}
+                          rx="2"
+                          width={groupedBarWidth}
+                          x={x}
+                          y={y}
+                        >
+                          <title>{`${item.label} ${point.label}: ${valueFormatter(pointValue)}`}</title>
+                        </rect>
+                      );
+                    })}
                   </g>
                 );
               })}
               {hovered ? (
-                <line className="chart-hover-line" x1={hovered.svgX} y1={chart.top} x2={hovered.svgX} y2={chart.top + plotHeight} />
+                <rect className="chart-hover-band" x={hovered.svgX - bucketSlot / 2} y={chart.top} width={bucketSlot} height={plotHeight} />
               ) : null}
+              {xTicks.map((tick) => (
+                <text className="axis-label" key={tick.key} x={tick.x} y={chart.top + plotHeight + 18} textAnchor="middle">{tick.label}</text>
+              ))}
               <rect
                 fill="transparent"
                 height={plotHeight}
@@ -730,6 +748,55 @@ function telemetryTooltipFromPointer(event, element) {
   if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
   const bounds = element.getBoundingClientRect();
   return telemetryTooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
+}
+
+function telemetryAxisMaximum(maximum) {
+  if (!Number.isFinite(maximum) || maximum <= 1) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(maximum));
+  const normalized = maximum / magnitude;
+  let niceNormalized = 10;
+  if (normalized <= 1) niceNormalized = 1;
+  else if (normalized <= 2) niceNormalized = 2;
+  else if (normalized <= 4) niceNormalized = 4;
+  else if (normalized <= 8) niceNormalized = 8;
+  return niceNormalized * magnitude;
+}
+
+function buildTelemetryYAxisTicks(axisMax) {
+  if (!Number.isFinite(axisMax) || axisMax <= 1) {
+    return [
+      { key: 'y-1', ratio: 1, value: 1 },
+      { key: 'y-0', ratio: 0, value: 0 }
+    ];
+  }
+
+  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
+    key: `y-${ratio}`,
+    ratio,
+    value: axisMax * ratio
+  }));
+}
+
+function buildTelemetryXAxisTicks(series, bucketCount, left, plotWidth) {
+  if (bucketCount <= 0) return [];
+  const tickCount = Math.min(8, bucketCount);
+  if (tickCount === 1) {
+    return [{ key: 'x-0', label: telemetryLabelAt(series, 0), x: left + plotWidth / 2 }];
+  }
+
+  return Array.from({ length: tickCount }, (_, tickIndex) => {
+    const ratio = tickIndex / (tickCount - 1);
+    const bucketIndex = Math.min(bucketCount - 1, Math.max(0, Math.round(ratio * (bucketCount - 1))));
+    return {
+      key: `x-${tickIndex}-${bucketIndex}`,
+      label: telemetryLabelAt(series, bucketIndex),
+      x: left + ratio * plotWidth
+    };
+  });
+}
+
+function telemetryLabelAt(series, index) {
+  return series.map((item) => item.values[index]?.label).find(Boolean) || '';
 }
 
 function telemetryTooltipPosition(x, y, width, height) {
@@ -1065,7 +1132,6 @@ function RequestHistoryView() {
         actions={(
           <div className="button-row">
             <IconButton iconOnly onClick={refreshAll} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
-            <IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} tooltip={t('clearHistoryMessage')} icon={<Trash2 size={16} />} variant="danger" />
           </div>
         )}
         className="chart-panel-card"
@@ -1074,6 +1140,7 @@ function RequestHistoryView() {
         <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
       </Panel>
       <DataTable
+        actions={<IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} tooltip={t('clearHistoryMessage')} icon={<Trash2 size={16} />} variant="danger" />}
         columns={['statusCode', 'method', 'path', 'model', 'requestorPrincipalType', 'requestorPrincipalId', 'requestorTenantId', 'authScheme', 'selectedClientId', 'durationMs', 'createdUtc']}
         onDelete={(row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);

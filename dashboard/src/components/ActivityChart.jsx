@@ -69,6 +69,7 @@ export default function ActivityChart({ onRangeChange, onRefresh, range, showCon
   const barSlot = chart.plotWidth / Math.max(1, buckets.length);
   const barWidth = Math.max(2, Math.min(14, barSlot - 2));
   const yTicks = buildYAxisTicks(axisMax);
+  const xTicks = buildXAxisTicks(buckets, chart.left, chart.plotWidth);
 
   return (
     <div className="activity-chart-panel">
@@ -115,7 +116,6 @@ export default function ActivityChart({ onRangeChange, onRefresh, range, showCon
             const failedHeight = (bucket.failed / axisMax) * chart.plotHeight;
             const failedY = chart.baseY - failedHeight;
             const successY = chart.baseY - failedHeight - successHeight;
-            const showTick = shouldShowTick(index, buckets.length);
             const tooltipY = Math.min(successY, failedY) + (successHeight + failedHeight) / 2;
             return (
               <g
@@ -129,10 +129,12 @@ export default function ActivityChart({ onRangeChange, onRefresh, range, showCon
                 <title>{`${bucket.label}: ${t('success')} ${bucket.success}, ${t('failed')} ${bucket.failed}. ${t('tooltipChartRange')}`}</title>
                 <rect x={x} y={failedY} width={barWidth} height={failedHeight} rx="3" fill="var(--color-danger)" />
                 <rect x={x} y={successY} width={barWidth} height={successHeight} rx="3" fill="var(--color-success)" />
-                {showTick ? <text className="axis-label" x={x + barWidth / 2} y={chart.baseY + 18} textAnchor="middle">{bucket.label}</text> : null}
               </g>
             );
           })}
+          {xTicks.map((tick) => (
+            <text className="axis-label" key={tick.key} x={tick.x} y={chart.baseY + 18} textAnchor="middle">{tick.label}</text>
+          ))}
         </svg>
         {hovered ? (
           <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
@@ -232,14 +234,37 @@ function fallbackLabel(range, index, count) {
     const minutes = totalMinutes % 60;
     return `${hours}h${minutes ? ` ${minutes}m` : ''}`;
   }
-  if (range === 'lastWeek') return `D${Math.max(1, index + 1)}`;
-  if (range === 'lastMonth') return `${Math.max(1, index + 1)}`;
+  if (range === 'lastWeek' || range === 'lastMonth') return dateFallbackLabel(range, index, count);
   return `${index + 1}`;
 }
 
-function shouldShowTick(index, count) {
-  const step = Math.max(1, Math.ceil(count / 8));
-  return index % step === 0 || index === count - 1;
+function dateFallbackLabel(range, index, count) {
+  const durationMs = range === 'lastWeek'
+    ? 7 * 24 * 60 * 60 * 1000
+    : 30 * 24 * 60 * 60 * 1000;
+  const bucketMs = durationMs / Math.max(1, count);
+  const timestamp = Date.now() - durationMs + index * bucketMs + bucketMs / 2;
+  return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function buildXAxisTicks(buckets, left, plotWidth) {
+  const count = buckets.length;
+  if (count === 0) return [];
+
+  const tickCount = Math.min(8, count);
+  if (tickCount === 1) {
+    return [{ key: 'x-0', label: buckets[0]?.label || '', x: left + plotWidth / 2 }];
+  }
+
+  return Array.from({ length: tickCount }, (_, tickIndex) => {
+    const ratio = tickIndex / (tickCount - 1);
+    const bucketIndex = Math.min(count - 1, Math.max(0, Math.round(ratio * (count - 1))));
+    return {
+      key: `x-${tickIndex}-${bucketIndex}`,
+      label: buckets[bucketIndex]?.label || '',
+      x: left + ratio * plotWidth
+    };
+  });
 }
 
 function axisMaximum(max) {

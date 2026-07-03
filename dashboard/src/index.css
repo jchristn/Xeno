@@ -1496,6 +1496,12 @@ html[data-theme='dark'] .primitive-list-item {
   pointer-events: none;
 }
 
+.chart-hover-band {
+  fill: var(--color-border-strong);
+  opacity: 0.16;
+  pointer-events: none;
+}
+
 .chart-legend {
   display: flex;
   align-items: center;
