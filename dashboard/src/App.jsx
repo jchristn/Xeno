@@ -56,6 +56,7 @@ const dashboardSessionKey = 'xeno.dashboard.session';
 const portalSessionHashKey = 'xeno-portal-session';
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
+const analyticsOverviewEndpoint = '/api/v1/analytics/overview';
 const analyticsRanges = [
   { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 1 },
   { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 15 },
@@ -960,19 +961,17 @@ function HomeView() {
   const [activityRange, setActivityRange] = useState('lastDay');
   const [rangeAnchor, setRangeAnchor] = useState(Date.now());
   const activityWindow = useMemo(() => buildAnalyticsWindow(activityRange, rangeAnchor), [activityRange, rangeAnchor]);
-  const analytics = useResource('/api/v1/analytics/overview', { total: 0, success: 0, failures: 0, failureRate: 0 });
+  const analytics = useResource(analyticsOverviewPath(activityWindow), { total: 0, success: 0, failures: 0, failureRate: 0, connectedClientCount: 0, totalClientCount: 0, advertisedModelCount: 0, completionModelCount: 0 });
   const summary = useResource(requestHistorySummaryPath(activityWindow), { buckets: [] });
-  const clients = useResource('/api/v1/clients', []);
-  const clientModels = flattenClientModels(clients.data);
-  const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
-  const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
-  const completionModels = clientModels.filter((model) => value(model, 'supportsCompletions') === true).length;
+  const connected = Number(value(analytics.data, 'connectedClientCount') || 0);
+  const totalClientCount = Number(value(analytics.data, 'totalClientCount') || 0);
+  const advertisedModelCount = Number(value(analytics.data, 'advertisedModelCount') || 0);
+  const completionModels = Number(value(analytics.data, 'completionModelCount') || 0);
 
   function refreshAll() {
     setRangeAnchor(Date.now());
     analytics.refresh();
     summary.refresh();
-    clients.refresh();
   }
 
   function updateActivityRange(nextRange) {
@@ -1016,9 +1015,9 @@ function HomeView() {
         <ConnectedClientsChart
           connected={connected}
           range={activityRange}
-          sampleVersion={clients.updatedAt}
+          sampleVersion={analytics.updatedAt}
           showControls={false}
-          total={clients.data.length}
+          total={totalClientCount}
         />
       </Panel>
     </div>
@@ -1030,7 +1029,7 @@ function RequestHistoryView() {
   const [activityRange, setActivityRange] = useState('lastDay');
   const [rangeAnchor, setRangeAnchor] = useState(Date.now());
   const activityWindow = useMemo(() => buildAnalyticsWindow(activityRange, rangeAnchor), [activityRange, rangeAnchor]);
-  const history = useResource(requestHistoryEndpoint, []);
+  const history = useResource(requestHistoryListPath(), { items: [], total: 0, page: 1, pageSize: 100 });
   const summary = useResource(requestHistorySummaryPath(activityWindow), { buckets: [] });
   const [selected, setSelected] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -1083,7 +1082,7 @@ function RequestHistoryView() {
         onRowClick={setSelected}
         onRefresh={refreshAll}
         loading={history.loading}
-        rows={history.data}
+        rows={collectionRows(history.data)}
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
       />
@@ -1748,17 +1747,21 @@ function AnalyticsView() {
   const [rangeAnchor, setRangeAnchor] = useState(() => Date.now());
   const analyticsWindow = useMemo(() => buildAnalyticsWindow(analyticsRange, rangeAnchor), [analyticsRange, rangeAnchor]);
   const summary = useResource(requestHistorySummaryPath(analyticsWindow), { buckets: [] });
-  const history = useResource(requestHistoryEndpoint, []);
+  const overview = useResource(analyticsOverviewPath(analyticsWindow), { total: 0, success: 0, failures: 0, failureRate: 0, byModel: [], byPath: [] });
   const metrics = useTextResource('/metrics', '');
-  const rangedHistory = useMemo(() => filterRowsByDateRange(history.data, analyticsWindow), [analyticsWindow, history.data]);
-  const analyticsTotals = summarizeHistoryRows(rangedHistory);
-  const byModel = groupByCount(rangedHistory, 'model');
-  const byPath = groupByCount(rangedHistory, 'path');
+  const analyticsTotals = {
+    failed: Number(value(overview.data, 'failures') || value(overview.data, 'failed') || 0),
+    failureRate: Number(value(overview.data, 'failureRate') || 0),
+    success: Number(value(overview.data, 'success') || 0),
+    total: Number(value(overview.data, 'total') || 0)
+  };
+  const byModel = collectionRows(value(overview.data, 'byModel'));
+  const byPath = collectionRows(value(overview.data, 'byPath'));
 
   function refreshAnalytics() {
     setRangeAnchor(Date.now());
     summary.refresh();
-    history.refresh();
+    overview.refresh();
     metrics.refresh();
   }
 
@@ -1789,8 +1792,8 @@ function AnalyticsView() {
         <ActivityChart onRangeChange={updateAnalyticsRange} onRefresh={refreshAnalytics} range={analyticsRange} showControls={false} summary={summary.data} />
       </Panel>
       <div className="workspace-grid">
-        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} loading={history.loading} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
-        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} loading={history.loading} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
+        <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} loading={overview.loading} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
+        <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} loading={overview.loading} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
       </div>
       <Panel
         actions={<IconButton iconOnly onClick={metrics.refresh} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
@@ -4532,6 +4535,22 @@ function requestHistorySummaryPath(window) {
     toUtc: window.toUtc
   });
   return `${requestHistorySummaryEndpoint}?${parameters.toString()}`;
+}
+
+function requestHistoryListPath() {
+  const parameters = new URLSearchParams({
+    page: '1',
+    pageSize: '250'
+  });
+  return `${requestHistoryEndpoint}?${parameters.toString()}`;
+}
+
+function analyticsOverviewPath(window) {
+  const parameters = new URLSearchParams({
+    fromUtc: window.fromUtc,
+    toUtc: window.toUtc
+  });
+  return `${analyticsOverviewEndpoint}?${parameters.toString()}`;
 }
 
 function filterRowsByDateRange(rows, window) {

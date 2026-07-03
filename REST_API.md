@@ -249,9 +249,24 @@ Requests relayed from the Xeno server to a connected `xeno` client also include 
 
 `GET /v1.0/api/request-history`
 
+Returns a paged result object:
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "pageSize": 100
+}
+```
+
+Supported query parameters are `page` (default `1`), `pageSize` (default `100`, maximum `1000`), `fromUtc`, and `toUtc`. Use `total` for dashboard counters and pagination instead of enumerating every request-history entry.
+
 `GET /v1.0/api/request-history/summary`
 
 `GET /v1.0/api/request-history/analytics/overview`
+
+Analytics overview accepts optional `fromUtc` and `toUtc` parameters and returns request totals plus aggregate groups such as `byModel`, `byPath`, and `byClient`, along with client/model KPI counts.
 
 `GET /v1.0/api/request-history/{id}`
 

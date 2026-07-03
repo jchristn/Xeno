@@ -575,7 +575,7 @@
                                                         "value":  "{{tenantId}}"
                                                     }
                                                 ],
-                                     "url":  "{{baseUrl}}/v1.0/api/request-history"
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history?page=1&pageSize=100"
                                  }
                  },
                  {
@@ -1007,7 +1007,7 @@
                      "name":  "Request Analytics Overview",
                      "request":  {
                                      "method":  "GET",
-                                     "url":  "{{baseUrl}}/v1.0/api/request-history/analytics/overview",
+                                     "url":  "{{baseUrl}}/v1.0/api/request-history/analytics/overview?fromUtc={{fromUtc}}&toUtc={{toUtc}}",
                                      "header":  [
                                                     {
                                                         "key":  "x-tenant-guid",

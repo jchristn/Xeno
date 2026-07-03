@@ -99,7 +99,7 @@ namespace Xeno.Sdk.Tests
         {
             RecordingHandler handler = new RecordingHandler(request =>
             {
-                if (request.RequestUri?.AbsolutePath.Equals("/v1.0/api/request-history", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("[]");
+                if (request.RequestUri?.AbsolutePath.Equals("/v1.0/api/request-history", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("{\"items\":[],\"total\":0,\"page\":1,\"pageSize\":100}");
                 return JsonResponse("{}");
             });
             using (HttpClient httpClient = new HttpClient(handler))

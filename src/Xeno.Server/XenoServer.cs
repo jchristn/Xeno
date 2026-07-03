@@ -419,6 +419,22 @@ namespace Xeno.Server
                     .WithParameter(OpenApiParameterMetadata.Query("bucketMinutes", "Bucket width in minutes.", false, IntegerSchemaMetadata("Bucket width in minutes.")));
             }
 
+            if (IsPath(path, "/api/v1/requesthistory", "/v1.0/api/request-history"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("page", "One-based page number. Defaults to 1.", false, IntegerSchemaMetadata("Page number.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("pageSize", "Number of entries per page. Defaults to 100 and is capped at 1000.", false, IntegerSchemaMetadata("Page size.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")));
+            }
+
+            if (IsPath(path, "/api/v1/requesthistory/analytics/overview", "/v1.0/api/request-history/analytics/overview", "/api/v1/analytics/overview", "/v1.0/api/analytics/overview"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")));
+            }
+
             if (IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
             {
                 metadata = metadata.WithParameter(OpenApiParameterMetadata.Query("email", "Email address used to discover tenant login options.", true, OpenApiSchemaMetadata.String("User email address.")));
@@ -1853,7 +1869,7 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory", "/v1.0/api/request-history"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, FilterRequestHistory(requestContext)).ConfigureAwait(false);
+                await SendJsonAsync(context, ListRequestHistory(requestContext, context)).ConfigureAwait(false);
                 return;
             }
 
@@ -1867,7 +1883,7 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory/analytics/overview", "/v1.0/api/request-history/analytics/overview", "/api/v1/analytics/overview", "/v1.0/api/analytics/overview"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, AnalyticsOverview(requestContext)).ConfigureAwait(false);
+                await SendJsonAsync(context, AnalyticsOverview(requestContext, context)).ConfigureAwait(false);
                 return;
             }
 
@@ -4876,20 +4892,54 @@ namespace Xeno.Server
             await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
         }
 
-        private object AnalyticsOverview(RequestContext requestContext)
+        private object AnalyticsOverview(RequestContext requestContext, HttpContextBase context)
         {
-            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext);
+            DateTime? fromUtc = ParseDateQuery(context, "fromUtc");
+            DateTime? toUtc = ParseDateQuery(context, "toUtc");
+            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext, fromUtc, toUtc);
             int total = entries.Count;
             int failures = entries.Count(item => item.StatusCode >= 400);
+            List<XenoClientRecord> clients = RequirePlatform().Clients
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .ToList();
+            List<XenoClientModel> clientModels = clients
+                .SelectMany(item => item.Models)
+                .ToList();
             List<object> byModel = entries
                 .Where(item => item.RoutingDecision != null && !String.IsNullOrWhiteSpace(item.RoutingDecision.EffectiveModel))
                 .GroupBy(item => item.RoutingDecision!.EffectiveModel)
-                .Select(group => (object)new { model = group.Key, count = group.Count() })
+                .Select(group => (object)new
+                {
+                    name = group.Key,
+                    model = group.Key,
+                    count = group.Count(),
+                    success = group.Count(item => item.StatusCode < 400),
+                    failed = group.Count(item => item.StatusCode >= 400)
+                })
+                .ToList();
+            List<object> byPath = entries
+                .Where(item => !String.IsNullOrWhiteSpace(item.Path))
+                .GroupBy(item => item.Path)
+                .Select(group => (object)new
+                {
+                    name = group.Key,
+                    path = group.Key,
+                    count = group.Count(),
+                    success = group.Count(item => item.StatusCode < 400),
+                    failed = group.Count(item => item.StatusCode >= 400)
+                })
                 .ToList();
             List<object> byClient = entries
                 .Where(item => !String.IsNullOrWhiteSpace(item.SelectedClientId))
                 .GroupBy(item => item.SelectedClientId)
-                .Select(group => (object)new { clientId = group.Key, count = group.Count() })
+                .Select(group => (object)new
+                {
+                    name = group.Key,
+                    clientId = group.Key,
+                    count = group.Count(),
+                    success = group.Count(item => item.StatusCode < 400),
+                    failed = group.Count(item => item.StatusCode >= 400)
+                })
                 .ToList();
 
             return new
@@ -4898,17 +4948,45 @@ namespace Xeno.Server
                 failures,
                 success = total - failures,
                 failureRate = total == 0 ? 0 : (double)failures / total,
+                connectedClientCount = clients.Count(item => item.Connected),
+                totalClientCount = clients.Count,
+                advertisedModelCount = clientModels
+                    .Select(item => item.Name)
+                    .Where(item => !String.IsNullOrWhiteSpace(item))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count(),
+                completionModelCount = clientModels.Count(item => item.SupportsCompletions),
+                embeddingModelCount = clientModels.Count(item => item.SupportsEmbeddings),
                 byModel,
+                byPath,
                 byClient
             };
         }
 
-        private List<RequestHistoryEntry> FilterRequestHistory(RequestContext context)
+        private RequestHistorySearchResult ListRequestHistory(RequestContext requestContext, HttpContextBase context)
         {
-            return RequirePlatform().RequestHistory
-                .Where(item => item.TenantId == context.TenantId)
-                .OrderByDescending(item => item.CreatedUtc)
-                .ToList();
+            DateTime? fromUtc = ParseDateQuery(context, "fromUtc");
+            DateTime? toUtc = ParseDateQuery(context, "toUtc");
+            int page = ParseIntegerQuery(context, "page", 1, 1, 100000);
+            int pageSize = ParseIntegerQuery(context, "pageSize", 100, 1, 1000);
+            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext, fromUtc, toUtc);
+            int skip = Math.Min(Int32.MaxValue, (page - 1) * pageSize);
+            return new RequestHistorySearchResult
+            {
+                Items = entries.Skip(skip).Take(pageSize).ToList(),
+                Total = entries.Count,
+                Page = page,
+                PageSize = pageSize
+            };
+        }
+
+        private List<RequestHistoryEntry> FilterRequestHistory(RequestContext context, DateTime? fromUtc = null, DateTime? toUtc = null)
+        {
+            IEnumerable<RequestHistoryEntry> entries = RequirePlatform().RequestHistory
+                .Where(item => item.TenantId == context.TenantId);
+            if (fromUtc.HasValue) entries = entries.Where(item => item.CreatedUtc >= fromUtc.Value);
+            if (toUtc.HasValue) entries = entries.Where(item => item.CreatedUtc < toUtc.Value);
+            return entries.OrderByDescending(item => item.CreatedUtc).ToList();
         }
 
         private object SummarizeRequestHistory(RequestContext requestContext, HttpContextBase context)
@@ -4926,7 +5004,7 @@ namespace Xeno.Server
             bucketMinutes = DefaultRequestHistoryBucketMinutes(fromUtc, toUtc);
             if (Int32.TryParse(bucketValue, out int parsedBucket) && parsedBucket > 0) bucketMinutes = parsedBucket;
 
-            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext);
+            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext, fromUtc, toUtc);
             List<object> buckets = new List<object>();
             DateTime cursor = fromUtc;
             while (cursor < toUtc)
@@ -4939,6 +5017,20 @@ namespace Xeno.Server
             }
 
             return new { fromUtc, toUtc, bucketMinutes, buckets };
+        }
+
+        private static DateTime? ParseDateQuery(HttpContextBase context, string name)
+        {
+            string? value = context.Request.Query.Elements.Get(name);
+            if (DateTime.TryParse(value, out DateTime parsed)) return parsed.ToUniversalTime();
+            return null;
+        }
+
+        private static int ParseIntegerQuery(HttpContextBase context, string name, int defaultValue, int minimum, int maximum)
+        {
+            string? value = context.Request.Query.Elements.Get(name);
+            if (!Int32.TryParse(value, out int parsed)) return defaultValue;
+            return Math.Min(maximum, Math.Max(minimum, parsed));
         }
 
         private static int DefaultRequestHistoryBucketMinutes(DateTime fromUtc, DateTime toUtc)
@@ -5116,7 +5208,7 @@ namespace Xeno.Server
                     ["/v1.0/api/routing-policies"] = Path(Operation("get", "listRoutingPolicies", "Routing", "List routing policies", "Lists tenant-scoped routing policies.", "RoutingPolicyArray", true), Operation("post", "createRoutingPolicy", "Routing", "Create routing policy", "Creates a tenant-scoped routing policy.", "RoutingPolicy", true)),
                     ["/v1.0/api/routing-policies/validate"] = Path(Operation("post", "validateRoutingPolicy", "Routing", "Validate routing policy", "Validates telemetry filters, ranking rules, and freshness bounds without saving a policy.", "RoutingPolicyValidationResult", true)),
                     ["/v1.0/api/routing-policies/{id}"] = Path(Operation("put", "updateRoutingPolicy", "Routing", "Update routing policy", "Updates a tenant-scoped routing policy.", "RoutingPolicy", true), Operation("delete", "deleteRoutingPolicy", "Routing", "Delete routing policy", "Deletes a non-default routing policy.", "GenericObject", true)),
-                    ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistoryArray", true)),
+                    ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistorySearchResult", true)),
                     ["/v1.0/api/request-history/{id}"] = Path(Operation("get", "getRequestHistory", "Request History", "Get request history", "Returns a captured request history entry.", "RequestHistoryEntry", true), Operation("delete", "deleteRequestHistory", "Request History", "Delete request history", "Deletes one captured request history entry.", "GenericObject", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
@@ -5170,7 +5262,11 @@ namespace Xeno.Server
                             Property("field", StringSchema()),
                             Property("code", StringSchema()),
                             Property("message", StringSchema())),
-                        ["RequestHistoryArray"] = ArraySchema("RequestHistoryEntry"),
+                        ["RequestHistorySearchResult"] = ObjectSchema(
+                            Property("items", ArraySchema("RequestHistoryEntry")),
+                            Property("total", IntegerSchema()),
+                            Property("page", IntegerSchema()),
+                            Property("pageSize", IntegerSchema())),
                         ["RequestHistorySummary"] = ObjectSchema(Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["RoutingDecision"] = ObjectSchema(Property("success", BooleanSchema()), Property("outcomeCode", StringSchema()), Property("message", StringSchema())),
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
@@ -5550,6 +5646,21 @@ namespace Xeno.Server
                 parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
                 parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
                 parameters.Add(Parameter("bucketMinutes", "query", false, "Bucket width in minutes.", IntegerSchema()));
+            }
+
+            if (String.Equals(operationId, "listRequestHistory", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("page", "query", false, "One-based page number. Defaults to 1.", IntegerSchema()));
+                parameters.Add(Parameter("pageSize", "query", false, "Number of entries per page. Defaults to 100 and is capped at 1000.", IntegerSchema()));
+                parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
+                parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
+            }
+
+            if (String.Equals(operationId, "requestAnalyticsOverview", StringComparison.Ordinal)
+                || String.Equals(operationId, "analyticsOverview", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
+                parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
             }
 
             if (String.Equals(operationId, "lookupLoginTenants", StringComparison.Ordinal))

@@ -381,7 +381,7 @@ class XenoClient:
     def create_embedding(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/embeddings", request)
 
-    def list_request_history(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def list_request_history(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request("GET", f"/v1.0/api/request-history{self._query_string(filters)}")
 
     def get_request_history(self, history_id: str) -> dict[str, Any]:

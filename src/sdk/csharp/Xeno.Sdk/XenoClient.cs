@@ -788,10 +788,10 @@
         /// </summary>
         /// <param name="filters">Optional query-string filters.</param>
         /// <param name="token">Cancellation token.</param>
-        /// <returns>Request history array JSON.</returns>
-        public async Task<List<RequestHistoryEntry>> ListRequestHistoryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
+        /// <returns>Paged request history result JSON.</returns>
+        public async Task<RequestHistorySearchResult> ListRequestHistoryAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
         {
-            return await GetJsonAsync<List<RequestHistoryEntry>>("/v1.0/api/request-history" + QueryString(filters), token).ConfigureAwait(false);
+            return await GetJsonAsync<RequestHistorySearchResult>("/v1.0/api/request-history" + QueryString(filters), token).ConfigureAwait(false);
         }
 
         /// <summary>

@@ -1879,6 +1879,11 @@ namespace Test.Shared
                         }
 
                         string requestHistory = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history").ConfigureAwait(false);
+                        if (!requestHistory.Contains("\"total\"", StringComparison.Ordinal) || !requestHistory.Contains("\"items\"", StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Request history list missing paged result fields: " + requestHistory);
+                        }
+
                         if (!requestHistory.Contains("/v1/chat/completions", StringComparison.Ordinal) || !requestHistory.Contains("ModelNotFound", StringComparison.Ordinal))
                         {
                             throw new InvalidOperationException("Request history list missing recorded OpenAI request: " + requestHistory);
@@ -2539,9 +2544,15 @@ namespace Test.Shared
                         foreach (OpenApiParameterExpectation parameter in new List<OpenApiParameterExpectation>
                         {
                             new OpenApiParameterExpectation { Route = "/v1.0/api/users/{id}", Method = "put", Name = "id", Location = "path" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history", Method = "get", Name = "page", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history", Method = "get", Name = "pageSize", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history", Method = "get", Name = "fromUtc", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history", Method = "get", Name = "toUtc", Location = "query" },
                             new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "fromUtc", Location = "query" },
                             new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "toUtc", Location = "query" },
-                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "bucketMinutes", Location = "query" }
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/summary", Method = "get", Name = "bucketMinutes", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/analytics/overview", Method = "get", Name = "fromUtc", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/request-history/analytics/overview", Method = "get", Name = "toUtc", Location = "query" }
                         })
                         {
                             if (!OpenApiHasParameter(openApi, parameter.Route, parameter.Method, parameter.Name, parameter.Location)) throw new InvalidOperationException("OpenAPI missing " + parameter.Location + " parameter " + parameter.Name + " on " + parameter.Method.ToUpperInvariant() + " " + parameter.Route + ".");
@@ -2583,8 +2594,9 @@ namespace Test.Shared
                             _ = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                         }
                         string historyJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history").ConfigureAwait(false);
-                        List<RequestHistoryEntry> historyRecords = DeserializeRequired<List<RequestHistoryEntry>>(historyJson);
-                        RequestHistoryEntry? history = historyRecords.FirstOrDefault();
+                        RequestHistorySearchResult historyRecords = DeserializeRequired<RequestHistorySearchResult>(historyJson);
+                        if (historyRecords.Total <= 0) throw new InvalidOperationException("Request history search result did not report a total.");
+                        RequestHistoryEntry? history = historyRecords.Items.FirstOrDefault();
                         string historyId = history?.Id ?? String.Empty;
                         if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("No request history entry was created.");
                         using (HttpResponseMessage deleteHistory = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/request-history/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
