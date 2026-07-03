@@ -2589,10 +2589,25 @@ namespace Test.Shared
                         }
 
                         await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                        DateTime summaryFromUtc = DateTime.UtcNow.AddMinutes(-5);
                         using (HttpResponseMessage completionResponse = await PostJsonAsync(httpClient, baseUrl + "/v1/chat/completions", "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}").ConfigureAwait(false))
                         {
                             _ = await completionResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                         }
+
+                        DateTime summaryToUtc = DateTime.UtcNow.AddMinutes(5);
+                        string encodedSummaryUrl = baseUrl
+                            + "/v1.0/api/request-history/summary?fromUtc="
+                            + Uri.EscapeDataString(summaryFromUtc.ToString("O"))
+                            + "&toUtc="
+                            + Uri.EscapeDataString(summaryToUtc.ToString("O"))
+                            + "&bucketMinutes=15";
+                        string encodedSummary = await httpClient.GetStringAsync(encodedSummaryUrl).ConfigureAwait(false);
+                        if (!encodedSummary.Contains("\"count\":1", StringComparison.Ordinal) && !encodedSummary.Contains("\"count\": 1", StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Request history summary did not honor encoded date query values: " + encodedSummary);
+                        }
+
                         string historyJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/request-history").ConfigureAwait(false);
                         RequestHistorySearchResult historyRecords = DeserializeRequired<RequestHistorySearchResult>(historyJson);
                         if (historyRecords.Total <= 0) throw new InvalidOperationException("Request history search result did not report a total.");

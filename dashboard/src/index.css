@@ -1319,6 +1319,29 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 12px;
 }
 
+.chart-canvas {
+  position: relative;
+}
+
+.chart-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-panel) 78%, transparent);
+  color: var(--color-muted);
+  backdrop-filter: blur(1px);
+}
+
+.chart-loading-overlay strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
 .telemetry-spark-chart-panel,
 .telemetry-spark-chart-panel .chart-canvas,
 .telemetry-spark-chart-panel .activity-chart {

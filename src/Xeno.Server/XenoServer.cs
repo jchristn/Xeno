@@ -4995,9 +4995,9 @@ namespace Xeno.Server
             DateTime fromUtc = toUtc.AddHours(-24);
             int bucketMinutes = 15;
 
-            string? fromValue = context.Request.Query.Elements.Get("fromUtc");
-            string? toValue = context.Request.Query.Elements.Get("toUtc");
-            string? bucketValue = context.Request.Query.Elements.Get("bucketMinutes");
+            string fromValue = DecodeQueryValue(context.Request.Query.Elements.Get("fromUtc"));
+            string toValue = DecodeQueryValue(context.Request.Query.Elements.Get("toUtc"));
+            string bucketValue = DecodeQueryValue(context.Request.Query.Elements.Get("bucketMinutes"));
 
             if (DateTime.TryParse(fromValue, out DateTime parsedFrom)) fromUtc = parsedFrom.ToUniversalTime();
             if (DateTime.TryParse(toValue, out DateTime parsedTo)) toUtc = parsedTo.ToUniversalTime();
@@ -5021,14 +5021,14 @@ namespace Xeno.Server
 
         private static DateTime? ParseDateQuery(HttpContextBase context, string name)
         {
-            string? value = context.Request.Query.Elements.Get(name);
+            string value = DecodeQueryValue(context.Request.Query.Elements.Get(name));
             if (DateTime.TryParse(value, out DateTime parsed)) return parsed.ToUniversalTime();
             return null;
         }
 
         private static int ParseIntegerQuery(HttpContextBase context, string name, int defaultValue, int minimum, int maximum)
         {
-            string? value = context.Request.Query.Elements.Get(name);
+            string value = DecodeQueryValue(context.Request.Query.Elements.Get(name));
             if (!Int32.TryParse(value, out int parsed)) return defaultValue;
             return Math.Min(maximum, Math.Max(minimum, parsed));
         }

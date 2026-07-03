@@ -546,16 +546,22 @@ function ClientTelemetryView() {
       <div className="client-telemetry-chart-grid view-stack">
         <TelemetrySparkChart
           emptyTitle={t('noData')}
+          loading={loading}
+          loadingLabel={t('loading')}
           series={hostChartSeries}
           subtitle={t('latestHostTelemetrySubtitle', 'Latest host telemetry samples collected by the server.')}
           title={t('latestHostTelemetry', 'Latest Host Telemetry')}
+          totalLabel={t('total')}
           valueFormatter={(nextValue) => formatPercent(nextValue / 100)}
         />
         <TelemetrySparkChart
           emptyTitle={t('noData')}
+          loading={loading}
+          loadingLabel={t('loading')}
           series={providerChartSeries}
           subtitle={t('latestProviderTelemetrySubtitle', 'Latest provider telemetry samples collected by the server.')}
           title={t('latestProviderTelemetry', 'Latest Provider Telemetry')}
+          totalLabel={t('total')}
           valueFormatter={(nextValue) => formatOptionalNumber(nextValue)}
         />
       </div>
@@ -608,7 +614,7 @@ function ClientTelemetryView() {
   );
 }
 
-function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatter }) {
+function TelemetrySparkChart({ emptyTitle, loading = false, loadingLabel = 'Loading...', series, subtitle, title, totalLabel = 'Total', valueFormatter }) {
   const canvasRef = useRef(null);
   const [hovered, setHovered] = useState(null);
   const normalizedSeries = series.map((item) => ({
@@ -616,19 +622,20 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
     values: Array.isArray(item.values) ? item.values : []
   }));
   const finiteValues = normalizedSeries.flatMap((item) => item.values.map((point) => Number(point.value)).filter((nextValue) => Number.isFinite(nextValue)));
-  const max = Math.max(1, ...finiteValues);
   const chart = { width: 900, height: 360, left: 54, right: 28, top: 24, bottom: 44 };
   const plotWidth = chart.width - chart.left - chart.right;
   const plotHeight = chart.height - chart.top - chart.bottom;
   const hasData = finiteValues.length > 0;
   const bucketCount = Math.max(0, ...normalizedSeries.map((item) => item.values.length));
+  const stackedTotals = Array.from({ length: bucketCount }, (_, index) => normalizedSeries.reduce((total, item) => {
+    const pointValue = Number(item.values[index]?.value);
+    return total + (Number.isFinite(pointValue) ? Math.max(0, pointValue) : 0);
+  }, 0));
+  const max = Math.max(1, ...stackedTotals);
   const axisMax = telemetryAxisMaximum(max);
   const yTicks = buildTelemetryYAxisTicks(axisMax);
   const bucketSlot = plotWidth / Math.max(1, bucketCount);
-  const seriesCount = Math.max(1, normalizedSeries.length);
-  const groupPadding = Math.min(10, Math.max(2, bucketSlot * 0.18));
-  const barGap = bucketSlot > 18 ? 2 : 1;
-  const groupedBarWidth = Math.max(1, Math.min(10, (bucketSlot - groupPadding - barGap * (seriesCount - 1)) / seriesCount));
+  const barWidth = Math.max(2, Math.min(18, bucketSlot - Math.min(12, Math.max(2, bucketSlot * 0.22))));
   const xTicks = buildTelemetryXAxisTicks(normalizedSeries, bucketCount, chart.left, plotWidth);
 
   function updateHover(event) {
@@ -653,17 +660,19 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
       };
     });
     const label = normalizedSeries.map((item) => item.values[index]?.label).find(Boolean) || '';
+    const total = rows.reduce((sum, row) => sum + (Number.isFinite(Number(row.value)) ? Number(row.value) : 0), 0);
     setHovered({
       label,
       rows,
       svgX: x,
+      total,
       ...telemetryTooltipFromPointer(event, canvasRef.current)
     });
   }
 
   return (
     <Panel subtitle={subtitle} title={title}>
-      {!hasData ? <EmptyState title={emptyTitle} description={subtitle} /> : (
+      {!hasData && !loading ? <EmptyState title={emptyTitle} description={subtitle} /> : (
         <div className="activity-chart-panel compact-chart-panel telemetry-spark-chart-panel">
           <div className="chart-canvas" ref={canvasRef}>
             <svg className="activity-chart" onMouseLeave={() => setHovered(null)} onMouseMove={updateHover} viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={title}>
@@ -679,24 +688,25 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
                 );
               })}
               {Array.from({ length: bucketCount }, (_, index) => {
-                const groupX = chart.left + index * bucketSlot + (bucketSlot - (groupedBarWidth * seriesCount + barGap * (seriesCount - 1))) / 2;
+                const x = chart.left + index * bucketSlot + (bucketSlot - barWidth) / 2;
+                let stackedHeight = 0;
                 return (
                   <g key={`bucket-${index}`}>
                     <rect x={chart.left + index * bucketSlot} y={chart.top} width={bucketSlot} height={plotHeight} fill="transparent" />
-                    {normalizedSeries.map((item, seriesIndex) => {
+                    {normalizedSeries.map((item) => {
                       const point = item.values[index] || {};
                       const pointValue = Number(point.value);
                       if (!Number.isFinite(pointValue)) return null;
-                      const height = Math.max(0, (pointValue / axisMax) * plotHeight);
-                      const x = groupX + seriesIndex * (groupedBarWidth + barGap);
-                      const y = chart.top + plotHeight - height;
+                      const height = Math.max(0, (Math.max(0, pointValue) / axisMax) * plotHeight);
+                      const y = chart.top + plotHeight - stackedHeight - height;
+                      stackedHeight += height;
                       return (
                         <rect
                           fill={item.color}
                           height={height}
                           key={`${item.key}-${index}`}
                           rx="2"
-                          width={groupedBarWidth}
+                          width={barWidth}
                           x={x}
                           y={y}
                         >
@@ -732,8 +742,14 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
                     <b>{row.value === null ? '-' : valueFormatter(row.value)}</b>
                   </span>
                 ))}
+                <span className="chart-tooltip-row">
+                  <i />
+                  <span>{totalLabel}</span>
+                  <b>{valueFormatter(hovered.total)}</b>
+                </span>
               </div>
             ) : null}
+            {loading ? <ChartLoadingOverlay label={loadingLabel} /> : null}
           </div>
           <div className="chart-legend">
             {normalizedSeries.map((item) => <span key={item.key}><i style={{ background: item.color }} />{item.label}</span>)}
@@ -741,6 +757,15 @@ function TelemetrySparkChart({ emptyTitle, series, subtitle, title, valueFormatt
         </div>
       )}
     </Panel>
+  );
+}
+
+function ChartLoadingOverlay({ label }) {
+  return (
+    <div aria-live="polite" className="chart-loading-overlay" role="status">
+      <div aria-hidden="true" className="table-loading-spinner" />
+      <strong>{label}</strong>
+    </div>
   );
 }
 
@@ -1072,7 +1097,7 @@ function HomeView() {
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart range={activityRange} showControls={false} summary={summary.data} />
+        <ActivityChart loading={summary.loading} range={activityRange} showControls={false} summary={summary.data} />
       </Panel>
 
       <Panel
@@ -1081,6 +1106,7 @@ function HomeView() {
       >
         <ConnectedClientsChart
           connected={connected}
+          loading={analytics.loading}
           range={activityRange}
           sampleVersion={analytics.updatedAt}
           showControls={false}
@@ -1137,7 +1163,7 @@ function RequestHistoryView() {
         className="chart-panel-card"
         title={t('requestActivity')}
       >
-        <ActivityChart onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
+        <ActivityChart loading={summary.loading} onRangeChange={updateActivityRange} onRefresh={refreshAll} range={activityRange} summary={summary.data} />
       </Panel>
       <DataTable
         actions={<IconButton iconOnly onClick={() => setConfirmClear(true)} label={t('clear')} tooltip={t('clearHistoryMessage')} icon={<Trash2 size={16} />} variant="danger" />}
@@ -1856,7 +1882,7 @@ function AnalyticsView() {
         actions={<IconButton iconOnly onClick={refreshAnalytics} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
         title={t('requestActivity')}
       >
-        <ActivityChart onRangeChange={updateAnalyticsRange} onRefresh={refreshAnalytics} range={analyticsRange} showControls={false} summary={summary.data} />
+        <ActivityChart loading={summary.loading} onRangeChange={updateAnalyticsRange} onRefresh={refreshAnalytics} range={analyticsRange} showControls={false} summary={summary.data} />
       </Panel>
       <div className="workspace-grid">
         <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} loading={overview.loading} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />

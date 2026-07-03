@@ -10,7 +10,7 @@ const ranges = [
   { key: 'lastMonth', buckets: 90 }
 ];
 
-export default function ActivityChart({ onRangeChange, onRefresh, range, showControls = true, summary }) {
+export default function ActivityChart({ loading = false, onRangeChange, onRefresh, range, showControls = true, summary }) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
   const refreshRef = useRef(onRefresh);
@@ -79,6 +79,7 @@ export default function ActivityChart({ onRangeChange, onRefresh, range, showCon
               <button
                 className={item.key === activeRange ? 'active' : ''}
                 key={item.key}
+                disabled={loading}
                 onClick={() => updateRange(item.key)}
                 title={t('tooltipChartRangeOption', { range: t(item.key) })}
                 type="button"
@@ -88,7 +89,7 @@ export default function ActivityChart({ onRangeChange, onRefresh, range, showCon
             )) : null}
           <ChartRefreshControls
             autoRefreshSeconds={autoRefreshSeconds}
-            disabled={!onRefresh}
+            disabled={!onRefresh || loading}
             onRefresh={onRefresh}
             setAutoRefreshSeconds={setAutoRefreshSeconds}
             t={t}
@@ -144,11 +145,21 @@ export default function ActivityChart({ onRangeChange, onRefresh, range, showCon
             <span>{t('total')}: {hovered.bucket.success + hovered.bucket.failed}</span>
           </div>
         ) : null}
+        {loading ? <ChartLoadingOverlay label={t('loading')} /> : null}
       </div>
       <div className="chart-legend">
         <span><i className="success-swatch" />{t('success')}</span>
         <span><i className="failed-swatch" />{t('failed')}</span>
       </div>
+    </div>
+  );
+}
+
+function ChartLoadingOverlay({ label }) {
+  return (
+    <div aria-live="polite" className="chart-loading-overlay" role="status">
+      <div aria-hidden="true" className="table-loading-spinner" />
+      <strong>{label}</strong>
     </div>
   );
 }

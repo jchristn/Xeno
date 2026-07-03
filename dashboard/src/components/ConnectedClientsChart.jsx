@@ -11,7 +11,7 @@ const ranges = [
   { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, buckets: 90 }
 ];
 
-export default function ConnectedClientsChart({ connected, onRangeChange, onRefresh, range, sampleVersion, showControls = true, total }) {
+export default function ConnectedClientsChart({ connected, loading = false, onRangeChange, onRefresh, range, sampleVersion, showControls = true, total }) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
   const refreshRef = useRef(onRefresh);
@@ -96,6 +96,7 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
           {showControls ? ranges.map((item) => (
             <button
               className={item.key === activeRange ? 'active' : ''}
+              disabled={loading}
               key={item.key}
               onClick={() => updateRange(item.key)}
               title={t('tooltipChartRangeOption', { range: t(item.key) })}
@@ -108,7 +109,7 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
             <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
               <span>{t('autoRefresh')}</span>
               <select
-                disabled={!onRefresh}
+                disabled={!onRefresh || loading}
                 value={autoRefreshSeconds}
                 onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
                 title={t('tooltipAutoRefresh')}
@@ -117,7 +118,7 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
                   <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
                 ))}
               </select>
-              <button className="pagination-button" disabled={!onRefresh} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
+              <button className="pagination-button" disabled={!onRefresh || loading} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
                 <RefreshCw size={14} />
               </button>
             </label>
@@ -169,10 +170,20 @@ export default function ConnectedClientsChart({ connected, onRangeChange, onRefr
             <span>{t('clients')}: {hovered.bucket.total}</span>
           </div>
         ) : null}
+        {loading ? <ChartLoadingOverlay label={t('loading')} /> : null}
       </div>
       <div className="chart-legend">
         <span><i className="info-swatch" />{t('connectedClients')}</span>
       </div>
+    </div>
+  );
+}
+
+function ChartLoadingOverlay({ label }) {
+  return (
+    <div aria-live="polite" className="chart-loading-overlay" role="status">
+      <div aria-hidden="true" className="table-loading-spinner" />
+      <strong>{label}</strong>
     </div>
   );
 }
