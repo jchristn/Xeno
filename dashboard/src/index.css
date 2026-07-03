@@ -1278,6 +1278,32 @@ html[data-theme='dark'] .primitive-list-item {
   margin-top: 2px;
 }
 
+.telemetry-kpi-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.telemetry-kpi-grid .metric-card {
+  min-width: 0;
+}
+
+@media (max-width: 1280px) {
+  .telemetry-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .telemetry-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .telemetry-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .workspace-card-body {
   padding: 16px;
 }

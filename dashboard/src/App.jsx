@@ -528,7 +528,7 @@ function ClientTelemetryView() {
         </label>
       </div>
 
-      <div className="metric-grid">
+      <div className="metric-grid telemetry-kpi-grid">
         <MetricCard icon={<Network size={18} />} label={t('connectedClients')} value={formatNumber(connectedClientCount)} subtext={t('clients')} tone="info" />
         <MetricCard icon={<Gauge size={18} />} label={t('freshTelemetry', 'Fresh Telemetry')} value={formatNumber(freshHostCount)} subtext={t('clients')} tone="success" />
         <MetricCard icon={<Cpu size={18} />} label={t('averageCpu', 'Average CPU')} value={formatPercent(averageCpu / 100)} />
