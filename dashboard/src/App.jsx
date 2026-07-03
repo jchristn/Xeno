@@ -1594,7 +1594,7 @@ function ClientsView() {
         <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(clientModels.filter((model) => value(model, 'supportsCompletions') === true).length)} />
       </div>
       <DataTable
-        columns={['id', 'name', 'ownerUserId', 'ownerCredentialId', 'ownerPrincipalType', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        columns={['id', 'name', 'ownerPrincipalType', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
         onDelete={(row) => {
           if (recordId(selectedClient) === recordId(row)) setSelectedClient(null);
           return deleteRecord('/api/v1/clients', row);
