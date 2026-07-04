@@ -31,43 +31,6 @@ services:
       && PGPASSWORD=xeno psql -h xeno-postgres -U xeno -d xeno -v ON_ERROR_STOP=1 -c 'SELECT 1;'"
     restart: "no"
 
-  xeno-mysql:
-    image: mysql:9
-    container_name: xeno-mysql
-    profiles: ["mysql"]
-    environment:
-      MYSQL_DATABASE: xeno
-      MYSQL_USER: xeno
-      MYSQL_PASSWORD: xeno
-      MYSQL_ROOT_PASSWORD: xeno-root
-    ports:
-      - "3306:3306"
-    volumes:
-      - xeno-mysql-data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uxeno", "-pxeno"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
-  xeno-sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: xeno-sqlserver
-    profiles: ["sqlserver"]
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "Xeno_password_123"
-    ports:
-      - "1433:1433"
-    volumes:
-      - xeno-sqlserver-data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Xeno_password_123 -C -Q \"SELECT 1\" || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
   xeno-server:
     image: jchristn77/xeno-server:v0.1.0
     build:
@@ -107,5 +70,3 @@ services:
 
 volumes:
   xeno-postgres-data:
-  xeno-mysql-data:
-  xeno-sqlserver-data:
