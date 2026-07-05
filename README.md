@@ -205,7 +205,7 @@ xeno reset --force
 Provider endpoint URLs and upstream API types are configured with
 `xeno provider add`; `xeno model add` takes the configured provider name and a
 model name. For the full walkthrough, see
-[CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md).
+the platform-specific guides in [getting-started/](getting-started/).
 
 ### Local Client Dashboard
 
@@ -433,7 +433,8 @@ Developer documentation:
 - [REST_API.md](REST_API.md)
 - [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
 - [MODEL_ROUTING.md](MODEL_ROUTING.md)
-- [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md)
+- [getting-started/](getting-started/)
+- [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
 - [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [AGENTS.md](AGENTS.md)
@@ -452,6 +453,7 @@ Archived planning and audit documents are in [archive](archive).
   CLIENT_GETTING_STARTED.md
   CLIENT_TELEMETRY.md
   Xeno.postman_collection.json
+  getting-started/
   build-all.bat
   build-server.bat
   build-dashboard.bat

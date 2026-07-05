@@ -13,7 +13,7 @@ namespace Xeno.Client
         /// <summary>
         /// Server URL.
         /// </summary>
-        public string Url { get; set; } = "ws://localhost:9000/ws/v1/clients";
+        public string Url { get; set; } = "ws://app.xenocloud.ai:9000/ws/v1/clients";
 
         /// <summary>
         /// REST API base URL.

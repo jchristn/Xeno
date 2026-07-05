@@ -1,0 +1,192 @@
+# Xeno Client on Windows
+
+This guide installs and runs the Xeno client on Windows.
+
+## Defaults
+
+- Client settings: `%USERPROFILE%\.xeno\client.json`
+- Client state: `%USERPROFILE%\.xeno\state.json`
+- Local dashboard: `http://127.0.0.1:9343`
+- Default cloud WebSocket URL: `ws://app.xenocloud.ai:9000/ws/v1/clients`
+- Local Docker server WebSocket URL: `ws://localhost:9000/ws/v1/clients`
+- Local Docker server REST URL: `http://localhost:9000`
+- Dashboard login for seeded Docker server: `admin@xeno` / `password`
+- Default seeded client access key: `default`
+
+## Prerequisites
+
+1. Install the .NET SDK for the repository target framework.
+2. Install Node.js and npm.
+3. Install Git.
+4. Install a provider runtime if you want local models. Ollama is the easiest starting point.
+5. Clone the repository.
+
+```powershell
+git clone https://github.com/jchristn/Xeno.git
+cd Xeno
+```
+
+## Install the Global Tool
+
+1. Build and install `xeno` as a .NET global tool.
+
+```powershell
+.\install-tool.bat
+```
+
+2. Confirm the tool is on your path.
+
+```powershell
+xeno help
+```
+
+3. Remove the global tool later if needed.
+
+```powershell
+.\remove-tool.bat
+```
+
+## Easy Path: Build, Configure, Start, Monitor
+
+1. Build the solution.
+
+```powershell
+dotnet build .\src\Xeno.sln
+```
+
+2. Build the local dashboard assets if you are running from source.
+
+```powershell
+cd dashboard
+npm install
+npm run build:local
+cd ..
+```
+
+3. Initialize the client settings file.
+
+```powershell
+xeno init
+```
+
+4. If you are connecting to a local Docker server, set the server URLs.
+
+```powershell
+xeno server set-url ws://localhost:9000/ws/v1/clients
+xeno server set-rest-url http://localhost:9000
+```
+
+5. Log in to the server and store a client access key.
+
+```powershell
+xeno login -u admin@xeno --server http://localhost:9000
+```
+
+For the seeded Docker server, use password `password`.
+
+6. Add a local Ollama provider.
+
+```powershell
+xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:11434
+```
+
+7. Advertise a completion model.
+
+```powershell
+xeno model add --provider local-ollama --name llama3.2:latest --type completion
+```
+
+8. Review the client configuration.
+
+```powershell
+xeno config show
+xeno inventory
+```
+
+9. Start the client in the background.
+
+```powershell
+xeno start
+```
+
+10. Check status.
+
+```powershell
+xeno status
+```
+
+11. Open the local Xeno Client dashboard.
+
+```powershell
+xeno dashboard open
+```
+
+12. Watch logs.
+
+```powershell
+xeno logs --tail 100
+xeno logs -f
+```
+
+13. Stop the client.
+
+```powershell
+xeno stop
+```
+
+## Better Path: Start on Boot
+
+Use a scheduled task to start the client when you log in.
+
+1. Confirm `xeno` works from a new PowerShell window.
+
+```powershell
+xeno status
+```
+
+2. Create the scheduled task.
+
+```powershell
+$xenoPath = (Get-Command xeno).Source
+$action = New-ScheduledTaskAction -Execute $xenoPath -Argument "start"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "Xeno Client" -Action $action -Trigger $trigger -Settings $settings -Description "Start Xeno Client at user logon"
+```
+
+3. Start it immediately.
+
+```powershell
+Start-ScheduledTask -TaskName "Xeno Client"
+```
+
+4. Confirm it connected.
+
+```powershell
+xeno status
+xeno logs --tail 50
+```
+
+5. Remove the task if needed.
+
+```powershell
+Unregister-ScheduledTask -TaskName "Xeno Client" -Confirm:$false
+```
+
+## Manage the Client
+
+Use these commands during normal operations:
+
+```powershell
+xeno status
+xeno config show
+xeno provider list
+xeno model list
+xeno dashboard
+xeno dashboard open
+xeno logs --tail 100
+xeno stop
+xeno reset
+```
+
+Use the local dashboard to manage provider endpoints, advertised models, local request history, host telemetry, provider telemetry, logs, and local settings.
