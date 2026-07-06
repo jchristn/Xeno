@@ -11,15 +11,15 @@
     },
     {
       "key": "serverApiBaseUrl",
-      "value": "{{serverBaseUrl}}/v1.0/api"
+      "value": "/v1.0/api"
     },
     {
       "key": "legacyServerApiBaseUrl",
-      "value": "{{serverBaseUrl}}/api/v1"
+      "value": "/api/v1"
     },
     {
       "key": "openAiBaseUrl",
-      "value": "{{serverBaseUrl}}/v1"
+      "value": "/v1"
     },
     {
       "key": "localDashboardUrl",
@@ -206,11 +206,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/models",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/models",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "models"
                   ]
                 }
@@ -254,11 +255,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/chat/completions",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/chat/completions",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "chat",
                     "completions"
                   ]
@@ -307,11 +309,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/chat/completions",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/chat/completions",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "chat",
                     "completions"
                   ]
@@ -365,11 +368,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/completions",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/completions",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "completions"
                   ]
                 },
@@ -417,11 +421,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/completions",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/completions",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "completions"
                   ]
                 },
@@ -474,11 +479,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/embeddings",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/embeddings",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "embeddings"
                   ]
                 },
@@ -526,11 +532,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/embeddings",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/embeddings",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "embeddings"
                   ]
                 },
@@ -1803,11 +1810,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/health",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/health",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "health"
                   ]
                 }
@@ -1872,11 +1881,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/tenants?username={{username}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/tenants?username={{username}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "tenants"
                   ],
@@ -1900,11 +1911,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/tenants",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/tenants",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "tenants"
                   ]
@@ -1931,11 +1944,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/dashboard/login",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/dashboard/login",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "dashboard",
                     "login"
@@ -1976,11 +1991,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/login",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/login",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "login"
                   ]
@@ -2030,11 +2047,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/token",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/token",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "token"
                   ]
@@ -2088,11 +2107,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/token/details",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/token/details",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "token",
                     "details"
@@ -2129,11 +2150,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/token/refresh",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/token/refresh",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "token",
                     "refresh"
@@ -2192,11 +2215,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/logout",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/logout",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "auth",
                     "logout"
                   ]
@@ -2228,11 +2253,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/onboarding/signup",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/onboarding/signup",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "onboarding",
                     "signup"
                   ]
@@ -2278,11 +2305,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/tenants",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "tenants"
                   ]
                 }
@@ -2317,11 +2346,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/tenants",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "tenants"
                   ]
                 },
@@ -2365,11 +2396,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants/{{tenantId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/tenants/{{tenantId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "tenants",
                     "{{tenantId}}"
                   ]
@@ -2410,11 +2443,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants/{{tenantId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/tenants/{{tenantId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "tenants",
                     "{{tenantId}}"
                   ]
@@ -2451,11 +2486,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "users"
                   ]
                 }
@@ -2490,11 +2527,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "users"
                   ]
                 },
@@ -2538,11 +2577,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users/{{userId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "users",
                     "{{userId}}"
                   ]
@@ -2583,11 +2624,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users/{{userId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "users",
                     "{{userId}}"
                   ]
@@ -2624,11 +2667,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/credentials",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "credentials"
                   ]
                 }
@@ -2663,11 +2708,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/credentials",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "credentials"
                   ]
                 },
@@ -2711,11 +2758,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials/{{credentialId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/credentials/{{credentialId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "credentials",
                     "{{credentialId}}"
                   ]
@@ -2756,11 +2805,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials/{{credentialId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/credentials/{{credentialId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "credentials",
                     "{{credentialId}}"
                   ]
@@ -2797,11 +2848,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "permissions"
                   ]
                 }
@@ -2832,11 +2885,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions/grantable",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions/grantable",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "permissions",
                     "grantable"
                   ]
@@ -2872,11 +2927,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "permissions"
                   ]
                 },
@@ -2920,11 +2977,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions/{{permissionId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions/{{permissionId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "permissions",
                     "{{permissionId}}"
                   ]
@@ -2965,11 +3024,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions/{{permissionId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions/{{permissionId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "permissions",
                     "{{permissionId}}"
                   ]
@@ -3006,11 +3067,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "roles"
                   ]
                 }
@@ -3045,11 +3108,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "roles"
                   ]
                 },
@@ -3093,11 +3158,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles/{{roleId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles/{{roleId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "roles",
                     "{{roleId}}"
                   ]
@@ -3138,11 +3205,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles/{{roleId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles/{{roleId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "roles",
                     "{{roleId}}"
                   ]
@@ -3179,11 +3248,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/role-assignments",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/role-assignments",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "role-assignments"
                   ]
                 }
@@ -3218,11 +3289,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/role-assignments",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/role-assignments",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "role-assignments"
                   ]
                 },
@@ -3262,11 +3335,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/role-assignments/{{roleAssignmentId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/role-assignments/{{roleAssignmentId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "role-assignments",
                     "{{roleAssignmentId}}"
                   ]
@@ -3298,11 +3373,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/effective-permissions",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/effective-permissions",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "effective-permissions"
                   ]
                 }
@@ -3338,11 +3415,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/clients",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/clients",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "clients"
                   ]
                 }
@@ -3373,11 +3452,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/clients/{{clientId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/clients/{{clientId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "clients",
                     "{{clientId}}"
                   ]
@@ -3413,11 +3494,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/client-models",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-models",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "client-models"
                   ]
                 },
@@ -3462,11 +3545,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/model-definitions",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/model-definitions",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "model-definitions"
                   ]
                 }
@@ -3497,11 +3582,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/model-configurations",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/model-configurations",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "model-configurations"
                   ]
                 }
@@ -3537,11 +3624,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "routing-policies"
                   ]
                 }
@@ -3576,11 +3665,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "routing-policies"
                   ]
                 },
@@ -3624,11 +3715,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/validate",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies/validate",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "routing-policies",
                     "validate"
                   ]
@@ -3673,11 +3766,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "routing-policies",
                     "{{routingPolicyId}}"
                   ]
@@ -3722,11 +3817,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "routing-policies",
                     "{{routingPolicyId}}"
                   ]
@@ -3767,11 +3864,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "routing-policies",
                     "{{routingPolicyId}}"
                   ]
@@ -3811,11 +3910,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/status",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/status",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "status"
                       ]
@@ -3847,11 +3948,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/metrics",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/metrics",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "metrics"
                       ]
@@ -3883,11 +3986,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collection-attempts",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/collection-attempts",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "collection-attempts"
                       ]
@@ -3923,11 +4028,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collect",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/collect",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "collect"
                       ]
@@ -3972,11 +4079,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collect",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/collect",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "collect"
                       ]
@@ -4021,11 +4130,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/collect",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/collect",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "collect"
@@ -4072,11 +4183,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/latest?clientId={{clientTelemetryClientId}}",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/latest?clientId={{clientTelemetryClientId}}",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "latest"
                       ],
@@ -4118,11 +4231,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/search",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/search",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "history",
                         "search"
@@ -4168,11 +4283,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/rollups",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/rollups",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "history",
                         "rollups"
@@ -4214,11 +4331,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "history",
                         "{{clientTelemetrySampleId}}"
@@ -4251,11 +4370,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "history",
                         "{{clientTelemetrySampleId}}"
@@ -4292,11 +4413,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/delete",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/delete",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "history",
                         "delete"
@@ -4343,11 +4466,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/latest?clientId={{clientTelemetryClientId}}&providerName={{clientTelemetryProviderName}}",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/latest?clientId={{clientTelemetryClientId}}&providerName={{clientTelemetryProviderName}}",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "latest"
@@ -4394,11 +4519,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/search",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/search",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "history",
@@ -4445,11 +4572,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/rollups",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/rollups",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "history",
@@ -4492,11 +4621,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "history",
@@ -4530,11 +4661,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "history",
@@ -4572,11 +4705,13 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/delete",
+                      "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/delete",
                       "host": [
-                        "{{serverApiBaseUrl}}"
+                        "{{serverBaseUrl}}"
                       ],
                       "path": [
+                        "v1.0",
+                        "api",
                         "client-telemetry",
                         "providers",
                         "history",
@@ -4626,11 +4761,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history?page={{page}}&pageSize={{pageSize}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history?page={{page}}&pageSize={{pageSize}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "request-history"
                   ],
                   "query": [
@@ -4671,11 +4808,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "request-history",
                     "{{requestHistoryId}}"
                   ]
@@ -4707,11 +4846,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "request-history",
                     "{{requestHistoryId}}"
                   ]
@@ -4743,11 +4884,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/summary?bucketMinutes={{bucketMinutes}}&fromUtc={{fromUtc}}&toUtc={{toUtc}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/summary?bucketMinutes={{bucketMinutes}}&fromUtc={{fromUtc}}&toUtc={{toUtc}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "request-history",
                     "summary"
                   ],
@@ -4797,11 +4940,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/bulk",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/bulk",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "request-history",
                     "bulk"
                   ]
@@ -4842,11 +4987,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/analytics/overview?fromUtc={{fromUtc}}&toUtc={{toUtc}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/analytics/overview?fromUtc={{fromUtc}}&toUtc={{toUtc}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "request-history",
                     "analytics",
                     "overview"
@@ -4894,11 +5041,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/analytics/overview",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/analytics/overview",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "analytics",
                     "overview"
                   ]
@@ -4935,11 +5084,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/settings",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/settings",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "settings"
                   ]
                 }
@@ -4974,11 +5125,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/settings",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/settings",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "settings"
                   ]
                 },
@@ -5023,11 +5176,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/backup",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/backup",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "backup"
                   ]
                 }
@@ -5062,11 +5217,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/restore",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/restore",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "restore"
                   ]
                 },
@@ -5111,11 +5268,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/audit",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/audit",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "audit"
                   ]
                 }
@@ -5146,11 +5305,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/audit/{{auditId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/audit/{{auditId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "audit",
                     "{{auditId}}"
                   ]
@@ -5168,11 +5329,12 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/models",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/models",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "models"
                   ]
                 },
@@ -5212,11 +5374,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/chat/completions",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/chat/completions",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "chat",
                     "completions"
                   ]
@@ -5247,11 +5410,12 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/models",
+                  "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/models",
                   "host": [
-                    "{{openAiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1",
                     "models"
                   ]
                 },
@@ -5287,11 +5451,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users/{{userId}}",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "users",
                     "{{userId}}"
                   ]
@@ -5336,11 +5502,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles",
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles",
                   "host": [
-                    "{{serverApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "v1.0",
+                    "api",
                     "roles"
                   ]
                 },
@@ -5371,11 +5539,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/auth/dashboard/login",
+                  "raw": "{{serverBaseUrl}}{{legacyServerApiBaseUrl}}/auth/dashboard/login",
                   "host": [
-                    "{{legacyServerApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "api",
+                    "v1",
                     "auth",
                     "dashboard",
                     "login"
@@ -5417,11 +5587,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/users",
+                  "raw": "{{serverBaseUrl}}{{legacyServerApiBaseUrl}}/users",
                   "host": [
-                    "{{legacyServerApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "api",
+                    "v1",
                     "users"
                   ]
                 }
@@ -5452,11 +5624,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/routingpolicies",
+                  "raw": "{{serverBaseUrl}}{{legacyServerApiBaseUrl}}/routingpolicies",
                   "host": [
-                    "{{legacyServerApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "api",
+                    "v1",
                     "routingpolicies"
                   ]
                 }
@@ -5495,11 +5669,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/openai/v1/chat/completions",
+                  "raw": "{{serverBaseUrl}}{{legacyServerApiBaseUrl}}/openai/v1/chat/completions",
                   "host": [
-                    "{{legacyServerApiBaseUrl}}"
+                    "{{serverBaseUrl}}"
                   ],
                   "path": [
+                    "api",
+                    "v1",
                     "openai",
                     "v1",
                     "chat",
