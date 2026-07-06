@@ -2200,10 +2200,16 @@ namespace Xeno.Server
             XenoClientModel? selectedModel = FindSelectedModel(client, decision, embeddings);
             client.InFlightRequests++;
             DateTime? clientRequestStartedUtc = null;
+            bool requestDispatched = false;
+            string dispatchedMethod = context.Request.Method.ToString().ToUpperInvariant();
+            string dispatchedRelativePath = NormalizeOpenAiPath(path);
+            string dispatchedRequestorIp = String.Empty;
+            string? dispatchedSource = selectedModel?.Source;
             try
             {
-                string relativePath = NormalizeOpenAiPath(path);
+                string relativePath = dispatchedRelativePath;
                 string requestorIp = GetRequestorIp(context, requestContext);
+                dispatchedRequestorIp = requestorIp;
                 Dictionary<string, string> forwardedHeaders = BuildForwardedHeaders(context, requestContext, requestorIp);
                 Dictionary<string, string> capturedRequestHeaders = CaptureRequestHeaders(context, forwardedHeaders);
                 ServerRequestMessage payload = new ServerRequestMessage
@@ -2217,8 +2223,8 @@ namespace Xeno.Server
                     ClientId = client.Id,
                     ClientName = client.Name,
                     ApiType = selectedModel?.Provider.ToString(),
-                    Source = selectedModel?.Source,
-                    Method = context.Request.Method.ToString().ToUpperInvariant(),
+                    Source = dispatchedSource,
+                    Method = dispatchedMethod,
                     RelativePath = relativePath,
                     Model = decision.EffectiveModel,
                     Embeddings = embeddings,
@@ -2231,6 +2237,7 @@ namespace Xeno.Server
                 clientRequestStartedUtc = DateTime.UtcNow;
                 decision.Timeline.Add("ClientDispatch");
                 await SendToClientAsync(connection, JsonUtil.Serialize(payload), token).ConfigureAwait(false);
+                requestDispatched = true;
                 if (stream)
                 {
                     ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, token).ConfigureAwait(false);
@@ -2252,6 +2259,27 @@ namespace Xeno.Server
                     decision.Timeline.Add("ClientResponse");
                     await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, token).ConfigureAwait(false);
                 }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                decision.Success = false;
+                decision.HttpStatusCode = 499;
+                decision.OutcomeCode = "CallerDisconnected";
+                decision.Message = "The caller disconnected before the client response completed.";
+                if (clientRequestStartedUtc.HasValue) decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
+                decision.Timeline.Add("CallerDisconnected");
+                if (requestDispatched)
+                {
+                    try
+                    {
+                        await SendRequestCancellationAsync(connection, requestId, "CallerDisconnected", dispatchedRequestorIp, dispatchedMethod, dispatchedRelativePath, dispatchedSource, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is WebSocketException)
+                    {
+                    }
+                }
+
+                await RecordAndSaveHistoryAsync(requestContext, dispatchedMethod, path, decision, CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -2396,6 +2424,29 @@ namespace Xeno.Server
             {
                 connection.SendLock.Release();
             }
+        }
+
+        private async Task SendRequestCancellationAsync(
+            ClientConnection connection,
+            string requestId,
+            string reason,
+            string requestorIp,
+            string method,
+            string relativePath,
+            string? source,
+            CancellationToken token)
+        {
+            ServerRequestCancellationMessage message = new ServerRequestCancellationMessage
+            {
+                Type = "server.request.cancel",
+                RequestId = requestId,
+                Reason = reason,
+                RequestorIp = requestorIp,
+                Method = method,
+                RelativePath = relativePath,
+                Source = source
+            };
+            await SendToClientAsync(connection, JsonUtil.Serialize(message), token).ConfigureAwait(false);
         }
 
         private object BuildOllamaTagsResponse(RequestContext requestContext)

@@ -3,11 +3,11 @@
     "Hostname": "0.0.0.0",
     "Port": 9000,
     "Ssl": false,
-    "RequireAuthentication": false
+    "RequireAuthentication": true
   },
   "Cors": {
     "Enabled": true,
-    "AllowedOrigins": ["http://localhost:9100"],
+    "AllowedOrigins": ["http://localhost:9100", "http://localhost:9200", "https://portal.xenocloud.ai"],
     "AllowedHeaders": ["Authorization", "Content-Type", "x-token", "x-tenant-guid", "x-tenant-id", "x-access-key", "x-signature"],
     "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   },
@@ -18,13 +18,18 @@
     "RequestTimeoutMs": 120000
   },
   "Database": {
-    "Type": "Sqlite",
-    "Filename": "data/xeno.db"
+    "Type": "Postgresql",
+    "Server": "xeno-postgres",
+    "Port": 5432,
+    "DatabaseName": "xeno",
+    "Username": "xeno",
+    "Password": "xeno"
   },
   "Auth": {
     "Issuer": "xeno",
     "SigningKey": "development-only-change-me",
-    "SessionMinutes": 60
+    "SessionMinutes": 60,
+    "MaxLoginRequestsPerMinute": 20
   },
   "TelemetryCollection": {
     "Enabled": true,

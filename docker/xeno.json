@@ -18,8 +18,12 @@
     "RequestTimeoutMs": 120000
   },
   "Database": {
-    "Type": "Sqlite",
-    "Filename": "data/xeno.db"
+    "Type": "Postgresql",
+    "Server": "xeno-postgres",
+    "Port": 5432,
+    "DatabaseName": "xeno",
+    "Username": "xeno",
+    "Password": "xeno"
   },
   "Auth": {
     "Issuer": "xeno",

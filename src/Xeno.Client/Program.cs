@@ -1,6 +1,7 @@
 namespace Xeno.Client
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.Globalization;
@@ -35,6 +36,8 @@ namespace Xeno.Client
         private static bool _WorkerMode = false;
         private static TimestampedLogWriter? _WorkerOutputLogWriter = null;
         private static readonly SemaphoreSlim _SendLock = new SemaphoreSlim(1, 1);
+        private static readonly ConcurrentDictionary<string, CancellationTokenSource> _RequestCancellationSources = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, string> _RequestCancellationReasons = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Run the Xeno client CLI.
@@ -1548,6 +1551,7 @@ namespace Xeno.Client
                 }
                 finally
                 {
+                    CancelActiveRequests();
                     heartbeatTokenSource.Cancel();
                     await heartbeatTask.ConfigureAwait(false);
                 }
@@ -1606,11 +1610,15 @@ namespace Xeno.Client
                 return;
             }
 
+            if (String.Equals(type, "server.request.cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleServerRequestCancellation(message);
+                return;
+            }
+
             if (!String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase)) return;
 
-            ClientSettings requestSettings = LoadRuntimeSettingsForConnectedSession(settings);
-            object? response = await ExecuteServerRequestAsync(socket, requestSettings, message, token).ConfigureAwait(false);
-            if (response != null) await SendMessageAsync(socket, response, token).ConfigureAwait(false);
+            StartServerRequestTask(socket, settings, message, token);
         }
 
         private static async Task HandleServerTelemetryRequestAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
@@ -1699,12 +1707,64 @@ namespace Xeno.Client
             }
         }
 
-        private static async Task<object?> ExecuteServerRequestAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
+        private static void StartServerRequestTask(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
         {
             ServerRequestMessage? serverRequest = JsonUtil.Deserialize<ServerRequestMessage>(message);
-            if (serverRequest == null) return null;
+            if (serverRequest == null) return;
 
             string requestId = String.IsNullOrWhiteSpace(serverRequest.RequestId) ? Guid.NewGuid().ToString("N") : serverRequest.RequestId;
+            CancellationTokenSource requestTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token);
+            _RequestCancellationSources[requestId] = requestTokenSource;
+            _ = ProcessServerRequestAsync(socket, settings, serverRequest, requestId, requestTokenSource);
+        }
+
+        private static async Task ProcessServerRequestAsync(ClientWebSocket socket, ClientSettings settings, ServerRequestMessage serverRequest, string requestId, CancellationTokenSource requestTokenSource)
+        {
+            try
+            {
+                ClientSettings requestSettings = LoadRuntimeSettingsForConnectedSession(settings);
+                object? response = await ExecuteServerRequestAsync(socket, requestSettings, serverRequest, requestId, requestTokenSource.Token).ConfigureAwait(false);
+                if (response != null) await SendMessageAsync(socket, response, requestTokenSource.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (requestTokenSource.IsCancellationRequested)
+            {
+                if (_RequestCancellationReasons.TryGetValue(requestId, out string? reason) &&
+                    String.Equals(reason, "CallerDisconnected", StringComparison.OrdinalIgnoreCase))
+                {
+                    await LocalDashboardRuntime.RecordCanceledAsync(requestId, "Request canceled due to caller disconnect.", CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                ClientResponseMessage response = new ClientResponseMessage
+                {
+                    Type = "client.response",
+                    RequestId = requestId,
+                    ClientId = settings.ClientId,
+                    TenantId = settings.TenantId,
+                    Success = false,
+                    Error = ex.Message
+                };
+                await LocalDashboardRuntime.RecordCompletedAsync(requestId, response, false, CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await SendMessageAsync(socket, response, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception sendEx) when (sendEx is InvalidOperationException || sendEx is WebSocketException || sendEx is IOException)
+                {
+                    WriteWarning("Could not send failed request response " + requestId + " to Xeno server: " + sendEx.Message);
+                }
+            }
+            finally
+            {
+                _RequestCancellationSources.TryRemove(requestId, out CancellationTokenSource? _);
+                _RequestCancellationReasons.TryRemove(requestId, out string? _);
+                requestTokenSource.Dispose();
+            }
+        }
+
+        private static async Task<object?> ExecuteServerRequestAsync(ClientWebSocket socket, ClientSettings settings, ServerRequestMessage serverRequest, string requestId, CancellationToken token)
+        {
             string? sourceName = String.IsNullOrWhiteSpace(serverRequest.Source) ? serverRequest.RunnerName : serverRequest.Source;
             string proxy = String.IsNullOrWhiteSpace(sourceName) ? "(default provider)" : sourceName;
             string relativePath = String.IsNullOrWhiteSpace(serverRequest.RelativePath) ? serverRequest.Path ?? "/v1/chat/completions" : serverRequest.RelativePath;
@@ -1876,6 +1936,38 @@ namespace Xeno.Client
                 await SendMessageAsync(socket, finalResponse, token).ConfigureAwait(false);
                 await LocalDashboardRuntime.RecordCompletedAsync(requestId, finalResponse, true, token).ConfigureAwait(false);
                 WriteRequestCompleted(requestId, requestorIp, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
+            }
+        }
+
+        private static void HandleServerRequestCancellation(string message)
+        {
+            ServerRequestCancellationMessage? cancellation = JsonUtil.Deserialize<ServerRequestCancellationMessage>(message);
+            if (cancellation == null || String.IsNullOrWhiteSpace(cancellation.RequestId)) return;
+            if (!_RequestCancellationSources.TryGetValue(cancellation.RequestId, out CancellationTokenSource? requestTokenSource)) return;
+
+            _RequestCancellationReasons[cancellation.RequestId] = cancellation.Reason;
+            requestTokenSource.Cancel();
+            if (String.Equals(cancellation.Reason, "CallerDisconnected", StringComparison.OrdinalIgnoreCase))
+            {
+                string requestorLabel = String.IsNullOrWhiteSpace(cancellation.RequestorIp) ? "unknown" : cancellation.RequestorIp;
+                string method = String.IsNullOrWhiteSpace(cancellation.Method) ? "POST" : cancellation.Method;
+                string path = String.IsNullOrWhiteSpace(cancellation.RelativePath) ? "/v1/chat/completions" : cancellation.RelativePath;
+                string source = String.IsNullOrWhiteSpace(cancellation.Source) ? "(default provider)" : cancellation.Source;
+                if (!_UseJson) WriteInfo("Request " + cancellation.RequestId + " canceled due to caller disconnect from " + requestorLabel + ": " + method + " " + path + " via " + source);
+            }
+        }
+
+        private static void CancelActiveRequests()
+        {
+            foreach (KeyValuePair<string, CancellationTokenSource> item in _RequestCancellationSources)
+            {
+                try
+                {
+                    item.Value.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
             }
         }
 
@@ -2711,6 +2803,12 @@ namespace Xeno.Client
                     string requestorIp = request == null ? String.Empty : RequestorIpFromServerRequest(request);
                     string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
                     WriteInfo("Request " + requestId + " received from " + requestorLabel + ": " + method + " " + path + " via " + source);
+                    return;
+                }
+
+                if (String.Equals(type, "server.request.cancel", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_UseJson) Console.WriteLine(message);
                     return;
                 }
 

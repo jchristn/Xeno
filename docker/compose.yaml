@@ -41,7 +41,6 @@ services:
       - "9000:9000"
     volumes:
       - ./xeno.json:/app/xeno.json:ro
-      - ./data:/app/data
       - ./logs:/app/logs
     depends_on:
       xeno-postgres:

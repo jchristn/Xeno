@@ -310,6 +310,27 @@ namespace Xeno.Client.LocalDashboard
         }
 
         /// <summary>
+        /// Record a canceled server request.
+        /// </summary>
+        /// <param name="requestId">Request ID.</param>
+        /// <param name="message">Cancellation message.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        public static async Task RecordCanceledAsync(string requestId, string message, CancellationToken token)
+        {
+            ILocalRequestHistoryMethods? history = _History;
+            if (history == null) return;
+            token.ThrowIfCancellationRequested();
+            LocalRequestHistoryEntry entry = await GetInflightOrStoredAsync(history, requestId, token).ConfigureAwait(false);
+            entry.CompletedUtc = DateTime.UtcNow;
+            entry.Outcome = LocalRequestOutcomeEnum.Failure;
+            entry.Error = message;
+            entry.Timeline.Add(new LocalRequestTimelineEvent { Stage = LocalRequestTimelineStageEnum.Failed, TimestampUtc = entry.CompletedUtc.Value, Message = message });
+            await history.UpsertAsync(entry, ClientSettings.Load().LocalDashboard.HistoryRetention, token).ConfigureAwait(false);
+            _InFlight.TryRemove(requestId, out LocalRequestHistoryEntry? _);
+        }
+
+        /// <summary>
         /// Record that upstream response headers were received.
         /// </summary>
         /// <param name="requestId">Request ID.</param>
