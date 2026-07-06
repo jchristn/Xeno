@@ -3672,6 +3672,8 @@ namespace Test.Shared
                     ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
                     if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
                     if (!connect.StandardOutput.Contains("Xeno client connected in the background", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not report connected: " + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("Server WebSocket: ws://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture) + settings.WebSocket.Path, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not include server WebSocket URL: " + connect.StandardOutput);
+                    if (!connect.StandardOutput.Contains("Server REST     : http://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not include server REST URL: " + connect.StandardOutput);
                     if (!connect.StandardOutput.Contains("Local dashboard : http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not include local dashboard URL: " + connect.StandardOutput);
 
                     string stateFile = Path.Combine(clientHome, "state.json");

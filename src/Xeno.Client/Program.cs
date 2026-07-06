@@ -1377,6 +1377,8 @@ namespace Xeno.Client
                     {
                         connected = true,
                         alreadyRunning = true,
+                        websocketUrl = settings.Server.Url,
+                        restUrl = BuildRestBaseUrl(settings),
                         processId = existing.ProcessId ?? 0,
                         logFile = existing.LogFilePath ?? ClientConnectionState.LogFile,
                         localDashboard = BuildLocalDashboardJson(existing)
@@ -1385,6 +1387,7 @@ namespace Xeno.Client
                 else
                 {
                     WriteInfo("Xeno client is already connected.");
+                    PrintServerAccess(settings);
                     PrintStartField("Process ID", existing.ProcessId == null ? "(none)" : existing.ProcessId.Value.ToString(CultureInfo.InvariantCulture));
                     PrintStartField("Log file", DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(existing);
@@ -1406,6 +1409,8 @@ namespace Xeno.Client
                     WriteJson(new
                     {
                         connected = registered,
+                        websocketUrl = settings.Server.Url,
+                        restUrl = BuildRestBaseUrl(settings),
                         processId = process.Id,
                         logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
                         errorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
@@ -1416,6 +1421,7 @@ namespace Xeno.Client
                 else if (registered)
                 {
                     WriteSuccess("Xeno client connected in the background.");
+                    PrintServerAccess(settings);
                     PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
                     PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
@@ -1423,6 +1429,7 @@ namespace Xeno.Client
                 else
                 {
                     WriteError("Xeno client did not register within " + timeoutMs + "ms.");
+                    PrintServerAccess(settings);
                     PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
                     PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
@@ -2078,6 +2085,17 @@ namespace Xeno.Client
             builder.Path = path.TrimStart('/');
             builder.Query = String.Empty;
             return builder.Uri;
+        }
+
+        private static string BuildRestBaseUrl(ClientSettings settings)
+        {
+            string source = String.IsNullOrWhiteSpace(settings.Server.RestUrl) ? settings.Server.Url : settings.Server.RestUrl;
+            UriBuilder builder = new UriBuilder(source);
+            if (String.Equals(builder.Scheme, "ws", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "http";
+            if (String.Equals(builder.Scheme, "wss", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "https";
+            builder.Path = String.Empty;
+            builder.Query = String.Empty;
+            return builder.Uri.ToString().TrimEnd('/');
         }
 
         private static string ReadSecret(string prompt)
@@ -2877,9 +2895,15 @@ namespace Xeno.Client
             if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Dashboard error: " + state.LocalDashboardLastError);
         }
 
+        private static void PrintServerAccess(ClientSettings settings)
+        {
+            PrintStartField("Server WebSocket", settings.Server.Url);
+            PrintStartField("Server REST", BuildRestBaseUrl(settings));
+        }
+
         private static void PrintStartField(string label, string value)
         {
-            Console.WriteLine("  " + label.PadRight(15) + " : " + value);
+            Console.WriteLine("  " + label.PadRight(16) + ": " + value);
         }
 
         private static void PrintLocalDashboardStatus(ClientConnectionState connection, ClientSettings settings)
