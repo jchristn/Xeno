@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Xeno.Sdk.Console", "sdk\csh
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Xeno.DataLoader", "Xeno.DataLoader\Xeno.DataLoader.csproj", "{A536C634-5228-4749-84F1-29823B752976}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Xeno.Tray", "Xeno.Tray\Xeno.Tray.csproj", "{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -171,6 +173,18 @@ Global
 		{A536C634-5228-4749-84F1-29823B752976}.Release|x64.Build.0 = Release|Any CPU
 		{A536C634-5228-4749-84F1-29823B752976}.Release|x86.ActiveCfg = Release|Any CPU
 		{A536C634-5228-4749-84F1-29823B752976}.Release|x86.Build.0 = Release|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Debug|x64.Build.0 = Debug|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Debug|x86.Build.0 = Debug|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x64.ActiveCfg = Release|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x64.Build.0 = Release|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x86.ActiveCfg = Release|Any CPU
+		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

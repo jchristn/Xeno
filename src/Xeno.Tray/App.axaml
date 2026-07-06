@@ -1,0 +1,29 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Xeno.Tray"
+             x:Class="Xeno.Tray.App"
+             x:DataType="local:XenoTrayViewModel">
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+  <TrayIcon.Icons>
+    <TrayIcons>
+      <TrayIcon Icon="/Assets/logo.ico"
+                ToolTipText="{Binding ToolTip}"
+                Command="{Binding ShowStatisticsCommand}">
+        <TrayIcon.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="{Binding StatusHeader}" IsEnabled="False" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Start Client" Command="{Binding StartCommand}" IsEnabled="{Binding StartEnabled}" />
+            <NativeMenuItem Header="Open Dashboard" Command="{Binding OpenDashboardCommand}" IsEnabled="{Binding OpenDashboardEnabled}" />
+            <NativeMenuItem Header="Statistics" Command="{Binding ShowStatisticsCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Exit Xeno Client" Command="{Binding ExitClientCommand}" IsEnabled="{Binding ExitClientEnabled}" />
+            <NativeMenuItem Header="Quit Tray" Command="{Binding QuitTrayCommand}" />
+          </NativeMenu>
+        </TrayIcon.Menu>
+      </TrayIcon>
+    </TrayIcons>
+  </TrayIcon.Icons>
+</Application>

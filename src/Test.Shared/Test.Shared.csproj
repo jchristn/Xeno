@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Xeno.Core\Xeno.Core.csproj" />
     <ProjectReference Include="..\Xeno.Client\Xeno.Client.csproj" />
+    <ProjectReference Include="..\Xeno.Tray\Xeno.Tray.csproj" />
     <ProjectReference Include="..\Xeno.Server\Xeno.Server.csproj" />
   </ItemGroup>
 
