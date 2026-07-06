@@ -1,7 +1,7 @@
 namespace Xeno.Tray
 {
     using Avalonia.Controls;
-    using Avalonia.Layout;
+    using Avalonia.Controls.Primitives;
     using Avalonia.Media;
 
     /// <summary>
@@ -17,35 +17,27 @@ namespace Xeno.Tray
         public StatisticsWindow()
         {
             Title = "Xeno Client Statistics";
-            Width = 520;
-            Height = 420;
-            MinWidth = 420;
-            MinHeight = 320;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            MinWidth = 320;
+            MinHeight = 180;
+            MaxWidth = 760;
+            MaxHeight = 560;
             _StatisticsText = new TextBlock
             {
                 FontFamily = FontFamily.Parse("Consolas, Cascadia Mono, Menlo, monospace"),
                 TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Stretch
+                MaxWidth = 728
             };
-            Button closeButton = new Button
-            {
-                Content = "Close",
-                HorizontalAlignment = HorizontalAlignment.Right
-            };
-            closeButton.Click += delegate
-            {
-                Close();
-            };
-            Content = new DockPanel
+
+            Content = new ScrollViewer
             {
                 Margin = new Avalonia.Thickness(16),
-                Children =
-                {
-                    new ScrollViewer { Content = _StatisticsText },
-                    closeButton
-                }
+                Content = _StatisticsText,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MaxHeight = 528,
+                MaxWidth = 728,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
             };
-            DockPanel.SetDock(closeButton, Dock.Bottom);
         }
 
         /// <summary>
@@ -55,6 +47,7 @@ namespace Xeno.Tray
         public void SetStatistics(string text)
         {
             _StatisticsText.Text = text;
+            SizeToContent = SizeToContent.WidthAndHeight;
         }
     }
 }

@@ -134,6 +134,26 @@ xeno logs -f
 xeno stop
 ```
 
+## Optional: Run the Windows Tray App
+
+The tray app is useful on a Windows workstation where the client should be easy to start, stop, inspect, and reopen without keeping a terminal nearby. It uses the `xeno.exe` built beside it, so build the solution before launching the tray from source.
+
+1. Build the tray app and its sibling client executable.
+
+```powershell
+dotnet build .\src\Xeno.sln
+```
+
+2. Start the tray app.
+
+```powershell
+Start-Process .\src\Xeno.Tray\bin\Debug\net10.0\xeno-tray.exe
+```
+
+3. Use the tray icon menu to start or stop the Xeno client, open the local dashboard, show client statistics, or quit the tray app.
+
+The statistics window uses the normal Windows title bar close button. If you rebuild while the tray app or the client it started is still running from `src\Xeno.Tray\bin\Debug\net10.0`, stop both processes first so the build can replace `xeno-tray.exe`, `xeno.exe`, and their referenced assemblies.
+
 ## Better Path: Start on Boot
 
 Use a scheduled task to start the client when you log in.
