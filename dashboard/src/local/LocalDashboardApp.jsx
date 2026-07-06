@@ -10,7 +10,6 @@ import {
   Gauge,
   HardDrive,
   History,
-  LineChart,
   MemoryStick,
   Moon,
   Pencil,
@@ -43,15 +42,13 @@ const pages = [
   { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
   { id: 'logs', descriptionKey: 'localLogsDescription', icon: Terminal, labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
   { id: 'telemetry', descriptionKey: 'localTelemetryDescription', icon: Gauge, labelKey: 'host', tooltipKey: 'tooltipLocalNavTelemetry' },
-  { id: 'telemetryAnalytics', descriptionKey: 'localTelemetryAnalyticsDescription', icon: LineChart, labelKey: 'hostAnalytics', tooltipKey: 'tooltipLocalNavTelemetryAnalytics' },
   { id: 'providerTelemetry', descriptionKey: 'localProviderTelemetryDescription', icon: Server, labelKey: 'provider', tooltipKey: 'tooltipLocalNavProviderTelemetry' },
-  { id: 'providerTelemetryAnalytics', descriptionKey: 'localProviderTelemetryAnalyticsDescription', icon: LineChart, labelKey: 'providerAnalytics', tooltipKey: 'tooltipLocalNavProviderTelemetryAnalytics' },
   { id: 'settings', descriptionKey: 'localSettingsDescription', icon: SettingsIcon, labelKey: 'settings', tooltipKey: 'tooltipLocalNavSettings' }
 ];
 
 const localNavGroups = [
   { key: 'observe', pageIds: ['home', 'providers', 'models', 'requests'] },
-  { key: 'telemetry', pageIds: ['telemetry', 'telemetryAnalytics', 'providerTelemetry', 'providerTelemetryAnalytics'] },
+  { key: 'telemetry', pageIds: ['telemetry', 'providerTelemetry'] },
   { key: 'administration', pageIds: ['logs', 'settings'] }
 ];
 
@@ -168,34 +165,20 @@ export default function LocalDashboardApp() {
         setRequests(historyResponse.entries || []);
         setSummary(summaryResponse.buckets || []);
       } else if (page === 'telemetry') {
-        const [latestResponse, rollupResponses] = await Promise.all([
+        const [latestResponse, searchResponse, rollupResponses] = await Promise.all([
           localApi('/api/v1/telemetry/latest'),
-          loadLocalHostTelemetryRollups(range)
-        ]);
-        setTelemetryLatest(latestResponse);
-        setHostTelemetryRollups(rollupResponses);
-      } else if (page === 'telemetryAnalytics') {
-        const [searchResponse, rollupResponses] = await Promise.all([
           localApi(`/api/v1/telemetry/history/search?range=${encodeURIComponent(localApiRange(range))}`, {
             method: 'POST',
             body: jsonBody({ metric: telemetryMetric, limit: 250 })
           }),
           loadLocalHostTelemetryRollups(range)
         ]);
+        setTelemetryLatest(latestResponse);
         setTelemetrySamples(localRows(searchResponse.samples || searchResponse));
         setHostTelemetryRollups(rollupResponses);
       } else if (page === 'providerTelemetry') {
-        const [latestResponse, rollupResponse] = await Promise.all([
+        const [latestResponse, searchResponse, rollupResponse] = await Promise.all([
           localApi(`/api/v1/telemetry/providers/latest${providerTelemetryProvider ? `?providerName=${encodeURIComponent(providerTelemetryProvider)}` : ''}`),
-          localApi(`/api/v1/telemetry/providers/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
-            method: 'POST',
-            body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, bucketMinutes: telemetryBucketMinutes(range) })
-          })
-        ]);
-        setProviderTelemetryLatest(latestResponse);
-        setProviderTelemetryRollups(localRows(rollupResponse));
-      } else if (page === 'providerTelemetryAnalytics') {
-        const [searchResponse, rollupResponse] = await Promise.all([
           localApi(`/api/v1/telemetry/providers/history/search?range=${encodeURIComponent(localApiRange(range))}`, {
             method: 'POST',
             body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, limit: 250 })
@@ -205,6 +188,7 @@ export default function LocalDashboardApp() {
             body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, bucketMinutes: telemetryBucketMinutes(range) })
           })
         ]);
+        setProviderTelemetryLatest(latestResponse);
         setProviderTelemetrySamples(localRows(searchResponse.samples || searchResponse));
         setProviderTelemetryRollups(localRows(rollupResponse));
       } else if (page === 'logs') {
@@ -291,11 +275,9 @@ export default function LocalDashboardApp() {
           {page === 'providers' ? <Providers providers={providers} refresh={refresh} setModal={setModal} /> : null}
           {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
           {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
-          {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} setModal={setModal} /> : null}
+          {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} metric={telemetryMetric} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} setModal={setModal} /> : null}
           {page === 'logs' ? <Logs logSeverity={logSeverity} logTail={logTail} logs={logs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
-          {page === 'telemetryAnalytics' ? <TelemetryAnalytics hostRollups={hostTelemetryRollups} metric={telemetryMetric} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setModal={setModal} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} /> : null}
-          {page === 'providerTelemetry' ? <ProviderTelemetry latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
-          {page === 'providerTelemetryAnalytics' ? <ProviderTelemetryAnalytics metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
+          {page === 'providerTelemetry' ? <ProviderTelemetry latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
           {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
         </main>
       </div>
@@ -498,55 +480,11 @@ function Requests({ range, refresh, requests, setModal, setRange, summary }) {
   );
 }
 
-function Telemetry({ hostRollups, latest, openCharts, range, refresh, setOpenCharts, setRange, setModal }) {
+function Telemetry({ hostRollups, latest, metric, openCharts, range, refresh, samples, setMetric, setOpenCharts, setRange, setModal }) {
   const { t } = useTranslation();
   const sample = latest?.detail?.sample || {};
   const snapshot = latest?.snapshot || {};
   const gpus = latest?.detail?.gpus || snapshot?.gpu?.devices || [];
-
-  async function collect() {
-    const response = await localApi('/api/v1/telemetry/collect', { method: 'POST', body: '{}' });
-    setModal(messageModal(t, t('telemetryCollected'), t('telemetryCollectedMessage'), response));
-    refresh();
-  }
-
-  return (
-    <>
-      <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
-        <TimeRangeButtons range={range} setRange={setRange} />
-        <div className="chart-action-row telemetry-control-actions">
-          <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
-        </div>
-      </div>
-      <div className="metric-grid">
-        <Metric icon={<Cpu size={18} />} label={t('cpuUtilization')} value={formatPercent(sample.cpuUtilizationPercent)} />
-        <Metric icon={<MemoryStick size={18} />} label={t('memoryUtilization')} value={formatPercent(sample.memoryUtilizationPercent)} />
-        <Metric icon={<HardDrive size={18} />} label={t('diskUtilization')} value={formatPercent(sample.diskUtilizationPercent)} />
-        <Metric icon={<Gauge size={18} />} label={t('gpuUtilization')} value={formatPercent(sample.gpuAverageUtilizationPercent)} />
-      </div>
-      <HostTelemetryChartGrid hostRollups={hostRollups} openCharts={openCharts} range={range} setOpenCharts={setOpenCharts} t={t} />
-      <Panel title={t('telemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
-        <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
-      </Panel>
-      <Panel title={t('systemTelemetry')}>
-        <RecordTable fields={['id', 'machineName', 'collectedUtc', 'osDescription', 'architecture', 'processorCount', 'collectionElapsedMs']} record={{ ...sample, id: sample.id }} />
-      </Panel>
-      <Panel title={t('resourceTelemetry')}>
-        <RecordTable fields={['cpuUtilizationPercent', 'memoryTotalBytes', 'memoryUsedBytes', 'memoryAvailableBytes', 'memoryUtilizationPercent', 'diskTotalBytes', 'diskUsedBytes', 'diskAvailableBytes', 'diskUtilizationPercent']} record={sample} />
-      </Panel>
-      <DataTable
-        columns={['uuid', 'name', 'utilizationPercent', 'memoryUtilizationPercent', 'temperatureCelsius', 'powerWatts']}
-        onRefresh={refresh}
-        onRowClick={(row) => setModal({ title: t('gpuDetails'), json: row, body: <RecordTable fields={Object.keys(row)} record={row} /> })}
-        rows={gpus}
-        title={t('gpuDevices')}
-      />
-    </>
-  );
-}
-
-function TelemetryAnalytics({ hostRollups, metric, openCharts, range, refresh, samples, setMetric, setModal, setOpenCharts, setRange }) {
-  const { t } = useTranslation();
 
   async function details(row) {
     const entry = await localApi(`/api/v1/telemetry/history/${encodeURIComponent(row.id)}`);
@@ -566,7 +504,13 @@ function TelemetryAnalytics({ hostRollups, metric, openCharts, range, refresh, s
     ));
   }
 
-  const metricValues = samples.map((sample) => Number(sample[telemetryMetricField(metric)] || 0)).filter((value) => Number.isFinite(value));
+  async function collect() {
+    const response = await localApi('/api/v1/telemetry/collect', { method: 'POST', body: '{}' });
+    setModal(messageModal(t, t('telemetryCollected'), t('telemetryCollectedMessage'), response));
+    refresh();
+  }
+
+  const metricValues = samples.map((item) => Number(item[telemetryMetricField(metric)] || 0)).filter((value) => Number.isFinite(value));
   const average = metricValues.length ? metricValues.reduce((sum, value) => sum + value, 0) / metricValues.length : null;
   const maximum = metricValues.length ? Math.max(...metricValues) : null;
 
@@ -574,7 +518,16 @@ function TelemetryAnalytics({ hostRollups, metric, openCharts, range, refresh, s
     <>
       <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
         <TimeRangeButtons range={range} setRange={setRange} />
-        <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
+        <div className="chart-action-row telemetry-control-actions">
+          <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
+          <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
+        </div>
+      </div>
+      <div className="metric-grid">
+        <Metric icon={<Cpu size={18} />} label={t('cpuUtilization')} value={formatPercent(sample.cpuUtilizationPercent)} />
+        <Metric icon={<MemoryStick size={18} />} label={t('memoryUtilization')} value={formatPercent(sample.memoryUtilizationPercent)} />
+        <Metric icon={<HardDrive size={18} />} label={t('diskUtilization')} value={formatPercent(sample.diskUtilizationPercent)} />
+        <Metric icon={<Gauge size={18} />} label={t('gpuUtilization')} value={formatPercent(sample.gpuAverageUtilizationPercent)} />
       </div>
       <div className="metric-grid">
         <Metric icon={<History size={18} />} label={t('samples')} value={samples.length} />
@@ -592,6 +545,22 @@ function TelemetryAnalytics({ hostRollups, metric, openCharts, range, refresh, s
         onRowClick={details}
         rows={samples}
         title={t('telemetrySamples')}
+      />
+      <Panel title={t('telemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
+        <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
+      </Panel>
+      <Panel title={t('systemTelemetry')}>
+        <RecordTable fields={['id', 'machineName', 'collectedUtc', 'osDescription', 'architecture', 'processorCount', 'collectionElapsedMs']} record={{ ...sample, id: sample.id }} />
+      </Panel>
+      <Panel title={t('resourceTelemetry')}>
+        <RecordTable fields={['cpuUtilizationPercent', 'memoryTotalBytes', 'memoryUsedBytes', 'memoryAvailableBytes', 'memoryUtilizationPercent', 'diskTotalBytes', 'diskUsedBytes', 'diskAvailableBytes', 'diskUtilizationPercent']} record={sample} />
+      </Panel>
+      <DataTable
+        columns={['uuid', 'name', 'utilizationPercent', 'memoryUtilizationPercent', 'temperatureCelsius', 'powerWatts']}
+        onRefresh={refresh}
+        onRowClick={(row) => setModal({ title: t('gpuDetails'), json: row, body: <RecordTable fields={Object.keys(row)} record={row} /> })}
+        rows={gpus}
+        title={t('gpuDevices')}
       />
     </>
   );
@@ -656,7 +625,7 @@ function TimeRangeButtons({ range, setRange }) {
   );
 }
 
-function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range, refresh, rollups, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
+function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range, refresh, rollups, samples, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
   const { t } = useTranslation();
   const providers = latest?.snapshot?.providers || [];
   const latestSample = latest?.detail?.sample || {};
@@ -665,59 +634,6 @@ function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range,
   const loadedModels = providers.reduce((sum, provider) => sum + Number(provider.loadedModelCount || 0), 0);
   const activeRequests = providers.reduce((sum, provider) => sum + Number(provider.activeRequests || 0), 0);
   const queuedRequests = providers.reduce((sum, provider) => sum + Number(provider.queuedRequests || 0), 0);
-
-  async function collect() {
-    const response = await localApi('/api/v1/telemetry/providers/collect', { method: 'POST', body: '{}' });
-    setModal(messageModal(t, t('providerTelemetryCollected'), t('providerTelemetryCollectedMessage'), response));
-    refresh();
-  }
-
-  return (
-    <>
-      <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
-        <TimeRangeButtons range={range} setRange={setRange} />
-        <div className="chart-action-row telemetry-control-actions">
-          <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} providerFilter={providerFilter} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
-          <button className="icon-button" onClick={collect} title={t('tooltipCollectProviderTelemetry')} type="button"><Zap size={16} /></button>
-        </div>
-      </div>
-      <div className="metric-grid">
-        <Metric icon={<Server size={18} />} label={t('healthyProviders')} value={activeProviders} />
-        <Metric icon={<BrainCircuit size={18} />} label={t('loadedModels')} value={loadedModels} />
-        <Metric icon={<Activity size={18} />} label={t('activeRequests')} value={formatMetric(activeRequests)} />
-        <Metric icon={<History size={18} />} label={t('queuedRequests')} value={formatMetric(queuedRequests)} />
-      </div>
-      <Panel
-        className="chart-panel-card telemetry-chart-card"
-        title={t('providerTelemetryOverTime')}
-      >
-        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
-      </Panel>
-      <Panel title={t('providerTelemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
-        <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
-      </Panel>
-      <Panel title={t('latestProviderSample')}>
-        <RecordTable fields={['id', 'providerName', 'apiType', 'providerKind', 'status', 'healthStatus', 'version', 'availableModelCount', 'loadedModelCount', 'activeRequests', 'queuedRequests', 'latencyP95Ms', 'timeToFirstTokenP95Ms']} record={latestSample} />
-      </Panel>
-      <DataTable
-        columns={['providerName', 'apiType', 'providerKind', 'status', 'healthStatus', 'availableModelCount', 'loadedModelCount', 'activeRequests', 'queuedRequests']}
-        onRefresh={refresh}
-        onRowClick={(row) => setModal({ title: t('providerTelemetryDetails'), json: row, size: 'request-details', body: <RecordTable fields={Object.keys(row)} record={row} /> })}
-        rows={providers.map((provider) => ({ ...provider, ...provider.endpoint }))}
-        title={t('providerRuntimeStatus')}
-      />
-      <DataTable
-        columns={['modelName', 'providerName', 'family', 'quantization', 'parameterSize', 'loaded', 'sizeBytes', 'memoryBytes']}
-        onRefresh={refresh}
-        rows={modelRows.map((model) => ({ ...model, modelName: model.modelName || model.name, providerName: model.providerName || latestSample.providerName }))}
-        title={t('providerModelTelemetry')}
-      />
-    </>
-  );
-}
-
-function ProviderTelemetryAnalytics({ metric, modelFilter, providerFilter, range, refresh, rollups, samples, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
-  const { t } = useTranslation();
 
   async function details(row) {
     const entry = await localApi(`/api/v1/telemetry/providers/history/${encodeURIComponent(row.id)}`);
@@ -737,7 +653,13 @@ function ProviderTelemetryAnalytics({ metric, modelFilter, providerFilter, range
     ));
   }
 
-  const metricValues = samples.map((sample) => Number(sample[providerTelemetryMetricField(metric)] || 0)).filter((value) => Number.isFinite(value));
+  async function collect() {
+    const response = await localApi('/api/v1/telemetry/providers/collect', { method: 'POST', body: '{}' });
+    setModal(messageModal(t, t('providerTelemetryCollected'), t('providerTelemetryCollectedMessage'), response));
+    refresh();
+  }
+
+  const metricValues = samples.map((item) => Number(item[providerTelemetryMetricField(metric)] || 0)).filter((value) => Number.isFinite(value));
   const average = metricValues.length ? metricValues.reduce((sum, value) => sum + value, 0) / metricValues.length : null;
   const maximum = metricValues.length ? Math.max(...metricValues) : null;
 
@@ -745,7 +667,16 @@ function ProviderTelemetryAnalytics({ metric, modelFilter, providerFilter, range
     <>
       <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
         <TimeRangeButtons range={range} setRange={setRange} />
-        <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} providerFilter={providerFilter} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
+        <div className="chart-action-row telemetry-control-actions">
+          <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} providerFilter={providerFilter} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
+          <button className="icon-button" onClick={collect} title={t('tooltipCollectProviderTelemetry')} type="button"><Zap size={16} /></button>
+        </div>
+      </div>
+      <div className="metric-grid">
+        <Metric icon={<Server size={18} />} label={t('healthyProviders')} value={activeProviders} />
+        <Metric icon={<BrainCircuit size={18} />} label={t('loadedModels')} value={loadedModels} />
+        <Metric icon={<Activity size={18} />} label={t('activeRequests')} value={formatMetric(activeRequests)} />
+        <Metric icon={<History size={18} />} label={t('queuedRequests')} value={formatMetric(queuedRequests)} />
       </div>
       <div className="metric-grid">
         <Metric icon={<History size={18} />} label={t('samples')} value={samples.length} />
@@ -753,7 +684,10 @@ function ProviderTelemetryAnalytics({ metric, modelFilter, providerFilter, range
         <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
         <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
       </div>
-      <Panel className="chart-panel-card telemetry-chart-card" title={t('providerTelemetryOverTime')}>
+      <Panel
+        className="chart-panel-card telemetry-chart-card"
+        title={t('providerTelemetryOverTime')}
+      >
         <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
       </Panel>
       <DataTable
@@ -765,6 +699,25 @@ function ProviderTelemetryAnalytics({ metric, modelFilter, providerFilter, range
         onRowClick={details}
         rows={samples}
         title={t('providerTelemetrySamples')}
+      />
+      <Panel title={t('providerTelemetryStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(latest || {}, null, 2)} />}>
+        <RecordTable fields={['enabled', 'running', 'collectionIntervalMs', 'retentionDays', 'samples', 'newestSampleUtc', 'lastCollectionUtc', 'lastPruneUtc', 'lastMessage']} record={latest?.status || {}} />
+      </Panel>
+      <Panel title={t('latestProviderSample')}>
+        <RecordTable fields={['id', 'providerName', 'apiType', 'providerKind', 'status', 'healthStatus', 'version', 'availableModelCount', 'loadedModelCount', 'activeRequests', 'queuedRequests', 'latencyP95Ms', 'timeToFirstTokenP95Ms']} record={latestSample} />
+      </Panel>
+      <DataTable
+        columns={['providerName', 'apiType', 'providerKind', 'status', 'healthStatus', 'availableModelCount', 'loadedModelCount', 'activeRequests', 'queuedRequests']}
+        onRefresh={refresh}
+        onRowClick={(row) => setModal({ title: t('providerTelemetryDetails'), json: row, size: 'request-details', body: <RecordTable fields={Object.keys(row)} record={row} /> })}
+        rows={providers.map((provider) => ({ ...provider, ...provider.endpoint }))}
+        title={t('providerRuntimeStatus')}
+      />
+      <DataTable
+        columns={['modelName', 'providerName', 'family', 'quantization', 'parameterSize', 'loaded', 'sizeBytes', 'memoryBytes']}
+        onRefresh={refresh}
+        rows={modelRows.map((model) => ({ ...model, modelName: model.modelName || model.name, providerName: model.providerName || latestSample.providerName }))}
+        title={t('providerModelTelemetry')}
       />
     </>
   );
