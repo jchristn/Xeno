@@ -198,7 +198,7 @@ namespace Xeno.Server
                 Type = "http",
                 Scheme = "bearer",
                 BearerFormat = "Xeno token",
-                Description = "Bearer token returned by /v1.0/api/auth/token."
+                Description = "Bearer session token or globally unique credential value. Bearer auth infers tenant context."
             };
             schemes["xTokenAuth"] = new OpenApiSecurityScheme
             {
@@ -219,7 +219,7 @@ namespace Xeno.Server
                 Type = "apiKey",
                 In = "header",
                 Name = "x-tenant-guid",
-                Description = "Optional tenant identifier. Defaults to ten_default when omitted."
+                Description = "Optional tenant selector or compatibility hint. Bearer auth infers tenant context when omitted."
             };
             schemes["tenantIdHeader"] = new OpenApiSecurityScheme
             {
@@ -4746,7 +4746,8 @@ namespace Xeno.Server
 
         private RequestContext CreateRequestContext(HttpContextBase context)
         {
-            string tenantId = ResolveTenantId(context, null);
+            string? tenantHint = ResolveTenantHint(context, null);
+            string tenantId = tenantHint ?? Constants.DefaultTenantId;
 
             string authorization = context.Request.Headers.Get("Authorization") ?? String.Empty;
             string tokenHeader = context.Request.Headers.Get("x-token") ?? String.Empty;
@@ -4770,9 +4771,11 @@ namespace Xeno.Server
 
             if (!String.IsNullOrWhiteSpace(sessionToken))
             {
-                AuthSession? session = _Authentication.ValidateToken(RequirePlatform(), tenantId, sessionToken);
+                AuthSession? session = _Authentication.ValidateToken(RequirePlatform(), sessionToken);
                 if (session != null)
                 {
+                    if (!TenantHintMatches(tenantHint, session.TenantId)) throw new UnauthorizedAccessException("Authenticated tenant does not match supplied tenant.");
+                    requestContext.TenantId = session.TenantId;
                     requestContext.IsAuthenticated = true;
                     requestContext.SessionId = session.Id;
                     requestContext.UserId = session.UserId;
@@ -4783,8 +4786,10 @@ namespace Xeno.Server
                     return requestContext;
                 }
 
-                Credential? bearerCredential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, sessionToken);
+                Credential? bearerCredential = _Authentication.ValidateCredential(RequirePlatform(), sessionToken);
                 if (bearerCredential == null) throw new UnauthorizedAccessException("Invalid or expired token.");
+                if (!TenantHintMatches(tenantHint, bearerCredential.TenantId)) throw new UnauthorizedAccessException("Authenticated tenant does not match supplied tenant.");
+                requestContext.TenantId = bearerCredential.TenantId;
                 requestContext.IsAuthenticated = true;
                 requestContext.CredentialId = bearerCredential.Id;
                 requestContext.UserId = bearerCredential.UserId;
@@ -4851,10 +4856,14 @@ namespace Xeno.Server
 
         private static string ResolveTenantId(HttpContextBase context, string? bodyTenantId)
         {
+            return ResolveTenantHint(context, bodyTenantId) ?? Constants.DefaultTenantId;
+        }
+
+        private static string? ResolveTenantHint(HttpContextBase context, string? bodyTenantId)
+        {
             string? tenantHeader = context.Request.Headers.Get("x-tenant-guid");
             string? tenantHeaderAlternate = context.Request.Headers.Get("x-tenant-id");
             string? tenantQuery = context.Request.Query.Elements.Get("tenantId");
-            string tenantId = FirstNonEmpty(tenantHeader, tenantHeaderAlternate, tenantQuery, bodyTenantId, Constants.DefaultTenantId);
 
             List<string> hints = new List<string>();
             AddNonEmpty(hints, tenantHeader);
@@ -4866,7 +4875,13 @@ namespace Xeno.Server
                 throw new ArgumentException("Conflicting tenant identifiers were supplied.");
             }
 
-            return tenantId;
+            string tenantHint = FirstNonEmpty(tenantHeader, tenantHeaderAlternate, tenantQuery, bodyTenantId);
+            return String.IsNullOrWhiteSpace(tenantHint) ? null : tenantHint;
+        }
+
+        private static bool TenantHintMatches(string? tenantHint, string tenantId)
+        {
+            return String.IsNullOrWhiteSpace(tenantHint) || String.Equals(tenantHint, tenantId, StringComparison.OrdinalIgnoreCase);
         }
 
         private static HashSet<string> GetStringSet(List<string>? source)
@@ -5298,10 +5313,10 @@ namespace Xeno.Server
                 {
                     securitySchemes = new Dictionary<string, object>
                     {
-                        ["bearerAuth"] = new { type = "http", scheme = "bearer", bearerFormat = "Xeno token", description = "Bearer token returned by /v1.0/api/auth/token." },
+                        ["bearerAuth"] = new { type = "http", scheme = "bearer", bearerFormat = "Xeno token", description = "Bearer session token or globally unique credential value. Bearer auth infers tenant context." },
                         ["xTokenAuth"] = new { type = "apiKey", @in = "header", name = "x-token", description = "Xeno bearer token supplied as an x-token header." },
                         ["accessKeyAuth"] = new { type = "apiKey", @in = "header", name = "x-access-key", description = "Tenant-bound Xeno credential access key." },
-                        ["tenantHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-guid", description = "Optional tenant identifier. Defaults to ten_default when omitted." },
+                        ["tenantHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-guid", description = "Optional tenant selector or compatibility hint. Bearer auth infers tenant context when omitted." },
                         ["tenantIdHeader"] = new { type = "apiKey", @in = "header", name = "x-tenant-id", description = "Alternate optional tenant identifier header." }
                     },
                     schemas = new Dictionary<string, object>

@@ -31,7 +31,7 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
-        public async Task DefaultOptions_SendSeededBearerAndTenantHeaders()
+        public async Task DefaultOptions_SendSeededBearerWithoutTenantHeader()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
             using (HttpClient httpClient = new HttpClient(handler))
@@ -46,7 +46,7 @@ namespace Xeno.Sdk.Tests
                 RecordedRequest request = Assert.Single(handler.Requests);
                 Assert.Equal("Bearer", request.AuthorizationScheme);
                 Assert.Equal("default", request.AuthorizationParameter);
-                Assert.Equal("ten_default", request.TenantId);
+                Assert.Null(request.TenantId);
             }
         }
 

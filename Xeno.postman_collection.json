@@ -173,17 +173,7 @@
               "name": "List Models",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/models",
                   "host": [
@@ -209,15 +199,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -250,15 +231,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -296,15 +268,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -336,15 +299,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -381,15 +335,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -421,15 +366,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -456,7 +392,7 @@
           ]
         }
       ],
-      "description": "OpenAI-compatible application APIs. Uses the collection Bearer Token auth and the default tenant header."
+      "description": "OpenAI-compatible application APIs. Uses collection Bearer Token auth; bearer credentials infer tenant context."
     },
     {
       "name": "Xeno Client",
@@ -1762,10 +1698,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
                   }
                 ],
                 "url": {
@@ -1808,17 +1740,7 @@
               "name": "Token Details",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/auth/token/details",
                   "host": [
@@ -1842,15 +1764,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -1898,15 +1811,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -1979,17 +1883,7 @@
               "name": "List Tenants",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/tenants",
                   "host": [
@@ -2011,15 +1905,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2052,15 +1937,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2090,17 +1966,7 @@
               "name": "Delete Tenant",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/tenants/{{tenantId}}",
                   "host": [
@@ -2124,17 +1990,7 @@
               "name": "List Users",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users",
                   "host": [
@@ -2156,15 +2012,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2197,15 +2044,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2235,17 +2073,7 @@
               "name": "Delete User",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/users/{{userId}}",
                   "host": [
@@ -2269,17 +2097,7 @@
               "name": "List Credentials",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/credentials",
                   "host": [
@@ -2301,15 +2119,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2342,15 +2151,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2380,17 +2180,7 @@
               "name": "Delete Credential",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/credentials/{{credentialId}}",
                   "host": [
@@ -2414,17 +2204,7 @@
               "name": "List Permissions",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions",
                   "host": [
@@ -2442,17 +2222,7 @@
               "name": "List Grantable Permissions",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions/grantable",
                   "host": [
@@ -2475,15 +2245,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2516,15 +2277,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2554,17 +2306,7 @@
               "name": "Delete Permission",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/permissions/{{permissionId}}",
                   "host": [
@@ -2588,17 +2330,7 @@
               "name": "List Roles",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles",
                   "host": [
@@ -2620,15 +2352,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2661,15 +2384,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2699,17 +2413,7 @@
               "name": "Delete Role",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/roles/{{roleId}}",
                   "host": [
@@ -2733,17 +2437,7 @@
               "name": "List Role Assignments",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/role-assignments",
                   "host": [
@@ -2765,15 +2459,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2802,17 +2487,7 @@
               "name": "Delete Role Assignment",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/role-assignments/{{roleAssignmentId}}",
                   "host": [
@@ -2831,17 +2506,7 @@
               "name": "List Effective Permissions",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/effective-permissions",
                   "host": [
@@ -2864,17 +2529,7 @@
               "name": "List Clients",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/clients",
                   "host": [
@@ -2892,17 +2547,7 @@
               "name": "Delete Client",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/clients/{{clientId}}",
                   "host": [
@@ -2925,15 +2570,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -2967,17 +2603,7 @@
               "name": "List Model Definitions",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/model-definitions",
                   "host": [
@@ -2995,17 +2621,7 @@
               "name": "List Model Configurations",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/model-configurations",
                   "host": [
@@ -3028,17 +2644,7 @@
               "name": "List Routing Policies",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies",
                   "host": [
@@ -3060,15 +2666,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -3101,15 +2698,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -3143,15 +2731,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -3185,15 +2764,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -3223,17 +2793,7 @@
               "name": "Delete Routing Policy",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
                   "host": [
@@ -3260,17 +2820,7 @@
                   "name": "Status",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/status",
                       "host": [
@@ -3289,17 +2839,7 @@
                   "name": "Metric Catalog",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/metrics",
                       "host": [
@@ -3318,17 +2858,7 @@
                   "name": "Collection Attempts",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/collection-attempts",
                       "host": [
@@ -3351,15 +2881,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3393,15 +2914,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3435,15 +2947,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3479,17 +2982,7 @@
                   "name": "Latest",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/latest?clientId={{clientTelemetryClientId}}",
                       "host": [
@@ -3518,15 +3011,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3561,15 +3045,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3600,17 +3075,7 @@
                   "name": "Get Detail",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
                       "host": [
@@ -3630,17 +3095,7 @@
                   "name": "Delete Detail",
                   "request": {
                     "method": "DELETE",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
                       "host": [
@@ -3664,15 +3119,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3708,17 +3154,7 @@
                   "name": "Latest",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/latest?clientId={{clientTelemetryClientId}}&providerName={{clientTelemetryProviderName}}",
                       "host": [
@@ -3752,15 +3188,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3796,15 +3223,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3836,17 +3254,7 @@
                   "name": "Get Detail",
                   "request": {
                     "method": "GET",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
                       "host": [
@@ -3867,17 +3275,7 @@
                   "name": "Delete Detail",
                   "request": {
                     "method": "DELETE",
-                    "header": [
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
-                      }
-                    ],
+                    "header": [],
                     "url": {
                       "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
                       "host": [
@@ -3902,15 +3300,6 @@
                       {
                         "key": "Content-Type",
                         "value": "application/json"
-                      },
-                      {
-                        "key": "x-tenant-guid",
-                        "value": "{{tenantId}}"
-                      },
-                      {
-                        "key": "x-tenant-id",
-                        "value": "{{tenantId}}",
-                        "disabled": true
                       }
                     ],
                     "url": {
@@ -3949,17 +3338,7 @@
               "name": "List Request History",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history?page={{page}}&pageSize={{pageSize}}",
                   "host": [
@@ -3987,17 +3366,7 @@
               "name": "Get Request History Entry",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
                   "host": [
@@ -4016,17 +3385,7 @@
               "name": "Delete Request History Entry",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
                   "host": [
@@ -4045,17 +3404,7 @@
               "name": "Summary",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/summary?bucketMinutes={{bucketMinutes}}&fromUtc={{fromUtc}}&toUtc={{toUtc}}",
                   "host": [
@@ -4092,15 +3441,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -4130,17 +3470,7 @@
               "name": "Analytics Overview",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/analytics/overview?fromUtc={{fromUtc}}&toUtc={{toUtc}}",
                   "host": [
@@ -4175,17 +3505,7 @@
               "name": "Overview",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/analytics/overview",
                   "host": [
@@ -4209,17 +3529,7 @@
               "name": "Get Settings",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/settings",
                   "host": [
@@ -4241,15 +3551,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -4283,17 +3584,7 @@
               "name": "Backup",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/backup",
                   "host": [
@@ -4315,15 +3606,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -4357,17 +3639,7 @@
               "name": "List Audit Records",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/audit",
                   "host": [
@@ -4385,17 +3657,7 @@
               "name": "Delete Audit Record",
               "request": {
                 "method": "DELETE",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/audit/{{auditId}}",
                   "host": [
@@ -4441,15 +3703,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -4478,12 +3731,7 @@
               "name": "Denied - Tenant Mismatch Models",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{foreignTenantId}}"
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{openAiBaseUrl}}/models",
                   "host": [
@@ -4505,15 +3753,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -4547,15 +3786,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {
@@ -4623,17 +3853,7 @@
               "name": "Legacy List Users",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{legacyServerApiBaseUrl}}/users",
                   "host": [
@@ -4651,17 +3871,7 @@
               "name": "Legacy List Routing Policies",
               "request": {
                 "method": "GET",
-                "header": [
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
-                  }
-                ],
+                "header": [],
                 "url": {
                   "raw": "{{serverBaseUrl}}{{legacyServerApiBaseUrl}}/routingpolicies",
                   "host": [
@@ -4683,15 +3893,6 @@
                   {
                     "key": "Content-Type",
                     "value": "application/json"
-                  },
-                  {
-                    "key": "x-tenant-guid",
-                    "value": "{{tenantId}}"
-                  },
-                  {
-                    "key": "x-tenant-id",
-                    "value": "{{tenantId}}",
-                    "disabled": true
                   }
                 ],
                 "url": {

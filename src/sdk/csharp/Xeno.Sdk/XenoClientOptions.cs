@@ -23,9 +23,9 @@ namespace Xeno.Sdk
         public string? AccessKey { get; set; }
 
         /// <summary>
-        /// Gets or sets the tenant identifier sent as <c>x-tenant-guid</c>. Default value is <c>ten_default</c>.
+        /// Gets or sets the optional tenant identifier sent as <c>x-tenant-guid</c>. Default value is <c>null</c>.
         /// </summary>
-        public string TenantId { get; set; } = "ten_default";
+        public string? TenantId { get; set; }
 
         /// <summary>
         /// Gets or sets an optional caller-owned HTTP client. When supplied, the SDK does not dispose it.

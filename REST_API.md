@@ -2,7 +2,7 @@
 
 Base URL: `http://localhost:9000`
 
-The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Tenant-scoped calls accept `x-tenant-guid`; if omitted, the seeded `ten_default` tenant is used. Tenant headers do not authenticate a caller. Protected REST routes use bearer auth. The bearer value may be an issued session token or a tenant credential value such as the seeded `default`; matching `x-token` and legacy direct `x-access-key` credentials remain accepted for compatibility. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, and access key material into Try it out requests.
+The server exposes Watson 7 routes with `/openapi.json` and `/swagger`. Protected REST routes use bearer auth. The bearer value may be an issued session token or a globally unique tenant credential value such as the seeded `default`; the authenticated session or credential establishes tenant context. Tenant-scoped calls may still accept `x-tenant-guid` as an optional selector or compatibility hint, and supplied tenant hints must match the authenticated bearer tenant. Tenant headers do not authenticate a caller. Matching `x-token` and legacy direct `x-access-key` credentials remain accepted for compatibility. Swagger UI includes a Xeno authentication panel that loads saved tenant, bearer token, `x-token`, and access key material into Try it out requests.
 
 The REST API is the operator and application surface for a federated accelerator fleet. Applications use the OpenAI-compatible routes so they can call one endpoint regardless of which connected machine ultimately serves the request. Operators use the management routes to inspect clients, advertised models, telemetry, request history, routing policy, tenants, credentials, and settings for the controller.
 
@@ -73,7 +73,7 @@ Server-collected telemetry is stored in the database engine selected by the serv
 
 `POST /v1.0/api/auth/logout`
 
-Token issuance accepts direct credential fields. REST clients may also send a tenant credential value directly as `Authorization: Bearer <credential>`. Bearer and `x-token` values must match when both are supplied.
+Token issuance accepts direct credential fields. REST clients may also send a globally unique tenant credential value directly as `Authorization: Bearer <credential>` without a tenant header. Bearer and `x-token` values must match when both are supplied.
 
 Login accepts `username`, `password`, and optional `tenantId`. It returns a generated `accessKey` for client use. For REST calls, send that credential value as a bearer token. The user password is only accepted by the login endpoint and is never accepted on the WebSocket control plane.
 
@@ -216,8 +216,10 @@ OpenAI-compatible routes are protected application APIs. `GET /v1/models`
 requires `Inference.Read`. `POST /v1/chat/completions`,
 `POST /v1/completions`, and `POST /v1/embeddings` require
 `Inference.Execute`. Authentication should use `Authorization: Bearer ...`,
-where the bearer value is an issued session token or a tenant credential value.
-Matching `x-token` and legacy `x-access-key` remain accepted; the tenant header
+where the bearer value is an issued session token or a globally unique tenant
+credential value. No tenant header is required for bearer credentials; the
+server infers the tenant from the authenticated session or credential. Matching
+`x-token` and legacy `x-access-key` remain accepted; any supplied tenant header
 must match the authenticated session or credential tenant unless the caller is a
 system admin. Anonymous requests receive 401 and cannot dispatch to a connected
 client.

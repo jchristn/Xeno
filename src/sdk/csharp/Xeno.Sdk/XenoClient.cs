@@ -27,10 +27,10 @@
         /// </summary>
         /// <param name="baseUrl">Xeno server base URL.</param>
         /// <param name="bearerToken">Bearer token. Default value is <c>default</c>; use <c>null</c> to omit bearer authentication.</param>
-        /// <param name="tenantId">Tenant identifier. Default value is <c>ten_default</c>.</param>
+        /// <param name="tenantId">Optional tenant identifier. Default value is <c>null</c>; bearer credentials infer tenant context.</param>
         /// <param name="httpClient">Optional caller-owned HTTP client.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="baseUrl"/> is null or empty.</exception>
-        public XenoClient(string baseUrl, string? bearerToken = "default", string tenantId = "ten_default", HttpClient? httpClient = null)
+        public XenoClient(string baseUrl, string? bearerToken = "default", string? tenantId = null, HttpClient? httpClient = null)
             : this(new XenoClientOptions
             {
                 BaseUrl = baseUrl,

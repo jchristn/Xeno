@@ -9,7 +9,7 @@ namespace Xeno.Sdk.Console
     internal static class Program
     {
         private static string _BaseUrl = "http://localhost:9000";
-        private static string _TenantId = "ten_default";
+        private static string? _TenantId;
         private static string? _BearerToken = "default";
 
         private static async Task<int> Main(string[] args)
@@ -75,7 +75,7 @@ namespace Xeno.Sdk.Console
         {
             string username = Prompt("Username", "admin@xeno");
             string password = Prompt("Password", "password");
-            CredentialLoginResponse response = await client.LoginAsync(username, password, _TenantId, token).ConfigureAwait(false);
+            CredentialLoginResponse response = await client.LoginAsync(username, password, _TenantId ?? "ten_default", token).ConfigureAwait(false);
             await PrintJsonAsync(response).ConfigureAwait(false);
         }
 
@@ -112,7 +112,7 @@ namespace Xeno.Sdk.Console
             System.Console.WriteLine("");
             System.Console.WriteLine("Connection");
             System.Console.WriteLine("  url <url>       set server URL, current " + _BaseUrl);
-            System.Console.WriteLine("  tenant <id>     set tenant, current " + _TenantId);
+            System.Console.WriteLine("  tenant <id>     set tenant header, current " + (_TenantId ?? "<inferred>"));
             System.Console.WriteLine("  token <token>   set bearer token, current " + (_BearerToken ?? "<none>"));
             System.Console.WriteLine("");
             System.Console.WriteLine("Read commands");

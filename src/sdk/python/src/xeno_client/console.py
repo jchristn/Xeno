@@ -9,7 +9,7 @@ from .client import XenoApiError, XenoClient
 
 def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:9000"
-    tenant_id = "ten_default"
+    tenant_id: str | None = None
     bearer_token: str | None = "default"
 
     print_help(base_url, tenant_id, bearer_token)
@@ -69,7 +69,7 @@ def run_command(command: str, client: XenoClient, tenant_id: str) -> None:
     elif command == "login":
         username = prompt("Username", "admin@xeno")
         password = getpass("Password [password]: ") or "password"
-        print_json(client.login(username, password, tenant_id))
+        print_json(client.login(username, password, tenant_id or "ten_default"))
     elif command == "chat":
         model = prompt("Model", "llama3.2:latest")
         content = prompt("Prompt", "hello")
@@ -91,7 +91,7 @@ def print_help(base_url: str, tenant_id: str, bearer_token: str | None) -> None:
     print("")
     print("Connection")
     print(f"  url <url>       set server URL, current {base_url}")
-    print(f"  tenant <id>     set tenant, current {tenant_id}")
+    print(f"  tenant <id>     set tenant header, current {tenant_id or '<inferred>'}")
     print(f"  token <token>   set bearer token, current {bearer_token or '<none>'}")
     print("")
     print("Read commands")

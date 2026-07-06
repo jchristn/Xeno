@@ -186,7 +186,7 @@ class XenoClient:
         base_url: str = "http://localhost:9000",
         bearer_token: str | None = "default",
         access_key: str | None = None,
-        tenant_id: str = "ten_default",
+        tenant_id: str | None = None,
         opener: Any | None = None,
     ) -> None:
         if not base_url:

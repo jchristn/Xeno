@@ -42,7 +42,7 @@ test('listTenants sends tenant and bearer headers', async () => {
   assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], 'ten_123');
 });
 
-test('default options send seeded bearer and tenant headers', async () => {
+test('default options send seeded bearer without tenant header', async () => {
   const fetchImpl = createFetch();
   const client = new XenoClient({
     baseUrl: 'https://xeno.local',
@@ -52,7 +52,7 @@ test('default options send seeded bearer and tenant headers', async () => {
   await client.listOpenAiModels();
 
   assert.equal(fetchImpl.calls[0].options.headers.Authorization, 'Bearer default');
-  assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], 'ten_default');
+  assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], undefined);
 });
 
 test('management CRUD methods use expected routes and bodies', async () => {

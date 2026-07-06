@@ -66,6 +66,30 @@ namespace Xeno.Core.Services
         /// Validate a bearer token.
         /// </summary>
         /// <param name="platform">Platform state.</param>
+        /// <param name="token">Bearer token.</param>
+        /// <returns>Active auth session.</returns>
+        public AuthSession? ValidateToken(XenoPlatform platform, string token)
+        {
+            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (String.IsNullOrWhiteSpace(token)) return null;
+
+            string tokenHash = HashToken(token);
+            DateTime now = DateTime.UtcNow;
+            List<AuthSession> sessions = platform.AuthSessions
+                .Where(item =>
+                    item.Active &&
+                    item.ExpiresUtc > now &&
+                    String.Equals(item.TokenHash, tokenHash, StringComparison.Ordinal))
+                .Where(item => IsSessionValid(platform, item))
+                .ToList();
+
+            return sessions.Count == 1 ? sessions[0] : null;
+        }
+
+        /// <summary>
+        /// Validate a bearer token for a specific tenant.
+        /// </summary>
+        /// <param name="platform">Platform state.</param>
         /// <param name="tenantId">Tenant ID.</param>
         /// <param name="token">Bearer token.</param>
         /// <returns>Active auth session.</returns>
@@ -74,33 +98,34 @@ namespace Xeno.Core.Services
             if (platform == null) throw new ArgumentNullException(nameof(platform));
             if (String.IsNullOrWhiteSpace(token)) return null;
 
-            string tokenHash = HashToken(token);
-            DateTime now = DateTime.UtcNow;
-            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
-            AuthSession? session = platform.AuthSessions.FirstOrDefault(item =>
-                item.TenantId == tenantId &&
-                item.Active &&
-                item.ExpiresUtc > now &&
-                String.Equals(item.TokenHash, tokenHash, StringComparison.Ordinal));
-
-            if (session == null) return null;
-            if (!String.IsNullOrWhiteSpace(session.UserId))
-            {
-                User? user = platform.Users.FirstOrDefault(item => item.Id == session.UserId && item.TenantId == session.TenantId && item.Active);
-                if (user == null) return null;
-            }
-
-            if (!String.IsNullOrWhiteSpace(session.CredentialId))
-            {
-                Credential? credential = platform.Credentials.FirstOrDefault(item => item.Id == session.CredentialId && item.TenantId == session.TenantId && item.Active);
-                if (credential == null) return null;
-            }
-
+            AuthSession? session = ValidateToken(platform, token);
+            if (session == null || !String.Equals(session.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)) return null;
             return session;
         }
 
         /// <summary>
-        /// Validate a direct credential.
+        /// Validate a direct credential by globally unique access key.
+        /// </summary>
+        /// <param name="platform">Platform state.</param>
+        /// <param name="accessKey">Access key.</param>
+        /// <returns>Credential when valid and unambiguous.</returns>
+        public Credential? ValidateCredential(XenoPlatform platform, string accessKey)
+        {
+            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (String.IsNullOrWhiteSpace(accessKey)) return null;
+
+            List<Credential> credentials = platform.Credentials
+                .Where(item =>
+                    item.Active &&
+                    String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))
+                .Where(item => IsCredentialValid(platform, item))
+                .ToList();
+
+            return credentials.Count == 1 ? credentials[0] : null;
+        }
+
+        /// <summary>
+        /// Validate a direct credential for a specific tenant.
         /// </summary>
         /// <param name="platform">Platform state.</param>
         /// <param name="tenantId">Tenant ID.</param>
@@ -119,6 +144,30 @@ namespace Xeno.Core.Services
             if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
             if (!platform.Users.Any(item => item.Id == credential.UserId && item.TenantId == tenantId && item.Active)) return null;
             return credential;
+        }
+
+        private static bool IsSessionValid(XenoPlatform platform, AuthSession session)
+        {
+            if (!platform.Tenants.Any(item => item.Id == session.TenantId && item.Active)) return false;
+            if (!String.IsNullOrWhiteSpace(session.UserId))
+            {
+                User? user = platform.Users.FirstOrDefault(item => item.Id == session.UserId && item.TenantId == session.TenantId && item.Active);
+                if (user == null) return false;
+            }
+
+            if (!String.IsNullOrWhiteSpace(session.CredentialId))
+            {
+                Credential? credential = platform.Credentials.FirstOrDefault(item => item.Id == session.CredentialId && item.TenantId == session.TenantId && item.Active);
+                if (credential == null) return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsCredentialValid(XenoPlatform platform, Credential credential)
+        {
+            if (!platform.Tenants.Any(item => item.Id == credential.TenantId && item.Active)) return false;
+            return platform.Users.Any(item => item.Id == credential.UserId && item.TenantId == credential.TenantId && item.Active);
         }
 
         /// <summary>

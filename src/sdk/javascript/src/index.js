@@ -13,7 +13,7 @@ export class XenoClient {
     baseUrl = 'http://localhost:9000',
     bearerToken = 'default',
     accessKey = null,
-    tenantId = 'ten_default',
+    tenantId = null,
     fetchImpl = globalThis.fetch
   } = {}) {
     if (!baseUrl) {

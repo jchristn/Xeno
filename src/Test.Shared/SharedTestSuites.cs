@@ -1018,8 +1018,11 @@ namespace Test.Shared
                             AuthenticationService auth = new AuthenticationService();
                             User user = platform.Users[0];
                             AuthTokenResult token = auth.IssueToken(platform, new AuthSettings(), user.TenantId, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Credential);
+                            AuthSession? inferredSession = auth.ValidateToken(platform, token.Token);
+                            if (inferredSession == null || inferredSession.TenantId != user.TenantId) throw new InvalidOperationException("Token tenant was not inferred.");
                             AuthSession? session = auth.ValidateToken(platform, user.TenantId, token.Token);
                             if (session == null) throw new InvalidOperationException("Token did not validate.");
+                            if (auth.ValidateToken(platform, "ten_wrong", token.Token) != null) throw new InvalidOperationException("Token validated for the wrong tenant.");
                             if (!auth.RevokeSession(platform, session.Id)) throw new InvalidOperationException("Session was not revoked.");
                             if (auth.ValidateToken(platform, user.TenantId, token.Token) != null) throw new InvalidOperationException("Revoked token still validates.");
                         }),
@@ -1033,7 +1036,10 @@ namespace Test.Shared
                             await platform.InitializeAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
                             Credential credential = platform.Credentials[0];
+                            Credential? inferredCredential = auth.ValidateCredential(platform, credential.AccessKey);
+                            if (inferredCredential == null || inferredCredential.TenantId != credential.TenantId) throw new InvalidOperationException("Credential tenant was not inferred.");
                             if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey) == null) throw new InvalidOperationException("Credential did not validate.");
+                            if (auth.ValidateCredential(platform, "ten_wrong", credential.AccessKey) != null) throw new InvalidOperationException("Credential validated for the wrong tenant.");
                             if (auth.ValidateCredential(platform, credential.TenantId, "wrong") != null) throw new InvalidOperationException("Invalid credential validated.");
                         }),
                     new TestCaseDescriptor(
@@ -3232,7 +3238,6 @@ namespace Test.Shared
                             {
                                 settingsRequest.Headers.Add("Authorization", "Bearer " + login.Token);
                                 settingsRequest.Headers.Add("x-token", login.Token);
-                                settingsRequest.Headers.Add("x-tenant-guid", login.TenantId);
                                 using (HttpResponseMessage settingsResponse = await httpClient.SendAsync(settingsRequest).ConfigureAwait(false))
                                 {
                                     string settingsJson = await settingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -4721,7 +4726,6 @@ namespace Test.Shared
             httpClient.DefaultRequestHeaders.Remove("x-tenant-guid");
             httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + token);
             httpClient.DefaultRequestHeaders.Add("x-token", token);
-            httpClient.DefaultRequestHeaders.Add("x-tenant-guid", tenantId);
         }
 
         private static async Task<string> CreateUserViaApiAsync(HttpClient httpClient, string baseUrl, string tenantId, string email, string password, bool isAdmin, bool isTenantAdmin)

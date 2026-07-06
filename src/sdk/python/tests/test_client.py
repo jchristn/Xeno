@@ -48,7 +48,7 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer token-123")
         self.assertEqual(request.headers["X-tenant-guid"], "ten_123")
 
-    def test_default_options_send_seeded_bearer_and_tenant_headers(self):
+    def test_default_options_send_seeded_bearer_without_tenant_header(self):
         opener = FakeOpener()
         client = XenoClient("https://xeno.local", opener=opener)
 
@@ -56,7 +56,7 @@ class XenoClientTests(unittest.TestCase):
 
         request = opener.calls[0]["request"]
         self.assertEqual(request.headers["Authorization"], "Bearer default")
-        self.assertEqual(request.headers["X-tenant-guid"], "ten_default")
+        self.assertNotIn("X-tenant-guid", request.headers)
 
     def test_management_crud_methods_use_expected_routes_and_bodies(self):
         opener = FakeOpener(lambda request: FakeResponse("{}", 204 if request.get_method() == "DELETE" else 200))

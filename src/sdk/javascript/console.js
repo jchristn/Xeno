@@ -4,7 +4,7 @@ import { XenoApiError, XenoClient } from './src/index.js';
 
 const rl = readline.createInterface({ input, output });
 let baseUrl = process.argv[2] || 'http://localhost:9000';
-let tenantId = 'ten_default';
+let tenantId = null;
 let bearerToken = 'default';
 
 function client() {
@@ -15,7 +15,7 @@ function printHelp() {
   console.log('');
   console.log('Connection');
   console.log(`  url <url>       set server URL, current ${baseUrl}`);
-  console.log(`  tenant <id>     set tenant, current ${tenantId}`);
+  console.log(`  tenant <id>     set tenant header, current ${tenantId ?? '<inferred>'}`);
   console.log(`  token <token>   set bearer token, current ${bearerToken ?? '<none>'}`);
   console.log('');
   console.log('Read commands');
@@ -68,7 +68,7 @@ async function runCommand(command) {
   if (command === 'login') {
     const username = await prompt('Username', 'admin@xeno');
     const password = await prompt('Password', 'password');
-    return printJson(await sdk.login(username, password, tenantId));
+    return printJson(await sdk.login(username, password, tenantId ?? 'ten_default'));
   }
   if (command === 'chat') {
     const model = await prompt('Model', 'llama3.2:latest');

@@ -23,7 +23,7 @@ using (XenoClient client = new XenoClient("http://localhost:9000"))
 }
 ```
 
-The SDK defaults to the seeded tenant `ten_default` and bearer token `default`, which works against the default local Docker server. Production deployments should pass an issued bearer token or a tenant credential value as the bearer token:
+The SDK defaults to bearer token `default`, which works against the default local Docker server. Bearer credentials infer tenant context, so the SDK does not send `x-tenant-guid` unless `TenantId` is explicitly set. Production deployments should pass an issued bearer token or a globally unique tenant credential value as the bearer token:
 
 ```csharp
 using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token))
@@ -49,7 +49,8 @@ using (XenoClient client = new XenoClient(new XenoClientOptions
 
 Use least-privilege credentials with `Inference.Read` and `Inference.Execute`
 for application traffic. Credential values may be sent as bearer tokens.
-Tenant headers select tenant context; they do not authenticate the request.
+Tenant headers are optional selectors or compatibility hints; they do not
+authenticate the request.
 
 ## Interactive Console
 
