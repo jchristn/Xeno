@@ -182,7 +182,7 @@ export default function LocalDashboardApp() {
           }),
           loadLocalHostTelemetryRollups(range)
         ]);
-        setTelemetrySamples(searchResponse.samples || []);
+        setTelemetrySamples(localRows(searchResponse.samples || searchResponse));
         setHostTelemetryRollups(rollupResponses);
       } else if (page === 'providerTelemetry') {
         const [latestResponse, rollupResponse] = await Promise.all([
@@ -193,7 +193,7 @@ export default function LocalDashboardApp() {
           })
         ]);
         setProviderTelemetryLatest(latestResponse);
-        setProviderTelemetryRollups(rollupResponse || []);
+        setProviderTelemetryRollups(localRows(rollupResponse));
       } else if (page === 'providerTelemetryAnalytics') {
         const [searchResponse, rollupResponse] = await Promise.all([
           localApi(`/api/v1/telemetry/providers/history/search?range=${encodeURIComponent(localApiRange(range))}`, {
@@ -205,8 +205,8 @@ export default function LocalDashboardApp() {
             body: jsonBody({ metric: providerTelemetryMetric, providerName: providerTelemetryProvider || null, modelName: providerTelemetryModel || null, bucketMinutes: telemetryBucketMinutes(range) })
           })
         ]);
-        setProviderTelemetrySamples(searchResponse.samples || []);
-        setProviderTelemetryRollups(rollupResponse || []);
+        setProviderTelemetrySamples(localRows(searchResponse.samples || searchResponse));
+        setProviderTelemetryRollups(localRows(rollupResponse));
       } else if (page === 'logs') {
         const response = await localApi(`/api/v1/logs?tail=${logTail}&severity=${logSeverity}`);
         setLogs(response.lines || []);
@@ -1589,9 +1589,21 @@ async function loadLocalHostTelemetryRollups(range) {
       method: 'POST',
       body: jsonBody({ metric: config.metric, bucketMinutes: telemetryBucketMinutes(range) })
     });
-    return [config.key, Array.isArray(response) ? response : []];
+    return [config.key, localRows(response)];
   }));
   return Object.fromEntries(entries);
+}
+
+function localRows(input) {
+  if (Array.isArray(input)) return input;
+  if (!input || typeof input !== 'object') return [];
+
+  const keys = ['data', 'value', 'items', 'rows', 'entries', 'records', 'samples', 'buckets', 'hostTelemetry', 'providerTelemetry'];
+  for (const key of keys) {
+    if (Array.isArray(input[key])) return input[key];
+  }
+
+  return [];
 }
 
 function desiredChartBuckets(range) {

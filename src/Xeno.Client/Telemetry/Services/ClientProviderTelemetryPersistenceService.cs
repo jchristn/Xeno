@@ -93,26 +93,32 @@ namespace Xeno.Client.Telemetry.Services
 
         private async Task RunAsync(CancellationToken token)
         {
-            await CollectAndPersistSafeAsync(token).ConfigureAwait(false);
-            await PruneSafeAsync(token).ConfigureAwait(false);
-            using (PeriodicTimer collectionTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(_Settings.Telemetry.ProviderTelemetry.CollectionIntervalMs)))
-            using (PeriodicTimer pruneTimer = new PeriodicTimer(TimeSpan.FromMinutes(_Settings.Telemetry.PruneIntervalMinutes)))
+            try
             {
-                while (!token.IsCancellationRequested)
+                await CollectAndPersistSafeAsync(token).ConfigureAwait(false);
+                await PruneSafeAsync(token).ConfigureAwait(false);
+                DateTime nextPruneUtc = DateTime.UtcNow.AddMinutes(_Settings.Telemetry.PruneIntervalMinutes);
+                using (PeriodicTimer collectionTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(_Settings.Telemetry.ProviderTelemetry.CollectionIntervalMs)))
                 {
-                    Task<bool> collectionTick = collectionTimer.WaitForNextTickAsync(token).AsTask();
-                    Task<bool> pruneTick = pruneTimer.WaitForNextTickAsync(token).AsTask();
-                    Task completed = await Task.WhenAny(collectionTick, pruneTick).ConfigureAwait(false);
-                    if (completed == collectionTick && collectionTick.IsCompletedSuccessfully && collectionTick.Result)
+                    while (!token.IsCancellationRequested && await collectionTimer.WaitForNextTickAsync(token).ConfigureAwait(false))
                     {
                         await CollectAndPersistSafeAsync(token).ConfigureAwait(false);
-                    }
-
-                    if (completed == pruneTick && pruneTick.IsCompletedSuccessfully && pruneTick.Result)
-                    {
-                        await PruneSafeAsync(token).ConfigureAwait(false);
+                        if (DateTime.UtcNow >= nextPruneUtc)
+                        {
+                            await PruneSafeAsync(token).ConfigureAwait(false);
+                            nextPruneUtc = DateTime.UtcNow.AddMinutes(_Settings.Telemetry.PruneIntervalMinutes);
+                        }
                     }
                 }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                Status.Running = false;
+                Status.LastMessage = ex.Message;
+                Console.Error.WriteLine(DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.ffffff'Z'") + " [WARN] Provider telemetry worker stopped: " + ex.Message);
             }
         }
 

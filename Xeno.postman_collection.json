@@ -1273,7 +1273,7 @@
                                                       "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/search",
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
+                                                                   "raw":  "{\n  \"metric\": \"CpuUtilizationPercent\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"
@@ -1299,7 +1299,7 @@
                                                       "url":  "{{localDashboardUrl}}/api/v1/telemetry/history/rollups",
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{\n  \"metric\": \"cpu\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5,\n  \"limit\": 500\n}",
+                                                                   "raw":  "{\n  \"metric\": \"CpuUtilizationPercent\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5,\n  \"limit\": 500\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"
@@ -1781,7 +1781,7 @@
                                                       "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/search",
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{ \"metric\": \"CpuUtilizationPercent\", \"limit\": 100, \"offset\": 0 }",
+                                                                   "raw":  "{\n  \"clientId\": \"{{clientTelemetryClientId}}\",\n  \"metric\": \"CpuUtilizationPercent\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"
@@ -1815,7 +1815,7 @@
                                                       "url":  "{{baseUrl}}/v1.0/api/client-telemetry/history/rollups",
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{ \"metric\": \"CpuUtilizationPercent\", \"bucketMinutes\": 5 }",
+                                                                   "raw":  "{\n  \"clientId\": \"{{clientTelemetryClientId}}\",\n  \"metric\": \"CpuUtilizationPercent\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"
@@ -1958,7 +1958,7 @@
                                                       "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/search",
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{ \"providerName\": \"{{clientTelemetryProviderName}}\", \"metric\": \"LatencyP95Ms\", \"limit\": 100, \"offset\": 0 }",
+                                                                   "raw":  "{\n  \"clientId\": \"{{clientTelemetryClientId}}\",\n  \"providerName\": \"{{clientTelemetryProviderName}}\",\n  \"modelName\": null,\n  \"metric\": \"LatencyP95Ms\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"limit\": 100,\n  \"offset\": 0\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"
@@ -1992,7 +1992,7 @@
                                                       "url":  "{{baseUrl}}/v1.0/api/client-telemetry/providers/history/rollups",
                                                       "body":  {
                                                                    "mode":  "raw",
-                                                                   "raw":  "{ \"metric\": \"LatencyP95Ms\", \"bucketMinutes\": 5 }",
+                                                                   "raw":  "{\n  \"clientId\": \"{{clientTelemetryClientId}}\",\n  \"providerName\": \"{{clientTelemetryProviderName}}\",\n  \"modelName\": null,\n  \"metric\": \"LatencyP95Ms\",\n  \"fromUtc\": null,\n  \"toUtc\": null,\n  \"bucketMinutes\": 5\n}",
                                                                    "options":  {
                                                                                    "raw":  {
                                                                                                "language":  "json"

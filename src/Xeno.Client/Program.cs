@@ -1569,6 +1569,7 @@ namespace Xeno.Client
                             SentUtc = DateTime.UtcNow,
                             Inventory = latestSettings.BuildInventoryMessage()
                         }, token).ConfigureAwait(false);
+                        WriteInfo("Sent client inventory update to Xeno server.");
                         ClientConnectionState.MarkInventoryUpdateSent();
                     }
                 }
@@ -2719,6 +2720,18 @@ namespace Xeno.Client
                     }
 
                     WriteDebug("Server message: " + type + ".");
+                    return;
+                }
+
+                if (String.Equals(type, "server.inventory.updated", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
+                    WriteInfo("Client inventory update acknowledged by Xeno server.");
                     return;
                 }
 

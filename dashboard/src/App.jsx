@@ -410,8 +410,8 @@ function ClientTelemetryView() {
   const selectedClientQuery = selectedClientId === 'all' ? '' : `?clientId=${encodeURIComponent(selectedClientId)}`;
   const latestHostTelemetry = value(latest, 'hostTelemetry');
   const latestProviderTelemetry = value(latest, 'providerTelemetry');
-  const hostRows = Array.isArray(latestHostTelemetry) ? latestHostTelemetry : [];
-  const providerRows = Array.isArray(latestProviderTelemetry) ? latestProviderTelemetry : [];
+  const hostRows = collectionRows(latestHostTelemetry);
+  const providerRows = collectionRows(latestProviderTelemetry);
   const connectedClientCount = selectedClientId === 'all'
     ? value(status, 'connectedClientCount') || 0
     : (value(selectedClient, 'connected') === true ? 1 : 0);
@@ -480,7 +480,7 @@ function ClientTelemetryView() {
     setAttemptsLoading(true);
     api.get(`/v1.0/api/client-telemetry/collection-attempts${selectedClientQuery}`)
       .then((nextAttempts) => {
-        if (alive) setAttempts(Array.isArray(nextAttempts) ? nextAttempts : []);
+        if (alive) setAttempts(collectionRows(nextAttempts));
       })
       .catch(() => {
         if (alive) setAttempts([]);
@@ -505,7 +505,7 @@ function ClientTelemetryView() {
       setRollupLoading((current) => ({ ...current, [config.key]: true }));
       try {
         const result = await api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: config.metric });
-        if (alive) setHostRollups((current) => ({ ...current, [config.key]: Array.isArray(result) ? result : [] }));
+        if (alive) setHostRollups((current) => ({ ...current, [config.key]: collectionRows(result) }));
       } catch {
         if (alive) setHostRollups((current) => ({ ...current, [config.key]: [] }));
       } finally {
@@ -517,7 +517,7 @@ function ClientTelemetryView() {
       setRollupLoading((current) => ({ ...current, [config.key]: true }));
       try {
         const result = await api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: config.metric });
-        if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: Array.isArray(result) ? result : [] }));
+        if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: collectionRows(result) }));
       } catch {
         if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: [] }));
       } finally {
@@ -4649,7 +4649,32 @@ function collectionRows(input) {
   if (Array.isArray(input)) return input;
   if (!input || typeof input !== 'object') return [];
 
-  const keys = ['data', 'Data', 'items', 'Items', 'rows', 'Rows', 'entries', 'Entries', 'records', 'Records', 'requestHistory', 'RequestHistory'];
+  const keys = [
+    'data',
+    'Data',
+    'value',
+    'Value',
+    'items',
+    'Items',
+    'rows',
+    'Rows',
+    'entries',
+    'Entries',
+    'records',
+    'Records',
+    'samples',
+    'Samples',
+    'buckets',
+    'Buckets',
+    'hostTelemetry',
+    'HostTelemetry',
+    'providerTelemetry',
+    'ProviderTelemetry',
+    'attempts',
+    'Attempts',
+    'requestHistory',
+    'RequestHistory'
+  ];
   for (const key of keys) {
     if (Array.isArray(input[key])) return input[key];
   }
