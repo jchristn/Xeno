@@ -1282,19 +1282,57 @@ namespace Test.Shared
                             Filename = dbFile
                         };
 
-                        DatabaseDriverBase first = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false);
-                        first.Platform.GetDefaultTenant().Name = "Persisted Tenant";
-                        await first.SaveAsync().ConfigureAwait(false);
-                        first.Dispose();
-
-                        DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false);
-                        if (second.Platform.GetDefaultTenant().Name != "Persisted Tenant") throw new InvalidOperationException("SQLite state did not persist.");
-                        second.Dispose();
+                        await RunPlatformStateRoundTripAsync(settings, "sqlite").ConfigureAwait(false);
                     }
                     finally
                     {
                         await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
                     }
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "PostgresqlPersistsPlatformState",
+                displayName: "PostgreSQL persists complete platform state when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_POSTGRESQL_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunPlatformStateRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.Postgresql,
+                        ConnectionString = connectionString
+                    }, "postgresql").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "MysqlPersistsPlatformState",
+                displayName: "MySQL persists complete platform state when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_MYSQL_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunPlatformStateRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.Mysql,
+                        ConnectionString = connectionString
+                    }, "mysql").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "SqlServerPersistsPlatformState",
+                displayName: "SQL Server persists complete platform state when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_SQLSERVER_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunPlatformStateRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.SqlServer,
+                        ConnectionString = connectionString
+                    }, "sqlserver").ConfigureAwait(false);
                 }));
 
             cases.Add(new TestCaseDescriptor(
@@ -1655,6 +1693,21 @@ namespace Test.Shared
 
             cases.Add(new TestCaseDescriptor(
                 suiteId: "Database",
+                caseId: "PostgresqlServerTelemetryRoundTrip",
+                displayName: "PostgreSQL server telemetry persists and rolls up when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_POSTGRESQL_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunServerTelemetryRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.Postgresql,
+                        ConnectionString = connectionString
+                    }, "postgresql").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
                 caseId: "MysqlServerTelemetryRoundTrip",
                 displayName: "MySQL server telemetry persists and rolls up when a test connection is provided",
                 executeAsync: async delegate
@@ -1684,6 +1737,151 @@ namespace Test.Shared
                 }));
 
             return new TestSuiteDescriptor("Database", "Database Providers", cases);
+        }
+
+        private static async Task RunPlatformStateRoundTripAsync(DatabaseSettings settings, string suffix)
+        {
+            string marker = suffix + "_" + Guid.NewGuid().ToString("N");
+            string tenantId = "ten_state_" + marker;
+            string userId = "usr_state_" + marker;
+            string credentialId = "cred_state_" + marker;
+            string sessionId = "sess_state_" + marker;
+            string permissionId = "perm_state_" + marker;
+            string roleId = "role_state_" + marker;
+            string roleAssignmentId = "rmap_state_" + marker;
+            string auditId = "aud_state_" + marker;
+            string clientId = "xcl_state_" + marker;
+            string modelDefinitionId = "md_state_" + marker;
+            string modelConfigurationId = "mc_state_" + marker;
+            string routingPolicyId = "rpol_state_" + marker;
+            string requestHistoryId = "req_state_" + marker;
+            using (DatabaseDriverBase first = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+            {
+                AddPlatformStateRoundTripRecords(first.Platform, tenantId, userId, credentialId, sessionId, permissionId, roleId, roleAssignmentId, auditId, clientId, modelDefinitionId, modelConfigurationId, routingPolicyId, requestHistoryId, marker);
+                await first.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            using (DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+            {
+                AssertPlatformStateRoundTrip(second.Platform, tenantId, userId, credentialId, sessionId, permissionId, roleId, roleAssignmentId, auditId, clientId, modelDefinitionId, modelConfigurationId, routingPolicyId, requestHistoryId, marker, settings.Type);
+                int removed = second.Platform.Tenants.RemoveAll(item => item.Id == tenantId);
+                removed += second.Platform.RemoveTenantScopedRecords(tenantId);
+                if (removed < 13) throw new InvalidOperationException(settings.Type + " platform cleanup removed too few records.");
+                await second.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            using (DatabaseDriverBase third = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+            {
+                if (third.Platform.Tenants.Any(item => item.Id == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup did not persist.");
+                if (third.Platform.ToState().Users.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant users.");
+                if (third.Platform.ToState().Clients.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant clients.");
+            }
+        }
+
+        private static void AddPlatformStateRoundTripRecords(XenoPlatform platform, string tenantId, string userId, string credentialId, string sessionId, string permissionId, string roleId, string roleAssignmentId, string auditId, string clientId, string modelDefinitionId, string modelConfigurationId, string routingPolicyId, string requestHistoryId, string marker)
+        {
+            platform.Tenants.Add(new Tenant { Id = tenantId, Name = "Tenant " + marker });
+            platform.Users.Add(new User { Id = userId, TenantId = tenantId, Username = "user_" + marker, Email = marker + "@xeno.test", IsAdmin = false, IsTenantAdmin = true, Active = true });
+            platform.Credentials.Add(new Credential { Id = credentialId, TenantId = tenantId, UserId = userId, AccessKey = "access_" + marker, SecretKey = "secret_" + marker, Active = true });
+            platform.AuthSessions.Add(new AuthSession { Id = sessionId, TenantId = tenantId, UserId = userId, CredentialId = credentialId, TokenHash = "token_" + marker, AuthScheme = AuthSchemeEnum.Credential, Active = true });
+            platform.Permissions.Add(new Permission { Id = permissionId, TenantId = tenantId, ResourceType = "StateRoundTrip", OperationType = OperationTypeEnum.Write, Permit = true, BuiltIn = false, Active = true });
+            platform.Roles.Add(new Role { Id = roleId, TenantId = tenantId, Name = "StateRole_" + marker, PermissionIds = new List<string> { permissionId }, Active = true });
+            platform.RoleAssignments.Add(new RoleAssignment { Id = roleAssignmentId, TenantId = tenantId, RoleId = roleId, PrincipalType = PrincipalTypeEnum.User, PrincipalId = userId, Active = true });
+            platform.AuditRecords.Add(new AuditRecord { Id = auditId, TenantId = tenantId, TargetTenantId = tenantId, TargetResourceId = roleId, RequestId = "audit_request_" + marker, PrincipalType = PrincipalTypeEnum.User, PrincipalId = userId, AuthScheme = AuthSchemeEnum.Credential, ResourceType = "StateRoundTrip", OperationType = OperationTypeEnum.Write, Allowed = true, ReasonCode = "RoundTrip", StatusCode = 202 });
+
+            XenoClientRecord client = new XenoClientRecord
+            {
+                Id = clientId,
+                TenantId = tenantId,
+                Name = "client_" + marker,
+                OwnerUserId = userId,
+                OwnerCredentialId = credentialId,
+                OwnerPrincipalType = PrincipalTypeEnum.User,
+                Connected = true,
+                ServiceState = ClientServiceStateEnum.Normal,
+                MaxParallelRequests = 9,
+                Weight = 77
+            };
+            client.Models.Add(new XenoClientModel { Name = "model_" + marker, Provider = ApiProviderTypeEnum.Ollama, Source = "source_" + marker, SupportsCompletions = true, SupportsEmbeddings = true });
+            platform.Clients.Add(client);
+
+            platform.ModelDefinitions.Add(new ModelDefinition { Id = modelDefinitionId, TenantId = tenantId, Name = "model_" + marker, SupportsCompletions = true, SupportsEmbeddings = true, Labels = new List<string> { "state", marker } });
+            ModelConfiguration modelConfiguration = new ModelConfiguration { Id = modelConfigurationId, TenantId = tenantId, Name = "config_" + marker, Model = "model_" + marker };
+            modelConfiguration.PinnedCompletionsProperties["temperature"] = 0.25;
+            modelConfiguration.PinnedCompletionsProperties["marker"] = marker;
+            platform.ModelConfigurations.Add(modelConfiguration);
+
+            RoutingPolicy routingPolicy = new RoutingPolicy
+            {
+                Id = routingPolicyId,
+                TenantId = tenantId,
+                Name = "policy_" + marker,
+                ModelName = "model_" + marker,
+                ClientName = "client_" + marker,
+                RequestTimeoutMs = 123456,
+                LoadBalancingMode = LoadBalancingModeEnum.Random,
+                MaxTelemetryAgeMs = 45000,
+                TelemetryFallbackMode = RoutingPolicyFallbackModeEnum.FailClosed,
+                Active = true
+            };
+            routingPolicy.TelemetryFilters.Add(new RoutingPolicyCondition { Metric = "telemetry.cpu.utilizationPercent", Operator = RoutingPolicyOperatorEnum.LessThanOrEqual, ValueType = RoutingPolicyMetricValueTypeEnum.Number, Value = "75" });
+            routingPolicy.TelemetryRanking.Add(new RoutingPolicyRankingRule { Metric = "provider.queuedRequests", Direction = RoutingPolicyRankingDirectionEnum.Ascending, Weight = 2 });
+            platform.RoutingPolicies.Add(routingPolicy);
+
+            RequestHistoryEntry request = new RequestHistoryEntry
+            {
+                Id = requestHistoryId,
+                TenantId = tenantId,
+                RequestorTenantId = tenantId,
+                Path = "/v1/chat/completions",
+                Method = "POST",
+                Model = "model_" + marker,
+                SelectedClientId = clientId,
+                StatusCode = 201,
+                DurationMs = 321,
+                SourceIp = "127.0.0.1",
+                UserId = userId,
+                CredentialId = credentialId,
+                SessionId = sessionId,
+                PrincipalType = PrincipalTypeEnum.User,
+                RequestorPrincipalType = PrincipalTypeEnum.User,
+                RequestorPrincipalId = userId,
+                AuthScheme = AuthSchemeEnum.Credential,
+                RequestBody = "{\"marker\":\"" + marker + "\"}",
+                ResponseBody = "{\"ok\":true}",
+                RequestBodyLength = 20,
+                ResponseBodyLength = 11
+            };
+            request.RequestHeaders["x-marker"] = marker;
+            request.ResponseHeaders["x-result"] = "ok";
+            request.Telemetry.TotalTimeMs = 321;
+            request.Telemetry.ProviderRequestId = "provider_" + marker;
+            request.Telemetry.Metadata["marker"] = marker;
+            request.Timeline.Add(new RequestHistoryTimelineEvent { Stage = RequestHistoryTimelineStageEnum.ClientSelection, Message = "selected", ElapsedMs = 5, Success = true });
+            platform.RequestHistory.Add(request);
+        }
+
+        private static void AssertPlatformStateRoundTrip(XenoPlatform platform, string tenantId, string userId, string credentialId, string sessionId, string permissionId, string roleId, string roleAssignmentId, string auditId, string clientId, string modelDefinitionId, string modelConfigurationId, string routingPolicyId, string requestHistoryId, string marker, DatabaseTypeEnum provider)
+        {
+            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Name == "Tenant " + marker)) throw new InvalidOperationException(provider + " tenant did not round-trip.");
+            if (!platform.Users.Any(item => item.Id == userId && item.TenantId == tenantId && item.Email == marker + "@xeno.test")) throw new InvalidOperationException(provider + " user did not round-trip.");
+            if (!platform.Credentials.Any(item => item.Id == credentialId && item.UserId == userId && item.AccessKey == "access_" + marker)) throw new InvalidOperationException(provider + " credential did not round-trip.");
+            if (!platform.AuthSessions.Any(item => item.Id == sessionId && item.UserId == userId && item.CredentialId == credentialId)) throw new InvalidOperationException(provider + " auth session did not round-trip.");
+            if (!platform.Permissions.Any(item => item.Id == permissionId && item.ResourceType == "StateRoundTrip" && item.OperationType == OperationTypeEnum.Write)) throw new InvalidOperationException(provider + " permission did not round-trip.");
+            if (!platform.Roles.Any(item => item.Id == roleId && item.PermissionIds.Contains(permissionId))) throw new InvalidOperationException(provider + " role did not round-trip.");
+            if (!platform.RoleAssignments.Any(item => item.Id == roleAssignmentId && item.RoleId == roleId && item.PrincipalId == userId)) throw new InvalidOperationException(provider + " role assignment did not round-trip.");
+            if (!platform.AuditRecords.Any(item => item.Id == auditId && item.RequestId == "audit_request_" + marker && item.StatusCode == 202)) throw new InvalidOperationException(provider + " audit record did not round-trip.");
+
+            XenoClientRecord client = platform.Clients.FirstOrDefault(item => item.Id == clientId) ?? throw new InvalidOperationException(provider + " client did not round-trip.");
+            if (client.OwnerUserId != userId || client.Weight != 77 || !client.Models.Any(item => item.Name == "model_" + marker && item.SupportsEmbeddings)) throw new InvalidOperationException(provider + " client details did not round-trip.");
+            ModelDefinition modelDefinition = platform.ModelDefinitions.FirstOrDefault(item => item.Id == modelDefinitionId) ?? throw new InvalidOperationException(provider + " model definition did not round-trip.");
+            if (!modelDefinition.Labels.Contains(marker)) throw new InvalidOperationException(provider + " model definition labels did not round-trip.");
+            ModelConfiguration modelConfiguration = platform.ModelConfigurations.FirstOrDefault(item => item.Id == modelConfigurationId) ?? throw new InvalidOperationException(provider + " model configuration did not round-trip.");
+            if (!modelConfiguration.PinnedCompletionsProperties.ContainsKey("marker")) throw new InvalidOperationException(provider + " model configuration pinned properties did not round-trip.");
+            RoutingPolicy routingPolicy = platform.RoutingPolicies.FirstOrDefault(item => item.Id == routingPolicyId) ?? throw new InvalidOperationException(provider + " routing policy did not round-trip.");
+            if (routingPolicy.TelemetryFilters.Count != 1 || routingPolicy.TelemetryRanking.Count != 1 || routingPolicy.MaxTelemetryAgeMs != 45000) throw new InvalidOperationException(provider + " routing policy telemetry settings did not round-trip.");
+            RequestHistoryEntry request = platform.RequestHistory.FirstOrDefault(item => item.Id == requestHistoryId) ?? throw new InvalidOperationException(provider + " request history did not round-trip.");
+            if (request.Telemetry.ProviderRequestId != "provider_" + marker || !request.Telemetry.Metadata.ContainsKey("marker") || request.Timeline.Count != 1) throw new InvalidOperationException(provider + " request history detail did not round-trip.");
         }
 
         private static async Task RunServerTelemetryRoundTripAsync(DatabaseSettings settings, string suffix)
