@@ -1,5 +1,6 @@
 namespace Xeno.Server
 {
+    using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Core.Models.Telemetry;
@@ -12,12 +13,12 @@ namespace Xeno.Server
         /// <summary>
         /// Host telemetry response task.
         /// </summary>
-        public TaskCompletionSource<ClientTelemetrySnapshotMessage> Host { get; } = new TaskCompletionSource<ClientTelemetrySnapshotMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<ServerClientTelemetrySampleRecord?> Host { get; } = new TaskCompletionSource<ServerClientTelemetrySampleRecord?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
         /// Provider telemetry response task.
         /// </summary>
-        public TaskCompletionSource<ClientProviderTelemetrySnapshotMessage> Provider { get; } = new TaskCompletionSource<ClientProviderTelemetrySnapshotMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<IReadOnlyList<ServerProviderTelemetrySampleRecord>> Provider { get; } = new TaskCompletionSource<IReadOnlyList<ServerProviderTelemetrySampleRecord>>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
         /// Host telemetry error task.
@@ -32,19 +33,19 @@ namespace Xeno.Server
         /// <summary>
         /// Set host telemetry result.
         /// </summary>
-        /// <param name="message">Host telemetry snapshot frame.</param>
-        public void SetHost(ClientTelemetrySnapshotMessage message)
+        /// <param name="record">Persisted host telemetry sample.</param>
+        public void SetHost(ServerClientTelemetrySampleRecord? record)
         {
-            Host.TrySetResult(message);
+            Host.TrySetResult(record);
         }
 
         /// <summary>
         /// Set provider telemetry result.
         /// </summary>
-        /// <param name="message">Provider telemetry snapshot frame.</param>
-        public void SetProvider(ClientProviderTelemetrySnapshotMessage message)
+        /// <param name="records">Persisted provider telemetry samples.</param>
+        public void SetProvider(IReadOnlyList<ServerProviderTelemetrySampleRecord> records)
         {
-            Provider.TrySetResult(message);
+            Provider.TrySetResult(records);
         }
 
         /// <summary>

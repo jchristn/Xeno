@@ -2610,12 +2610,9 @@ namespace Xeno.Server
 
                 if (request.CollectHostTelemetry && _Database?.ClientTelemetry != null)
                 {
-                    ClientTelemetrySnapshotMessage? host = await WaitForHostTelemetryAsync(pending, token).ConfigureAwait(false);
-                    if (host != null)
+                    ServerClientTelemetrySampleRecord? record = await WaitForHostTelemetryAsync(pending, token).ConfigureAwait(false);
+                    if (record != null)
                     {
-                        string? rawJson = _Settings.TelemetryCollection.PersistRawSnapshots ? LimitRawSnapshot(JsonUtil.Serialize(host.Snapshot, true)) : null;
-                        ServerClientTelemetrySampleRecord record = await _Database.ClientTelemetry.CreateHostSampleAsync(target.TenantId, target.ClientId, target.ClientName, attempt.Id, host.Snapshot, rawJson, token).ConfigureAwait(false);
-                        _TelemetryLatestCache.SetHost(record);
                         attempt.HostSucceeded = true;
                         attempt.HostSampleId = record.Id;
                     }
@@ -2623,15 +2620,9 @@ namespace Xeno.Server
 
                 if (request.CollectProviderTelemetry && _Database?.ClientProviderTelemetry != null)
                 {
-                    ClientProviderTelemetrySnapshotMessage? provider = await WaitForProviderTelemetryAsync(pending, token).ConfigureAwait(false);
-                    if (provider != null)
+                    IReadOnlyList<ServerProviderTelemetrySampleRecord> records = await WaitForProviderTelemetryAsync(pending, token).ConfigureAwait(false);
+                    if (records.Count > 0)
                     {
-                        IReadOnlyList<ServerProviderTelemetrySampleRecord> records = await _Database.ClientProviderTelemetry.CreateProviderSnapshotAsync(target.TenantId, target.ClientId, target.ClientName, attempt.Id, provider.Snapshot, _Settings.TelemetryCollection.PersistRawSnapshots, token).ConfigureAwait(false);
-                        foreach (ServerProviderTelemetrySampleRecord record in records)
-                        {
-                            _TelemetryLatestCache.SetProvider(record);
-                        }
-
                         attempt.ProviderSucceeded = true;
                         attempt.ProviderSampleCount = records.Count;
                     }
@@ -2671,7 +2662,7 @@ namespace Xeno.Server
             return attempt.Id;
         }
 
-        private async Task<ClientTelemetrySnapshotMessage?> WaitForHostTelemetryAsync(PendingTelemetryResponse pending, CancellationToken token)
+        private async Task<ServerClientTelemetrySampleRecord?> WaitForHostTelemetryAsync(PendingTelemetryResponse pending, CancellationToken token)
         {
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
@@ -2689,7 +2680,7 @@ namespace Xeno.Server
             }
         }
 
-        private async Task<ClientProviderTelemetrySnapshotMessage?> WaitForProviderTelemetryAsync(PendingTelemetryResponse pending, CancellationToken token)
+        private async Task<IReadOnlyList<ServerProviderTelemetrySampleRecord>> WaitForProviderTelemetryAsync(PendingTelemetryResponse pending, CancellationToken token)
         {
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
@@ -2924,7 +2915,22 @@ namespace Xeno.Server
         {
             ValidateTelemetryFrame(session, message.RequestId, message.TenantId, message.ClientId, requestContext);
             PendingTelemetryResponse? pending = GetPendingTelemetryResponse(message.RequestId);
-            pending?.SetHost(message);
+            ServerClientTelemetrySampleRecord? record = null;
+            if (_Database?.ClientTelemetry != null)
+            {
+                string? rawJson = _Settings.TelemetryCollection.PersistRawSnapshots ? LimitRawSnapshot(JsonUtil.Serialize(message.Snapshot, true)) : null;
+                record = await _Database.ClientTelemetry.CreateHostSampleAsync(
+                    requestContext.TenantId,
+                    message.ClientId,
+                    TelemetryClientName(requestContext.TenantId, message.ClientId),
+                    message.RequestId,
+                    message.Snapshot,
+                    rawJson,
+                    token).ConfigureAwait(false);
+                _TelemetryLatestCache.SetHost(record);
+            }
+
+            pending?.SetHost(record);
             await SendTelemetryAckAsync(message.RequestId, message.TenantId, message.ClientId, true, null, token).ConfigureAwait(false);
         }
 
@@ -2932,7 +2938,24 @@ namespace Xeno.Server
         {
             ValidateTelemetryFrame(session, message.RequestId, message.TenantId, message.ClientId, requestContext);
             PendingTelemetryResponse? pending = GetPendingTelemetryResponse(message.RequestId);
-            pending?.SetProvider(message);
+            IReadOnlyList<ServerProviderTelemetrySampleRecord> records = Array.Empty<ServerProviderTelemetrySampleRecord>();
+            if (_Database?.ClientProviderTelemetry != null)
+            {
+                records = await _Database.ClientProviderTelemetry.CreateProviderSnapshotAsync(
+                    requestContext.TenantId,
+                    message.ClientId,
+                    TelemetryClientName(requestContext.TenantId, message.ClientId),
+                    message.RequestId,
+                    message.Snapshot,
+                    _Settings.TelemetryCollection.PersistRawSnapshots,
+                    token).ConfigureAwait(false);
+                foreach (ServerProviderTelemetrySampleRecord record in records)
+                {
+                    _TelemetryLatestCache.SetProvider(record);
+                }
+            }
+
+            pending?.SetProvider(records);
             await SendTelemetryAckAsync(message.RequestId, message.TenantId, message.ClientId, true, null, token).ConfigureAwait(false);
         }
 
@@ -2962,6 +2985,14 @@ namespace Xeno.Server
             if (connection == null) throw new UnauthorizedAccessException("Telemetry frame client is not registered.");
             if (!String.Equals(connection.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Telemetry frame client tenant is invalid.");
             if (!String.Equals(connection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Telemetry frame arrived on the wrong client session.");
+        }
+
+        private string? TelemetryClientName(string tenantId, string clientId)
+        {
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item =>
+                String.Equals(item.Id, clientId, StringComparison.OrdinalIgnoreCase)
+                && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            return client?.Name;
         }
 
         private async Task SendTelemetryAckAsync(string requestId, string tenantId, string clientId, bool accepted, string? message, CancellationToken token)

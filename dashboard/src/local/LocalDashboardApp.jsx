@@ -1813,6 +1813,18 @@ function title(value, t) {
     statusCode: 'status'
   };
   if (mapped[key]) return t(mapped[key]);
+  if (key.toLowerCase().includes('percent') || key.toLowerCase().includes('average')) {
+    return key
+      .replace(/Average/g, 'Avg')
+      .replace(/average/g, 'avg')
+      .replace(/Percent/g, '%')
+      .replace(/percent/g, '%')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/%/g, ' %')
+      .replace(/\s+/g, ' ')
+      .replace(/^./, (letter) => letter.toUpperCase())
+      .trim();
+  }
 
   if (typeof t === 'function') {
     const translated = t(key);

@@ -1234,6 +1234,11 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Telemetry",
+                        "AcceptedTelemetrySnapshotPersistsForDashboard",
+                        "Accepted telemetry WebSocket snapshots are persisted for dashboard latest and rollup APIs",
+                        executeAsync: delegate { return RunAcceptedTelemetrySnapshotPersistsForDashboardAsync(); }),
+                    new TestCaseDescriptor(
+                        "Telemetry",
                         "TelemetryOpenApiIncludesRoutes",
                         "OpenAPI includes telemetry routes and request bodies",
                         executeAsync: delegate { return RunTelemetryOpenApiSmokeAsync(); }),
@@ -1243,6 +1248,130 @@ namespace Test.Shared
                         "Routing policy validation rejects invalid telemetry policy fields",
                         executeAsync: delegate { return RunRoutingPolicyValidationSmokeAsync(); })
                 });
+        }
+
+        private static async Task RunAcceptedTelemetrySnapshotPersistsForDashboardAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-dashboard-telemetry-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                },
+                TelemetryCollection = new TelemetryCollectionSettings
+                {
+                    Enabled = false
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    DateTime collectedUtc = DateTime.UtcNow;
+                    using (ClientWebSocket socket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(socket);
+                        await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? connected = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Telemetry test WebSocket did not connect: " + connected);
+
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_dashboard_telemetry",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "dashboard-telemetry-client",
+                            inventory = new
+                            {
+                                runners = Array.Empty<object>()
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? registered = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(registered) || !registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Telemetry test client did not register: " + registered);
+
+                        Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage snapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage
+                        {
+                            RequestId = "telreq_dashboard_telemetry",
+                            TenantId = Constants.DefaultTenantId,
+                            ClientId = "xcl_dashboard_telemetry",
+                            Snapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot
+                            {
+                                Metadata = new Xeno.Core.Models.Telemetry.ClientTelemetryMetadata
+                                {
+                                    ClientId = "xcl_dashboard_telemetry",
+                                    MachineName = "dashboard-telemetry-machine",
+                                    CollectedUtc = collectedUtc,
+                                    CollectionElapsedMs = 7
+                                },
+                                Cpu = new Xeno.Core.Models.Telemetry.ClientCpuTelemetry
+                                {
+                                    UtilizationPercent = 42
+                                },
+                                Memory = new Xeno.Core.Models.Telemetry.ClientMemoryTelemetry
+                                {
+                                    UtilizationPercent = 55,
+                                    TotalBytes = 1000,
+                                    UsedBytes = 550,
+                                    AvailableBytes = 450
+                                },
+                                Gpu = new Xeno.Core.Models.Telemetry.ClientGpuTelemetry
+                                {
+                                    AverageUtilizationPercent = 12
+                                }
+                            }
+                        };
+
+                        await SendWebSocketJsonAsync(socket, snapshot, clientTokenSource.Token).ConfigureAwait(false);
+                        string? ack = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(ack) || !ack.Contains("server.telemetry.ack", StringComparison.OrdinalIgnoreCase) || !ack.Contains("\"accepted\":true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Telemetry snapshot was not accepted: " + ack);
+                    }
+
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string baseUrl = "http://127.0.0.1:" + port;
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                        string latestJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/client-telemetry/latest?clientId=xcl_dashboard_telemetry").ConfigureAwait(false);
+                        Xeno.Core.Models.Telemetry.ServerClientTelemetryLatestResponse latest = DeserializeRequired<Xeno.Core.Models.Telemetry.ServerClientTelemetryLatestResponse>(latestJson);
+                        Xeno.Core.Models.Telemetry.ServerClientTelemetrySampleRecord latestHost = latest.HostTelemetry.FirstOrDefault() ?? throw new InvalidOperationException("Latest host telemetry did not include the accepted WebSocket sample: " + latestJson);
+                        if (latestHost.CpuUtilizationPercent != 42) throw new InvalidOperationException("Latest host telemetry returned the wrong CPU value.");
+
+                        Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupRequest rollupRequest = new Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupRequest
+                        {
+                            TenantId = Constants.DefaultTenantId,
+                            ClientId = "xcl_dashboard_telemetry",
+                            Metric = Xeno.Core.Models.Telemetry.ClientTelemetryMetricEnum.CpuUtilizationPercent,
+                            FromUtc = collectedUtc.AddMinutes(-5),
+                            ToUtc = collectedUtc.AddMinutes(5),
+                            BucketMinutes = 5
+                        };
+                        using (HttpResponseMessage rollupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/client-telemetry/history/rollups", JsonUtil.Serialize(rollupRequest)).ConfigureAwait(false))
+                        {
+                            string rollupJson = await rollupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!rollupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Telemetry rollup request failed: " + rollupJson);
+                            IReadOnlyList<Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupBucket>? buckets = JsonUtil.Deserialize<List<Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupBucket>>(rollupJson);
+                            if (buckets == null || !buckets.Any(item => item.Count > 0 && item.Average == 42)) throw new InvalidOperationException("Telemetry rollup did not include the accepted WebSocket sample: " + rollupJson);
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
         }
 
 
