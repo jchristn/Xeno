@@ -120,5 +120,17 @@ ON CONFLICT(id) DO UPDATE SET
                 }
             }
         }
+
+        /// <inheritdoc />
+        public override async Task<int> PurgeTenantDataAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            token.ThrowIfCancellationRequested();
+            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                return await SqliteTelemetryMethods.PurgeTenantAsync(connection, tenantId, token).ConfigureAwait(false);
+            }
+        }
     }
 }

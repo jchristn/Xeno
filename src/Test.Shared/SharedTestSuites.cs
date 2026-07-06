@@ -12,6 +12,7 @@ namespace Test.Shared
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    using Microsoft.Data.Sqlite;
     using Touchstone.Core;
     using Xeno.Client;
     using Xeno.Client.LocalDashboard;
@@ -1352,6 +1353,138 @@ namespace Test.Shared
 
             cases.Add(new TestCaseDescriptor(
                 suiteId: "Database",
+                caseId: "PlatformTenantCascadeRemovesScopedState",
+                displayName: "Platform tenant cascade removes all tenant-scoped state",
+                executeAsync: async delegate
+                {
+                    const string tenantId = "ten_cascade";
+                    const string keepTenantId = "ten_keep";
+                    XenoPlatform platform = new XenoPlatform();
+                    await platform.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+                    platform.Tenants.Add(new Tenant { Id = tenantId, Name = "Cascade" });
+                    platform.Tenants.Add(new Tenant { Id = keepTenantId, Name = "Keep" });
+                    platform.Users.Add(new User { Id = "usr_cascade", TenantId = tenantId, Email = "cascade@xeno" });
+                    platform.Users.Add(new User { Id = "usr_keep", TenantId = keepTenantId, Email = "keep@xeno" });
+                    platform.Credentials.Add(new Credential { Id = "cred_cascade", TenantId = tenantId, UserId = "usr_cascade", AccessKey = "cascade" });
+                    platform.AuthSessions.Add(new AuthSession { Id = "sess_cascade", TenantId = tenantId, UserId = "usr_cascade" });
+                    platform.Roles.Add(new Role { Id = "role_cascade", TenantId = tenantId, Name = "CascadeRole" });
+                    platform.Permissions.Add(new Permission { Id = "perm_cascade", TenantId = tenantId, ResourceType = "Cascade", OperationType = OperationTypeEnum.Read });
+                    platform.RoleAssignments.Add(new RoleAssignment { Id = "rmap_cascade", TenantId = tenantId, RoleId = "role_cascade", PrincipalType = PrincipalTypeEnum.User, PrincipalId = "usr_cascade" });
+                    platform.AuditRecords.Add(new AuditRecord { Id = "aud_cascade", TenantId = tenantId, ResourceType = "Cascade" });
+                    platform.Clients.Add(new XenoClientRecord { Id = "xcl_cascade", TenantId = tenantId, Name = "cascade-client" });
+                    platform.ModelDefinitions.Add(new ModelDefinition { Id = "md_cascade", TenantId = tenantId, Name = "cascade-model" });
+                    platform.ModelConfigurations.Add(new ModelConfiguration { Id = "mc_cascade", TenantId = tenantId, Name = "cascade-config" });
+                    platform.RoutingPolicies.Add(new RoutingPolicy { Id = "rpol_cascade", TenantId = tenantId, Name = "cascade-routing", ModelName = "*", ClientName = "*" });
+                    platform.RequestHistory.Add(new RequestHistoryEntry { Id = "req_cascade", TenantId = tenantId, RequestorTenantId = tenantId });
+
+                    int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
+                    removed += platform.RemoveTenantScopedRecords(tenantId);
+                    if (removed < 13) throw new InvalidOperationException("Tenant cascade removed too few records.");
+                    if (platform.Tenants.Any(item => item.Id == tenantId)) throw new InvalidOperationException("Tenant record remained after cascade.");
+                    if (platform.ToState().Users.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant users remained after cascade.");
+                    if (platform.ToState().Credentials.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant credentials remained after cascade.");
+                    if (platform.ToState().AuthSessions.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant sessions remained after cascade.");
+                    if (platform.ToState().Roles.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant roles remained after cascade.");
+                    if (platform.ToState().Permissions.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant permissions remained after cascade.");
+                    if (platform.ToState().RoleAssignments.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant role assignments remained after cascade.");
+                    if (platform.ToState().AuditRecords.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant audit records remained after cascade.");
+                    if (platform.ToState().Clients.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant clients remained after cascade.");
+                    if (platform.ToState().ModelDefinitions.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant model definitions remained after cascade.");
+                    if (platform.ToState().ModelConfigurations.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant model configurations remained after cascade.");
+                    if (platform.ToState().RoutingPolicies.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant routing policies remained after cascade.");
+                    if (platform.ToState().RequestHistory.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant request history remained after cascade.");
+                    if (!platform.Users.Any(item => item.TenantId == keepTenantId)) throw new InvalidOperationException("Cascade removed another tenant's user.");
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "SqliteTenantPurgeRemovesTelemetryRemnants",
+                displayName: "SQLite tenant purge removes telemetry remnants",
+                executeAsync: async delegate
+                {
+                    const string tenantId = "ten_purge";
+                    const string keepTenantId = "ten_keep";
+                    string dbFile = Path.Combine(Path.GetTempPath(), "xeno-tenant-purge-" + Guid.NewGuid().ToString("N") + ".db");
+                    try
+                    {
+                        DatabaseSettings settings = new DatabaseSettings
+                        {
+                            Type = DatabaseTypeEnum.Sqlite,
+                            Filename = dbFile
+                        };
+
+                        using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+                        {
+                            if (driver.ClientTelemetry == null) throw new InvalidOperationException("Client telemetry driver was not initialized.");
+                            if (driver.ClientProviderTelemetry == null) throw new InvalidOperationException("Client provider telemetry driver was not initialized.");
+                            if (driver.ClientTelemetryCollectionAttempts == null) throw new InvalidOperationException("Telemetry collection attempts driver was not initialized.");
+
+                            Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot hostSnapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot
+                            {
+                                Metadata = new Xeno.Core.Models.Telemetry.ClientTelemetryMetadata
+                                {
+                                    ClientId = "xcl_purge",
+                                    MachineName = "purge-client",
+                                    CollectedUtc = DateTime.UtcNow
+                                },
+                                Gpu = new Xeno.Core.Models.Telemetry.ClientGpuTelemetry
+                                {
+                                    AverageUtilizationPercent = 10
+                                }
+                            };
+                            hostSnapshot.Gpu.Devices.Add(new Xeno.Core.Models.Telemetry.ClientGpuDeviceTelemetry { Uuid = "gpu-purge", Name = "Purge GPU", UtilizationPercent = 10 });
+                            await driver.ClientTelemetry.CreateHostSampleAsync(tenantId, "xcl_purge", "purge-client", "telreq_purge", hostSnapshot, null, CancellationToken.None).ConfigureAwait(false);
+                            await driver.ClientTelemetry.CreateHostSampleAsync(keepTenantId, "xcl_keep", "keep-client", "telreq_keep", hostSnapshot, null, CancellationToken.None).ConfigureAwait(false);
+
+                            Xeno.Core.Models.Telemetry.ClientProviderTelemetrySnapshot providerSnapshot = new Xeno.Core.Models.Telemetry.ClientProviderTelemetrySnapshot();
+                            providerSnapshot.Providers.Add(new Xeno.Core.Models.Telemetry.ClientProviderTelemetryProviderStatus
+                            {
+                                Endpoint = new Xeno.Core.Models.Telemetry.ClientProviderTelemetryEndpoint
+                                {
+                                    ProviderName = "purge-provider",
+                                    ApiType = "Ollama",
+                                    Kind = Xeno.Core.Models.Telemetry.ClientProviderTelemetryKindEnum.Ollama,
+                                    EndpointDisplay = "http://127.0.0.1:11434",
+                                    EndpointHash = "purgehash"
+                                },
+                                Status = Xeno.Core.Models.Telemetry.ClientProviderTelemetryStatusEnum.Available,
+                                HealthStatus = Xeno.Core.Models.Telemetry.ClientProviderTelemetryHealthStatusEnum.Healthy,
+                                CollectedUtc = DateTime.UtcNow
+                            });
+                            IReadOnlyList<Xeno.Core.Models.Telemetry.ServerProviderTelemetrySampleRecord> providerRecords = await driver.ClientProviderTelemetry.CreateProviderSnapshotAsync(tenantId, "xcl_purge", "purge-client", "telreq_purge", providerSnapshot, false, CancellationToken.None).ConfigureAwait(false);
+                            string providerSampleId = providerRecords.First().Id;
+                            await driver.ClientTelemetryCollectionAttempts.CreateAttemptAsync(new Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord { TenantId = tenantId, ClientId = "xcl_purge", ClientName = "purge-client", Status = "Started" }, CancellationToken.None).ConfigureAwait(false);
+
+                            await InsertTelemetryRemnantRowsAsync(dbFile, tenantId, providerSampleId).ConfigureAwait(false);
+                            await driver.PurgeTenantDataAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                        }
+
+                        string[] tenantTables = new[]
+                        {
+                            "client_telemetry_samples",
+                            "client_telemetry_gpu_samples",
+                            "client_provider_telemetry_samples",
+                            "client_provider_telemetry_models",
+                            "client_provider_telemetry_metrics",
+                            "client_telemetry_collection_attempts"
+                        };
+                        foreach (string tableName in tenantTables)
+                        {
+                            int count = await CountRowsForTenantAsync(dbFile, tableName, tenantId).ConfigureAwait(false);
+                            if (count != 0) throw new InvalidOperationException("Tenant purge left rows in " + tableName + ".");
+                        }
+
+                        int keepCount = await CountRowsForTenantAsync(dbFile, "client_telemetry_samples", keepTenantId).ConfigureAwait(false);
+                        if (keepCount != 1) throw new InvalidOperationException("Tenant purge removed another tenant's telemetry.");
+                    }
+                    finally
+                    {
+                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    }
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
                 caseId: "SqliteServerTelemetryRollupsReturnPersistedSamples",
                 displayName: "SQLite server telemetry rollups return persisted host and provider samples",
                 executeAsync: async delegate
@@ -1482,7 +1615,211 @@ namespace Test.Shared
                     }
                 }));
 
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "ServerTelemetryImplementationsCoverConfiguredProviders",
+                displayName: "Server telemetry persistence implementations cover every database provider",
+                executeAsync: delegate
+                {
+                    Type[] telemetryTypes = new[]
+                    {
+                        typeof(Xeno.Core.Database.Sqlite.SqliteTelemetryMethods),
+                        typeof(Xeno.Core.Database.Postgresql.PostgresqlTelemetryMethods),
+                        typeof(Xeno.Core.Database.Mysql.MysqlTelemetryMethods),
+                        typeof(Xeno.Core.Database.SqlServer.SqlServerTelemetryMethods)
+                    };
+
+                    foreach (Type telemetryType in telemetryTypes)
+                    {
+                        if (!typeof(Xeno.Core.Database.Interfaces.IClientTelemetryMethods).IsAssignableFrom(telemetryType)) throw new InvalidOperationException(telemetryType.Name + " does not implement host telemetry persistence.");
+                        if (!typeof(Xeno.Core.Database.Interfaces.IClientProviderTelemetryMethods).IsAssignableFrom(telemetryType)) throw new InvalidOperationException(telemetryType.Name + " does not implement provider telemetry persistence.");
+                        if (!typeof(Xeno.Core.Database.Interfaces.IClientTelemetryCollectionAttemptMethods).IsAssignableFrom(telemetryType)) throw new InvalidOperationException(telemetryType.Name + " does not implement telemetry collection attempts.");
+                    }
+
+                    Type[] driverTypes = new[]
+                    {
+                        typeof(Xeno.Core.Database.Sqlite.SqliteDatabaseDriver),
+                        typeof(Xeno.Core.Database.Postgresql.PostgresqlDatabaseDriver),
+                        typeof(Xeno.Core.Database.Mysql.MysqlDatabaseDriver),
+                        typeof(Xeno.Core.Database.SqlServer.SqlServerDatabaseDriver)
+                    };
+
+                    foreach (Type driverType in driverTypes)
+                    {
+                        MethodInfo? purgeMethod = driverType.GetMethod("PurgeTenantDataAsync", new[] { typeof(string), typeof(CancellationToken) });
+                        if (purgeMethod == null || purgeMethod.DeclaringType == typeof(DatabaseDriverBase)) throw new InvalidOperationException(driverType.Name + " does not override tenant-scoped telemetry purge.");
+                    }
+
+                    return Task.CompletedTask;
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "MysqlServerTelemetryRoundTrip",
+                displayName: "MySQL server telemetry persists and rolls up when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_MYSQL_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunServerTelemetryRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.Mysql,
+                        ConnectionString = connectionString
+                    }, "mysql").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "SqlServerServerTelemetryRoundTrip",
+                displayName: "SQL Server telemetry persists and rolls up when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_SQLSERVER_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunServerTelemetryRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.SqlServer,
+                        ConnectionString = connectionString
+                    }, "sqlserver").ConfigureAwait(false);
+                }));
+
             return new TestSuiteDescriptor("Database", "Database Providers", cases);
+        }
+
+        private static async Task RunServerTelemetryRoundTripAsync(DatabaseSettings settings, string suffix)
+        {
+            string tenantId = "ten_telemetry_" + suffix + "_" + Guid.NewGuid().ToString("N");
+            string clientId = "xcl_telemetry_" + suffix;
+            DateTime sampleUtc = DateTime.UtcNow.AddMinutes(-5);
+            using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+            {
+                if (driver.ClientTelemetry == null) throw new InvalidOperationException(settings.Type + " client telemetry driver was not initialized.");
+                if (driver.ClientProviderTelemetry == null) throw new InvalidOperationException(settings.Type + " client provider telemetry driver was not initialized.");
+                if (driver.ClientTelemetryCollectionAttempts == null) throw new InvalidOperationException(settings.Type + " telemetry collection attempts driver was not initialized.");
+
+                Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot hostSnapshot = new Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot
+                {
+                    Metadata = new Xeno.Core.Models.Telemetry.ClientTelemetryMetadata
+                    {
+                        ClientId = clientId,
+                        MachineName = suffix + "-client",
+                        CollectedUtc = sampleUtc,
+                        CollectionElapsedMs = 11
+                    },
+                    Cpu = new Xeno.Core.Models.Telemetry.ClientCpuTelemetry
+                    {
+                        UtilizationPercent = 37
+                    },
+                    Memory = new Xeno.Core.Models.Telemetry.ClientMemoryTelemetry
+                    {
+                        TotalBytes = 1000,
+                        UsedBytes = 410,
+                        AvailableBytes = 590,
+                        UtilizationPercent = 41
+                    },
+                    Disk = new Xeno.Core.Models.Telemetry.ClientDiskTelemetry
+                    {
+                        TotalBytes = 1000,
+                        UsedBytes = 520,
+                        AvailableBytes = 480,
+                        UtilizationPercent = 52
+                    },
+                    Gpu = new Xeno.Core.Models.Telemetry.ClientGpuTelemetry
+                    {
+                        AverageUtilizationPercent = 13
+                    }
+                };
+
+                await driver.ClientTelemetry.CreateHostSampleAsync(tenantId, clientId, suffix + "-client", "telreq_" + suffix, hostSnapshot, null, CancellationToken.None).ConfigureAwait(false);
+
+                Xeno.Core.Models.Telemetry.ClientProviderTelemetrySnapshot providerSnapshot = new Xeno.Core.Models.Telemetry.ClientProviderTelemetrySnapshot
+                {
+                    Metadata = new Xeno.Core.Models.Telemetry.ClientProviderTelemetryMetadata
+                    {
+                        ClientId = clientId,
+                        MachineName = suffix + "-client",
+                        CollectedUtc = sampleUtc,
+                        ProviderCount = 1
+                    }
+                };
+                providerSnapshot.Providers.Add(new Xeno.Core.Models.Telemetry.ClientProviderTelemetryProviderStatus
+                {
+                    Endpoint = new Xeno.Core.Models.Telemetry.ClientProviderTelemetryEndpoint
+                    {
+                        ProviderName = suffix + "-provider",
+                        ApiType = "Ollama",
+                        Kind = Xeno.Core.Models.Telemetry.ClientProviderTelemetryKindEnum.Ollama,
+                        EndpointDisplay = "http://127.0.0.1:11434",
+                        EndpointHash = suffix + "hash"
+                    },
+                    Status = Xeno.Core.Models.Telemetry.ClientProviderTelemetryStatusEnum.Available,
+                    HealthStatus = Xeno.Core.Models.Telemetry.ClientProviderTelemetryHealthStatusEnum.Healthy,
+                    CollectedUtc = sampleUtc,
+                    AvailableModelCount = 5,
+                    LoadedModelCount = 2,
+                    ActiveRequests = 4,
+                    QueuedRequests = 1,
+                    LatencyP95Ms = 95
+                });
+
+                await driver.ClientProviderTelemetry.CreateProviderSnapshotAsync(tenantId, clientId, suffix + "-client", "telreq_" + suffix, providerSnapshot, false, CancellationToken.None).ConfigureAwait(false);
+
+                Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord attempt = new Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord
+                {
+                    TenantId = tenantId,
+                    ClientId = clientId,
+                    ClientName = suffix + "-client",
+                    HostRequested = true,
+                    ProviderRequested = true,
+                    Status = "Started"
+                };
+                await driver.ClientTelemetryCollectionAttempts.CreateAttemptAsync(attempt, CancellationToken.None).ConfigureAwait(false);
+                attempt.CompletedUtc = DateTime.UtcNow;
+                attempt.ElapsedMs = 123;
+                attempt.HostSucceeded = true;
+                attempt.ProviderSucceeded = true;
+                attempt.Status = "Completed";
+                attempt.ProviderSampleCount = 1;
+                await driver.ClientTelemetryCollectionAttempts.CompleteAttemptAsync(attempt, CancellationToken.None).ConfigureAwait(false);
+
+                DateTime fromUtc = sampleUtc.AddHours(-1);
+                DateTime toUtc = sampleUtc.AddHours(1);
+                IReadOnlyList<Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupBucket> hostBuckets = await driver.ClientTelemetry.RollupHostAsync(new Xeno.Core.Models.Telemetry.ServerClientTelemetryRollupRequest
+                {
+                    TenantId = tenantId,
+                    ClientId = clientId,
+                    FromUtc = fromUtc,
+                    ToUtc = toUtc,
+                    BucketMinutes = 5,
+                    Metric = Xeno.Core.Models.Telemetry.ClientTelemetryMetricEnum.CpuUtilizationPercent
+                }, CancellationToken.None).ConfigureAwait(false);
+                if (!hostBuckets.Any(item => item.Count > 0 && Math.Abs((item.Average ?? 0) - 37) < 0.001)) throw new InvalidOperationException(settings.Type + " host telemetry rollup did not include persisted CPU value.");
+
+                IReadOnlyList<Xeno.Core.Models.Telemetry.ServerProviderTelemetryRollupBucket> providerBuckets = await driver.ClientProviderTelemetry.RollupProviderAsync(new Xeno.Core.Models.Telemetry.ServerProviderTelemetryRollupRequest
+                {
+                    TenantId = tenantId,
+                    ClientId = clientId,
+                    ProviderName = suffix + "-provider",
+                    FromUtc = fromUtc,
+                    ToUtc = toUtc,
+                    BucketMinutes = 5,
+                    Metric = Xeno.Core.Models.Telemetry.ClientProviderTelemetryMetricEnum.ActiveRequests
+                }, CancellationToken.None).ConfigureAwait(false);
+                if (!providerBuckets.Any(item => item.Count > 0 && Math.Abs((item.Average ?? 0) - 4) < 0.001)) throw new InvalidOperationException(settings.Type + " provider telemetry rollup did not include persisted active request value.");
+
+                IReadOnlyList<Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord> attempts = await driver.ClientTelemetryCollectionAttempts.SearchAttemptsAsync(tenantId, clientId, 10, CancellationToken.None).ConfigureAwait(false);
+                Xeno.Core.Models.Telemetry.ServerClientTelemetryCollectionAttemptRecord storedAttempt = attempts.FirstOrDefault() ?? throw new InvalidOperationException(settings.Type + " telemetry collection attempt was not returned.");
+                if (!storedAttempt.HostSucceeded || !storedAttempt.ProviderSucceeded) throw new InvalidOperationException(settings.Type + " telemetry attempt success flags did not round-trip.");
+
+                await driver.PurgeTenantDataAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                Xeno.Core.Models.Telemetry.ServerClientTelemetrySearchResult remaining = await driver.ClientTelemetry.SearchHostAsync(new Xeno.Core.Models.Telemetry.ServerClientTelemetrySearchRequest
+                {
+                    TenantId = tenantId,
+                    ClientId = clientId,
+                    Limit = 10
+                }, CancellationToken.None).ConfigureAwait(false);
+                if (remaining.Items.Count != 0) throw new InvalidOperationException(settings.Type + " telemetry tenant purge left host samples.");
+            }
         }
 
         /// <summary>
@@ -4393,6 +4730,7 @@ namespace Test.Shared
 
             ClientSettings settings = DeserializeRequired<ClientSettings>(File.ReadAllText(settingsFile));
             if (!String.Equals(settings.TenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default tenant.");
+            if (!String.Equals(settings.Server.Url, "ws://app.xenocloud.ai:9000/ws/v1/clients", StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default client server URL.");
             if (settings.Providers.Count == 0)
             {
                 throw new InvalidOperationException("Reset did not restore the default provider endpoint.");
@@ -4466,6 +4804,48 @@ namespace Test.Shared
                 catch (IOException)
                 {
                     await Task.Delay(100).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task InsertTelemetryRemnantRowsAsync(string dbFile, string tenantId, string providerSampleId)
+        {
+            using (SqliteConnection connection = new SqliteConnection("Data Source=" + dbFile + ";Pooling=False;"))
+            {
+                await connection.OpenAsync().ConfigureAwait(false);
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = """
+INSERT INTO client_telemetry_gpu_samples (id, sample_id, tenant_id, client_id, collected_utc, gpu_uuid, name, utilization_percent)
+VALUES ('ctgpu_orphan', 'ctel_orphan', $tenantId, 'xcl_purge', $now, 'gpu-orphan', 'Orphan GPU', 99);
+INSERT INTO client_provider_telemetry_models (id, sample_id, tenant_id, client_id, provider_name, model_name)
+VALUES ('ptm_child', $providerSampleId, $tenantId, 'xcl_purge', 'purge-provider', 'purge-model');
+INSERT INTO client_provider_telemetry_models (id, sample_id, tenant_id, client_id, provider_name, model_name)
+VALUES ('ptm_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider', 'orphan-model');
+INSERT INTO client_provider_telemetry_metrics (id, sample_id, tenant_id, client_id, provider_name, model_name, metric_name, metric_kind, metric_value, unit, source, labels_json)
+VALUES ('ptmet_child', $providerSampleId, $tenantId, 'xcl_purge', 'purge-provider', 'purge-model', 'active_requests', 'gauge', 1, 'count', 'Unknown', NULL);
+INSERT INTO client_provider_telemetry_metrics (id, sample_id, tenant_id, client_id, provider_name, model_name, metric_name, metric_kind, metric_value, unit, source, labels_json)
+VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider', 'orphan-model', 'active_requests', 'gauge', 1, 'count', 'Unknown', NULL);
+""";
+                    command.Parameters.AddWithValue("$tenantId", tenantId);
+                    command.Parameters.AddWithValue("$providerSampleId", providerSampleId);
+                    command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+                    await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task<int> CountRowsForTenantAsync(string dbFile, string tableName, string tenantId)
+        {
+            using (SqliteConnection connection = new SqliteConnection("Data Source=" + dbFile + ";Pooling=False;"))
+            {
+                await connection.OpenAsync().ConfigureAwait(false);
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT COUNT(*) FROM " + tableName + " WHERE tenant_id = $tenantId;";
+                    command.Parameters.AddWithValue("$tenantId", tenantId);
+                    object? value = await command.ExecuteScalarAsync().ConfigureAwait(false);
+                    return Convert.ToInt32(value);
                 }
             }
         }

@@ -61,8 +61,14 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+
+                await MysqlTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
+            MysqlTelemetryMethods telemetryMethods = new MysqlTelemetryMethods(_ConnectionString);
+            ClientTelemetry = telemetryMethods;
+            ClientProviderTelemetry = telemetryMethods;
+            ClientTelemetryCollectionAttempts = telemetryMethods;
             return true;
         }
 
@@ -104,6 +110,18 @@ ON DUPLICATE KEY UPDATE
                     command.Parameters.AddWithValue("@data", stateJson);
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+            }
+        }
+
+        /// <inheritdoc />
+        public override async Task<int> PurgeTenantDataAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            token.ThrowIfCancellationRequested();
+            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                return await MysqlTelemetryMethods.PurgeTenantAsync(connection, tenantId, token).ConfigureAwait(false);
             }
         }
 

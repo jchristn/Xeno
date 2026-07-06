@@ -91,6 +91,19 @@ namespace Xeno.Core.Database
         }
 
         /// <summary>
+        /// Purge provider-specific tenant records that are persisted outside the serialized platform state.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Deleted row count.</returns>
+        public virtual Task<int> PurgeTenantDataAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(0);
+        }
+
+        /// <summary>
         /// Dispose resources.
         /// </summary>
         public void Dispose()

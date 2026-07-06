@@ -419,6 +419,8 @@ Supported database engines:
 - SQL Server
 - MySQL
 
+The selected database engine stores server platform state and server-collected client telemetry, including host samples, provider samples, collection attempts, details, deletes, rollups, and tenant purge data.
+
 The default Docker compose stack uses PostgreSQL. Optional MySQL and SQL Server services are present in [docker/compose.yaml](docker/compose.yaml) for alternate deployments.
 
 ## SDKs

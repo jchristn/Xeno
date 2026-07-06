@@ -47,6 +47,32 @@ namespace Xeno.Core.Database.Sqlite
             await EnsureColumnAsync(connection, "client_provider_telemetry_samples", "loaded_model_count", "INTEGER NULL", token).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Delete all server-collected telemetry rows for a tenant.
+        /// </summary>
+        /// <param name="connection">Open SQLite connection.</param>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Deleted row count.</returns>
+        public static async Task<int> PurgeTenantAsync(SqliteConnection connection, string tenantId, CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(connection);
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            token.ThrowIfCancellationRequested();
+            using (SqliteTransaction transaction = connection.BeginTransaction())
+            {
+                int total = 0;
+                total += await ExecuteTenantDeleteAsync(connection, transaction, "client_telemetry_gpu_samples", tenantId, token).ConfigureAwait(false);
+                total += await ExecuteTenantDeleteAsync(connection, transaction, "client_provider_telemetry_models", tenantId, token).ConfigureAwait(false);
+                total += await ExecuteTenantDeleteAsync(connection, transaction, "client_provider_telemetry_metrics", tenantId, token).ConfigureAwait(false);
+                total += await ExecuteTenantDeleteAsync(connection, transaction, "client_telemetry_collection_attempts", tenantId, token).ConfigureAwait(false);
+                total += await ExecuteTenantDeleteAsync(connection, transaction, "client_telemetry_samples", tenantId, token).ConfigureAwait(false);
+                total += await ExecuteTenantDeleteAsync(connection, transaction, "client_provider_telemetry_samples", tenantId, token).ConfigureAwait(false);
+                transaction.Commit();
+                return total;
+            }
+        }
+
         /// <inheritdoc />
         public async Task<ServerClientTelemetrySampleRecord> CreateHostSampleAsync(string tenantId, string clientId, string? clientName, string? collectionRequestId, ClientTelemetrySnapshot snapshot, string? snapshotJson, CancellationToken token)
         {
@@ -238,12 +264,18 @@ ORDER BY bucket_index;";
             using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
-                using (SqliteCommand command = connection.CreateCommand())
+                using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
-                    command.CommandText = "DELETE FROM client_telemetry_samples WHERE tenant_id = $tenantId AND id = $id;";
-                    command.Parameters.AddWithValue("$tenantId", tenantId);
-                    command.Parameters.AddWithValue("$id", id);
-                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false) > 0;
+                    await DeleteHostChildrenAsync(connection, transaction, tenantId, "sample_id = $id", delegate (SqliteCommand command)
+                    {
+                        command.Parameters.AddWithValue("$id", id);
+                    }, token).ConfigureAwait(false);
+                    int deleted = await DeleteHostParentsAsync(connection, transaction, tenantId, "id = $id", delegate (SqliteCommand command)
+                    {
+                        command.Parameters.AddWithValue("$id", id);
+                    }, token).ConfigureAwait(false);
+                    transaction.Commit();
+                    return deleted > 0;
                 }
             }
         }
@@ -256,13 +288,18 @@ ORDER BY bucket_index;";
             using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
-                using (SqliteCommand command = connection.CreateCommand())
+                using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
-                    command.CommandText = "DELETE FROM client_telemetry_samples WHERE tenant_id = $tenantId AND ($clientId IS NULL OR client_id = $clientId) AND ($toUtc IS NULL OR collected_utc < $toUtc);";
-                    AddNullable(command, "$tenantId", request.TenantId ?? string.Empty);
-                    AddNullable(command, "$clientId", request.ClientId);
-                    AddNullable(command, "$toUtc", request.ToUtc?.ToString("O", CultureInfo.InvariantCulture));
-                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    string predicate = "($clientId IS NULL OR client_id = $clientId) AND ($toUtc IS NULL OR collected_utc < $toUtc)";
+                    Action<SqliteCommand> addParameters = delegate (SqliteCommand command)
+                    {
+                        AddNullable(command, "$clientId", request.ClientId);
+                        AddNullable(command, "$toUtc", request.ToUtc?.ToString("O", CultureInfo.InvariantCulture));
+                    };
+                    await DeleteHostChildrenAsync(connection, transaction, request.TenantId ?? string.Empty, predicate, addParameters, token).ConfigureAwait(false);
+                    int deleted = await DeleteHostParentsAsync(connection, transaction, request.TenantId ?? string.Empty, predicate, addParameters, token).ConfigureAwait(false);
+                    transaction.Commit();
+                    return deleted;
                 }
             }
         }
@@ -274,22 +311,23 @@ ORDER BY bucket_index;";
             using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
-                int total = 0;
-                using (SqliteCommand host = connection.CreateCommand())
+                using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
-                    host.CommandText = "DELETE FROM client_telemetry_samples WHERE collected_utc < $olderThanUtc;";
-                    host.Parameters.AddWithValue("$olderThanUtc", olderThanUtc.ToString("O", CultureInfo.InvariantCulture));
-                    total += await host.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-                }
+                    int total = 0;
+                    string predicate = "collected_utc < $olderThanUtc";
+                    Action<SqliteCommand> addParameters = delegate (SqliteCommand command)
+                    {
+                        command.Parameters.AddWithValue("$olderThanUtc", olderThanUtc.ToString("O", CultureInfo.InvariantCulture));
+                    };
+                    total += await DeleteHostChildrenAsync(connection, transaction, null, predicate, addParameters, token).ConfigureAwait(false);
+                    total += await DeleteHostParentsAsync(connection, transaction, null, predicate, addParameters, token).ConfigureAwait(false);
+                    total += await DeleteProviderChildrenForParentsAsync(connection, transaction, null, predicate, addParameters, token).ConfigureAwait(false);
+                    total += await DeleteProviderParentsAsync(connection, transaction, null, predicate, addParameters, token).ConfigureAwait(false);
+                    total += await DeleteAttemptsAsync(connection, transaction, "started_utc < $olderThanUtc", addParameters, token).ConfigureAwait(false);
 
-                using (SqliteCommand provider = connection.CreateCommand())
-                {
-                    provider.CommandText = "DELETE FROM client_provider_telemetry_samples WHERE collected_utc < $olderThanUtc;";
-                    provider.Parameters.AddWithValue("$olderThanUtc", olderThanUtc.ToString("O", CultureInfo.InvariantCulture));
-                    total += await provider.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    transaction.Commit();
+                    return total;
                 }
-
-                return total;
             }
         }
 
@@ -478,12 +516,18 @@ ORDER BY bucket_index;";
             using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
-                using (SqliteCommand command = connection.CreateCommand())
+                using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
-                    command.CommandText = "DELETE FROM client_provider_telemetry_samples WHERE tenant_id = $tenantId AND id = $id;";
-                    command.Parameters.AddWithValue("$tenantId", tenantId);
-                    command.Parameters.AddWithValue("$id", id);
-                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false) > 0;
+                    await DeleteProviderChildrenAsync(connection, transaction, tenantId, "sample_id = $id", delegate (SqliteCommand command)
+                    {
+                        command.Parameters.AddWithValue("$id", id);
+                    }, token).ConfigureAwait(false);
+                    int deleted = await DeleteProviderParentsAsync(connection, transaction, tenantId, "id = $id", delegate (SqliteCommand command)
+                    {
+                        command.Parameters.AddWithValue("$id", id);
+                    }, token).ConfigureAwait(false);
+                    transaction.Commit();
+                    return deleted > 0;
                 }
             }
         }
@@ -496,13 +540,18 @@ ORDER BY bucket_index;";
             using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
             {
                 await connection.OpenAsync(token).ConfigureAwait(false);
-                using (SqliteCommand command = connection.CreateCommand())
+                using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
-                    command.CommandText = "DELETE FROM client_provider_telemetry_samples WHERE tenant_id = $tenantId AND ($clientId IS NULL OR client_id = $clientId) AND ($toUtc IS NULL OR collected_utc < $toUtc);";
-                    AddNullable(command, "$tenantId", request.TenantId ?? string.Empty);
-                    AddNullable(command, "$clientId", request.ClientId);
-                    AddNullable(command, "$toUtc", request.ToUtc?.ToString("O", CultureInfo.InvariantCulture));
-                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    string predicate = "($clientId IS NULL OR client_id = $clientId) AND ($toUtc IS NULL OR collected_utc < $toUtc)";
+                    Action<SqliteCommand> addParameters = delegate (SqliteCommand command)
+                    {
+                        AddNullable(command, "$clientId", request.ClientId);
+                        AddNullable(command, "$toUtc", request.ToUtc?.ToString("O", CultureInfo.InvariantCulture));
+                    };
+                    await DeleteProviderChildrenForParentsAsync(connection, transaction, request.TenantId ?? string.Empty, predicate, addParameters, token).ConfigureAwait(false);
+                    int deleted = await DeleteProviderParentsAsync(connection, transaction, request.TenantId ?? string.Empty, predicate, addParameters, token).ConfigureAwait(false);
+                    transaction.Commit();
+                    return deleted;
                 }
             }
         }
@@ -877,6 +926,96 @@ ORDER BY bucket_index;";
         private static string InsertAttemptSql()
         {
             return "INSERT INTO client_telemetry_collection_attempts (id, tenant_id, client_id, client_name, started_utc, completed_utc, elapsed_ms, host_requested, provider_requested, host_succeeded, provider_succeeded, status, error_code, error_message, host_sample_id, provider_sample_count) VALUES ($id, $tenantId, $clientId, $clientName, $startedUtc, $completedUtc, $elapsedMs, $hostRequested, $providerRequested, $hostSucceeded, $providerSucceeded, $status, $errorCode, $errorMessage, $hostSampleId, $providerSampleCount);";
+        }
+
+        private static async Task<int> ExecuteTenantDeleteAsync(SqliteConnection connection, SqliteTransaction transaction, string tableName, string tenantId, CancellationToken token)
+        {
+            return await ExecuteDeleteAsync(connection, transaction, "DELETE FROM " + tableName + " WHERE tenant_id = $tenantId;", delegate (SqliteCommand command)
+            {
+                command.Parameters.AddWithValue("$tenantId", tenantId);
+            }, token).ConfigureAwait(false);
+        }
+
+        private static async Task<int> DeleteHostChildrenAsync(SqliteConnection connection, SqliteTransaction transaction, string? tenantId, string predicate, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            string tenantPredicate = String.IsNullOrWhiteSpace(tenantId) ? string.Empty : "tenant_id = $tenantId AND ";
+            return await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_telemetry_gpu_samples WHERE " + tenantPredicate + predicate + ";", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+        }
+
+        private static async Task<int> DeleteHostParentsAsync(SqliteConnection connection, SqliteTransaction transaction, string? tenantId, string predicate, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            string tenantPredicate = String.IsNullOrWhiteSpace(tenantId) ? string.Empty : "tenant_id = $tenantId AND ";
+            return await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_telemetry_samples WHERE " + tenantPredicate + predicate + ";", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+        }
+
+        private static async Task<int> DeleteProviderChildrenAsync(SqliteConnection connection, SqliteTransaction transaction, string? tenantId, string predicate, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            string tenantPredicate = String.IsNullOrWhiteSpace(tenantId) ? string.Empty : "tenant_id = $tenantId AND ";
+            int total = 0;
+            total += await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_provider_telemetry_models WHERE " + tenantPredicate + predicate + ";", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+            total += await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_provider_telemetry_metrics WHERE " + tenantPredicate + predicate + ";", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+            return total;
+        }
+
+        private static async Task<int> DeleteProviderChildrenForParentsAsync(SqliteConnection connection, SqliteTransaction transaction, string? tenantId, string parentPredicate, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            string tenantPredicate = String.IsNullOrWhiteSpace(tenantId) ? string.Empty : "tenant_id = $tenantId AND ";
+            string parentTenantPredicate = String.IsNullOrWhiteSpace(tenantId) ? string.Empty : "parent.tenant_id = $tenantId AND ";
+            string subquery = "SELECT parent.id FROM client_provider_telemetry_samples parent WHERE " + parentTenantPredicate + parentPredicate;
+            int total = 0;
+            total += await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_provider_telemetry_models WHERE " + tenantPredicate + "sample_id IN (" + subquery + ");", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+            total += await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_provider_telemetry_metrics WHERE " + tenantPredicate + "sample_id IN (" + subquery + ");", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+            return total;
+        }
+
+        private static async Task<int> DeleteProviderParentsAsync(SqliteConnection connection, SqliteTransaction transaction, string? tenantId, string predicate, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            string tenantPredicate = String.IsNullOrWhiteSpace(tenantId) ? string.Empty : "tenant_id = $tenantId AND ";
+            return await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_provider_telemetry_samples WHERE " + tenantPredicate + predicate + ";", delegate (SqliteCommand command)
+            {
+                if (!String.IsNullOrWhiteSpace(tenantId)) command.Parameters.AddWithValue("$tenantId", tenantId);
+                addParameters(command);
+            }, token).ConfigureAwait(false);
+        }
+
+        private static async Task<int> DeleteAttemptsAsync(SqliteConnection connection, SqliteTransaction transaction, string predicate, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            return await ExecuteDeleteAsync(connection, transaction, "DELETE FROM client_telemetry_collection_attempts WHERE " + predicate + ";", addParameters, token).ConfigureAwait(false);
+        }
+
+        private static async Task<int> ExecuteDeleteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, Action<SqliteCommand> addParameters, CancellationToken token)
+        {
+            using (SqliteCommand command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                command.CommandText = sql;
+                addParameters(command);
+                return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
         }
 
         private static string SchemaSql()

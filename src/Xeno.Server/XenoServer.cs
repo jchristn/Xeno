@@ -1406,8 +1406,7 @@ namespace Xeno.Server
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string deleteTenantId)
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                int removed = DeleteTenant(deleteTenantId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await DeleteTenantAsync(deleteTenantId, token).ConfigureAwait(false);
                 await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
@@ -4341,14 +4340,19 @@ namespace Xeno.Server
             return RequirePlatform().RoutingPolicies.RemoveAll(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
         }
 
-        private int DeleteTenant(string tenantId)
+        private async Task<int> DeleteTenantAsync(string tenantId, CancellationToken token)
         {
             XenoPlatform platform = RequirePlatform();
             List<string> clientIds = platform.Clients.Where(item => item.TenantId == tenantId).Select(item => item.Id).ToList();
             int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
-            if (removed == 0) return 0;
+            if (removed > 0)
+            {
+                removed += platform.RemoveTenantScopedRecords(tenantId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+            }
 
-            removed += platform.RemoveTenantScopedRecords(tenantId);
+            if (_Database != null) removed += await _Database.PurgeTenantDataAsync(tenantId, token).ConfigureAwait(false);
+            _TelemetryLatestCache.ClearTenant(tenantId);
 
             lock (_ClientConnectionsLock)
             {

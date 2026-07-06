@@ -70,8 +70,14 @@ END;
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+
+                await SqlServerTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
+            SqlServerTelemetryMethods telemetryMethods = new SqlServerTelemetryMethods(_ConnectionString);
+            ClientTelemetry = telemetryMethods;
+            ClientProviderTelemetry = telemetryMethods;
+            ClientTelemetryCollectionAttempts = telemetryMethods;
             return true;
         }
 
@@ -118,6 +124,18 @@ END;
                     command.Parameters.AddWithValue("@data", stateJson);
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+            }
+        }
+
+        /// <inheritdoc />
+        public override async Task<int> PurgeTenantDataAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            token.ThrowIfCancellationRequested();
+            using (SqlConnection connection = new SqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                return await SqlServerTelemetryMethods.PurgeTenantAsync(connection, tenantId, token).ConfigureAwait(false);
             }
         }
 

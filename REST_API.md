@@ -27,6 +27,7 @@ The live OpenAPI document remains available at `GET /openapi.json` and should be
 ## Client Telemetry
 
 All client telemetry routes are tenant-scoped and require authentication. Canonical routes use `/v1.0/api/...`.
+Server-collected telemetry is stored in the database engine selected by the server JSON `Database` settings. SQLite, PostgreSQL, SQL Server, and MySQL all support host telemetry, provider telemetry, collection attempts, details, deletes, rollups, and tenant purge cleanup.
 
 - `GET /v1.0/api/client-telemetry/status`
 - `GET /v1.0/api/client-telemetry/latest`
