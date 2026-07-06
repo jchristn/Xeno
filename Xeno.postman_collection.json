@@ -206,7 +206,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/models"
+                  "raw": "{{openAiBaseUrl}}/models",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "models"
+                  ]
                 }
               }
             }
@@ -248,7 +254,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/chat/completions"
+                  "raw": "{{openAiBaseUrl}}/chat/completions",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "chat",
+                    "completions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -294,7 +307,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/chat/completions"
+                  "raw": "{{openAiBaseUrl}}/chat/completions",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "chat",
+                    "completions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -345,7 +365,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/completions"
+                  "raw": "{{openAiBaseUrl}}/completions",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "completions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -391,7 +417,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/completions"
+                  "raw": "{{openAiBaseUrl}}/completions",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "completions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -442,7 +474,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/embeddings"
+                  "raw": "{{openAiBaseUrl}}/embeddings",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "embeddings"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -488,7 +526,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/embeddings"
+                  "raw": "{{openAiBaseUrl}}/embeddings",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "embeddings"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -518,7 +562,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/health"
+                  "raw": "{{localDashboardUrl}}/health",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
                 }
               }
             },
@@ -533,7 +583,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/state"
+                  "raw": "{{localDashboardUrl}}/api/v1/state",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "state"
+                  ]
                 }
               }
             },
@@ -548,7 +606,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/statistics"
+                  "raw": "{{localDashboardUrl}}/api/v1/statistics",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "statistics"
+                  ]
                 }
               }
             },
@@ -563,7 +629,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/database"
+                  "raw": "{{localDashboardUrl}}/api/v1/database",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "database"
+                  ]
                 }
               }
             }
@@ -583,7 +657,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/providers"
+                  "raw": "{{localDashboardUrl}}/api/v1/providers",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers"
+                  ]
                 }
               }
             },
@@ -602,7 +684,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/providers"
+                  "raw": "{{localDashboardUrl}}/api/v1/providers",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -630,7 +720,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers",
+                    "{{localProviderName}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -658,7 +757,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}/test"
+                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}/test",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers",
+                    "{{localProviderName}}",
+                    "test"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -682,7 +791,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers",
+                    "{{localProviderName}}"
+                  ]
                 }
               }
             }
@@ -702,7 +820,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/models"
+                  "raw": "{{localDashboardUrl}}/api/v1/models",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "models"
+                  ]
                 }
               }
             },
@@ -721,7 +847,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/models"
+                  "raw": "{{localDashboardUrl}}/api/v1/models",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "models"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -749,7 +883,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/models/{{localProviderName}}/{{modelName}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/models/{{localProviderName}}/{{modelName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "models",
+                    "{{localProviderName}}",
+                    "{{modelName}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -773,7 +917,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/models/{{localProviderName}}/{{modelName}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/models/{{localProviderName}}/{{modelName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "models",
+                    "{{localProviderName}}",
+                    "{{modelName}}"
+                  ]
                 }
               }
             }
@@ -793,7 +947,21 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/requests?limit={{pageSize}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/requests?limit={{pageSize}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "{{pageSize}}"
+                    }
+                  ]
                 }
               }
             },
@@ -808,7 +976,26 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/requests/summary?range=hour&bucketMinutes={{bucketMinutes}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/requests/summary?range=hour&bucketMinutes={{bucketMinutes}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "range",
+                      "value": "hour"
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}"
+                    }
+                  ]
                 }
               }
             },
@@ -823,7 +1010,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/requests/analytics/overview"
+                  "raw": "{{localDashboardUrl}}/api/v1/requests/analytics/overview",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests",
+                    "analytics",
+                    "overview"
+                  ]
                 }
               }
             },
@@ -838,7 +1035,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/requests/{{requestHistoryId}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/requests/{{requestHistoryId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests",
+                    "{{requestHistoryId}}"
+                  ]
                 }
               }
             },
@@ -853,7 +1059,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/requests/{{requestHistoryId}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/requests/{{requestHistoryId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests",
+                    "{{requestHistoryId}}"
+                  ]
                 }
               }
             },
@@ -872,7 +1087,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/requests/bulk"
+                  "raw": "{{localDashboardUrl}}/api/v1/requests/bulk",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests",
+                    "bulk"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -901,7 +1125,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/status"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/status",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "status"
+                  ]
                 }
               }
             },
@@ -916,7 +1149,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/latest"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/latest",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "latest"
+                  ]
                 }
               }
             },
@@ -935,7 +1177,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/collect"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/collect",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "collect"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -963,7 +1214,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/search"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/search",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "history",
+                    "search"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -991,7 +1252,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/rollups"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/rollups",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "history",
+                    "rollups"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1015,7 +1286,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "history",
+                    "{{localTelemetrySampleId}}"
+                  ]
                 }
               }
             },
@@ -1030,7 +1311,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/{{localTelemetrySampleId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "history",
+                    "{{localTelemetrySampleId}}"
+                  ]
                 }
               }
             },
@@ -1049,7 +1340,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/delete"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/history/delete",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "history",
+                    "delete"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1078,7 +1379,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/status"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/status",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "status"
+                  ]
                 }
               }
             },
@@ -1093,7 +1404,23 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/latest?providerName={{localProviderName}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/latest?providerName={{localProviderName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "latest"
+                  ],
+                  "query": [
+                    {
+                      "key": "providerName",
+                      "value": "{{localProviderName}}"
+                    }
+                  ]
                 }
               }
             },
@@ -1112,7 +1439,17 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/collect"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/collect",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "collect"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1140,7 +1477,18 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/search"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/search",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "history",
+                    "search"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1168,7 +1516,18 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/rollups"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/rollups",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "history",
+                    "rollups"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1192,7 +1551,18 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "history",
+                    "{{localProviderTelemetrySampleId}}"
+                  ]
                 }
               }
             },
@@ -1207,7 +1577,18 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/{{localProviderTelemetrySampleId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "history",
+                    "{{localProviderTelemetrySampleId}}"
+                  ]
                 }
               }
             },
@@ -1226,7 +1607,18 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/delete"
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/history/delete",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "history",
+                    "delete"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1255,7 +1647,25 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/logs?tail={{tail}}&severity=all"
+                  "raw": "{{localDashboardUrl}}/api/v1/logs?tail={{tail}}&severity=all",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs"
+                  ],
+                  "query": [
+                    {
+                      "key": "tail",
+                      "value": "{{tail}}"
+                    },
+                    {
+                      "key": "severity",
+                      "value": "all"
+                    }
+                  ]
                 }
               }
             }
@@ -1275,7 +1685,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/settings"
+                  "raw": "{{localDashboardUrl}}/api/v1/settings",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "settings"
+                  ]
                 }
               }
             },
@@ -1294,7 +1712,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/settings"
+                  "raw": "{{localDashboardUrl}}/api/v1/settings",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "settings"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1322,7 +1748,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{localDashboardUrl}}/api/v1/settings/reload"
+                  "raw": "{{localDashboardUrl}}/api/v1/settings/reload",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "settings",
+                    "reload"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1352,7 +1787,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverBaseUrl}}/health"
+                  "raw": "{{serverBaseUrl}}/health",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
                 }
               }
             },
@@ -1362,7 +1803,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/health"
+                  "raw": "{{serverApiBaseUrl}}/health",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
                 }
               }
             },
@@ -1372,7 +1819,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverBaseUrl}}/metrics"
+                  "raw": "{{serverBaseUrl}}/metrics",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "metrics"
+                  ]
                 }
               }
             },
@@ -1382,7 +1835,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverBaseUrl}}/openapi.json"
+                  "raw": "{{serverBaseUrl}}/openapi.json",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "openapi.json"
+                  ]
                 }
               }
             },
@@ -1392,7 +1851,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverBaseUrl}}/swagger"
+                  "raw": "{{serverBaseUrl}}/swagger",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "swagger"
+                  ]
                 }
               }
             }
@@ -1407,7 +1872,20 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/tenants?username={{username}}"
+                  "raw": "{{serverApiBaseUrl}}/auth/tenants?username={{username}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "tenants"
+                  ],
+                  "query": [
+                    {
+                      "key": "username",
+                      "value": "{{username}}"
+                    }
+                  ]
                 }
               }
             },
@@ -1422,7 +1900,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/tenants"
+                  "raw": "{{serverApiBaseUrl}}/auth/tenants",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "tenants"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1446,7 +1931,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/dashboard/login"
+                  "raw": "{{serverApiBaseUrl}}/auth/dashboard/login",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "dashboard",
+                    "login"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1483,7 +1976,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/login"
+                  "raw": "{{serverApiBaseUrl}}/auth/login",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1530,7 +2030,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/token"
+                  "raw": "{{serverApiBaseUrl}}/auth/token",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "token"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1581,7 +2088,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/token/details"
+                  "raw": "{{serverApiBaseUrl}}/auth/token/details",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "token",
+                    "details"
+                  ]
                 }
               }
             },
@@ -1614,7 +2129,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/token/refresh"
+                  "raw": "{{serverApiBaseUrl}}/auth/token/refresh",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "token",
+                    "refresh"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1669,7 +2192,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/auth/logout"
+                  "raw": "{{serverApiBaseUrl}}/auth/logout",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "logout"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1698,7 +2228,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/onboarding/signup"
+                  "raw": "{{serverApiBaseUrl}}/onboarding/signup",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "onboarding",
+                    "signup"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1741,7 +2278,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants"
+                  "raw": "{{serverApiBaseUrl}}/tenants",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "tenants"
+                  ]
                 }
               }
             },
@@ -1774,7 +2317,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants"
+                  "raw": "{{serverApiBaseUrl}}/tenants",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "tenants"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1816,7 +2365,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants/{{tenantId}}"
+                  "raw": "{{serverApiBaseUrl}}/tenants/{{tenantId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "tenants",
+                    "{{tenantId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1854,7 +2410,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/tenants/{{tenantId}}"
+                  "raw": "{{serverApiBaseUrl}}/tenants/{{tenantId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "tenants",
+                    "{{tenantId}}"
+                  ]
                 }
               }
             }
@@ -1888,7 +2451,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users"
+                  "raw": "{{serverApiBaseUrl}}/users",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "users"
+                  ]
                 }
               }
             },
@@ -1921,7 +2490,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users"
+                  "raw": "{{serverApiBaseUrl}}/users",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "users"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -1963,7 +2538,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}"
+                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "{{userId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2001,7 +2583,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}"
+                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "{{userId}}"
+                  ]
                 }
               }
             }
@@ -2035,7 +2624,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials"
+                  "raw": "{{serverApiBaseUrl}}/credentials",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "credentials"
+                  ]
                 }
               }
             },
@@ -2068,7 +2663,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials"
+                  "raw": "{{serverApiBaseUrl}}/credentials",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "credentials"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2110,7 +2711,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials/{{credentialId}}"
+                  "raw": "{{serverApiBaseUrl}}/credentials/{{credentialId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "credentials",
+                    "{{credentialId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2148,7 +2756,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/credentials/{{credentialId}}"
+                  "raw": "{{serverApiBaseUrl}}/credentials/{{credentialId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "credentials",
+                    "{{credentialId}}"
+                  ]
                 }
               }
             }
@@ -2182,7 +2797,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions"
+                  "raw": "{{serverApiBaseUrl}}/permissions",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "permissions"
+                  ]
                 }
               }
             },
@@ -2211,7 +2832,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions/grantable"
+                  "raw": "{{serverApiBaseUrl}}/permissions/grantable",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "permissions",
+                    "grantable"
+                  ]
                 }
               }
             },
@@ -2244,7 +2872,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions"
+                  "raw": "{{serverApiBaseUrl}}/permissions",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "permissions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2286,7 +2920,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions/{{permissionId}}"
+                  "raw": "{{serverApiBaseUrl}}/permissions/{{permissionId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "permissions",
+                    "{{permissionId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2324,7 +2965,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/permissions/{{permissionId}}"
+                  "raw": "{{serverApiBaseUrl}}/permissions/{{permissionId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "permissions",
+                    "{{permissionId}}"
+                  ]
                 }
               }
             }
@@ -2358,7 +3006,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles"
+                  "raw": "{{serverApiBaseUrl}}/roles",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "roles"
+                  ]
                 }
               }
             },
@@ -2391,7 +3045,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles"
+                  "raw": "{{serverApiBaseUrl}}/roles",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "roles"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2433,7 +3093,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles/{{roleId}}"
+                  "raw": "{{serverApiBaseUrl}}/roles/{{roleId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "roles",
+                    "{{roleId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2471,7 +3138,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles/{{roleId}}"
+                  "raw": "{{serverApiBaseUrl}}/roles/{{roleId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "roles",
+                    "{{roleId}}"
+                  ]
                 }
               }
             }
@@ -2505,7 +3179,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/role-assignments"
+                  "raw": "{{serverApiBaseUrl}}/role-assignments",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "role-assignments"
+                  ]
                 }
               }
             },
@@ -2538,7 +3218,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/role-assignments"
+                  "raw": "{{serverApiBaseUrl}}/role-assignments",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "role-assignments"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2576,7 +3262,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/role-assignments/{{roleAssignmentId}}"
+                  "raw": "{{serverApiBaseUrl}}/role-assignments/{{roleAssignmentId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "role-assignments",
+                    "{{roleAssignmentId}}"
+                  ]
                 }
               }
             },
@@ -2605,7 +3298,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/effective-permissions"
+                  "raw": "{{serverApiBaseUrl}}/effective-permissions",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "effective-permissions"
+                  ]
                 }
               }
             }
@@ -2639,7 +3338,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/clients"
+                  "raw": "{{serverApiBaseUrl}}/clients",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "clients"
+                  ]
                 }
               }
             },
@@ -2668,7 +3373,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/clients/{{clientId}}"
+                  "raw": "{{serverApiBaseUrl}}/clients/{{clientId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "clients",
+                    "{{clientId}}"
+                  ]
                 }
               }
             },
@@ -2701,7 +3413,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/client-models"
+                  "raw": "{{serverApiBaseUrl}}/client-models",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "client-models"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2744,7 +3462,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/model-definitions"
+                  "raw": "{{serverApiBaseUrl}}/model-definitions",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "model-definitions"
+                  ]
                 }
               }
             },
@@ -2773,7 +3497,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/model-configurations"
+                  "raw": "{{serverApiBaseUrl}}/model-configurations",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "model-configurations"
+                  ]
                 }
               }
             }
@@ -2807,7 +3537,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies"
+                  "raw": "{{serverApiBaseUrl}}/routing-policies",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routing-policies"
+                  ]
                 }
               }
             },
@@ -2840,7 +3576,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies"
+                  "raw": "{{serverApiBaseUrl}}/routing-policies",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routing-policies"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2882,7 +3624,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/validate"
+                  "raw": "{{serverApiBaseUrl}}/routing-policies/validate",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routing-policies",
+                    "validate"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2924,7 +3673,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}"
+                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routing-policies",
+                    "{{routingPolicyId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -2966,7 +3722,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}"
+                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routing-policies",
+                    "{{routingPolicyId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -3004,7 +3767,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}"
+                  "raw": "{{serverApiBaseUrl}}/routing-policies/{{routingPolicyId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routing-policies",
+                    "{{routingPolicyId}}"
+                  ]
                 }
               }
             }
@@ -3041,7 +3811,14 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/status"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/status",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "status"
+                      ]
                     }
                   }
                 },
@@ -3070,7 +3847,14 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/metrics"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/metrics",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "metrics"
+                      ]
                     }
                   }
                 },
@@ -3099,7 +3883,14 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collection-attempts"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collection-attempts",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "collection-attempts"
+                      ]
                     }
                   }
                 },
@@ -3132,7 +3923,14 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collect"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collect",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "collect"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3174,7 +3972,14 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collect"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/collect",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "collect"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3216,7 +4021,15 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/collect"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/collect",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "collect"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3259,7 +4072,20 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/latest?clientId={{clientTelemetryClientId}}"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/latest?clientId={{clientTelemetryClientId}}",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "latest"
+                      ],
+                      "query": [
+                        {
+                          "key": "clientId",
+                          "value": "{{clientTelemetryClientId}}"
+                        }
+                      ]
                     }
                   }
                 },
@@ -3292,7 +4118,15 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/search"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/search",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "history",
+                        "search"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3334,7 +4168,15 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/rollups"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/rollups",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "history",
+                        "rollups"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3372,7 +4214,15 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "history",
+                        "{{clientTelemetrySampleId}}"
+                      ]
                     }
                   }
                 },
@@ -3401,7 +4251,15 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/{{clientTelemetrySampleId}}",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "history",
+                        "{{clientTelemetrySampleId}}"
+                      ]
                     }
                   }
                 },
@@ -3434,7 +4292,15 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/delete"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/history/delete",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "history",
+                        "delete"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3477,7 +4343,25 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/latest?clientId={{clientTelemetryClientId}}&providerName={{clientTelemetryProviderName}}"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/latest?clientId={{clientTelemetryClientId}}&providerName={{clientTelemetryProviderName}}",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "latest"
+                      ],
+                      "query": [
+                        {
+                          "key": "clientId",
+                          "value": "{{clientTelemetryClientId}}"
+                        },
+                        {
+                          "key": "providerName",
+                          "value": "{{clientTelemetryProviderName}}"
+                        }
+                      ]
                     }
                   }
                 },
@@ -3510,7 +4394,16 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/search"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/search",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "history",
+                        "search"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3552,7 +4445,16 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/rollups"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/rollups",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "history",
+                        "rollups"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3590,7 +4492,16 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "history",
+                        "{{clientProviderTelemetrySampleId}}"
+                      ]
                     }
                   }
                 },
@@ -3619,7 +4530,16 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/{{clientProviderTelemetrySampleId}}",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "history",
+                        "{{clientProviderTelemetrySampleId}}"
+                      ]
                     }
                   }
                 },
@@ -3652,7 +4572,16 @@
                       }
                     ],
                     "url": {
-                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/delete"
+                      "raw": "{{serverApiBaseUrl}}/client-telemetry/providers/history/delete",
+                      "host": [
+                        "{{serverApiBaseUrl}}"
+                      ],
+                      "path": [
+                        "client-telemetry",
+                        "providers",
+                        "history",
+                        "delete"
+                      ]
                     },
                     "body": {
                       "mode": "raw",
@@ -3697,7 +4626,23 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history?page={{page}}&pageSize={{pageSize}}"
+                  "raw": "{{serverApiBaseUrl}}/request-history?page={{page}}&pageSize={{pageSize}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "request-history"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "{{page}}"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "{{pageSize}}"
+                    }
+                  ]
                 }
               }
             },
@@ -3726,7 +4671,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}"
+                  "raw": "{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "request-history",
+                    "{{requestHistoryId}}"
+                  ]
                 }
               }
             },
@@ -3755,7 +4707,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}"
+                  "raw": "{{serverApiBaseUrl}}/request-history/{{requestHistoryId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "request-history",
+                    "{{requestHistoryId}}"
+                  ]
                 }
               }
             },
@@ -3784,7 +4743,28 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/summary?bucketMinutes={{bucketMinutes}}&fromUtc={{fromUtc}}&toUtc={{toUtc}}"
+                  "raw": "{{serverApiBaseUrl}}/request-history/summary?bucketMinutes={{bucketMinutes}}&fromUtc={{fromUtc}}&toUtc={{toUtc}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "request-history",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}"
+                    },
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}"
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}"
+                    }
+                  ]
                 }
               }
             },
@@ -3817,7 +4797,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/bulk"
+                  "raw": "{{serverApiBaseUrl}}/request-history/bulk",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "request-history",
+                    "bulk"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -3855,7 +4842,25 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/request-history/analytics/overview?fromUtc={{fromUtc}}&toUtc={{toUtc}}"
+                  "raw": "{{serverApiBaseUrl}}/request-history/analytics/overview?fromUtc={{fromUtc}}&toUtc={{toUtc}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "request-history",
+                    "analytics",
+                    "overview"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}"
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}"
+                    }
+                  ]
                 }
               }
             }
@@ -3889,7 +4894,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/analytics/overview"
+                  "raw": "{{serverApiBaseUrl}}/analytics/overview",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "analytics",
+                    "overview"
+                  ]
                 }
               }
             }
@@ -3923,7 +4935,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/settings"
+                  "raw": "{{serverApiBaseUrl}}/settings",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "settings"
+                  ]
                 }
               }
             },
@@ -3956,7 +4974,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/settings"
+                  "raw": "{{serverApiBaseUrl}}/settings",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "settings"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -3999,7 +5023,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/backup"
+                  "raw": "{{serverApiBaseUrl}}/backup",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "backup"
+                  ]
                 }
               }
             },
@@ -4032,7 +5062,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/restore"
+                  "raw": "{{serverApiBaseUrl}}/restore",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "restore"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -4075,7 +5111,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/audit"
+                  "raw": "{{serverApiBaseUrl}}/audit",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "audit"
+                  ]
                 }
               }
             },
@@ -4104,7 +5146,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/audit/{{auditId}}"
+                  "raw": "{{serverApiBaseUrl}}/audit/{{auditId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "audit",
+                    "{{auditId}}"
+                  ]
                 }
               }
             }
@@ -4119,7 +5168,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/models"
+                  "raw": "{{openAiBaseUrl}}/models",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "models"
+                  ]
                 },
                 "description": "No authentication headers; expected 401 when authentication is required."
               }
@@ -4157,7 +5212,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/chat/completions"
+                  "raw": "{{openAiBaseUrl}}/chat/completions",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "chat",
+                    "completions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -4185,7 +5247,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{openAiBaseUrl}}/models"
+                  "raw": "{{openAiBaseUrl}}/models",
+                  "host": [
+                    "{{openAiBaseUrl}}"
+                  ],
+                  "path": [
+                    "models"
+                  ]
                 },
                 "description": "Expected 403 when a credential is used against another tenant."
               }
@@ -4219,7 +5287,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}"
+                  "raw": "{{serverApiBaseUrl}}/users/{{userId}}",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "users",
+                    "{{userId}}"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -4261,7 +5336,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{serverApiBaseUrl}}/roles"
+                  "raw": "{{serverApiBaseUrl}}/roles",
+                  "host": [
+                    "{{serverApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "roles"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -4290,7 +5371,15 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/auth/dashboard/login"
+                  "raw": "{{legacyServerApiBaseUrl}}/auth/dashboard/login",
+                  "host": [
+                    "{{legacyServerApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "dashboard",
+                    "login"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
@@ -4328,7 +5417,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/users"
+                  "raw": "{{legacyServerApiBaseUrl}}/users",
+                  "host": [
+                    "{{legacyServerApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "users"
+                  ]
                 }
               }
             },
@@ -4357,7 +5452,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/routingpolicies"
+                  "raw": "{{legacyServerApiBaseUrl}}/routingpolicies",
+                  "host": [
+                    "{{legacyServerApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "routingpolicies"
+                  ]
                 }
               }
             },
@@ -4394,7 +5495,16 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{legacyServerApiBaseUrl}}/openai/v1/chat/completions"
+                  "raw": "{{legacyServerApiBaseUrl}}/openai/v1/chat/completions",
+                  "host": [
+                    "{{legacyServerApiBaseUrl}}"
+                  ],
+                  "path": [
+                    "openai",
+                    "v1",
+                    "chat",
+                    "completions"
+                  ]
                 },
                 "body": {
                   "mode": "raw",
