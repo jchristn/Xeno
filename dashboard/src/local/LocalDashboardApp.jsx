@@ -116,6 +116,7 @@ export default function LocalDashboardApp() {
   const [providerFilter, setProviderFilter] = useState('');
   const [logSeverity, setLogSeverity] = useState('all');
   const [logTail, setLogTail] = useState(200);
+  const [followLogs, setFollowLogs] = useState(false);
   const [modal, setModal] = useState(null);
   const [error, setError] = useState('');
 
@@ -126,6 +127,14 @@ export default function LocalDashboardApp() {
   useEffect(() => {
     refresh();
   }, [page, range, logSeverity, logTail, telemetryMetric, providerTelemetryMetric, providerTelemetryProvider, providerTelemetryModel]);
+
+  useEffect(() => {
+    if (page !== 'logs' || !followLogs) return undefined;
+    const interval = window.setInterval(() => {
+      refresh();
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [page, followLogs, logSeverity, logTail]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -193,7 +202,7 @@ export default function LocalDashboardApp() {
         setProviderTelemetryRollups(localRows(rollupResponse));
       } else if (page === 'logs') {
         const response = await localApi(`/api/v1/logs?tail=${logTail}&severity=${logSeverity}`);
-        setLogs(response.lines || []);
+        setLogs(sortLogLinesDescending(response.lines || []));
       } else if (page === 'settings') {
         const [stateResponse, databaseResponse] = await Promise.all([
           localApi('/api/v1/settings'),
@@ -276,7 +285,7 @@ export default function LocalDashboardApp() {
           {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
           {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
           {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} metric={telemetryMetric} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} setModal={setModal} /> : null}
-          {page === 'logs' ? <Logs logSeverity={logSeverity} logTail={logTail} logs={logs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
+          {page === 'logs' ? <Logs followLogs={followLogs} logSeverity={logSeverity} logTail={logTail} logs={logs} setFollowLogs={setFollowLogs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
           {page === 'providerTelemetry' ? <ProviderTelemetry latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
           {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
         </main>
@@ -769,7 +778,7 @@ function ProviderTelemetryDetails({ detail }) {
   );
 }
 
-function Logs({ logSeverity, logTail, logs, setLogSeverity, setLogTail }) {
+function Logs({ followLogs, logSeverity, logTail, logs, setFollowLogs, setLogSeverity, setLogTail }) {
   const { t } = useTranslation();
   return (
     <Panel
@@ -788,6 +797,10 @@ function Logs({ logSeverity, logTail, logs, setLogSeverity, setLogTail }) {
             <select value={logTail} onChange={(event) => setLogTail(Number(event.target.value))} title={t('tooltipLocalLogTail')}>
               {[50, 100, 200, 500].map((count) => <option key={count} value={count}>{count}</option>)}
             </select>
+          </label>
+          <label className="toggle-field client-log-follow" title={t('tooltipFollowLocalLogs')}>
+            <input checked={followLogs} onChange={(event) => setFollowLogs(event.target.checked)} title={t('tooltipFollowLocalLogs')} type="checkbox" />
+            {t('followLive')}
           </label>
         </div>
       )}
@@ -1747,6 +1760,19 @@ function localApiRange(range) {
   if (range === 'lastWeek') return 'week';
   if (range === 'lastMonth') return 'month';
   return 'hour';
+}
+
+function sortLogLinesDescending(lines) {
+  return [...(Array.isArray(lines) ? lines : [])].sort((left, right) => logLineTimestampMs(right) - logLineTimestampMs(left));
+}
+
+function logLineTimestampMs(line) {
+  const match = String(line || '').match(/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)/);
+  if (!match) return Number.NEGATIVE_INFINITY;
+  const normalized = match[1].includes('T') ? match[1] : match[1].replace(' ', 'T');
+  const timestampText = normalized.endsWith('Z') ? normalized : `${normalized}Z`;
+  const timestamp = Date.parse(timestampText);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
 function telemetryBucketMinutes(range) {

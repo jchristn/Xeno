@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+let logRequests = 0;
+
 const stateResponse = {
   dashboardUrl: 'http://127.0.0.1:9343',
   dashboardStatus: 'Listening',
@@ -106,6 +108,7 @@ const telemetryLatestResponse = {
 };
 
 test.beforeEach(async ({ page }) => {
+  logRequests = 0;
   await page.route('**/api/v1/state', async (route) => route.fulfill({ json: stateResponse }));
   await page.route('**/api/v1/settings', async (route) => route.fulfill({ json: stateResponse }));
   await page.route('**/api/v1/statistics', async (route) => route.fulfill({ json: { requests: 12, failures: 1, streamingRequests: 3, averageLatencyMs: 42 } }));
@@ -127,7 +130,18 @@ test.beforeEach(async ({ page }) => {
       ]
     });
   });
-  await page.route('**/api/v1/logs**', async (route) => route.fulfill({ json: { logFile: 'xeno.log', lines: ['2026-06-26 08:00:00.000000Z [INFO] Local dashboard listening.'] } }));
+  await page.route('**/api/v1/logs**', async (route) => {
+    logRequests += 1;
+    await route.fulfill({
+      json: {
+        logFile: 'xeno.log',
+        lines: [
+          '2026-06-26 08:00:00.000000Z [INFO] Local dashboard listening.',
+          `2026-06-26 08:00:${String(Math.min(logRequests, 59)).padStart(2, '0')}.000000Z [DEBUG] Latest local dashboard log.`
+        ]
+      }
+    });
+  });
   await page.route('**/api/v1/database', async (route) => route.fulfill({ json: { status: 'Ready', filename: '~/.xeno/local-dashboard.db', resolvedFilename: 'C:\\Users\\test\\.xeno\\local-dashboard.db', exists: true, sizeBytes: 4096, requests: 12, oldestRequestUtc: '2026-06-26T08:00:00Z', newestRequestUtc: '2026-06-26T09:00:00Z' } }));
 });
 
@@ -187,6 +201,10 @@ test('local dashboard renders and follows interaction expectations', async ({ pa
 
   await page.getByRole('button', { name: 'Logs', exact: true }).click();
   await expect(page.getByText('[INFO] Local dashboard listening.')).toBeVisible();
+  const logPreviewText = await page.locator('.client-logs-card .json-preview').innerText();
+  expect(logPreviewText.indexOf('[DEBUG] Latest local dashboard log.')).toBeLessThan(logPreviewText.indexOf('[INFO] Local dashboard listening.'));
+  await page.getByLabel('Follow live').check();
+  await expect.poll(() => logRequests, { timeout: 3000 }).toBeGreaterThan(1);
 
   await page.getByRole('button', { name: 'Host', exact: true }).click();
   await expect(page.locator('.telemetry-collapsible-chart')).toHaveCount(3);
