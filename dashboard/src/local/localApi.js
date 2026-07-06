@@ -6,7 +6,7 @@ export async function localApi(path, options = {}) {
     'X-Xeno-Local-Token': token,
     ...(options.headers || {})
   };
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(path, { cache: 'no-store', ...options, headers });
   const text = await response.text();
   if (!response.ok) throw new Error(text || response.statusText);
   return text ? normalizeKeys(JSON.parse(text)) : {};

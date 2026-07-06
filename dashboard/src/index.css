@@ -1138,21 +1138,21 @@ html[data-theme='dark'] .primitive-list-item {
 
 .local-dashboard-shell .client-logs-card .workspace-card-actions {
   margin-left: auto;
-  flex: 1;
+  flex: 0 1 auto;
   justify-content: flex-end;
 }
 
 .client-logs-actions {
-  display: flex;
+  display: inline-flex;
   align-items: flex-end;
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: nowrap;
   margin-left: auto;
-  width: 100%;
+  width: auto;
 }
 
-.client-log-filter {
+.client-logs-actions .client-log-filter.form-field.inline {
   width: auto;
   grid-template-columns: auto auto;
   gap: 6px;

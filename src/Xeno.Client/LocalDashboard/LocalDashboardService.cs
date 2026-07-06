@@ -883,6 +883,7 @@ namespace Xeno.Client.LocalDashboard
         private static async Task SendJsonAsync(HttpContextBase context, object value)
         {
             context.Response.ContentType = "application/json";
+            context.Response.Headers.Add("Cache-Control", "no-store");
             await context.Response.Send(JsonUtil.Serialize(value, true), context.Token).ConfigureAwait(false);
         }
 

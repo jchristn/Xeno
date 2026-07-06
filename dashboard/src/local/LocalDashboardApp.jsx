@@ -201,7 +201,7 @@ export default function LocalDashboardApp() {
         setProviderTelemetrySamples(localRows(searchResponse.samples || searchResponse));
         setProviderTelemetryRollups(localRows(rollupResponse));
       } else if (page === 'logs') {
-        const response = await localApi(`/api/v1/logs?tail=${logTail}&severity=${logSeverity}`);
+        const response = await localApi(`/api/v1/logs?tail=${logTail}&severity=${logSeverity}&_=${Date.now()}`);
         setLogs(sortLogLinesDescending(response.lines || []));
       } else if (page === 'settings') {
         const [stateResponse, databaseResponse] = await Promise.all([
