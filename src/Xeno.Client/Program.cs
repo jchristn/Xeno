@@ -33,6 +33,7 @@ namespace Xeno.Client
         private static bool _UseColors = true;
         private static bool _UseJson = false;
         private static bool _WorkerMode = false;
+        private static TimestampedLogWriter? _WorkerOutputLogWriter = null;
         private static readonly SemaphoreSlim _SendLock = new SemaphoreSlim(1, 1);
 
         /// <summary>
@@ -94,6 +95,8 @@ namespace Xeno.Client
                             if (_UseJson) WriteJson(settings.BuildInventory());
                             else PrintInventory(settings);
                             return 0;
+                        case "reload":
+                            return HandleReload(args);
                         case "status":
                             PrintStatus(settings);
                             return 0;
@@ -353,6 +356,46 @@ namespace Xeno.Client
             if (open)
             {
                 OpenBrowser(state.LocalDashboardUrl);
+            }
+
+            return 0;
+        }
+
+        private static int HandleReload(string[] args)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintReloadHelp();
+                return 0;
+            }
+
+            ClientSettings reloaded = ClientSettings.Load();
+            string clientId = EnsureClientId(reloaded);
+            ClientConnectionState.MarkInventoryUpdateRequested();
+            ClientConnectionState state = ClientConnectionState.Load();
+            bool connected = state.IsConnected && state.IsRegistered && state.IsRecordedProcessRunning();
+
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    reloaded = true,
+                    settingsFile = ClientSettings.SettingsFile,
+                    clientId,
+                    connected,
+                    inventoryUpdateRequested = true
+                });
+                return 0;
+            }
+
+            WriteSuccess("Reloaded " + ClientSettings.SettingsFile + ".");
+            if (connected)
+            {
+                WriteInfo("A connected client worker will re-advertise the updated provider and model inventory on the next heartbeat.");
+            }
+            else
+            {
+                WriteInfo("No connected client worker is running. Updated inventory will be advertised on the next connection.");
             }
 
             return 0;
@@ -729,9 +772,90 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                settings.Save();
+                SaveInventorySettings(settings);
                 if (removed == 1) WriteSuccess("Deleted provider endpoint '" + runnerName + "'.");
                 else WriteSuccess("Deleted provider endpoint '" + runnerName + "' (" + removed + " entries removed).");
+                return 0;
+            }
+
+            if (args.Length >= 2 && IsUpdateCommand(args[1]))
+            {
+                string runnerName = String.Empty;
+                string? newName = null;
+                string? apiType = null;
+                string? endpoint = null;
+                string? credential = null;
+                bool clearCredential = false;
+                int? timeoutMs = null;
+                for (int i = 2; i < args.Length; i++)
+                {
+                    string option = args[i];
+                    if (String.Equals(option, "--clear-credential", StringComparison.OrdinalIgnoreCase))
+                    {
+                        clearCredential = true;
+                        continue;
+                    }
+
+                    if (i + 1 >= args.Length)
+                    {
+                        WriteError(option + " requires a value.");
+                        PrintProviderHelp();
+                        return 1;
+                    }
+
+                    if (String.Equals(option, "--name", StringComparison.OrdinalIgnoreCase)) runnerName = args[++i];
+                    else if (String.Equals(option, "--new-name", StringComparison.OrdinalIgnoreCase)) newName = args[++i];
+                    else if (String.Equals(option, "--type", StringComparison.OrdinalIgnoreCase) || String.Equals(option, "--api-type", StringComparison.OrdinalIgnoreCase)) apiType = args[++i];
+                    else if (String.Equals(option, "--endpoint", StringComparison.OrdinalIgnoreCase)) endpoint = args[++i];
+                    else if (String.Equals(option, "--credential", StringComparison.OrdinalIgnoreCase)) credential = args[++i];
+                    else if (String.Equals(option, "--timeout", StringComparison.OrdinalIgnoreCase) || String.Equals(option, "--timeout-ms", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!Int32.TryParse(args[++i], out int parsedTimeout) || parsedTimeout < 1000)
+                        {
+                            WriteError(option + " requires a timeout in milliseconds greater than or equal to 1000.");
+                            return 1;
+                        }
+
+                        timeoutMs = parsedTimeout;
+                    }
+                    else
+                    {
+                        WriteError("Unknown provider update option: " + option);
+                        PrintProviderHelp();
+                        return 1;
+                    }
+                }
+
+                if (String.IsNullOrWhiteSpace(runnerName))
+                {
+                    WriteError("Provider endpoint name is required.");
+                    PrintProviderHelp();
+                    return 1;
+                }
+
+                ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                if (runner == null)
+                {
+                    WriteError("Provider endpoint not found: " + runnerName);
+                    return 1;
+                }
+
+                if (!String.IsNullOrWhiteSpace(newName) && !String.Equals(newName, runner.Name, StringComparison.OrdinalIgnoreCase) &&
+                    settings.Runners.Exists(item => String.Equals(item.Name, newName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    WriteError("Provider endpoint already exists: " + newName);
+                    return 1;
+                }
+
+                if (!String.IsNullOrWhiteSpace(newName)) runner.Name = newName;
+                if (!String.IsNullOrWhiteSpace(apiType)) runner.ApiType = apiType;
+                if (!String.IsNullOrWhiteSpace(endpoint)) runner.Endpoint = endpoint;
+                if (timeoutMs != null) runner.TimeoutMs = timeoutMs.Value;
+                if (clearCredential) runner.Credential = null;
+                else if (credential != null) runner.Credential = credential;
+
+                SaveInventorySettings(settings);
+                WriteSuccess("Updated provider endpoint '" + runner.Name + "'.");
                 return 0;
             }
 
@@ -761,6 +885,16 @@ namespace Xeno.Client
                     }
                     else if (option == "--endpoint") runner.Endpoint = args[++i];
                     else if (option == "--credential") runner.Credential = args[++i];
+                    else if (option == "--timeout" || option == "--timeout-ms")
+                    {
+                        if (!Int32.TryParse(args[++i], out int parsedTimeout) || parsedTimeout < 1000)
+                        {
+                            WriteError(option + " requires a timeout in milliseconds greater than or equal to 1000.");
+                            return 1;
+                        }
+
+                        runner.TimeoutMs = parsedTimeout;
+                    }
                     else
                     {
                         WriteError("Unknown provider add option: " + option);
@@ -798,7 +932,7 @@ namespace Xeno.Client
                 }
 
                 settings.Runners.Add(runner);
-                settings.Save();
+                SaveInventorySettings(settings);
                 WriteSuccess("Added provider endpoint '" + runner.Name + "'.");
                 return 0;
             }
@@ -976,8 +1110,204 @@ namespace Xeno.Client
                     SupportsCompletions = supportsCompletions,
                     SupportsEmbeddings = supportsEmbeddings
                 });
-                settings.Save();
+                SaveInventorySettings(settings);
                 WriteSuccess("Added model '" + modelName + "' to provider endpoint '" + runner.Name + "'.");
+                return 0;
+            }
+
+            if (args.Length >= 2 && IsUpdateCommand(args[1]))
+            {
+                string runnerName = String.Empty;
+                string modelName = String.Empty;
+                string? newRunnerName = null;
+                string? newModelName = null;
+                bool? supportsCompletions = null;
+                bool? supportsEmbeddings = null;
+                for (int i = 2; i < args.Length; i++)
+                {
+                    string option = args[i];
+                    if (String.Equals(option, "--completion", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--completions", StringComparison.OrdinalIgnoreCase))
+                    {
+                        supportsCompletions = true;
+                        if (i + 1 < args.Length && IsBooleanLiteral(args[i + 1])) supportsCompletions = ParseBooleanLiteral(args[++i]);
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--embedding", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--embeddings", StringComparison.OrdinalIgnoreCase))
+                    {
+                        supportsEmbeddings = true;
+                        if (i + 1 < args.Length && IsBooleanLiteral(args[i + 1])) supportsEmbeddings = ParseBooleanLiteral(args[++i]);
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--no-completion", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--no-completions", StringComparison.OrdinalIgnoreCase))
+                    {
+                        supportsCompletions = false;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--no-embedding", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--no-embeddings", StringComparison.OrdinalIgnoreCase))
+                    {
+                        supportsEmbeddings = false;
+                        continue;
+                    }
+
+                    if (i + 1 >= args.Length)
+                    {
+                        WriteError(option + " requires a value.");
+                        PrintModelHelp();
+                        return 1;
+                    }
+
+                    if (String.Equals(option, "--runner", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--provider", StringComparison.OrdinalIgnoreCase))
+                    {
+                        runnerName = args[++i];
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--name", StringComparison.OrdinalIgnoreCase))
+                    {
+                        modelName = args[++i];
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--new-provider", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--new-runner", StringComparison.OrdinalIgnoreCase))
+                    {
+                        newRunnerName = args[++i];
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--new-name", StringComparison.OrdinalIgnoreCase))
+                    {
+                        newModelName = args[++i];
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--type", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string type = args[++i];
+                        if (String.Equals(type, "completion", StringComparison.OrdinalIgnoreCase) ||
+                            String.Equals(type, "completions", StringComparison.OrdinalIgnoreCase))
+                        {
+                            supportsCompletions = true;
+                            supportsEmbeddings = false;
+                            continue;
+                        }
+
+                        if (String.Equals(type, "embedding", StringComparison.OrdinalIgnoreCase) ||
+                            String.Equals(type, "embeddings", StringComparison.OrdinalIgnoreCase))
+                        {
+                            supportsCompletions = false;
+                            supportsEmbeddings = true;
+                            continue;
+                        }
+
+                        if (String.Equals(type, "both", StringComparison.OrdinalIgnoreCase) ||
+                            String.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
+                        {
+                            supportsCompletions = true;
+                            supportsEmbeddings = true;
+                            continue;
+                        }
+
+                        WriteError("--type requires completion, embedding, or both.");
+                        PrintModelHelp();
+                        return 1;
+                    }
+
+                    WriteError("Unknown model update option: " + option);
+                    PrintModelHelp();
+                    return 1;
+                }
+
+                if (String.IsNullOrWhiteSpace(modelName))
+                {
+                    WriteError("Model name is required.");
+                    PrintModelHelp();
+                    return 1;
+                }
+
+                ClientRunnerSettings? sourceRunner = null;
+                ClientModelSettings? model = null;
+                int matches = 0;
+                foreach (ClientRunnerSettings runner in settings.Runners)
+                {
+                    if (!String.IsNullOrWhiteSpace(runnerName) && !String.Equals(runner.Name, runnerName, StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (ClientModelSettings candidate in runner.Models)
+                    {
+                        if (!String.Equals(candidate.Name, modelName, StringComparison.OrdinalIgnoreCase)) continue;
+                        sourceRunner = runner;
+                        model = candidate;
+                        matches++;
+                    }
+                }
+
+                if (matches == 0)
+                {
+                    WriteError("Model not found: " + modelName);
+                    return 1;
+                }
+
+                if (matches > 1 && String.IsNullOrWhiteSpace(runnerName))
+                {
+                    WriteError("Model name exists in multiple providers. Specify --provider.");
+                    return 1;
+                }
+
+                if (sourceRunner == null || model == null)
+                {
+                    WriteError("Model not found: " + modelName);
+                    return 1;
+                }
+
+                ClientRunnerSettings targetRunner = sourceRunner;
+                if (!String.IsNullOrWhiteSpace(newRunnerName))
+                {
+                    ClientRunnerSettings? foundRunner = settings.Runners.Find(item => String.Equals(item.Name, newRunnerName, StringComparison.OrdinalIgnoreCase));
+                    if (foundRunner == null)
+                    {
+                        WriteError("Provider endpoint not found: " + newRunnerName);
+                        return 1;
+                    }
+
+                    targetRunner = foundRunner;
+                }
+
+                string targetModelName = String.IsNullOrWhiteSpace(newModelName) ? model.Name : newModelName;
+                bool moving = !Object.ReferenceEquals(sourceRunner, targetRunner);
+                bool renaming = !String.Equals(model.Name, targetModelName, StringComparison.OrdinalIgnoreCase);
+                if ((moving || renaming) && targetRunner.Models.Exists(item => String.Equals(item.Name, targetModelName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    WriteError("Model already exists in provider endpoint '" + targetRunner.Name + "': " + targetModelName);
+                    return 1;
+                }
+
+                bool finalSupportsCompletions = supportsCompletions ?? model.SupportsCompletions;
+                bool finalSupportsEmbeddings = supportsEmbeddings ?? model.SupportsEmbeddings;
+                if (!finalSupportsCompletions && !finalSupportsEmbeddings)
+                {
+                    WriteError("Model must support completions, embeddings, or both.");
+                    PrintModelHelp();
+                    return 1;
+                }
+
+                if (moving)
+                {
+                    sourceRunner.Models.Remove(model);
+                    targetRunner.Models.Add(model);
+                }
+
+                model.Name = targetModelName;
+                model.SupportsCompletions = finalSupportsCompletions;
+                model.SupportsEmbeddings = finalSupportsEmbeddings;
+                SaveInventorySettings(settings);
+                WriteSuccess("Updated model '" + model.Name + "' in provider endpoint '" + targetRunner.Name + "'.");
                 return 0;
             }
 
@@ -1018,7 +1348,7 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                settings.Save();
+                SaveInventorySettings(settings);
                 if (!String.IsNullOrWhiteSpace(runnerName)) WriteSuccess("Deleted model '" + modelName + "' from provider endpoint '" + runnerName + "'.");
                 else if (removed == 1) WriteSuccess("Deleted model '" + modelName + "'.");
                 else WriteSuccess("Deleted model '" + modelName + "' (" + removed + " entries removed).");
@@ -1230,8 +1560,7 @@ namespace Xeno.Client
                     ClientConnectionState.MarkHeartbeat(settings);
                     if (ClientConnectionState.IsInventoryUpdatePending())
                     {
-                        ClientSettings latestSettings = ClientSettings.Load();
-                        EnsureClientId(latestSettings);
+                        ClientSettings latestSettings = LoadRuntimeSettingsForConnectedSession(settings);
                         await SendMessageAsync(socket, new ClientInventoryUpdateMessage
                         {
                             Type = "client.inventory.update",
@@ -1264,13 +1593,15 @@ namespace Xeno.Client
             string type = envelope?.Type ?? string.Empty;
             if (String.Equals(type, "server.telemetry.request", StringComparison.OrdinalIgnoreCase))
             {
-                await HandleServerTelemetryRequestAsync(socket, settings, message, token).ConfigureAwait(false);
+                ClientSettings runtimeSettings = LoadRuntimeSettingsForConnectedSession(settings);
+                await HandleServerTelemetryRequestAsync(socket, runtimeSettings, message, token).ConfigureAwait(false);
                 return;
             }
 
             if (!String.Equals(type, "server.request", StringComparison.OrdinalIgnoreCase)) return;
 
-            object? response = await ExecuteServerRequestAsync(socket, settings, message, token).ConfigureAwait(false);
+            ClientSettings requestSettings = LoadRuntimeSettingsForConnectedSession(settings);
+            object? response = await ExecuteServerRequestAsync(socket, requestSettings, message, token).ConfigureAwait(false);
             if (response != null) await SendMessageAsync(socket, response, token).ConfigureAwait(false);
         }
 
@@ -1712,6 +2043,20 @@ namespace Xeno.Client
             return !String.IsNullOrWhiteSpace(settings.Server.AccessKey);
         }
 
+        private static void SaveInventorySettings(ClientSettings settings)
+        {
+            settings.Save();
+            ClientConnectionState.MarkInventoryUpdateRequested();
+        }
+
+        private static ClientSettings LoadRuntimeSettingsForConnectedSession(ClientSettings connectedSettings)
+        {
+            ClientSettings latestSettings = ClientSettings.Load();
+            if (!String.IsNullOrWhiteSpace(connectedSettings.ClientId)) latestSettings.ClientId = connectedSettings.ClientId;
+            if (!String.IsNullOrWhiteSpace(connectedSettings.TenantId)) latestSettings.TenantId = connectedSettings.TenantId;
+            return latestSettings;
+        }
+
         private static string EnsureClientId(ClientSettings settings)
         {
             if (String.IsNullOrWhiteSpace(settings.ClientId))
@@ -1850,7 +2195,8 @@ namespace Xeno.Client
             {
                 AutoFlush = true
             };
-            Console.SetOut(new TimestampedLogWriter(output, "INFO"));
+            _WorkerOutputLogWriter = new TimestampedLogWriter(output, "INFO");
+            Console.SetOut(_WorkerOutputLogWriter);
             Console.SetError(new TimestampedLogWriter(error, "ERROR"));
             _UseColors = false;
         }
@@ -1948,6 +2294,22 @@ namespace Xeno.Client
                         WriteLine();
                     }
 
+                    _AtLineStart = true;
+                }
+            }
+
+            public void WriteLineWithSeverity(string severity, string? value)
+            {
+                lock (_SyncRoot)
+                {
+                    if (!_AtLineStart)
+                    {
+                        _Inner.WriteLine();
+                    }
+
+                    string normalizedSeverity = String.IsNullOrWhiteSpace(severity) ? _Severity : severity.Trim().ToUpperInvariant();
+                    _Inner.Write(FormatLogPrefix(DateTimeOffset.UtcNow, normalizedSeverity));
+                    _Inner.WriteLine(value ?? String.Empty);
                     _AtLineStart = true;
                 }
             }
@@ -2344,6 +2706,19 @@ namespace Xeno.Client
 
                     ClientErrorResponse? error = JsonUtil.Deserialize<ClientErrorResponse>(message);
                     WriteError(error?.Message ?? "The Xeno server rejected the client message.");
+                    return;
+                }
+
+                if (String.Equals(type, "server.telemetry.request", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(type, "server.telemetry.ack", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_UseJson)
+                    {
+                        Console.WriteLine(message);
+                        return;
+                    }
+
+                    WriteDebug("Server message: " + type + ".");
                     return;
                 }
 
@@ -2746,6 +3121,13 @@ namespace Xeno.Client
                    String.Equals(value, "rm", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsUpdateCommand(string value)
+        {
+            return String.Equals(value, "update", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "edit", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(value, "set", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool IsBooleanLiteral(string value)
         {
             return String.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
@@ -2825,6 +3207,8 @@ namespace Xeno.Client
             Console.WriteLine("      Delete one configured provider endpoint.");
             Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>]");
             Console.WriteLine("      Add an Ollama, OpenAI, Gemini, or compatible endpoint.");
+            Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential]");
+            Console.WriteLine("      Update a configured provider endpoint and request inventory re-advertisement when connected.");
         }
 
         private static void PrintModelHelp()
@@ -2836,6 +3220,8 @@ namespace Xeno.Client
             Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--type completion|embedding|both]");
             Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--completions true|false] [--embeddings true|false]");
             Console.WriteLine("      Add a model to a configured provider.");
+            Console.WriteLine("  xeno model update --name <model-name> [--provider <provider-name>] [--new-name <model-name>] [--new-provider <provider-name>] [--type completion|embedding|both]");
+            Console.WriteLine("      Update a model advertisement and request inventory re-advertisement when connected.");
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]");
             Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete a model from one provider, or from all providers when omitted.");
@@ -2875,6 +3261,13 @@ namespace Xeno.Client
             Console.WriteLine("      Open the local dashboard in the default browser.");
         }
 
+        private static void PrintReloadHelp()
+        {
+            WriteInfoHeading("Reload command");
+            Console.WriteLine("  xeno reload");
+            Console.WriteLine("      Reload ~/.xeno/client.json from disk and request provider/model inventory re-advertisement when connected.");
+        }
+
         private static void PrintStopHelp()
         {
             WriteInfoHeading("Stop commands");
@@ -2893,6 +3286,17 @@ namespace Xeno.Client
         private static void WriteInfo(string message)
         {
             WriteColored(message, ConsoleColor.Cyan);
+        }
+
+        private static void WriteDebug(string message)
+        {
+            if (_WorkerOutputLogWriter != null)
+            {
+                _WorkerOutputLogWriter.WriteLineWithSeverity("DEBUG", message);
+                return;
+            }
+
+            WriteColored(message, ConsoleColor.DarkGray);
         }
 
         private static void WriteWarning(string message)
@@ -2958,6 +3362,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno status");
             Console.WriteLine("  xeno inventory");
+            Console.WriteLine("  xeno reload");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");
@@ -2982,12 +3387,15 @@ namespace Xeno.Client
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("  xeno provider delete --name <name>  (aliases: remove, remote, rm)");
             Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>]");
+            Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential]");
             WritePlainHeading("Models:");
             Console.WriteLine("  xeno model list");
             Console.WriteLine("  xeno model ls");
             Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--type completion|embedding|both]");
+            Console.WriteLine("  xeno model update --name <model-name> [--provider <provider-name>] [--new-name <model-name>] [--new-provider <provider-name>] [--type completion|embedding|both]");
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]  (aliases: remove, remote, rm)");
             WritePlainHeading("Runtime:");
+            Console.WriteLine("  xeno reload");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");

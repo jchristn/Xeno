@@ -14,5 +14,15 @@ namespace Xeno.Client.LocalDashboard.Models
         /// Whether one record was removed.
         /// </summary>
         public bool RemovedOne { get; set; } = false;
+
+        /// <summary>
+        /// Whether the client inventory update flag was requested.
+        /// </summary>
+        public bool InventoryUpdateRequested { get; set; } = false;
+
+        /// <summary>
+        /// Settings file affected by the mutation.
+        /// </summary>
+        public string? SettingsFile { get; set; } = null;
     }
 }

@@ -181,7 +181,10 @@ Use these commands during normal operations:
 xeno status
 xeno config show
 xeno provider list
+xeno provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000
 xeno model list
+xeno model update --provider local-ollama --name llama3.2:latest --type completion
+xeno reload
 xeno dashboard
 xeno dashboard open
 xeno logs --tail 100
@@ -189,4 +192,4 @@ xeno stop
 xeno reset
 ```
 
-Use the local dashboard to manage provider endpoints, advertised models, local request history, host telemetry, provider telemetry, logs, and local settings.
+Use the local dashboard to create, update, and delete provider endpoints and advertised models, inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `%USERPROFILE%\.xeno\client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `xeno reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory.

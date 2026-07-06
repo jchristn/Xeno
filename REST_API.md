@@ -365,9 +365,11 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `GET /api/v1/settings`
 
+`POST /api/v1/settings/reload`
+
 `PUT /api/v1/settings`
 
-Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Local telemetry search and rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, `offset`, and optional GPU filters. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry search and rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, `offset`, and optional GPU filters. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
 
 ## WebSocket
 

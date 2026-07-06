@@ -1316,6 +1316,13 @@ html[data-theme='dark'] .primitive-list-item {
   min-width: 0;
 }
 
+.telemetry-kpi-grid .metric-value-timestamp {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1280px) {
   .telemetry-kpi-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1969,6 +1976,21 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-text);
   font-size: 13px;
   font-weight: 700;
+}
+
+.settings-restart-banner.success-state {
+  border-left-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.settings-restart-banner.error-state {
+  border-left-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.settings-reload-grid {
+  display: grid;
+  gap: 12px;
 }
 
 .settings-impact-note {

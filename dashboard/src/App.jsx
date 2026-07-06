@@ -578,8 +578,8 @@ function ClientTelemetryView() {
         <MetricCard icon={<Activity size={18} />} label={t('running', 'Running')} value={String(Boolean(value(status, 'running')))} tone={value(status, 'running') ? 'success' : 'warning'} />
         <MetricCard icon={<History size={18} />} label={t('collectionInterval', 'Collection Interval')} value={`${formatNumber(value(status, 'collectionIntervalSeconds') || 0)}s`} />
         <MetricCard icon={<Gauge size={18} />} label={t('requestTimeout', 'Request Timeout')} value={`${formatNumber(value(status, 'requestTimeoutMs') || 0)}ms`} />
-        <MetricCard icon={<History size={18} />} label={t('lastCycle', 'Last Cycle')} value={formatDateTime(value(status, 'lastCycleUtc'))} />
-        <MetricCard icon={<History size={18} />} label={t('nextCycle', 'Next Cycle')} value={formatDateTime(value(status, 'nextCycleUtc'))} />
+        <MetricCard icon={<History size={18} />} label={t('lastCycle', 'Last Cycle')} value={formatDateTime(value(status, 'lastCycleUtc'))} valueClassName="metric-value-timestamp" />
+        <MetricCard icon={<History size={18} />} label={t('nextCycle', 'Next Cycle')} value={formatDateTime(value(status, 'nextCycleUtc'))} valueClassName="metric-value-timestamp" />
       </div>
 
       <div className="client-telemetry-chart-grid view-stack">
@@ -2473,13 +2473,13 @@ function listToText(input) {
   return Array.isArray(input) ? input.join('\n') : '';
 }
 
-function MetricCard({ icon, label, subtext, tone = 'neutral', value }) {
+function MetricCard({ icon, label, subtext, tone = 'neutral', value, valueClassName = '' }) {
   return (
     <div className={`metric-card ${tone}`}>
       <div className="metric-icon">{icon}</div>
       <div className="metric-copy">
         <span>{label}</span>
-        <strong>{value ?? '-'}</strong>
+        <strong className={valueClassName}>{value ?? '-'}</strong>
         {subtext ? <small>{subtext}</small> : null}
       </div>
     </div>

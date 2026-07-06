@@ -406,7 +406,9 @@ Example:
 
 Refreshes a connected client's advertised inventory without restarting the
 WebSocket connection. The Xeno client sends this after local provider or model
-configuration changes, including changes made through the local client dashboard.
+configuration changes, including changes made through the local client
+dashboard, `xeno provider`/`xeno model` CLI mutations, or `xeno reload` after
+manual `~/.xeno/client.json` edits.
 
 Schema:
 

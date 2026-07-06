@@ -187,15 +187,18 @@ xeno status
 xeno logs -f
 xeno dashboard
 xeno dashboard open
+xeno reload
 xeno stop
 xeno disconnect
 xeno provider list
 xeno provider ls
+xeno provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000
 xeno provider delete --name local-ollama
 xeno provider rm --name local-ollama
 xeno model list
 xeno model ls
 xeno model add --provider local-ollama --name all-minilm --type embedding
+xeno model update --provider local-ollama --name llama3.2:latest --type both
 xeno model delete --name llama3.2:latest
 xeno model rm --name llama3.2:latest
 xeno reset
@@ -203,9 +206,14 @@ xeno reset --force
 ```
 
 Provider endpoint URLs and upstream API types are configured with
-`xeno provider add`; `xeno model add` takes the configured provider name and a
-model name. For the full walkthrough, see
-the platform-specific guides in [getting-started/](getting-started/).
+`xeno provider add` and `xeno provider update`; `xeno model add` and
+`xeno model update` manage the models advertised under each provider. Provider
+and model CLI mutations are written to `~/.xeno/client.json` and request an
+inventory update when a client worker is already connected. If you edit
+`~/.xeno/client.json` directly, run `xeno reload` to re-read the file and
+re-advertise updated provider/model inventory on the next heartbeat. For the
+full walkthrough, see the platform-specific guides in
+[getting-started/](getting-started/).
 
 ### Local Client Dashboard
 
@@ -217,7 +225,9 @@ telemetry, provider runtime telemetry from Ollama, vLLM, and compatible
 endpoints, telemetry analytics, client logs, configured provider endpoints,
 advertised models, and request details for work processed by that machine.
 Providers and advertised models can be created, edited, and deleted from the
-browser without hand-editing `client.json`.
+browser without hand-editing `client.json`. Dashboard provider/model changes
+also request a server inventory update while connected. If you do hand-edit
+`client.json`, use the Settings page's reload action or run `xeno reload`.
 
 The default settings in `~/.xeno/client.json` are:
 
