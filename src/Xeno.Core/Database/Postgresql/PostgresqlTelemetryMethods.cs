@@ -193,7 +193,7 @@ WHERE tenant_id = @tenantId
   AND active = 1
   AND collected_utc >= @fromUtc
   AND collected_utc < @toUtc
-  AND (@clientId IS NULL OR client_id = @clientId)
+  AND (CAST(@clientId AS text) IS NULL OR client_id = CAST(@clientId AS text))
   AND {metricColumn} IS NOT NULL
 GROUP BY bucket_index
 ORDER BY bucket_index;";
@@ -442,8 +442,8 @@ WHERE tenant_id = @tenantId
   AND active = 1
   AND collected_utc >= @fromUtc
   AND collected_utc < @toUtc
-  AND (@clientId IS NULL OR client_id = @clientId)
-  AND (@providerName IS NULL OR provider_name = @providerName)
+  AND (CAST(@clientId AS text) IS NULL OR client_id = CAST(@clientId AS text))
+  AND (CAST(@providerName AS text) IS NULL OR provider_name = CAST(@providerName AS text))
   AND {metricColumn} IS NOT NULL
 GROUP BY bucket_index
 ORDER BY bucket_index;";

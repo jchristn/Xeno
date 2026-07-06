@@ -1813,8 +1813,12 @@ function title(value, t) {
     statusCode: 'status'
   };
   if (mapped[key]) return t(mapped[key]);
-  if (key.toLowerCase().includes('percent') || key.toLowerCase().includes('average')) {
+  if (key.toLowerCase().includes('percent') || key.toLowerCase().includes('average') || key.toLowerCase().includes('utilization') || key.toLowerCase().includes('temperature')) {
     return key
+      .replace(/Utilization/g, 'Util')
+      .replace(/utilization/g, 'util')
+      .replace(/Temperature/g, 'Temp')
+      .replace(/temperature/g, 'temp')
       .replace(/Average/g, 'Avg')
       .replace(/average/g, 'avg')
       .replace(/Percent/g, '%')
