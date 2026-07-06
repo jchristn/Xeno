@@ -1293,6 +1293,22 @@ namespace Test.Shared
                             Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage parsedSnapshot = DeserializeRequired<Xeno.Core.Models.Telemetry.ClientTelemetrySnapshotMessage>(snapshotJson);
                             if (parsedSnapshot.Type != "client.telemetry.snapshot") throw new InvalidOperationException("Telemetry snapshot type did not serialize.");
                             if (parsedSnapshot.Snapshot.Metadata.MachineName != "test-machine") throw new InvalidOperationException("Telemetry snapshot metadata did not round-trip.");
+
+                            ServerRequestCancellationMessage cancellation = new ServerRequestCancellationMessage
+                            {
+                                Type = "server.request.cancel",
+                                RequestId = "req_cancel",
+                                Reason = "CallerDisconnected",
+                                RequestorIp = "127.0.0.1",
+                                Method = "POST",
+                                RelativePath = "/v1/chat/completions",
+                                Source = "local-provider"
+                            };
+                            string cancellationJson = JsonUtil.Serialize(cancellation);
+                            ServerRequestCancellationMessage parsedCancellation = DeserializeRequired<ServerRequestCancellationMessage>(cancellationJson);
+                            if (parsedCancellation.Type != "server.request.cancel") throw new InvalidOperationException("Request cancellation type did not serialize.");
+                            if (parsedCancellation.Reason != "CallerDisconnected") throw new InvalidOperationException("Request cancellation reason did not round-trip.");
+                            if (parsedCancellation.Source != "local-provider") throw new InvalidOperationException("Request cancellation source did not round-trip.");
                             return Task.CompletedTask;
                         }),
                     new TestCaseDescriptor(

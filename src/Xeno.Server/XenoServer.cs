@@ -1,6 +1,7 @@
 namespace Xeno.Server
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Globalization;
     using System.IO;
@@ -47,6 +48,7 @@ namespace Xeno.Server
         private readonly Dictionary<string, PendingClientResponse> _PendingClientResponses = new Dictionary<string, PendingClientResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, PendingTelemetryResponse> _PendingTelemetryResponses = new Dictionary<string, PendingTelemetryResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<DateTime>> _AuthRateLimitAttempts = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingCallerDisconnects = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         private readonly AuthenticationService _Authentication = new AuthenticationService();
         private readonly AuthorizationService _Authorization = new AuthorizationService();
         private readonly ClientTelemetryLatestCache _TelemetryLatestCache = new ClientTelemetryLatestCache();
@@ -150,6 +152,9 @@ namespace Xeno.Server
 
         private void ConfigureWatson()
         {
+            _Webserver.Events.RequestAborted += HandleRequestAborted;
+            _Webserver.Events.RequestorDisconnected += HandleRequestorDisconnected;
+
             _Webserver.UseOpenApi(openApi =>
             {
                 openApi.EnableOpenApi = true;
@@ -190,6 +195,16 @@ namespace Xeno.Server
             {
                 _Webserver.WebSocket(_Settings.WebSocket.Path, WebSocketRouteAsync, false);
             }
+        }
+
+        private void HandleRequestAborted(object? sender, RequestEventArgs args)
+        {
+            CancelPendingRoutedRequest(args);
+        }
+
+        private void HandleRequestorDisconnected(object? sender, RequestEventArgs args)
+        {
+            CancelPendingRoutedRequest(args);
         }
 
         private static void AddXenoOpenApiSecuritySchemes(IDictionary<string, OpenApiSecurityScheme> schemes)
@@ -2205,8 +2220,15 @@ namespace Xeno.Server
             string dispatchedRelativePath = NormalizeOpenAiPath(path);
             string dispatchedRequestorIp = String.Empty;
             string? dispatchedSource = selectedModel?.Source;
+            string requestEventKey = RequestEventKey(context.Connection.Guid, context.Stream.Guid);
+            CancellationTokenSource? callerDisconnectedSource = null;
+            CancellationTokenSource? requestWaitSource = null;
             try
             {
+                callerDisconnectedSource = new CancellationTokenSource();
+                requestWaitSource = CancellationTokenSource.CreateLinkedTokenSource(token, callerDisconnectedSource.Token);
+                _PendingCallerDisconnects[requestEventKey] = callerDisconnectedSource;
+
                 string relativePath = dispatchedRelativePath;
                 string requestorIp = GetRequestorIp(context, requestContext);
                 dispatchedRequestorIp = requestorIp;
@@ -2236,31 +2258,31 @@ namespace Xeno.Server
 
                 clientRequestStartedUtc = DateTime.UtcNow;
                 decision.Timeline.Add("ClientDispatch");
-                await SendToClientAsync(connection, JsonUtil.Serialize(payload), token).ConfigureAwait(false);
+                await SendToClientAsync(connection, JsonUtil.Serialize(payload), requestWaitSource.Token).ConfigureAwait(false);
                 requestDispatched = true;
                 if (stream)
                 {
-                    ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, token).ConfigureAwait(false);
+                    ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, requestWaitSource.Token).ConfigureAwait(false);
                     if (IsClientResponseStart(firstResponse))
                     {
-                        await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, token).ConfigureAwait(false);
+                        await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, requestWaitSource.Token).ConfigureAwait(false);
                     }
                     else
                     {
                         decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
                         decision.Timeline.Add("ClientResponse");
-                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, firstResponse, requestBodyJson, capturedRequestHeaders, token).ConfigureAwait(false);
+                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, firstResponse, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
                     }
                 }
                 else
                 {
-                    ClientResponseMessage response = await WaitForClientResponseAsync(requestId, pending, token).ConfigureAwait(false);
+                    ClientResponseMessage response = await WaitForClientResponseAsync(requestId, pending, requestWaitSource.Token).ConfigureAwait(false);
                     decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
                     decision.Timeline.Add("ClientResponse");
-                    await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, token).ConfigureAwait(false);
+                    await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (OperationCanceledException) when (callerDisconnectedSource != null && callerDisconnectedSource.IsCancellationRequested)
             {
                 decision.Success = false;
                 decision.HttpStatusCode = 499;
@@ -2300,6 +2322,9 @@ namespace Xeno.Server
                 {
                     _PendingClientResponses.Remove(requestId);
                 }
+                _PendingCallerDisconnects.TryRemove(requestEventKey, out CancellationTokenSource? _);
+                requestWaitSource?.Dispose();
+                callerDisconnectedSource?.Dispose();
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
         }
@@ -2447,6 +2472,21 @@ namespace Xeno.Server
                 Source = source
             };
             await SendToClientAsync(connection, JsonUtil.Serialize(message), token).ConfigureAwait(false);
+        }
+
+        private void CancelPendingRoutedRequest(RequestEventArgs args)
+        {
+            if (args == null) return;
+            string key = RequestEventKey(args.ConnectionId, args.StreamId);
+            if (_PendingCallerDisconnects.TryGetValue(key, out CancellationTokenSource? cancellation))
+            {
+                cancellation.Cancel();
+            }
+        }
+
+        private static string RequestEventKey(Guid connectionId, Guid streamId)
+        {
+            return connectionId.ToString("N", CultureInfo.InvariantCulture) + ":" + streamId.ToString("N", CultureInfo.InvariantCulture);
         }
 
         private object BuildOllamaTagsResponse(RequestContext requestContext)
