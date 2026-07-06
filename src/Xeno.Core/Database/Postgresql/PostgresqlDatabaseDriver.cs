@@ -62,8 +62,14 @@ ON CONFLICT (id) DO NOTHING;
 """;
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+
+                await PostgresqlTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
+            PostgresqlTelemetryMethods telemetryMethods = new PostgresqlTelemetryMethods(_ConnectionString);
+            ClientTelemetry = telemetryMethods;
+            ClientProviderTelemetry = telemetryMethods;
+            ClientTelemetryCollectionAttempts = telemetryMethods;
             return true;
         }
 
@@ -105,6 +111,18 @@ ON CONFLICT (id) DO UPDATE SET
                     command.Parameters.AddWithValue("@data", stateJson);
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
+            }
+        }
+
+        /// <inheritdoc />
+        public override async Task<int> PurgeTenantDataAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            token.ThrowIfCancellationRequested();
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                return await PostgresqlTelemetryMethods.PurgeTenantAsync(connection, tenantId, token).ConfigureAwait(false);
             }
         }
 
