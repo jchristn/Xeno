@@ -4771,12 +4771,24 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(sessionToken))
             {
                 AuthSession? session = _Authentication.ValidateToken(RequirePlatform(), tenantId, sessionToken);
-                if (session == null) throw new UnauthorizedAccessException("Invalid or expired token.");
+                if (session != null)
+                {
+                    requestContext.IsAuthenticated = true;
+                    requestContext.SessionId = session.Id;
+                    requestContext.UserId = session.UserId;
+                    requestContext.CredentialId = session.CredentialId;
+                    requestContext.PrincipalType = session.PrincipalType;
+                    requestContext.AuthScheme = AuthSchemeEnum.Bearer;
+                    Interlocked.Increment(ref _AuthSuccessCount);
+                    return requestContext;
+                }
+
+                Credential? bearerCredential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, sessionToken);
+                if (bearerCredential == null) throw new UnauthorizedAccessException("Invalid or expired token.");
                 requestContext.IsAuthenticated = true;
-                requestContext.SessionId = session.Id;
-                requestContext.UserId = session.UserId;
-                requestContext.CredentialId = session.CredentialId;
-                requestContext.PrincipalType = session.PrincipalType;
+                requestContext.CredentialId = bearerCredential.Id;
+                requestContext.UserId = bearerCredential.UserId;
+                requestContext.PrincipalType = PrincipalTypeEnum.Credential;
                 requestContext.AuthScheme = AuthSchemeEnum.Bearer;
                 Interlocked.Increment(ref _AuthSuccessCount);
                 return requestContext;

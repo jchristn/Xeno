@@ -484,6 +484,26 @@ namespace Xeno.Core.Services
                     });
                 }
             }
+
+            Credential? defaultCredential = Credentials.FirstOrDefault(item => item.TenantId == tenantId && String.Equals(item.AccessKey, "default", StringComparison.Ordinal));
+            if (defaultCredential != null)
+            {
+                bool hasAssignment = RoleAssignments.Any(item =>
+                    item.TenantId == tenantId &&
+                    item.RoleId == tenantAdmin.Id &&
+                    item.PrincipalType == PrincipalTypeEnum.Credential &&
+                    item.PrincipalId == defaultCredential.Id);
+                if (!hasAssignment)
+                {
+                    RoleAssignments.Add(new RoleAssignment
+                    {
+                        TenantId = tenantId,
+                        RoleId = tenantAdmin.Id,
+                        PrincipalType = PrincipalTypeEnum.Credential,
+                        PrincipalId = defaultCredential.Id
+                    });
+                }
+            }
         }
 
         private Permission EnsurePermission(string tenantId, string resourceType, OperationTypeEnum operationType)
