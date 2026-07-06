@@ -12,6 +12,7 @@ This guide deploys the Xeno server and web dashboard with Docker Desktop on macO
 - Dashboard user: `admin@xeno`
 - Dashboard password: `password`
 - Default client access key: `default`
+- Default REST bearer token: `default`
 
 ## Prerequisites
 

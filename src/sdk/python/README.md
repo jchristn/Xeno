@@ -15,31 +15,32 @@ python -m pip install -e src/sdk/python
 ```python
 from xeno_client import XenoClient
 
-client = XenoClient("http://localhost:9000", bearer_token=token, tenant_id="ten_default")
+client = XenoClient("http://localhost:9000")
 health = client.get_health()
 models = client.list_openai_models()
 policies = client.list_routing_policies()
 ```
 
-Authenticated servers can pass a bearer token:
+The SDK defaults to the seeded tenant `ten_default` and bearer token `default`, which works against the default local Docker server. Production deployments should pass an issued bearer token or a tenant credential value as the bearer token:
 
 ```python
 client = XenoClient("http://localhost:9000", bearer_token=token)
 ```
 
-OpenAI-compatible routes also accept tenant-bound access credentials:
+Legacy integrations can still send tenant-bound access credentials through `x-access-key`, but new REST integrations should prefer bearer authentication:
 
 ```python
 client = XenoClient(
     "http://localhost:9000",
+    bearer_token=None,
     tenant_id="ten_default",
     access_key=access_key,
 )
 ```
 
 Use least-privilege credentials with `Inference.Read` and `Inference.Execute`
-for application traffic. Tenant headers select tenant context; they do not
-authenticate the request.
+for application traffic. Credential values may be sent as bearer tokens.
+Tenant headers select tenant context; they do not authenticate the request.
 
 ## Interactive Console
 

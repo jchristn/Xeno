@@ -12,6 +12,7 @@ This guide deploys the Xeno server and web dashboard with Docker on Linux.
 - Dashboard user: `admin@xeno`
 - Dashboard password: `password`
 - Default client access key: `default`
+- Default REST bearer token: `default`
 
 ## Prerequisites
 

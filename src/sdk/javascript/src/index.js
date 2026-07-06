@@ -11,7 +11,7 @@ export class XenoApiError extends Error {
 export class XenoClient {
   constructor({
     baseUrl = 'http://localhost:9000',
-    bearerToken = null,
+    bearerToken = 'default',
     accessKey = null,
     tenantId = 'ten_default',
     fetchImpl = globalThis.fetch

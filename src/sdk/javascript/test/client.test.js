@@ -42,6 +42,19 @@ test('listTenants sends tenant and bearer headers', async () => {
   assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], 'ten_123');
 });
 
+test('default options send seeded bearer and tenant headers', async () => {
+  const fetchImpl = createFetch();
+  const client = new XenoClient({
+    baseUrl: 'https://xeno.local',
+    fetchImpl
+  });
+
+  await client.listOpenAiModels();
+
+  assert.equal(fetchImpl.calls[0].options.headers.Authorization, 'Bearer default');
+  assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], 'ten_default');
+});
+
 test('management CRUD methods use expected routes and bodies', async () => {
   const fetchImpl = createFetch((url, options) => jsonResponse({}, options.method === 'DELETE' ? 204 : 200));
   const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
@@ -122,6 +135,7 @@ test('credential options send tenant and access key headers', async () => {
   const fetchImpl = createFetch();
   const client = new XenoClient({
     baseUrl: 'https://xeno.local',
+    bearerToken: null,
     accessKey: 'xeno_access',
     tenantId: 'ten_123',
     fetchImpl
@@ -136,7 +150,7 @@ test('credential options send tenant and access key headers', async () => {
 
 test('OpenAI errors surface authentication and authorization status', async () => {
   const anonymousFetch = createFetch(() => jsonResponse({ error: 'Unauthenticated', message: 'Authentication is required.' }, 401));
-  const anonymousClient = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl: anonymousFetch });
+  const anonymousClient = new XenoClient({ baseUrl: 'https://xeno.local', bearerToken: null, fetchImpl: anonymousFetch });
   await assert.rejects(() => anonymousClient.listOpenAiModels(), (error) => {
     assert.ok(error instanceof XenoApiError);
     assert.equal(error.status, 401);

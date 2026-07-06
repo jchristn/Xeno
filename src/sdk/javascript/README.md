@@ -16,9 +16,7 @@ npm install ./src/sdk/javascript
 import { XenoClient } from '@xeno-control-plane/sdk';
 
 const client = new XenoClient({
-  baseUrl: 'http://localhost:9000',
-  bearerToken: token,
-  tenantId: 'ten_default'
+  baseUrl: 'http://localhost:9000'
 });
 
 const health = await client.getHealth();
@@ -26,25 +24,26 @@ const models = await client.listOpenAiModels();
 const policies = await client.listRoutingPolicies();
 ```
 
-Authenticated servers can pass a bearer token:
+The SDK defaults to the seeded tenant `ten_default` and bearer token `default`, which works against the default local Docker server. Production deployments should pass an issued bearer token or a tenant credential value as the bearer token:
 
 ```javascript
 const client = new XenoClient({ baseUrl, bearerToken: token });
 ```
 
-OpenAI-compatible routes also accept tenant-bound access credentials:
+Legacy integrations can still send tenant-bound access credentials through `x-access-key`, but new REST integrations should prefer bearer authentication:
 
 ```javascript
 const client = new XenoClient({
   baseUrl,
+  bearerToken: null,
   tenantId: 'ten_default',
   accessKey
 });
 ```
 
 Use least-privilege credentials with `Inference.Read` and `Inference.Execute`
-for application traffic. Tenant headers select tenant context; they do not
-authenticate the request.
+for application traffic. Credential values may be sent as bearer tokens.
+Tenant headers select tenant context; they do not authenticate the request.
 
 ## Interactive Console
 

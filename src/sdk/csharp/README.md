@@ -15,7 +15,7 @@ dotnet add <your-project>.csproj reference .\src\sdk\csharp\Xeno.Sdk\Xeno.Sdk.cs
 ```csharp
 using Xeno.Sdk;
 
-using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token, tenantId: "ten_default"))
+using (XenoClient client = new XenoClient("http://localhost:9000"))
 {
     XenoApiResponse health = await client.GetHealthAsync();
     XenoApiResponse models = await client.ListOpenAiModelsAsync();
@@ -23,7 +23,7 @@ using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: 
 }
 ```
 
-Authenticated servers can use bearer tokens:
+The SDK defaults to the seeded tenant `ten_default` and bearer token `default`, which works against the default local Docker server. Production deployments should pass an issued bearer token or a tenant credential value as the bearer token:
 
 ```csharp
 using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token))
@@ -32,12 +32,13 @@ using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: 
 }
 ```
 
-OpenAI-compatible routes also accept tenant-bound access credentials:
+Legacy integrations can still send tenant-bound access credentials through `x-access-key`, but new REST integrations should prefer bearer authentication:
 
 ```csharp
 using (XenoClient client = new XenoClient(new XenoClientOptions
 {
     BaseUrl = "http://localhost:9000",
+    BearerToken = null,
     TenantId = "ten_default",
     AccessKey = accessKey
 }))
@@ -47,8 +48,8 @@ using (XenoClient client = new XenoClient(new XenoClientOptions
 ```
 
 Use least-privilege credentials with `Inference.Read` and `Inference.Execute`
-for application traffic. Tenant headers select tenant context; they do not
-authenticate the request.
+for application traffic. Credential values may be sent as bearer tokens.
+Tenant headers select tenant context; they do not authenticate the request.
 
 ## Interactive Console
 

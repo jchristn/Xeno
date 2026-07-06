@@ -10,9 +10,9 @@ from .client import XenoApiError, XenoClient
 def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:9000"
     tenant_id = "ten_default"
-    bearer_token: str | None = None
+    bearer_token: str | None = "default"
 
-    print_help(base_url, tenant_id)
+    print_help(base_url, tenant_id, bearer_token)
     while True:
         try:
             try:
@@ -22,7 +22,7 @@ def main() -> int:
             if not command:
                 continue
             if command in ("?", "help"):
-                print_help(base_url, tenant_id)
+                print_help(base_url, tenant_id, bearer_token)
             elif command in ("q", "quit"):
                 return 0
             elif command == "cls":
@@ -87,12 +87,12 @@ def print_json(value: object) -> None:
     print(json.dumps(value, indent=2))
 
 
-def print_help(base_url: str, tenant_id: str) -> None:
+def print_help(base_url: str, tenant_id: str, bearer_token: str | None) -> None:
     print("")
     print("Connection")
     print(f"  url <url>       set server URL, current {base_url}")
     print(f"  tenant <id>     set tenant, current {tenant_id}")
-    print("  token <token>   set bearer token for authenticated servers")
+    print(f"  token <token>   set bearer token, current {bearer_token or '<none>'}")
     print("")
     print("Read commands")
     print("  health          server health")

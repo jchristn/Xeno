@@ -184,7 +184,7 @@ class XenoClient:
     def __init__(
         self,
         base_url: str = "http://localhost:9000",
-        bearer_token: str | None = None,
+        bearer_token: str | None = "default",
         access_key: str | None = None,
         tenant_id: str = "ten_default",
         opener: Any | None = None,

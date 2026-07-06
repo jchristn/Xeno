@@ -13,12 +13,12 @@ namespace Xeno.Sdk
         public string BaseUrl { get; set; } = "http://localhost:9000";
 
         /// <summary>
-        /// Gets or sets an optional bearer token for authenticated REST calls.
+        /// Gets or sets the bearer token for authenticated REST calls. Default value is <c>default</c>.
         /// </summary>
-        public string? BearerToken { get; set; }
+        public string? BearerToken { get; set; } = "default";
 
         /// <summary>
-        /// Gets or sets an optional tenant-bound credential access key.
+        /// Gets or sets an optional legacy tenant-bound credential access key header.
         /// </summary>
         public string? AccessKey { get; set; }
 

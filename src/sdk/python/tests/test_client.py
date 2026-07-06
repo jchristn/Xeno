@@ -48,6 +48,16 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer token-123")
         self.assertEqual(request.headers["X-tenant-guid"], "ten_123")
 
+    def test_default_options_send_seeded_bearer_and_tenant_headers(self):
+        opener = FakeOpener()
+        client = XenoClient("https://xeno.local", opener=opener)
+
+        client.list_openai_models()
+
+        request = opener.calls[0]["request"]
+        self.assertEqual(request.headers["Authorization"], "Bearer default")
+        self.assertEqual(request.headers["X-tenant-guid"], "ten_default")
+
     def test_management_crud_methods_use_expected_routes_and_bodies(self):
         opener = FakeOpener(lambda request: FakeResponse("{}", 204 if request.get_method() == "DELETE" else 200))
         client = XenoClient("https://xeno.local", opener=opener)
@@ -130,7 +140,7 @@ class XenoClientTests(unittest.TestCase):
 
     def test_credential_options_send_tenant_and_access_key_headers(self):
         opener = FakeOpener()
-        client = XenoClient("https://xeno.local", access_key="xeno_access", tenant_id="ten_123", opener=opener)
+        client = XenoClient("https://xeno.local", bearer_token=None, access_key="xeno_access", tenant_id="ten_123", opener=opener)
 
         client.list_openai_models()
 
@@ -148,7 +158,7 @@ class XenoClientTests(unittest.TestCase):
             FakeResponse('{"error":"Unauthenticated","message":"Authentication is required."}', 401),
         )
         anonymous_opener = FakeOpener(lambda request: unauthenticated_error)
-        anonymous_client = XenoClient("https://xeno.local", opener=anonymous_opener)
+        anonymous_client = XenoClient("https://xeno.local", bearer_token=None, opener=anonymous_opener)
         with self.assertRaises(XenoApiError) as unauthenticated_context:
             anonymous_client.list_openai_models()
         self.assertEqual(unauthenticated_context.exception.status, 401)

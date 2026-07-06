@@ -31,6 +31,26 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
+        public async Task DefaultOptions_SendSeededBearerAndTenantHeaders()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient(new XenoClientOptions
+            {
+                BaseUrl = "https://xeno.local",
+                HttpClient = httpClient
+            }))
+            {
+                await client.ListOpenAiModelsAsync();
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                Assert.Equal("Bearer", request.AuthorizationScheme);
+                Assert.Equal("default", request.AuthorizationParameter);
+                Assert.Equal("ten_default", request.TenantId);
+            }
+        }
+
+        [Fact]
         public async Task ManagementCrudMethods_UseExpectedRoutesAndBodies()
         {
             RecordingHandler handler = new RecordingHandler(request =>
@@ -129,6 +149,7 @@ namespace Xeno.Sdk.Tests
             using (XenoClient client = new XenoClient(new XenoClientOptions
             {
                 BaseUrl = "https://xeno.local",
+                BearerToken = null,
                 AccessKey = "xeno_access",
                 TenantId = "ten_123",
                 HttpClient = httpClient
@@ -150,7 +171,7 @@ namespace Xeno.Sdk.Tests
                 Content = new StringContent("{\"error\":\"Unauthenticated\",\"message\":\"Authentication is required.\"}", Encoding.UTF8, "application/json")
             });
             using (HttpClient anonymousHttpClient = new HttpClient(anonymousHandler))
-            using (XenoClient anonymousClient = new XenoClient("https://xeno.local", httpClient: anonymousHttpClient))
+            using (XenoClient anonymousClient = new XenoClient("https://xeno.local", bearerToken: null, httpClient: anonymousHttpClient))
             {
                 XenoApiException unauthenticated = await Assert.ThrowsAsync<XenoApiException>(
                     async () => await anonymousClient.ListOpenAiModelsAsync());

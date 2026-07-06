@@ -12,6 +12,7 @@ This guide installs and runs the Xeno client on Windows.
 - Local Docker server REST URL: `http://localhost:9000`
 - Dashboard login for seeded Docker server: `admin@xeno` / `password`
 - Default seeded client access key: `default`
+- Default REST bearer token for Postman and SDK examples: `default`
 
 ## Prerequisites
 

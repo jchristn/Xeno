@@ -5,7 +5,7 @@ import { XenoApiError, XenoClient } from './src/index.js';
 const rl = readline.createInterface({ input, output });
 let baseUrl = process.argv[2] || 'http://localhost:9000';
 let tenantId = 'ten_default';
-let bearerToken = null;
+let bearerToken = 'default';
 
 function client() {
   return new XenoClient({ baseUrl, tenantId, bearerToken });
@@ -16,7 +16,7 @@ function printHelp() {
   console.log('Connection');
   console.log(`  url <url>       set server URL, current ${baseUrl}`);
   console.log(`  tenant <id>     set tenant, current ${tenantId}`);
-  console.log('  token <token>   set bearer token for authenticated servers');
+  console.log(`  token <token>   set bearer token, current ${bearerToken ?? '<none>'}`);
   console.log('');
   console.log('Read commands');
   console.log('  health          server health');

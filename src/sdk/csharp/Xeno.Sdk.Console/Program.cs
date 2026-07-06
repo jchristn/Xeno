@@ -10,7 +10,7 @@ namespace Xeno.Sdk.Console
     {
         private static string _BaseUrl = "http://localhost:9000";
         private static string _TenantId = "ten_default";
-        private static string? _BearerToken;
+        private static string? _BearerToken = "default";
 
         private static async Task<int> Main(string[] args)
         {
@@ -113,7 +113,7 @@ namespace Xeno.Sdk.Console
             System.Console.WriteLine("Connection");
             System.Console.WriteLine("  url <url>       set server URL, current " + _BaseUrl);
             System.Console.WriteLine("  tenant <id>     set tenant, current " + _TenantId);
-            System.Console.WriteLine("  token <token>   set bearer token for authenticated servers");
+            System.Console.WriteLine("  token <token>   set bearer token, current " + (_BearerToken ?? "<none>"));
             System.Console.WriteLine("");
             System.Console.WriteLine("Read commands");
             System.Console.WriteLine("  health          server health");
