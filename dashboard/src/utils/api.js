@@ -1,5 +1,41 @@
 export const authFailureEventName = 'xeno.dashboard.authFailed';
 
+export function defaultServerUrl() {
+  return normalizeServerUrl(window.__XENO_CONFIG__?.serverUrl || '');
+}
+
+export function normalizeServerUrl(input) {
+  const fallback = browserDerivedServerUrl();
+  const raw = String(input || '').trim();
+  if (!raw) return fallback;
+
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (isLoopbackHost(parsed.hostname) && !isLoopbackHost(window.location.hostname)) {
+      parsed.protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      parsed.hostname = window.location.hostname;
+    }
+
+    parsed.pathname = '';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return raw.replace(/\/$/, '') || fallback;
+  }
+}
+
+function browserDerivedServerUrl() {
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const host = window.location.hostname || 'localhost';
+  return `${protocol}//${host}:9000`;
+}
+
+function isLoopbackHost(hostname) {
+  const normalized = String(hostname || '').toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]';
+}
+
 export class ApiAuthenticationError extends Error {
   constructor(message, status) {
     super(message);
@@ -9,14 +45,14 @@ export class ApiAuthenticationError extends Error {
 }
 
 export default class ApiClient {
-  constructor(baseUrl = window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000') {
-    this.baseUrl = baseUrl.replace(/\/$/, '');
+  constructor(baseUrl = defaultServerUrl()) {
+    this.baseUrl = normalizeServerUrl(baseUrl);
     this.token = '';
     this.tenantId = '';
   }
 
   setBaseUrl(baseUrl) {
-    this.baseUrl = String(baseUrl || 'http://localhost:9000').replace(/\/$/, '');
+    this.baseUrl = normalizeServerUrl(baseUrl);
   }
 
   setAuth(session) {

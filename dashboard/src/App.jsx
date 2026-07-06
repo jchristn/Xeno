@@ -39,7 +39,7 @@ import {
   Upload,
   Zap
 } from 'lucide-react';
-import ApiClient, { authFailureEventName } from './utils/api.js';
+import ApiClient, { authFailureEventName, defaultServerUrl, normalizeServerUrl } from './utils/api.js';
 import ActionMenu from './components/ActionMenu.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
 import CopyButton from './components/CopyButton.jsx';
@@ -928,7 +928,7 @@ function telemetryTooltipPosition(x, y, width, height) {
 
 function LoginView({ onLogin, onToggleTheme, theme }) {
   const { t } = useTranslation();
-  const [serverUrl, setServerUrl] = useState(api.baseUrl || 'http://localhost:9000');
+  const [serverUrl, setServerUrl] = useState(api.baseUrl || defaultServerUrl());
   const [email, setEmail] = useState('');
   const [tenants, setTenants] = useState([]);
   const [selectedTenantId, setSelectedTenantId] = useState('');
@@ -958,7 +958,9 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
     setStatus('');
     setLoading(true);
     try {
-      api.setBaseUrl(serverUrl);
+      const normalizedServerUrl = normalizeServerUrl(serverUrl);
+      api.setBaseUrl(normalizedServerUrl);
+      setServerUrl(normalizedServerUrl);
       const result = await api.post('/api/v1/auth/tenants', { email: email.trim() }, { skipAuth: true });
       if (result?.error) throw new Error(result.message || result.error);
 
@@ -989,7 +991,9 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
 
     setLoading(true);
     try {
-      api.setBaseUrl(serverUrl);
+      const normalizedServerUrl = normalizeServerUrl(serverUrl);
+      api.setBaseUrl(normalizedServerUrl);
+      setServerUrl(normalizedServerUrl);
       const result = await api.post('/api/v1/auth/dashboard/login', {
         tenantId: selectedTenantId,
         email: email.trim(),
@@ -1001,7 +1005,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
       onLogin({
         email: result.email || email.trim(),
         expiresUtc: result.expiresUtc,
-        serverUrl: api.baseUrl,
+        serverUrl: normalizedServerUrl,
         sessionId: result.sessionId,
         tenantId: result.tenantId,
         tenantName: result.tenantName || tenantName(result.tenantId),
@@ -4937,7 +4941,8 @@ function AppRoutes() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [session, setSession] = useState(() => {
     const storedSession = readDashboardSession();
-    const configuredServerUrl = storedSession?.serverUrl || window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000';
+    const configuredServerUrl = normalizeServerUrl(storedSession?.serverUrl || defaultServerUrl());
+    if (storedSession) storedSession.serverUrl = configuredServerUrl;
     api.setBaseUrl(configuredServerUrl);
     if (storedSession) api.setAuth(storedSession);
     else api.clearAuth();
@@ -4951,7 +4956,7 @@ function AppRoutes() {
   }, [theme]);
 
   useEffect(() => {
-    const configuredServerUrl = session?.serverUrl || window.__XENO_CONFIG__?.serverUrl || 'http://localhost:9000';
+    const configuredServerUrl = normalizeServerUrl(session?.serverUrl || defaultServerUrl());
     api.setBaseUrl(configuredServerUrl);
     if (session) api.setAuth(session);
     else api.clearAuth();
