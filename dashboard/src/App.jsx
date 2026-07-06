@@ -936,6 +936,8 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
   const [step, setStep] = useState('identity');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
+  const passwordInputRef = useRef(null);
+  const tenantSelectRef = useRef(null);
 
   async function submitLogin(event) {
     event.preventDefault();
@@ -1037,6 +1039,20 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
     ? serverUrl.trim() && email.trim() && password && selectedTenantId
     : serverUrl.trim() && email.trim();
 
+  useEffect(() => {
+    if (!passwordStep || loading) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (selectedTenantId) {
+        passwordInputRef.current?.focus();
+      } else {
+        tenantSelectRef.current?.focus();
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, passwordStep, selectedTenantId]);
+
   return (
     <div className="login-view">
       <div className="login-shell">
@@ -1091,6 +1107,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
                 <select
                   disabled={loading}
                   onChange={(event) => setSelectedTenantId(event.target.value)}
+                  ref={tenantSelectRef}
                   title={t('tooltipLoginTenant')}
                   value={selectedTenantId}
                 >
@@ -1114,6 +1131,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
                   autoComplete="current-password"
                   disabled={loading}
                   onChange={(event) => setPassword(event.target.value)}
+                  ref={passwordInputRef}
                   title={t('tooltipLoginPassword')}
                   type="password"
                   value={password}
