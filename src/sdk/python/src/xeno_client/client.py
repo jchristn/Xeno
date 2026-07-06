@@ -381,6 +381,18 @@ class XenoClient:
     def create_embedding(self, request: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/embeddings", request)
 
+    def list_ollama_models(self) -> dict[str, Any]:
+        return self._request("GET", "/api/tags")
+
+    def create_ollama_chat(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/api/chat", request)
+
+    def create_ollama_generate(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/api/generate", request)
+
+    def create_ollama_embedding(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/api/embed", request)
+
     def list_request_history(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request("GET", f"/v1.0/api/request-history{self._query_string(filters)}")
 

@@ -2980,6 +2980,7 @@ namespace Test.Shared
                         await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/request-history/analytics/overview", "request analytics").ConfigureAwait(false);
                         await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1.0/api/client-telemetry/status", "client telemetry status").ConfigureAwait(false);
                         await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/v1/models", "OpenAI model list").ConfigureAwait(false);
+                        await AssertProtectedGetRouteAsync(anonymousClient, noAccessClient, adminClient, baseUrl + "/api/tags", "Ollama model list").ConfigureAwait(false);
                     }
                 }
                 finally
@@ -3345,7 +3346,8 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token/refresh", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/logout", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies", Method = "get" },
-                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" }
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" },
+                            new OpenApiRouteExpectation { Route = "/api/tags", Method = "get" }
                         })
                         {
                             if (!OpenApiHasMethod(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
@@ -3381,7 +3383,11 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/settings", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1/chat/completions", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1/completions", Method = "post" },
-                            new OpenApiRouteExpectation { Route = "/v1/embeddings", Method = "post" }
+                            new OpenApiRouteExpectation { Route = "/v1/embeddings", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/api/chat", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/api/generate", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/api/embed", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/api/embeddings", Method = "post" }
                         })
                         {
                             if (!OpenApiHasRequestBody(openApi, route.Route, route.Method)) throw new InvalidOperationException("OpenAPI missing editable request body on " + route.Method.ToUpperInvariant() + " " + route.Route + ".");
@@ -3825,6 +3831,15 @@ namespace Test.Shared
                                         {
                                             new { name = "touchstone-updated-model", supportsCompletions = true, supportsEmbeddings = false }
                                         }
+                                    },
+                                    new
+                                    {
+                                        name = "updated-ollama-provider",
+                                        apiType = "Ollama",
+                                        models = new[]
+                                        {
+                                            new { name = "touchstone-ollama-model", supportsCompletions = true, supportsEmbeddings = true }
+                                        }
                                     }
                                 }
                             }
@@ -3843,6 +3858,12 @@ namespace Test.Shared
 
                         string models = await httpClient.GetStringAsync(baseUrl + "/v1/models").ConfigureAwait(false);
                         if (!models.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include inventory update model: " + models);
+                        if (!models.Contains("\"created\"", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include created timestamps: " + models);
+
+                        string ollamaTags = await httpClient.GetStringAsync(baseUrl + "/api/tags").ConfigureAwait(false);
+                        if (!ollamaTags.Contains("\"models\"", StringComparison.Ordinal)) throw new InvalidOperationException("Ollama tags response did not include models array: " + ollamaTags);
+                        if (!ollamaTags.Contains("touchstone-ollama-model", StringComparison.Ordinal)) throw new InvalidOperationException("Ollama tags response did not include Ollama inventory model: " + ollamaTags);
+                        if (!ollamaTags.Contains("\"details\"", StringComparison.Ordinal)) throw new InvalidOperationException("Ollama tags response did not include details objects: " + ollamaTags);
                     }
                 }
                 finally

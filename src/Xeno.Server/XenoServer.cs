@@ -174,6 +174,7 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "Client Telemetry", Description = "Server-collected client host and provider telemetry" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Routing", Description = "Direct routing to connected Xeno clients" });
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Ollama", Description = "Ollama-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
                 AddXenoOpenApiSecuritySchemes(openApi.SecuritySchemes);
@@ -318,6 +319,11 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/openai/v1/completions", "Create completion", "OpenAI");
             RegisterStaticRoute(HttpMethod.POST, "/v1/embeddings", "Create embeddings", "OpenAI");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/openai/v1/embeddings", "Create embeddings", "OpenAI");
+            RegisterStaticRoute(HttpMethod.GET, "/api/tags", "List Ollama models", "Ollama");
+            RegisterStaticRoute(HttpMethod.POST, "/api/chat", "Create Ollama chat completion", "Ollama");
+            RegisterStaticRoute(HttpMethod.POST, "/api/generate", "Create Ollama generation", "Ollama");
+            RegisterStaticRoute(HttpMethod.POST, "/api/embed", "Create Ollama embeddings", "Ollama");
+            RegisterStaticRoute(HttpMethod.POST, "/api/embeddings", "Create Ollama embeddings", "Ollama");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory", "List request history", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history", "List request history", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/summary", "Request history summary", "Request History");
@@ -919,6 +925,47 @@ namespace Xeno.Server
                     });
             }
 
+            if (method == HttpMethod.POST && IsPath(path, "/api/chat"))
+            {
+                return JsonBody(
+                    "Ollama-compatible chat request.",
+                    OllamaChatBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "llama3.2:latest",
+                        ["messages"] = new[]
+                        {
+                            new Dictionary<string, object> { ["role"] = "user", ["content"] = "Hello! Reply in one sentence." }
+                        },
+                        ["stream"] = false
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/generate"))
+            {
+                return JsonBody(
+                    "Ollama-compatible generation request.",
+                    OllamaGenerateBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "llama3.2:latest",
+                        ["prompt"] = "Say hello in one sentence.",
+                        ["stream"] = false
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/embed", "/api/embeddings"))
+            {
+                return JsonBody(
+                    "Ollama-compatible embeddings request.",
+                    OllamaEmbeddingBodySchema(),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "llama3.2:latest",
+                        ["input"] = new[] { "hello", "goodbye" }
+                    });
+            }
+
             if (method == HttpMethod.POST && path.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
             {
                 return JsonBody(
@@ -1169,6 +1216,42 @@ namespace Xeno.Server
                 new[] { "model", "input" },
                 SchemaProperty("model", OpenApiSchemaMetadata.String("Embedding model name.")),
                 SchemaProperty("input", ArraySchemaMetadata("Input strings.", OpenApiSchemaMetadata.String("Input text."))));
+        }
+
+        private static OpenApiSchemaMetadata OllamaChatBodySchema()
+        {
+            OpenApiSchemaMetadata messageSchema = ObjectSchemaMetadata(
+                "Ollama chat message.",
+                new[] { "role", "content" },
+                SchemaProperty("role", StringEnumSchemaMetadata("Message role.", "system", "user", "assistant", "tool")),
+                SchemaProperty("content", OpenApiSchemaMetadata.String("Message content.")));
+
+            return ObjectSchemaMetadata(
+                "Ollama chat request.",
+                new[] { "model", "messages" },
+                SchemaProperty("model", OpenApiSchemaMetadata.String("Model name.")),
+                SchemaProperty("messages", ArraySchemaMetadata("Chat messages.", messageSchema)),
+                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")));
+        }
+
+        private static OpenApiSchemaMetadata OllamaGenerateBodySchema()
+        {
+            return ObjectSchemaMetadata(
+                "Ollama generation request.",
+                new[] { "model", "prompt" },
+                SchemaProperty("model", OpenApiSchemaMetadata.String("Model name.")),
+                SchemaProperty("prompt", OpenApiSchemaMetadata.String("Prompt text.")),
+                SchemaProperty("stream", BooleanSchemaMetadata("Whether to stream the response.")));
+        }
+
+        private static OpenApiSchemaMetadata OllamaEmbeddingBodySchema()
+        {
+            return ObjectSchemaMetadata(
+                "Ollama embeddings request.",
+                new[] { "model" },
+                SchemaProperty("model", OpenApiSchemaMetadata.String("Embedding model name.")),
+                SchemaProperty("input", ArraySchemaMetadata("Input strings.", OpenApiSchemaMetadata.String("Input text."))),
+                SchemaProperty("prompt", OpenApiSchemaMetadata.String("Legacy single prompt.")));
         }
 
         private static OpenApiSchemaMetadata XenoSettingsBodySchema()
@@ -1867,9 +1950,16 @@ namespace Xeno.Server
                     .Where(item => item.TenantId == requestContext.TenantId)
                     .SelectMany(item => item.Models)
                     .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(group => (object)new { id = group.Key, @object = "model", owned_by = "xeno" })
+                    .Select(group => (object)new { id = group.Key, @object = "model", created = ToUnixTimeSeconds(group.Max(item => item.LastAdvertisedUtc)), owned_by = "xeno" })
                     .ToList();
                 await SendJsonAsync(context, new { @object = "list", data = models }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/tags"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendJsonAsync(context, BuildOllamaTagsResponse(requestContext)).ConfigureAwait(false);
                 return;
             }
 
@@ -1884,6 +1974,20 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
                 await HandleEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/chat", "/api/generate"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+                await HandleOllamaCompletionAsync(context, requestContext, path, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/embed", "/api/embeddings"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+                await HandleOllamaEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
                 return;
             }
 
@@ -2013,6 +2117,41 @@ namespace Xeno.Server
             await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, true, false, token).ConfigureAwait(false);
         }
 
+        private async Task HandleOllamaCompletionAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
+        {
+            string requestBodyJson = ReadBodyJson(context);
+            OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
+            bool requestedStream = body.Stream.GetValueOrDefault();
+            RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, body.Model, false, ApiProviderTypeEnum.Ollama, token).ConfigureAwait(false);
+
+            if (!decision.Success)
+            {
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, null, null, history);
+                await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.Message }).ConfigureAwait(false);
+                return;
+            }
+
+            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, false, requestedStream, token).ConfigureAwait(false);
+        }
+
+        private async Task HandleOllamaEmbeddingAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
+        {
+            string requestBodyJson = ReadBodyJson(context);
+            OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
+            RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, body.Model, true, ApiProviderTypeEnum.Ollama, token).ConfigureAwait(false);
+
+            if (!decision.Success)
+            {
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, decision, null, null, history);
+                await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.Message }).ConfigureAwait(false);
+                return;
+            }
+
+            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, true, false, token).ConfigureAwait(false);
+        }
+
         private async Task RelayClientRequestAsync(
             HttpContextBase context,
             RequestContext requestContext,
@@ -2058,7 +2197,7 @@ namespace Xeno.Server
                 _PendingClientResponses[requestId] = pending;
             }
 
-            XenoClientModel? selectedModel = client.Models.FirstOrDefault(item => String.Equals(item.Name, decision.EffectiveModel, StringComparison.OrdinalIgnoreCase));
+            XenoClientModel? selectedModel = FindSelectedModel(client, decision, embeddings);
             client.InFlightRequests++;
             DateTime? clientRequestStartedUtc = null;
             try
@@ -2257,6 +2396,67 @@ namespace Xeno.Server
             {
                 connection.SendLock.Release();
             }
+        }
+
+        private object BuildOllamaTagsResponse(RequestContext requestContext)
+        {
+            List<object> models = RequirePlatform().Clients
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .SelectMany(item => item.Models)
+                .Where(item => item.Provider == ApiProviderTypeEnum.Ollama)
+                .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => BuildOllamaTagModel(group.Key, group.Max(item => item.LastAdvertisedUtc)))
+                .ToList();
+            return new { models };
+        }
+
+        private static object BuildOllamaTagModel(string modelName, DateTime modifiedUtc)
+        {
+            return new
+            {
+                name = modelName,
+                model = modelName,
+                modified_at = modifiedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                size = 0,
+                digest = StableDigest(modelName),
+                details = new
+                {
+                    format = String.Empty,
+                    family = FamilyFromModelName(modelName),
+                    families = new[] { FamilyFromModelName(modelName) },
+                    parameter_size = String.Empty,
+                    quantization_level = String.Empty
+                }
+            };
+        }
+
+        private static XenoClientModel? FindSelectedModel(XenoClientRecord client, RoutingDecision decision, bool embeddings)
+        {
+            return client.Models.FirstOrDefault(item =>
+                String.Equals(item.Name, decision.EffectiveModel, StringComparison.OrdinalIgnoreCase)
+                && String.Equals(item.Provider.ToString(), decision.SelectedProvider, StringComparison.OrdinalIgnoreCase)
+                && (String.IsNullOrWhiteSpace(decision.SelectedSource) || String.Equals(item.Source, decision.SelectedSource, StringComparison.OrdinalIgnoreCase))
+                && (embeddings ? item.SupportsEmbeddings : item.SupportsCompletions));
+        }
+
+        private static long ToUnixTimeSeconds(DateTime value)
+        {
+            DateTime normalized = value.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(value, DateTimeKind.Utc) : value;
+            return new DateTimeOffset(normalized.ToUniversalTime()).ToUnixTimeSeconds();
+        }
+
+        private static string StableDigest(string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value ?? String.Empty);
+            byte[] hash = SHA256.HashData(bytes);
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        private static string FamilyFromModelName(string modelName)
+        {
+            if (String.IsNullOrWhiteSpace(modelName)) return String.Empty;
+            int tagIndex = modelName.IndexOf(':');
+            return tagIndex > 0 ? modelName.Substring(0, tagIndex) : modelName;
         }
 
         private void StartTelemetryCollectionLoop()
@@ -5307,7 +5507,12 @@ namespace Xeno.Server
                     ["/v1/models"] = Path(Operation("get", "listOpenAiModels", "OpenAI", "List models", "OpenAI-compatible model list. Requires Inference.Read in the selected tenant.", "OpenAiModelList", true)),
                     ["/v1/chat/completions"] = Path(Operation("post", "createChatCompletion", "OpenAI", "Create chat completion", "OpenAI-compatible chat completion. Requires Inference.Execute in the selected tenant.", "OpenAiChatCompletion", true)),
                     ["/v1/completions"] = Path(Operation("post", "createCompletion", "OpenAI", "Create completion", "OpenAI-compatible completion. Requires Inference.Execute in the selected tenant.", "OpenAiChatCompletion", true)),
-                    ["/v1/embeddings"] = Path(Operation("post", "createEmbedding", "OpenAI", "Create embeddings", "OpenAI-compatible embeddings. Requires Inference.Execute in the selected tenant.", "OpenAiEmbeddingList", true))
+                    ["/v1/embeddings"] = Path(Operation("post", "createEmbedding", "OpenAI", "Create embeddings", "OpenAI-compatible embeddings. Requires Inference.Execute in the selected tenant.", "OpenAiEmbeddingList", true)),
+                    ["/api/tags"] = Path(Operation("get", "listOllamaModels", "Ollama", "List models", "Ollama-compatible model list. Requires Inference.Read in the selected tenant.", "OllamaModelList", true)),
+                    ["/api/chat"] = Path(Operation("post", "createOllamaChat", "Ollama", "Create chat completion", "Ollama-compatible chat completion. Requires Inference.Execute in the selected tenant.", "GenericObject", true)),
+                    ["/api/generate"] = Path(Operation("post", "createOllamaGenerate", "Ollama", "Generate completion", "Ollama-compatible generation. Requires Inference.Execute in the selected tenant.", "GenericObject", true)),
+                    ["/api/embed"] = Path(Operation("post", "createOllamaEmbed", "Ollama", "Generate embeddings", "Ollama-compatible embedding generation. Requires Inference.Execute in the selected tenant.", "GenericObject", true)),
+                    ["/api/embeddings"] = Path(Operation("post", "createOllamaEmbeddings", "Ollama", "Generate embeddings", "Ollama-compatible legacy embedding generation. Requires Inference.Execute in the selected tenant.", "GenericObject", true))
                 },
                 components = new
                 {
@@ -5359,6 +5564,7 @@ namespace Xeno.Server
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["OpenAiChatCompletion"] = ObjectSchema(Property("id", StringSchema()), Property("object", StringSchema()), Property("model", StringSchema())),
                         ["OpenAiEmbeddingList"] = ObjectSchema(Property("object", StringSchema()), Property("model", StringSchema())),
+                        ["OllamaModelList"] = ObjectSchema(Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ErrorResponse"] = ObjectSchema(Property("error", StringSchema()), Property("message", StringSchema())),
                         ["SettingsResponse"] = ObjectSchema(Property("settings", ObjectSchema()), Property("settingsFile", StringSchema()), Property("restartRequired", BooleanSchema())),
                         ["GenericObject"] = ObjectSchema(),
@@ -6163,6 +6369,59 @@ namespace Xeno.Server
                             "Artificial intelligence is transforming software development.",
                             "How do I cook a perfect medium-rare steak?"
                         }
+                    });
+            }
+
+            if (String.Equals(operationId, "createOllamaChat", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Ollama-compatible chat request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("messages", new Dictionary<string, object>
+                        {
+                            ["type"] = "array",
+                            ["items"] = ObjectSchema(Property("role", StringSchema()), Property("content", StringSchema()))
+                        }),
+                        Property("stream", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "llama3.2:latest",
+                        ["messages"] = new[]
+                        {
+                            new Dictionary<string, object> { ["role"] = "user", ["content"] = "Hello! Reply in one sentence." }
+                        },
+                        ["stream"] = false
+                    });
+            }
+
+            if (String.Equals(operationId, "createOllamaGenerate", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Ollama-compatible generation request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("prompt", StringSchema()),
+                        Property("stream", BooleanSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "llama3.2:latest",
+                        ["prompt"] = "Say hello in one sentence.",
+                        ["stream"] = false
+                    });
+            }
+
+            if (String.Equals(operationId, "createOllamaEmbed", StringComparison.Ordinal) || String.Equals(operationId, "createOllamaEmbeddings", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Ollama-compatible embeddings request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("input", new Dictionary<string, object> { ["oneOf"] = new object[] { StringSchema(), new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() } } })),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "llama3.2:latest",
+                        ["input"] = new[] { "hello", "goodbye" }
                     });
             }
 

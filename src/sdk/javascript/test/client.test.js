@@ -119,6 +119,10 @@ test('OpenAI and request history methods use expected routes', async () => {
   await client.listOpenAiModels();
   await client.createChatCompletion({ model: 'llama3.2:latest' });
   await client.createEmbedding({ model: 'text-embedding-3-small', input: 'hello' });
+  await client.listOllamaModels();
+  await client.createOllamaChat({ model: 'llama3.2:latest' });
+  await client.createOllamaGenerate({ model: 'llama3.2:latest', prompt: 'hello' });
+  await client.createOllamaEmbedding({ model: 'llama3.2:latest', input: 'hello' });
   await client.listRequestHistory({ model: 'llama3.2:latest', empty: '' });
   await client.getRequestHistorySummary({ bucketMinutes: 60 });
 
@@ -126,6 +130,10 @@ test('OpenAI and request history methods use expected routes', async () => {
     ['GET', 'https://xeno.local/v1/models'],
     ['POST', 'https://xeno.local/v1/chat/completions'],
     ['POST', 'https://xeno.local/v1/embeddings'],
+    ['GET', 'https://xeno.local/api/tags'],
+    ['POST', 'https://xeno.local/api/chat'],
+    ['POST', 'https://xeno.local/api/generate'],
+    ['POST', 'https://xeno.local/api/embed'],
     ['GET', 'https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest'],
     ['GET', 'https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60']
   ]);

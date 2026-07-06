@@ -124,6 +124,10 @@ class XenoClientTests(unittest.TestCase):
         client.list_openai_models()
         client.create_chat_completion({"model": "llama3.2:latest"})
         client.create_embedding({"model": "text-embedding-3-small", "input": "hello"})
+        client.list_ollama_models()
+        client.create_ollama_chat({"model": "llama3.2:latest"})
+        client.create_ollama_generate({"model": "llama3.2:latest", "prompt": "hello"})
+        client.create_ollama_embedding({"model": "llama3.2:latest", "input": "hello"})
         client.list_request_history({"model": "llama3.2:latest", "empty": ""})
         client.get_request_history_summary({"bucketMinutes": 60})
 
@@ -133,6 +137,10 @@ class XenoClientTests(unittest.TestCase):
                 ("GET", "https://xeno.local/v1/models"),
                 ("POST", "https://xeno.local/v1/chat/completions"),
                 ("POST", "https://xeno.local/v1/embeddings"),
+                ("GET", "https://xeno.local/api/tags"),
+                ("POST", "https://xeno.local/api/chat"),
+                ("POST", "https://xeno.local/api/generate"),
+                ("POST", "https://xeno.local/api/embed"),
                 ("GET", "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
                 ("GET", "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"),
             ],

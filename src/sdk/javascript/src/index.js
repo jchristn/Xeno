@@ -275,6 +275,22 @@ export class XenoClient {
     return this.#request('POST', '/v1/embeddings', request);
   }
 
+  async listOllamaModels() {
+    return this.#request('GET', '/api/tags');
+  }
+
+  async createOllamaChat(request = {}) {
+    return this.#request('POST', '/api/chat', request);
+  }
+
+  async createOllamaGenerate(request = {}) {
+    return this.#request('POST', '/api/generate', request);
+  }
+
+  async createOllamaEmbedding(request = {}) {
+    return this.#request('POST', '/api/embed', request);
+  }
+
   async listRequestHistory(filters = {}) {
     return this.#request('GET', `/v1.0/api/request-history${this.#queryString(filters)}`);
   }

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Xeno",
-    "description": "Organized collection for Xeno integrators. User APIs cover OpenAI-compatible inference, Xeno Client covers the local dashboard API, and Xeno Server covers management and operations APIs.",
+    "description": "Organized collection for Xeno integrators. User APIs cover OpenAI-compatible and Ollama-compatible inference, Xeno Client covers the local dashboard API, and Xeno Server covers management and operations APIs.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -20,6 +20,10 @@
     {
       "key": "openAiBaseUrl",
       "value": "/v1"
+    },
+    {
+      "key": "ollamaBaseUrl",
+      "value": "/api"
     },
     {
       "key": "localDashboardUrl",
@@ -390,9 +394,269 @@
               }
             }
           ]
+        },
+        {
+          "name": "Ollama APIs",
+          "item": [
+            {
+              "name": "Models",
+              "item": [
+                {
+                  "name": "List Tags",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/tags",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "tags"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Chat",
+              "item": [
+                {
+                  "name": "Create Chat Completion",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/chat",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "chat"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"hello\"\n    }\n  ],\n  \"stream\": false\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "Create Streaming Chat Completion",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/chat",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "chat"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"hello\"\n    }\n  ],\n  \"stream\": true\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Generate",
+              "item": [
+                {
+                  "name": "Create Generation",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/generate",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "generate"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"prompt\": \"{{prompt}}\",\n  \"stream\": false\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "Create Streaming Generation",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/generate",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "generate"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"prompt\": \"{{prompt}}\",\n  \"stream\": true\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Embeddings",
+              "item": [
+                {
+                  "name": "Generate Embedding",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/embed",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "embed"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"input\": \"hello\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "Generate Embeddings Batch",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/embed",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "embed"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"input\": [\n    \"hello\",\n    \"goodbye\"\n  ]\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "Generate Embeddings Legacy",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}{{ollamaBaseUrl}}/embeddings",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "embeddings"
+                      ]
+                    },
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"prompt\": \"hello\"\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "description": "Ollama-compatible application APIs. Uses collection Bearer Token auth; bearer credentials infer tenant context."
         }
       ],
-      "description": "OpenAI-compatible application APIs. Uses collection Bearer Token auth; bearer credentials infer tenant context."
+      "description": "OpenAI-compatible and Ollama-compatible application APIs. Uses collection Bearer Token auth; bearer credentials infer tenant context."
     },
     {
       "name": "Xeno Client",

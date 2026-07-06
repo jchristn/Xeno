@@ -128,6 +128,10 @@ namespace Xeno.Sdk.Tests
                 await client.ListOpenAiModelsAsync();
                 await client.CreateChatCompletionAsync(new { model = "llama3.2:latest" });
                 await client.CreateEmbeddingAsync(new { model = "text-embedding-3-small", input = "hello" });
+                await client.ListOllamaModelsAsync();
+                await client.CreateOllamaChatAsync(new { model = "llama3.2:latest" });
+                await client.CreateOllamaGenerateAsync(new { model = "llama3.2:latest", prompt = "hello" });
+                await client.CreateOllamaEmbeddingAsync(new { model = "llama3.2:latest", input = "hello" });
                 await client.ListRequestHistoryAsync(new Dictionary<string, string> { ["model"] = "llama3.2:latest", ["empty"] = "" });
                 await client.GetRequestHistorySummaryAsync(new Dictionary<string, string> { ["bucketMinutes"] = "60" });
 
@@ -136,6 +140,10 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1/models"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/chat/completions", "\"model\":\"llama3.2:latest\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1/embeddings", "\"input\":\"hello\""),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/api/tags"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/api/chat", "\"model\":\"llama3.2:latest\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/api/generate", "\"prompt\":\"hello\""),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/api/embed", "\"input\":\"hello\""),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"));
             }

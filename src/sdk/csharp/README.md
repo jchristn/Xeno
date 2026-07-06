@@ -69,6 +69,7 @@ The SDK includes methods for:
 - clients and advertised client models;
 - model definitions, configurations, and routing policies;
 - OpenAI-compatible models, chat completions, completions, and embeddings;
+- Ollama-compatible model listing, chat, generation, and embeddings;
 - server-collected client telemetry status, latest samples, manual collection,
   history search, rollups, detail reads, deletes, provider telemetry, and the
   telemetry metric catalog;

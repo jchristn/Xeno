@@ -46,6 +46,20 @@ namespace Xeno.Core.Services
         /// <returns>Routing decision.</returns>
         public Task<RoutingDecision> RouteAsync(RequestContext context, string? model, bool isEmbedding, CancellationToken token = default)
         {
+            return RouteAsync(context, model, isEmbedding, null, token);
+        }
+
+        /// <summary>
+        /// Route a request to an eligible connected client.
+        /// </summary>
+        /// <param name="context">Request context.</param>
+        /// <param name="model">Requested model.</param>
+        /// <param name="isEmbedding">Whether request is an embedding request.</param>
+        /// <param name="provider">Optional upstream provider filter.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Routing decision.</returns>
+        public Task<RoutingDecision> RouteAsync(RequestContext context, string? model, bool isEmbedding, ApiProviderTypeEnum? provider, CancellationToken token = default)
+        {
             if (context == null) throw new ArgumentNullException(nameof(context));
             token.ThrowIfCancellationRequested();
 
@@ -56,7 +70,7 @@ namespace Xeno.Core.Services
                 Message = "Routing started."
             };
 
-            string effectiveModel = ResolveModel(context.TenantId, model, isEmbedding);
+            string effectiveModel = ResolveModel(context.TenantId, model, isEmbedding, provider);
             decision.Timeline.Add("ModelResolution");
             if (String.IsNullOrWhiteSpace(effectiveModel))
             {
@@ -73,7 +87,7 @@ namespace Xeno.Core.Services
                 .Where(item => item.ServiceState == ClientServiceStateEnum.Normal)
                 .Where(item => item.Connected)
                 .Where(item => item.LastHeartbeatUtc >= DateTime.UtcNow.AddSeconds(-60))
-                .Where(item => item.Models.Any(model => String.Equals(model.Name, effectiveModel, StringComparison.OrdinalIgnoreCase) && (isEmbedding ? model.SupportsEmbeddings : model.SupportsCompletions)))
+                .Where(item => item.Models.Any(model => ModelMatches(model, effectiveModel, isEmbedding, provider)))
                 .Where(item => item.MaxParallelRequests == 0 || item.InFlightRequests < item.MaxParallelRequests)
                 .OrderBy(item => item.Name)
                 .ThenByDescending(item => item.Weight)
@@ -97,7 +111,7 @@ namespace Xeno.Core.Services
             }
 
             XenoClientRecord selected = SelectClient(candidates, policy.LoadBalancingMode, BuildRouteScopeKey(context, effectiveModel, isEmbedding, policy), decision, policy.Adaptive);
-            XenoClientModel? selectedModel = selected.Models.FirstOrDefault(item => String.Equals(item.Name, effectiveModel, StringComparison.OrdinalIgnoreCase));
+            XenoClientModel? selectedModel = selected.Models.FirstOrDefault(item => ModelMatches(item, effectiveModel, isEmbedding, provider));
             decision.CandidateClientIds = candidates.Select(item => item.Id).ToList();
             decision.CandidateCount = candidates.Count;
             decision.LoadBalancingMode = policy.LoadBalancingMode;
@@ -155,7 +169,7 @@ namespace Xeno.Core.Services
             return entry;
         }
 
-        private string ResolveModel(string tenantId, string? requestedModel, bool isEmbedding)
+        private string ResolveModel(string tenantId, string? requestedModel, bool isEmbedding, ApiProviderTypeEnum? provider)
         {
             List<ModelDefinition> definitions = _Platform.ModelDefinitions
                 .Where(item => item.TenantId == tenantId)
@@ -169,7 +183,7 @@ namespace Xeno.Core.Services
 
                 bool clientAdvertisesRequestedModel = _Platform.Clients
                     .Where(item => item.TenantId == tenantId)
-                    .Any(item => item.Models.Any(model => String.Equals(model.Name, requestedModel, StringComparison.OrdinalIgnoreCase)));
+                    .Any(item => item.Models.Any(model => ModelMatches(model, requestedModel, isEmbedding, provider)));
                 return clientAdvertisesRequestedModel ? requestedModel : String.Empty;
             }
 
@@ -179,8 +193,17 @@ namespace Xeno.Core.Services
             return _Platform.Clients
                 .Where(item => item.TenantId == tenantId)
                 .SelectMany(item => item.Models)
+                .Where(item => ModelMatches(item, item.Name, isEmbedding, provider))
                 .Select(item => item.Name)
                 .FirstOrDefault() ?? String.Empty;
+        }
+
+        private static bool ModelMatches(XenoClientModel model, string? name, bool isEmbedding, ApiProviderTypeEnum? provider)
+        {
+            if (model == null) return false;
+            if (!String.Equals(model.Name, name, StringComparison.OrdinalIgnoreCase)) return false;
+            if (provider.HasValue && model.Provider != provider.Value) return false;
+            return isEmbedding ? model.SupportsEmbeddings : model.SupportsCompletions;
         }
 
         private XenoClientRecord SelectClient(List<XenoClientRecord> candidates, LoadBalancingModeEnum mode, string routeScopeKey, RoutingDecision decision, AdaptiveLoadBalancingSettings adaptive)

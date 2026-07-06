@@ -784,6 +784,49 @@
         }
 
         /// <summary>
+        /// Lists Ollama-compatible models.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ollama model list JSON.</returns>
+        public async Task<XenoObjectResponse> ListOllamaModelsAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync<XenoObjectResponse>("/api/tags", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates an Ollama-compatible chat completion.
+        /// </summary>
+        /// <param name="request">Ollama chat payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ollama chat response JSON.</returns>
+        public async Task<XenoObjectResponse> CreateOllamaChatAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoObjectResponse>("/api/chat", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates an Ollama-compatible generation.
+        /// </summary>
+        /// <param name="request">Ollama generate payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ollama generation response JSON.</returns>
+        public async Task<XenoObjectResponse> CreateOllamaGenerateAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoObjectResponse>("/api/generate", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates Ollama-compatible embeddings.
+        /// </summary>
+        /// <param name="request">Ollama embedding payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ollama embedding response JSON.</returns>
+        public async Task<XenoObjectResponse> CreateOllamaEmbeddingAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoObjectResponse>("/api/embed", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Lists request history.
         /// </summary>
         /// <param name="filters">Optional query-string filters.</param>

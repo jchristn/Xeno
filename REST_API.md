@@ -204,6 +204,22 @@ Legacy dashboard aliases under `/api/v1/...` are also registered for administrat
 
 `GET /v1/models`
 
+Returns an OpenAI-compatible model list:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "llama3.2:latest",
+      "object": "model",
+      "created": 1762300800,
+      "owned_by": "xeno"
+    }
+  ]
+}
+```
+
 `POST /v1/chat/completions`
 
 `POST /v1/completions`
@@ -248,6 +264,50 @@ provider usage chunks with `stream_options.include_usage = true` for Ollama,
 OpenAI, vLLM, and generic OpenAI-compatible endpoints. Request history stores
 OpenAI `usage` token fields and normalizes Ollama-native `prompt_eval_count`
 and `eval_count` into prompt, completion, and total token telemetry.
+
+## Ollama-Compatible API
+
+`GET /api/tags`
+
+Returns an Ollama-compatible model list:
+
+```json
+{
+  "models": [
+    {
+      "name": "llama3.2:latest",
+      "model": "llama3.2:latest",
+      "modified_at": "2026-07-06T00:00:00.0000000Z",
+      "size": 0,
+      "digest": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "details": {
+        "format": "",
+        "family": "llama3.2",
+        "families": [
+          "llama3.2"
+        ],
+        "parameter_size": "",
+        "quantization_level": ""
+      }
+    }
+  ]
+}
+```
+
+`POST /api/chat`
+
+`POST /api/generate`
+
+`POST /api/embed`
+
+`POST /api/embeddings`
+
+Ollama-compatible routes are protected application APIs. `GET /api/tags`
+requires `Inference.Read`. Generation and embedding requests require
+`Inference.Execute`. These routes are relayed to connected Ollama providers
+using the native Ollama path, and successful responses preserve the provider's
+Ollama response body shape. Xeno routing and trace metadata is returned in
+headers.
 
 Requests relayed from the Xeno server to a connected `xeno` client also include a forwarded requestor identity header set. The client forwards these headers to its configured provider endpoint and prints the requestor IP in `xeno connect` logs:
 
