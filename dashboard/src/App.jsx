@@ -937,6 +937,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const passwordInputRef = useRef(null);
+  const pendingLoginFocusRef = useRef(null);
   const tenantSelectRef = useRef(null);
 
   async function submitLogin(event) {
@@ -974,6 +975,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
         return;
       }
 
+      pendingLoginFocusRef.current = tenantList.length === 1 ? 'password' : 'tenant';
       setTenants(tenantList);
       setSelectedTenantId(tenantList.length === 1 ? tenantList[0].id : '');
       setStep('password');
@@ -1027,6 +1029,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
   }
 
   function resetIdentity() {
+    pendingLoginFocusRef.current = null;
     setStep('identity');
     setTenants([]);
     setSelectedTenantId('');
@@ -1043,11 +1046,10 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
     if (!passwordStep || loading) return undefined;
 
     const frame = window.requestAnimationFrame(() => {
-      if (selectedTenantId) {
-        passwordInputRef.current?.focus();
-      } else {
-        tenantSelectRef.current?.focus();
-      }
+      const focusTarget = pendingLoginFocusRef.current || (selectedTenantId ? 'password' : 'tenant');
+      pendingLoginFocusRef.current = null;
+      const focusElement = focusTarget === 'password' ? passwordInputRef.current : tenantSelectRef.current;
+      focusElement?.focus();
     });
 
     return () => window.cancelAnimationFrame(frame);

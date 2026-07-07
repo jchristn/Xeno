@@ -108,6 +108,33 @@ async function openSecurity(page, fixtures, onCreateRoleAssignment) {
   await expect(page.locator('h1', { hasText: 'Security' })).toBeVisible();
 }
 
+async function openLoginWithTenantLookup(page, tenants) {
+  await page.route(`${serverUrl}/api/v1/auth/tenants`, async (route) => {
+    await route.fulfill({ json: { tenants } });
+  });
+  await page.goto('/');
+  await page.getByRole('textbox', { name: 'Server URL' }).fill(serverUrl);
+  await page.getByRole('textbox', { name: 'Email' }).fill('operator@xeno.test');
+  await page.getByRole('textbox', { name: 'Email' }).press('Enter');
+}
+
+test('login focuses tenant selector after email submit when multiple tenants are available', async ({ page }) => {
+  await openLoginWithTenantLookup(page, [
+    { id: 'ten_default', name: 'Default' },
+    { id: 'ten_ops', name: 'Operations' }
+  ]);
+
+  await expect(page.getByRole('combobox', { name: 'Tenant' })).toBeFocused();
+});
+
+test('login focuses password after email submit when one tenant is available', async ({ page }) => {
+  await openLoginWithTenantLookup(page, [
+    { id: 'ten_default', name: 'Default' }
+  ]);
+
+  await expect(page.getByLabel('Password')).toBeFocused();
+});
+
 test('regular user editor disables admin flags and omits them from saves', async ({ page }) => {
   const users = [
     { id: 'usr_regular', tenantId: 'ten_default', username: 'regular@xeno.test', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false, active: true },
