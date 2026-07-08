@@ -181,6 +181,7 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Ollama", Description = "Ollama-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Model Leaderboard", Description = "Public model token usage leaderboards" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
                 AddXenoOpenApiSecuritySchemes(openApi.SecuritySchemes);
             });
@@ -341,6 +342,10 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/api/embeddings", "Create Ollama embeddings", "Ollama");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory", "List request history", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history", "List request history", "Request History");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelleaderboard", "Model token leaderboard", "Model Leaderboard");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/model-leaderboard", "Model token leaderboard", "Model Leaderboard");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelleaderboard", "Model token leaderboard", "Model Leaderboard");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/request-history/model-leaderboard", "Model token leaderboard", "Model Leaderboard");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/summary", "Request history summary", "Request History");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory/summary", "Request history summary", "Request History");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/requesthistory/bulk", "Bulk delete request history", "Request History");
@@ -447,6 +452,15 @@ namespace Xeno.Server
                     .WithParameter(OpenApiParameterMetadata.Query("pageSize", "Number of entries per page. Defaults to 100 and is capped at 1000.", false, IntegerSchemaMetadata("Page size.")))
                     .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
                     .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")));
+            }
+
+            if (IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("limit", "Maximum ranked models to return. Defaults to 100 and is capped at 1000.", false, IntegerSchemaMetadata("Result limit.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("offset", "Number of ranked models to skip.", false, IntegerSchemaMetadata("Result offset.")));
             }
 
             if (IsPath(path, "/api/v1/requesthistory/analytics/overview", "/v1.0/api/request-history/analytics/overview", "/api/v1/analytics/overview", "/v1.0/api/analytics/overview"))
@@ -886,6 +900,28 @@ namespace Xeno.Server
                     {
                         ["clientId"] = "xcl_example",
                         ["toUtc"] = DateTime.UtcNow.AddDays(-30).ToString("O", CultureInfo.InvariantCulture)
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
+            {
+                return JsonBody(
+                    "Model token leaderboard request.",
+                    ObjectSchemaMetadata(
+                        "Model token leaderboard request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional tenant identifier. Defaults to ten_default.")),
+                        SchemaProperty("fromUtc", DateTimeSchema("Inclusive UTC start time.")),
+                        SchemaProperty("toUtc", DateTimeSchema("Exclusive UTC end time.")),
+                        SchemaProperty("limit", IntegerSchemaMetadata("Maximum ranked models to return. Defaults to 100 and is capped at 1000.")),
+                        SchemaProperty("offset", IntegerSchemaMetadata("Number of ranked models to skip."))),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantId"] = Constants.DefaultTenantId,
+                        ["fromUtc"] = DateTime.UtcNow.AddDays(-7).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["limit"] = 10,
+                        ["offset"] = 0
                     });
             }
 
@@ -1415,6 +1451,18 @@ namespace Xeno.Server
             {
                 if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
                 await HandleOnboardingSignupAsync(context, token).ConfigureAwait(false);
+                return;
+            }
+
+            if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
+            {
+                ModelTokenLeaderboardRequest body = method == "POST"
+                    ? NormalizeModelTokenLeaderboardRequest(ReadJsonBody<ModelTokenLeaderboardRequest>(context))
+                    : BuildModelTokenLeaderboardRequest(context);
+                ModelTokenLeaderboardResponse result = _Database == null
+                    ? new ModelTokenLeaderboardResponse { Limit = body.Limit, Offset = body.Offset }
+                    : await _Database.GetModelTokenLeaderboardAsync(body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
                 return;
             }
 
@@ -5358,6 +5406,31 @@ namespace Xeno.Server
             };
         }
 
+        private static ModelTokenLeaderboardRequest BuildModelTokenLeaderboardRequest(HttpContextBase context)
+        {
+            ModelTokenLeaderboardRequest request = new ModelTokenLeaderboardRequest
+            {
+                TenantId = DecodeQueryValue(context.Request.Query.Elements.Get("tenantId")),
+                FromUtc = ParseDateQuery(context, "fromUtc"),
+                ToUtc = ParseDateQuery(context, "toUtc"),
+                Limit = ParseIntegerQuery(context, "limit", 100, 1, 1000),
+                Offset = ParseIntegerQuery(context, "offset", 0, 0, Int32.MaxValue)
+            };
+
+            return NormalizeModelTokenLeaderboardRequest(request);
+        }
+
+        private static ModelTokenLeaderboardRequest NormalizeModelTokenLeaderboardRequest(ModelTokenLeaderboardRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.TenantId = String.IsNullOrWhiteSpace(request.TenantId) ? Constants.DefaultTenantId : request.TenantId;
+            request.Limit = Math.Clamp(request.Limit, 1, 1000);
+            request.Offset = Math.Max(0, request.Offset);
+            if (request.FromUtc.HasValue) request.FromUtc = request.FromUtc.Value.ToUniversalTime();
+            if (request.ToUtc.HasValue) request.ToUtc = request.ToUtc.Value.ToUniversalTime();
+            return request;
+        }
+
         private List<RequestHistoryEntry> FilterRequestHistory(RequestContext context, DateTime? fromUtc = null, DateTime? toUtc = null)
         {
             IEnumerable<RequestHistoryEntry> entries = RequirePlatform().RequestHistory
@@ -5587,6 +5660,7 @@ namespace Xeno.Server
                     ["/v1.0/api/routing-policies/validate"] = Path(Operation("post", "validateRoutingPolicy", "Routing", "Validate routing policy", "Validates telemetry filters, ranking rules, and freshness bounds without saving a policy.", "RoutingPolicyValidationResult", true)),
                     ["/v1.0/api/routing-policies/{id}"] = Path(Operation("put", "updateRoutingPolicy", "Routing", "Update routing policy", "Updates a tenant-scoped routing policy.", "RoutingPolicy", true), Operation("delete", "deleteRoutingPolicy", "Routing", "Delete routing policy", "Deletes a non-default routing policy.", "GenericObject", true)),
                     ["/v1.0/api/request-history"] = Path(Operation("get", "listRequestHistory", "Request History", "List request history", "Lists captured request history entries.", "RequestHistorySearchResult", true)),
+                    ["/v1.0/api/request-history/model-leaderboard"] = Path(Operation("get", "getModelTokenLeaderboard", "Model Leaderboard", "Model token leaderboard", "Returns public ranked model token usage from request history.", "ModelTokenLeaderboardResponse", false), Operation("post", "queryModelTokenLeaderboard", "Model Leaderboard", "Model token leaderboard", "Returns public ranked model token usage from request history.", "ModelTokenLeaderboardResponse", false)),
                     ["/v1.0/api/request-history/{id}"] = Path(Operation("get", "getRequestHistory", "Request History", "Get request history", "Returns a captured request history entry.", "RequestHistoryEntry", true), Operation("delete", "deleteRequestHistory", "Request History", "Delete request history", "Deletes one captured request history entry.", "GenericObject", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
@@ -5650,6 +5724,15 @@ namespace Xeno.Server
                             Property("total", IntegerSchema()),
                             Property("page", IntegerSchema()),
                             Property("pageSize", IntegerSchema())),
+                        ["ModelTokenUsage"] = ObjectSchema(
+                            Property("totalTokens", IntegerSchema()),
+                            Property("promptTokens", IntegerSchema()),
+                            Property("outputTokens", IntegerSchema())),
+                        ["ModelTokenLeaderboardResponse"] = ObjectSchema(
+                            Property("models", new Dictionary<string, object> { ["type"] = "object", ["additionalProperties"] = SchemaRef("ModelTokenUsage") }),
+                            Property("total", IntegerSchema()),
+                            Property("limit", IntegerSchema()),
+                            Property("offset", IntegerSchema())),
                         ["RequestHistorySummary"] = ObjectSchema(Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["RoutingDecision"] = ObjectSchema(Property("success", BooleanSchema()), Property("outcomeCode", StringSchema()), Property("message", StringSchema())),
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
@@ -6040,6 +6123,15 @@ namespace Xeno.Server
                 parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
             }
 
+            if (String.Equals(operationId, "getModelTokenLeaderboard", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("tenantId", "query", false, "Optional tenant identifier. Defaults to ten_default.", StringSchema()));
+                parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
+                parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
+                parameters.Add(Parameter("limit", "query", false, "Maximum ranked models to return. Defaults to 100 and is capped at 1000.", IntegerSchema()));
+                parameters.Add(Parameter("offset", "query", false, "Number of ranked models to skip.", IntegerSchema()));
+            }
+
             if (String.Equals(operationId, "requestAnalyticsOverview", StringComparison.Ordinal)
                 || String.Equals(operationId, "analyticsOverview", StringComparison.Ordinal))
             {
@@ -6350,6 +6442,26 @@ namespace Xeno.Server
                         Property("path", StringSchema()),
                         Property("selectedClientId", StringSchema())),
                     new Dictionary<string, object> { ["ids"] = new[] { "req_example" }, ["model"] = "llama3.2:latest", ["path"] = "/v1/chat/completions" });
+            }
+
+            if (String.Equals(operationId, "queryModelTokenLeaderboard", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Model token leaderboard request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("fromUtc", StringSchema("date-time")),
+                        Property("toUtc", StringSchema("date-time")),
+                        Property("limit", IntegerSchema()),
+                        Property("offset", IntegerSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["tenantId"] = Constants.DefaultTenantId,
+                        ["fromUtc"] = DateTime.UtcNow.AddDays(-7).ToString("O", CultureInfo.InvariantCulture),
+                        ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                        ["limit"] = 10,
+                        ["offset"] = 0
+                    });
             }
 
             if (String.Equals(operationId, "updateSettings", StringComparison.Ordinal))

@@ -3627,6 +3627,39 @@
               }
             },
             {
+              "name": "Model Token Leaderboard",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/request-history/model-leaderboard",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "request-history",
+                    "model-leaderboard"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantId\": \"{{tenantId}}\",\n  \"fromUtc\": \"{{fromUtc}}\",\n  \"toUtc\": \"{{toUtc}}\",\n  \"limit\": 10,\n  \"offset\": 0\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "Get Request History Entry",
               "request": {
                 "method": "GET",

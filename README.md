@@ -339,6 +339,12 @@ generic OpenAI-compatible endpoints. Request history captures OpenAI `usage`
 token fields and normalizes Ollama-native `prompt_eval_count` and `eval_count`
 into input, output, and total token telemetry.
 
+The public `GET` and `POST`
+`/v1.0/api/request-history/model-leaderboard` APIs aggregate request-history
+token telemetry into a rank-ordered model leaderboard. Responses are keyed by
+model name and include `totalTokens`, `promptTokens`, `outputTokens`, plus a
+pre-pagination `total` count for dashboard paging.
+
 The same bearer token is used for management APIs. Client WebSocket
 connections are different: they authenticate with `x-access-key` and
 `x-tenant-guid`, not bearer tokens. When a client registers, the server stores

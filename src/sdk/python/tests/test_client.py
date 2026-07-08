@@ -129,6 +129,8 @@ class XenoClientTests(unittest.TestCase):
         client.create_ollama_generate({"model": "llama3.2:latest", "prompt": "hello"})
         client.create_ollama_embedding({"model": "llama3.2:latest", "input": "hello"})
         client.list_request_history({"model": "llama3.2:latest", "empty": ""})
+        client.get_model_token_leaderboard({"limit": 10, "offset": 0, "empty": ""})
+        client.query_model_token_leaderboard({"limit": 10, "offset": 0})
         client.get_request_history_summary({"bucketMinutes": 60})
 
         self.assertEqual(
@@ -142,9 +144,12 @@ class XenoClientTests(unittest.TestCase):
                 ("POST", "https://xeno.local/api/generate"),
                 ("POST", "https://xeno.local/api/embed"),
                 ("GET", "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
+                ("GET", "https://xeno.local/v1.0/api/request-history/model-leaderboard?limit=10&offset=0"),
+                ("POST", "https://xeno.local/v1.0/api/request-history/model-leaderboard"),
                 ("GET", "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"),
             ],
         )
+        self.assertIn('"offset": 0', opener.calls[9]["body"])
 
     def test_credential_options_send_tenant_and_access_key_headers(self):
         opener = FakeOpener()

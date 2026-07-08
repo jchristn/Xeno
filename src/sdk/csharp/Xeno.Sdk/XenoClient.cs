@@ -838,6 +838,28 @@
         }
 
         /// <summary>
+        /// Gets a public model token leaderboard from request history.
+        /// </summary>
+        /// <param name="filters">Optional query-string filters.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ranked model token usage response.</returns>
+        public async Task<ModelTokenLeaderboardResponse> GetModelTokenLeaderboardAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
+        {
+            return await GetJsonAsync<ModelTokenLeaderboardResponse>("/v1.0/api/request-history/model-leaderboard" + QueryString(filters), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Queries the public model token leaderboard from request history.
+        /// </summary>
+        /// <param name="request">Leaderboard request body.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ranked model token usage response.</returns>
+        public async Task<ModelTokenLeaderboardResponse> QueryModelTokenLeaderboardAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<ModelTokenLeaderboardResponse>("/v1.0/api/request-history/model-leaderboard", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets a request history entry.
         /// </summary>
         /// <param name="id">Request history identifier.</param>

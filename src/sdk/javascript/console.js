@@ -29,6 +29,7 @@ function printHelp() {
   console.log('  permissions     permissions');
   console.log('  routing-policies routing policies');
   console.log('  history         request history');
+  console.log('  leaderboard     public model token leaderboard');
   console.log('  settings        server settings');
   console.log('  metrics         Prometheus metrics');
   console.log('');
@@ -63,6 +64,7 @@ async function runCommand(command) {
   if (command === 'permissions') return printJson(await sdk.listPermissions());
   if (command === 'routing-policies') return printJson(await sdk.listRoutingPolicies());
   if (command === 'history') return printJson(await sdk.listRequestHistory());
+  if (command === 'leaderboard') return printJson(await sdk.getModelTokenLeaderboard());
   if (command === 'settings') return printJson(await sdk.getSettings());
   if (command === 'metrics') return console.log(await sdk.getMetrics());
   if (command === 'login') {

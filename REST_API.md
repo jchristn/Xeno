@@ -333,6 +333,42 @@ Returns a paged result object:
 
 Supported query parameters are `page` (default `1`), `pageSize` (default `100`, maximum `1000`), `fromUtc`, and `toUtc`. Use `total` for dashboard counters and pagination instead of enumerating every request-history entry.
 
+`GET /v1.0/api/request-history/model-leaderboard`
+
+`POST /v1.0/api/request-history/model-leaderboard`
+
+Returns a public, unauthenticated leaderboard of model token usage aggregated
+from request-history entries. The GET route accepts query-string parameters;
+the POST route accepts the same fields as JSON:
+
+```json
+{
+  "tenantId": "ten_default",
+  "fromUtc": "2026-07-01T00:00:00Z",
+  "toUtc": "2026-07-08T00:00:00Z",
+  "limit": 10,
+  "offset": 0
+}
+```
+
+The response is rank ordered by total tokens descending. `total` is the number
+of matching model records before `limit` and `offset` are applied.
+
+```json
+{
+  "models": {
+    "llama3.2:latest": {
+      "totalTokens": 124000,
+      "promptTokens": 78000,
+      "outputTokens": 46000
+    }
+  },
+  "total": 1,
+  "limit": 10,
+  "offset": 0
+}
+```
+
 `GET /v1.0/api/request-history/summary`
 
 `GET /v1.0/api/request-history/analytics/overview`

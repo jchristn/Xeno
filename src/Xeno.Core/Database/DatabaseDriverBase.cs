@@ -1,6 +1,8 @@
 namespace Xeno.Core.Database
 {
     using System;
+    using System.Collections.Generic;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Core.Enums;
@@ -101,6 +103,76 @@ namespace Xeno.Core.Database
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
             token.ThrowIfCancellationRequested();
             return Task.FromResult(0);
+        }
+
+        /// <summary>
+        /// Query rank-ordered model token usage from persisted request history.
+        /// </summary>
+        /// <param name="request">Leaderboard request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Model token leaderboard.</returns>
+        public virtual Task<ModelTokenLeaderboardResponse> GetModelTokenLeaderboardAsync(ModelTokenLeaderboardRequest request, CancellationToken token = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            token.ThrowIfCancellationRequested();
+
+            string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? Constants.DefaultTenantId : request.TenantId;
+            int limit = Math.Clamp(request.Limit, 1, 1000);
+            int offset = Math.Max(0, request.Offset);
+            IEnumerable<RequestHistoryEntry> entries = Platform.RequestHistory
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                .Where(item => !String.IsNullOrWhiteSpace(item.Model));
+
+            if (request.FromUtc.HasValue)
+            {
+                DateTime fromUtc = request.FromUtc.Value.ToUniversalTime();
+                entries = entries.Where(item => item.CreatedUtc >= fromUtc);
+            }
+
+            if (request.ToUtc.HasValue)
+            {
+                DateTime toUtc = request.ToUtc.Value.ToUniversalTime();
+                entries = entries.Where(item => item.CreatedUtc < toUtc);
+            }
+
+            Dictionary<string, ModelTokenUsage> usageByModel = new Dictionary<string, ModelTokenUsage>(StringComparer.OrdinalIgnoreCase);
+            foreach (RequestHistoryEntry entry in entries)
+            {
+                string model = entry.Model ?? String.Empty;
+                if (String.IsNullOrWhiteSpace(model)) continue;
+
+                if (!usageByModel.TryGetValue(model, out ModelTokenUsage? usage))
+                {
+                    usage = new ModelTokenUsage();
+                    usageByModel[model] = usage;
+                }
+
+                usage.PromptTokens += Math.Max(0, entry.Telemetry?.PromptTokens ?? 0);
+                usage.OutputTokens += Math.Max(0, entry.Telemetry?.CompletionTokens ?? 0);
+                int reportedTotalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);
+                usage.TotalTokens += reportedTotalTokens > 0
+                    ? reportedTotalTokens
+                    : Math.Max(0, entry.Telemetry?.PromptTokens ?? 0) + Math.Max(0, entry.Telemetry?.CompletionTokens ?? 0);
+            }
+
+            List<KeyValuePair<string, ModelTokenUsage>> ranked = usageByModel
+                .OrderByDescending(item => item.Value.TotalTokens)
+                .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            Dictionary<string, ModelTokenUsage> models = new Dictionary<string, ModelTokenUsage>();
+            foreach (KeyValuePair<string, ModelTokenUsage> item in ranked.Skip(offset).Take(limit))
+            {
+                models[item.Key] = item.Value;
+            }
+
+            return Task.FromResult(new ModelTokenLeaderboardResponse
+            {
+                Models = models,
+                Total = ranked.Count,
+                Limit = limit,
+                Offset = offset
+            });
         }
 
         /// <summary>

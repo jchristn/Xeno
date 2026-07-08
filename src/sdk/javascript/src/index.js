@@ -295,6 +295,14 @@ export class XenoClient {
     return this.#request('GET', `/v1.0/api/request-history${this.#queryString(filters)}`);
   }
 
+  async getModelTokenLeaderboard(filters = {}) {
+    return this.#request('GET', `/v1.0/api/request-history/model-leaderboard${this.#queryString(filters)}`);
+  }
+
+  async queryModelTokenLeaderboard(request = {}) {
+    return this.#request('POST', '/v1.0/api/request-history/model-leaderboard', request);
+  }
+
   async getRequestHistory(id) {
     return this.#request('GET', `/v1.0/api/request-history/${encodeURIComponent(id)}`);
   }

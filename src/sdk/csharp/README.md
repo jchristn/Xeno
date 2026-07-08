@@ -21,6 +21,8 @@ using (XenoClient client = new XenoClient("http://localhost:9000"))
     HealthResponse health = await client.GetHealthAsync();
     OpenAiModelList models = await client.ListOpenAiModelsAsync();
     List<RoutingPolicy> policies = await client.ListRoutingPoliciesAsync();
+    ModelTokenLeaderboardResponse leaderboard = await client.GetModelTokenLeaderboardAsync(
+        new Dictionary<string, string> { ["limit"] = "10", ["offset"] = "0" });
 }
 ```
 
@@ -74,7 +76,8 @@ The SDK includes methods for:
 - server-collected client telemetry status, latest samples, manual collection,
   history search, rollups, detail reads, deletes, provider telemetry, and the
   telemetry metric catalog;
-- request history, analytics, settings, backup, restore, health, metrics, and OpenAPI.
+- request history, public model token leaderboard, analytics, settings, backup,
+  restore, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

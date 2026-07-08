@@ -22,6 +22,7 @@ const client = new XenoClient({
 const health = await client.getHealth();
 const models = await client.listOpenAiModels();
 const policies = await client.listRoutingPolicies();
+const leaderboard = await client.getModelTokenLeaderboard({ limit: 10, offset: 0 });
 ```
 
 The SDK defaults to bearer token `default`, which works against the default local Docker server. Bearer credentials infer tenant context, so the SDK does not send `x-tenant-guid` unless `tenantId` is explicitly set. Production deployments should pass an issued bearer token or a globally unique tenant credential value as the bearer token:
@@ -56,7 +57,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, analytics, settings, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings, backup, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

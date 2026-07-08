@@ -1581,6 +1581,72 @@ namespace Test.Shared
 
             cases.Add(new TestCaseDescriptor(
                 suiteId: "Database",
+                caseId: "SqliteModelTokenLeaderboardAggregatesRequestHistory",
+                displayName: "SQLite model token leaderboard aggregates request history",
+                executeAsync: async delegate
+                {
+                    string dbFile = Path.Combine(Path.GetTempPath(), "xeno-model-leaderboard-" + Guid.NewGuid().ToString("N") + ".db");
+                    try
+                    {
+                        await RunModelTokenLeaderboardRoundTripAsync(new DatabaseSettings
+                        {
+                            Type = DatabaseTypeEnum.Sqlite,
+                            Filename = dbFile
+                        }, "sqlite").ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    }
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "PostgresqlModelTokenLeaderboardAggregatesRequestHistory",
+                displayName: "PostgreSQL model token leaderboard aggregates request history when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_POSTGRESQL_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunModelTokenLeaderboardRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.Postgresql,
+                        ConnectionString = connectionString
+                    }, "postgresql").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "MysqlModelTokenLeaderboardAggregatesRequestHistory",
+                displayName: "MySQL model token leaderboard aggregates request history when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_MYSQL_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunModelTokenLeaderboardRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.Mysql,
+                        ConnectionString = connectionString
+                    }, "mysql").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
+                caseId: "SqlServerModelTokenLeaderboardAggregatesRequestHistory",
+                displayName: "SQL Server model token leaderboard aggregates request history when a test connection is provided",
+                executeAsync: async delegate
+                {
+                    string? connectionString = Environment.GetEnvironmentVariable("XENO_TEST_SQLSERVER_CONNECTION_STRING");
+                    if (String.IsNullOrWhiteSpace(connectionString)) return;
+                    await RunModelTokenLeaderboardRoundTripAsync(new DatabaseSettings
+                    {
+                        Type = DatabaseTypeEnum.SqlServer,
+                        ConnectionString = connectionString
+                    }, "sqlserver").ConfigureAwait(false);
+                }));
+
+            cases.Add(new TestCaseDescriptor(
+                suiteId: "Database",
                 caseId: "SqliteTelemetryCollectionAttemptsRoundTrip",
                 displayName: "SQLite telemetry collection attempts preserve success fields",
                 executeAsync: async delegate
@@ -2020,6 +2086,96 @@ namespace Test.Shared
                 if (third.Platform.ToState().Users.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant users.");
                 if (third.Platform.ToState().Clients.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant clients.");
             }
+        }
+
+        private static async Task RunModelTokenLeaderboardRoundTripAsync(DatabaseSettings settings, string suffix)
+        {
+            string marker = suffix + "_" + Guid.NewGuid().ToString("N");
+            string tenantId = "ten_leaderboard_" + marker;
+            string otherTenantId = "ten_leaderboard_other_" + marker;
+            DateTime nowUtc = DateTime.UtcNow;
+            using (DatabaseDriverBase first = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+            {
+                first.Platform.Tenants.Add(new Tenant { Id = tenantId, Name = "Leaderboard " + marker });
+                first.Platform.Tenants.Add(new Tenant { Id = otherTenantId, Name = "Other Leaderboard " + marker });
+                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_a1_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-20), 40, 60, 100));
+                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_a2_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-10), 10, 20, 0));
+                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_b1_" + marker, tenantId, "leader-beta", nowUtc.AddMinutes(-5), 25, 35, 60));
+                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_old_" + marker, tenantId, "leader-older", nowUtc.AddDays(-5), 1, 1, 2));
+                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_other_" + marker, otherTenantId, "leader-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000));
+                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_blank_" + marker, tenantId, null, nowUtc.AddMinutes(-5), 100, 100, 200));
+                await first.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            using (DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
+            {
+                ModelTokenLeaderboardResponse firstPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
+                {
+                    TenantId = tenantId,
+                    FromUtc = nowUtc.AddHours(-1),
+                    ToUtc = nowUtc.AddHours(1),
+                    Limit = 1,
+                    Offset = 0
+                }, CancellationToken.None).ConfigureAwait(false);
+
+                if (firstPage.Total != 2) throw new InvalidOperationException(settings.Type + " leaderboard total should report two matching model records before pagination.");
+                if (firstPage.Limit != 1) throw new InvalidOperationException(settings.Type + " leaderboard did not report the applied limit.");
+                if (firstPage.Offset != 0) throw new InvalidOperationException(settings.Type + " leaderboard did not report the applied offset.");
+                if (firstPage.Models.Count != 1) throw new InvalidOperationException(settings.Type + " leaderboard first page returned the wrong model count.");
+                KeyValuePair<string, ModelTokenUsage> firstModel = firstPage.Models.FirstOrDefault();
+                if (!String.Equals(firstModel.Key, "leader-alpha", StringComparison.Ordinal)) throw new InvalidOperationException(settings.Type + " leaderboard did not rank the highest-token model first.");
+                if (firstModel.Value.TotalTokens != 130 || firstModel.Value.PromptTokens != 50 || firstModel.Value.OutputTokens != 80) throw new InvalidOperationException(settings.Type + " leaderboard did not aggregate alpha token totals.");
+
+                ModelTokenLeaderboardResponse secondPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
+                {
+                    TenantId = tenantId,
+                    FromUtc = nowUtc.AddHours(-1),
+                    ToUtc = nowUtc.AddHours(1),
+                    Limit = 1,
+                    Offset = 1
+                }, CancellationToken.None).ConfigureAwait(false);
+
+                if (secondPage.Total != 2) throw new InvalidOperationException(settings.Type + " leaderboard second page did not preserve total.");
+                if (secondPage.Offset != 1) throw new InvalidOperationException(settings.Type + " leaderboard second page did not report the applied offset.");
+                KeyValuePair<string, ModelTokenUsage> secondModel = secondPage.Models.FirstOrDefault();
+                if (!String.Equals(secondModel.Key, "leader-beta", StringComparison.Ordinal)) throw new InvalidOperationException(settings.Type + " leaderboard second page returned the wrong model.");
+                if (secondModel.Value.TotalTokens != 60 || secondModel.Value.PromptTokens != 25 || secondModel.Value.OutputTokens != 35) throw new InvalidOperationException(settings.Type + " leaderboard did not aggregate beta token totals.");
+
+                ModelTokenLeaderboardResponse emptyPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
+                {
+                    TenantId = otherTenantId,
+                    FromUtc = nowUtc.AddHours(-1),
+                    ToUtc = nowUtc.AddHours(1),
+                    Limit = 10,
+                    Offset = 1
+                }, CancellationToken.None).ConfigureAwait(false);
+
+                if (emptyPage.Total != 1 || emptyPage.Models.Count != 0) throw new InvalidOperationException(settings.Type + " leaderboard pagination total should include skipped matching records.");
+
+                second.Platform.Tenants.RemoveAll(item => item.Id == tenantId || item.Id == otherTenantId);
+                second.Platform.RequestHistory.RemoveAll(item => item.Id.Contains(marker, StringComparison.Ordinal));
+                await second.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+
+        private static RequestHistoryEntry CreateModelLeaderboardHistory(string id, string tenantId, string? model, DateTime createdUtc, int promptTokens, int outputTokens, int totalTokens)
+        {
+            RequestHistoryEntry entry = new RequestHistoryEntry
+            {
+                Id = id,
+                TenantId = tenantId,
+                RequestorTenantId = tenantId,
+                Path = "/v1/chat/completions",
+                Method = "POST",
+                Model = model,
+                StatusCode = 200,
+                CreatedUtc = createdUtc,
+                CompletedUtc = createdUtc.AddMilliseconds(25)
+            };
+            entry.Telemetry.PromptTokens = promptTokens;
+            entry.Telemetry.CompletionTokens = outputTokens;
+            entry.Telemetry.TotalTokens = totalTokens;
+            return entry;
         }
 
         private static void AddPlatformStateRoundTripRecords(XenoPlatform platform, string tenantId, string userId, string credentialId, string sessionId, string permissionId, string roleId, string roleAssignmentId, string auditId, string clientId, string modelDefinitionId, string modelConfigurationId, string routingPolicyId, string requestHistoryId, string marker)
@@ -2602,6 +2758,11 @@ namespace Test.Shared
                         "DashboardLoginSmoke",
                         "Dashboard login discovers tenants and issues an authenticated bearer session",
                         executeAsync: delegate { return RunDashboardLoginSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "ModelTokenLeaderboardPublicSmoke",
+                        "Model token leaderboard returns ranked public token totals with total count",
+                        executeAsync: delegate { return RunModelTokenLeaderboardPublicSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
                         "ManagementDeleteRoutesSmoke",
@@ -3305,6 +3466,91 @@ namespace Test.Shared
                     server.Dispose();
                     await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
                     await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunModelTokenLeaderboardPublicSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-model-leaderboard-public-" + Guid.NewGuid().ToString("N") + ".db");
+            DateTime nowUtc = DateTime.UtcNow;
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    RequireAuthentication = true,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings.Database).ConfigureAwait(false))
+            {
+                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_1", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-20), 40, 60, 100));
+                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_2", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-10), 10, 20, 30));
+                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_beta_1", Constants.DefaultTenantId, "public-beta", nowUtc.AddMinutes(-5), 25, 35, 60));
+                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_old", Constants.DefaultTenantId, "public-old", nowUtc.AddDays(-3), 1, 1, 2));
+                await driver.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    string fromUtc = Uri.EscapeDataString(nowUtc.AddHours(-1).ToString("O"));
+                    string toUtc = Uri.EscapeDataString(nowUtc.AddHours(1).ToString("O"));
+                    using (HttpClient anonymousClient = new HttpClient())
+                    {
+                        using (HttpResponseMessage settingsResponse = await anonymousClient.GetAsync(baseUrl + "/v1.0/api/settings").ConfigureAwait(false))
+                        {
+                            if ((int)settingsResponse.StatusCode != 401) throw new InvalidOperationException("Authenticated settings route should still reject anonymous requests.");
+                        }
+
+                        using (HttpResponseMessage leaderboardResponse = await anonymousClient.GetAsync(baseUrl + "/v1.0/api/request-history/model-leaderboard?tenantId=" + Constants.DefaultTenantId + "&fromUtc=" + fromUtc + "&toUtc=" + toUtc + "&limit=1&offset=0").ConfigureAwait(false))
+                        {
+                            string leaderboardJson = await leaderboardResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!leaderboardResponse.IsSuccessStatusCode) throw new InvalidOperationException("Anonymous leaderboard GET failed: " + leaderboardJson);
+                            ModelTokenLeaderboardResponse leaderboard = DeserializeRequired<ModelTokenLeaderboardResponse>(leaderboardJson);
+                            if (leaderboard.Total != 2) throw new InvalidOperationException("Anonymous leaderboard GET did not include total matching model records.");
+                            if (leaderboard.Models.Count != 1 || !leaderboard.Models.ContainsKey("public-alpha")) throw new InvalidOperationException("Anonymous leaderboard GET did not return the top-ranked model.");
+                            ModelTokenUsage alpha = leaderboard.Models["public-alpha"];
+                            if (alpha.TotalTokens != 130 || alpha.PromptTokens != 50 || alpha.OutputTokens != 80) throw new InvalidOperationException("Anonymous leaderboard GET returned incorrect token totals.");
+                        }
+
+                        ModelTokenLeaderboardRequest request = new ModelTokenLeaderboardRequest
+                        {
+                            TenantId = Constants.DefaultTenantId,
+                            FromUtc = nowUtc.AddHours(-1),
+                            ToUtc = nowUtc.AddHours(1),
+                            Limit = 1,
+                            Offset = 1
+                        };
+                        using (HttpResponseMessage leaderboardResponse = await PostJsonAsync(anonymousClient, baseUrl + "/v1.0/api/request-history/model-leaderboard", JsonUtil.Serialize(request)).ConfigureAwait(false))
+                        {
+                            string leaderboardJson = await leaderboardResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!leaderboardResponse.IsSuccessStatusCode) throw new InvalidOperationException("Anonymous leaderboard POST failed: " + leaderboardJson);
+                            ModelTokenLeaderboardResponse leaderboard = DeserializeRequired<ModelTokenLeaderboardResponse>(leaderboardJson);
+                            if (leaderboard.Total != 2) throw new InvalidOperationException("Anonymous leaderboard POST did not preserve total across pagination.");
+                            if (leaderboard.Offset != 1) throw new InvalidOperationException("Anonymous leaderboard POST did not report the applied offset.");
+                            if (leaderboard.Models.Count != 1 || !leaderboard.Models.ContainsKey("public-beta")) throw new InvalidOperationException("Anonymous leaderboard POST did not return the second-ranked model.");
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
         }

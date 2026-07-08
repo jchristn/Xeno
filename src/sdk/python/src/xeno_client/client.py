@@ -396,6 +396,12 @@ class XenoClient:
     def list_request_history(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request("GET", f"/v1.0/api/request-history{self._query_string(filters)}")
 
+    def get_model_token_leaderboard(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("GET", f"/v1.0/api/request-history/model-leaderboard{self._query_string(filters)}")
+
+    def query_model_token_leaderboard(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/request-history/model-leaderboard", request or {})
+
     def get_request_history(self, history_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1.0/api/request-history/{history_id}")
 
