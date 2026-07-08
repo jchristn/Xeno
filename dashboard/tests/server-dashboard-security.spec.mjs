@@ -122,8 +122,8 @@ async function fulfillLeaderboard(route) {
   await route.fulfill({
     json: {
       models: {
-        'llama3.2:latest': { totalTokens: 130, promptTokens: 50, outputTokens: 80 },
-        'mistral:latest': { totalTokens: 60, promptTokens: 25, outputTokens: 35 }
+        'llama3.2:latest': { requestCount: 2, totalTokens: 130, promptTokens: 50, outputTokens: 80 },
+        'mistral:latest': { requestCount: 1, totalTokens: 60, promptTokens: 25, outputTokens: 35 }
       },
       total: 2,
       limit: 10,
@@ -186,6 +186,8 @@ test('public model leaderboard uses the unauthenticated global API', async ({ pa
   await page.goto('/leaderboard/models?startUtc=2026-07-01T00%3A00%3A00Z&endUtc=2026-07-08T00%3A00%3A00Z');
   await expect(page.getByRole('heading', { name: 'Model Leaderboard' }).first()).toBeVisible();
   await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Request Count' })).toBeVisible();
+  await expect(page.getByRole('row', { name: /llama3\.2:latest/ })).toContainText('2');
   await expect(page.getByRole('combobox', { name: 'Rows Per Page' })).toHaveValue('10');
   await expect(page.getByRole('combobox', { name: 'Rows Per Page' }).locator('option')).toHaveText(['10', '25', '50', '100']);
   await expect.poll(() => leaderboardRequest).not.toBeNull();
@@ -237,6 +239,8 @@ test('tenant model leaderboard scopes regular users to their session tenant', as
   await page.goto('/dashboard/clients/advertised-models/leaderboard');
   await expect(page.locator('h1', { hasText: 'Model Leaderboard' })).toBeVisible();
   await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Request Count' })).toBeVisible();
+  await expect(page.getByRole('row', { name: /llama3\.2:latest/ })).toContainText('2');
   await expect(page.getByRole('combobox', { name: 'Rows Per Page' })).toHaveValue('10');
   await expect(page.getByRole('combobox', { name: 'Rows Per Page' }).locator('option')).toHaveText(['10', '25', '50', '100']);
   await expect(page.getByRole('combobox', { name: 'Tenant Filter' })).toHaveCount(0);

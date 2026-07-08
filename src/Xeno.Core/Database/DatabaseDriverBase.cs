@@ -150,6 +150,7 @@ namespace Xeno.Core.Database
                     usageByModel[model] = usage;
                 }
 
+                usage.RequestCount++;
                 usage.PromptTokens += Math.Max(0, entry.Telemetry?.PromptTokens ?? 0);
                 usage.OutputTokens += Math.Max(0, entry.Telemetry?.CompletionTokens ?? 0);
                 int reportedTotalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);

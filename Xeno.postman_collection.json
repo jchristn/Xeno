@@ -3628,7 +3628,7 @@
             },
             {
               "name": "Model Token Leaderboard",
-              "description": "Public unauthenticated model token leaderboard. Omit tenantId for global statistics. limit and offset are optional numeric fields; omit them or send null for defaults.",
+              "description": "Public unauthenticated model token leaderboard with request counts. Omit tenantId for global statistics. limit and offset are optional numeric fields; omit them or send null for defaults.",
               "request": {
                 "method": "POST",
                 "header": [

@@ -6,6 +6,11 @@ namespace Xeno.Core.Models
     public class ModelTokenUsage
     {
         /// <summary>
+        /// Number of request-history entries processed for the model.
+        /// </summary>
+        public long RequestCount { get; set; } = 0;
+
+        /// <summary>
         /// Total tokens reported for the model.
         /// </summary>
         public long TotalTokens { get; set; } = 0;

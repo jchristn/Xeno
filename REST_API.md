@@ -337,11 +337,11 @@ Supported query parameters are `page` (default `1`), `pageSize` (default `100`, 
 
 `POST /v1.0/api/request-history/model-leaderboard`
 
-Returns a public, unauthenticated leaderboard of model token usage aggregated
-from request-history entries. When `tenantId` is omitted, the leaderboard is
-global across all tenants. Include `tenantId` only when tenant-scoped results
-are required. The GET route accepts query-string parameters; the POST route
-accepts the same fields as JSON:
+Returns a public, unauthenticated leaderboard of model token usage and request
+counts aggregated from request-history entries. When `tenantId` is omitted, the
+leaderboard is global across all tenants. Include `tenantId` only when
+tenant-scoped results are required. The GET route accepts query-string
+parameters; the POST route accepts the same fields as JSON:
 
 ```json
 {
@@ -373,6 +373,7 @@ of matching model records before `limit` and `offset` are applied.
 {
   "models": {
     "llama3.2:latest": {
+      "requestCount": 42,
       "totalTokens": 124000,
       "promptTokens": 78000,
       "outputTokens": 46000

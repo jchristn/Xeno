@@ -2121,6 +2121,7 @@ namespace Test.Shared
                 KeyValuePair<string, ModelTokenUsage> globalModel = globalPage.Models.FirstOrDefault();
                 if (!String.Equals(globalModel.Key, "leader-alpha", StringComparison.Ordinal)) throw new InvalidOperationException(settings.Type + " global leaderboard did not rank the highest-token model first.");
                 if (globalModel.Value.TotalTokens != 1130 || globalModel.Value.PromptTokens != 550 || globalModel.Value.OutputTokens != 580) throw new InvalidOperationException(settings.Type + " global leaderboard did not aggregate token totals across tenants.");
+                if (globalModel.Value.RequestCount != 3) throw new InvalidOperationException(settings.Type + " global leaderboard did not aggregate request counts across tenants.");
 
                 ModelTokenLeaderboardResponse firstPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
                 {
@@ -2138,6 +2139,7 @@ namespace Test.Shared
                 KeyValuePair<string, ModelTokenUsage> firstModel = firstPage.Models.FirstOrDefault();
                 if (!String.Equals(firstModel.Key, "leader-alpha", StringComparison.Ordinal)) throw new InvalidOperationException(settings.Type + " leaderboard did not rank the highest-token model first.");
                 if (firstModel.Value.TotalTokens != 130 || firstModel.Value.PromptTokens != 50 || firstModel.Value.OutputTokens != 80) throw new InvalidOperationException(settings.Type + " leaderboard did not aggregate alpha token totals.");
+                if (firstModel.Value.RequestCount != 2) throw new InvalidOperationException(settings.Type + " leaderboard did not aggregate alpha request counts.");
 
                 ModelTokenLeaderboardResponse secondPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
                 {
@@ -2153,6 +2155,7 @@ namespace Test.Shared
                 KeyValuePair<string, ModelTokenUsage> secondModel = secondPage.Models.FirstOrDefault();
                 if (!String.Equals(secondModel.Key, "leader-beta", StringComparison.Ordinal)) throw new InvalidOperationException(settings.Type + " leaderboard second page returned the wrong model.");
                 if (secondModel.Value.TotalTokens != 60 || secondModel.Value.PromptTokens != 25 || secondModel.Value.OutputTokens != 35) throw new InvalidOperationException(settings.Type + " leaderboard did not aggregate beta token totals.");
+                if (secondModel.Value.RequestCount != 1) throw new InvalidOperationException(settings.Type + " leaderboard did not aggregate beta request counts.");
 
                 ModelTokenLeaderboardResponse emptyPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
                 {
@@ -3543,6 +3546,7 @@ namespace Test.Shared
                             if (leaderboard.Models.Count != 1 || !leaderboard.Models.ContainsKey("public-alpha")) throw new InvalidOperationException("Anonymous leaderboard GET did not return the top-ranked model.");
                             ModelTokenUsage alpha = leaderboard.Models["public-alpha"];
                             if (alpha.TotalTokens != 1130 || alpha.PromptTokens != 550 || alpha.OutputTokens != 580) throw new InvalidOperationException("Anonymous leaderboard GET did not aggregate global token totals across tenants.");
+                            if (alpha.RequestCount != 3) throw new InvalidOperationException("Anonymous leaderboard GET did not aggregate global request counts across tenants.");
                         }
 
                         using (HttpResponseMessage leaderboardDefaultsResponse = await PostJsonAsync(anonymousClient, baseUrl + "/v1.0/api/request-history/model-leaderboard", "{}").ConfigureAwait(false))
@@ -3577,6 +3581,7 @@ namespace Test.Shared
                             if (leaderboard.Total != 2) throw new InvalidOperationException("Anonymous leaderboard POST did not preserve total across pagination.");
                             if (leaderboard.Offset != 1) throw new InvalidOperationException("Anonymous leaderboard POST did not report the applied offset.");
                             if (leaderboard.Models.Count != 1 || !leaderboard.Models.ContainsKey("public-beta")) throw new InvalidOperationException("Anonymous leaderboard POST did not return the second-ranked model.");
+                            if (leaderboard.Models["public-beta"].RequestCount != 1) throw new InvalidOperationException("Anonymous leaderboard POST did not include request count for the second-ranked model.");
                         }
                     }
                 }

@@ -5725,6 +5725,7 @@ namespace Xeno.Server
                             Property("page", IntegerSchema()),
                             Property("pageSize", IntegerSchema())),
                         ["ModelTokenUsage"] = ObjectSchema(
+                            Property("requestCount", IntegerSchema()),
                             Property("totalTokens", IntegerSchema()),
                             Property("promptTokens", IntegerSchema()),
                             Property("outputTokens", IntegerSchema())),

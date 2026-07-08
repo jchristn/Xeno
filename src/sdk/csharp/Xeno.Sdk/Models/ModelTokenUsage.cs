@@ -8,6 +8,12 @@ namespace Xeno.Sdk
     public class ModelTokenUsage
     {
         /// <summary>
+        /// Gets or sets number of request-history entries processed for the model.
+        /// </summary>
+        [JsonPropertyName("requestCount")]
+        public long RequestCount { get; set; }
+
+        /// <summary>
         /// Gets or sets total tokens reported for the model.
         /// </summary>
         [JsonPropertyName("totalTokens")]

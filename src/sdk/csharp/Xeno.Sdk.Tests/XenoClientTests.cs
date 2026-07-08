@@ -120,7 +120,7 @@ namespace Xeno.Sdk.Tests
             RecordingHandler handler = new RecordingHandler(request =>
             {
                 if (request.RequestUri?.AbsolutePath.Equals("/v1.0/api/request-history", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("{\"items\":[],\"total\":0,\"page\":1,\"pageSize\":100}");
-                if (request.RequestUri?.AbsolutePath.Equals("/v1.0/api/request-history/model-leaderboard", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("{\"models\":{\"llama3.2:latest\":{\"totalTokens\":30,\"promptTokens\":10,\"outputTokens\":20}},\"total\":1,\"limit\":10,\"offset\":0}");
+                if (request.RequestUri?.AbsolutePath.Equals("/v1.0/api/request-history/model-leaderboard", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("{\"models\":{\"llama3.2:latest\":{\"requestCount\":2,\"totalTokens\":30,\"promptTokens\":10,\"outputTokens\":20}},\"total\":1,\"limit\":10,\"offset\":0}");
                 return JsonResponse("{}");
             });
             using (HttpClient httpClient = new HttpClient(handler))
@@ -136,6 +136,7 @@ namespace Xeno.Sdk.Tests
                 await client.ListRequestHistoryAsync(new Dictionary<string, string> { ["model"] = "llama3.2:latest", ["empty"] = "" });
                 ModelTokenLeaderboardResponse leaderboard = await client.GetModelTokenLeaderboardAsync(new Dictionary<string, string> { ["limit"] = "10", ["offset"] = "0", ["empty"] = "" });
                 Assert.Equal(1, leaderboard.Total);
+                Assert.Equal(2, leaderboard.Models["llama3.2:latest"].RequestCount);
                 Assert.Equal(30, leaderboard.Models["llama3.2:latest"].TotalTokens);
                 await client.QueryModelTokenLeaderboardAsync(new { limit = 10, offset = 0 });
                 await client.GetModelTokenLeaderboardAsync();

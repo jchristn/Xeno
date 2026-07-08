@@ -2131,6 +2131,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
                 <tr>
                   <th className="leaderboard-rank-column">{t('rank', 'Rank')}</th>
                   <th>{t('model')}</th>
+                  <th>{t('requestCount', 'Request Count')}</th>
                   <th>{t('totalTokens', 'Total Tokens')}</th>
                   <th>{t('promptTokens', 'Prompt Tokens')}</th>
                   <th>{t('outputTokens', 'Output Tokens')}</th>
@@ -2150,6 +2151,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
                           </div>
                         </div>
                       </td>
+                      <td>{formatNumber(row.requestCount)}</td>
                       <td>{formatNumber(row.totalTokens)}</td>
                       <td>{formatNumber(row.promptTokens)}</td>
                       <td>{formatNumber(row.outputTokens)}</td>
@@ -5028,6 +5030,7 @@ function modelLeaderboardRows(response, offset) {
     outputTokens: coerceInteger(value(usage, 'outputTokens'), 0, 0, Number.MAX_SAFE_INTEGER),
     promptTokens: coerceInteger(value(usage, 'promptTokens'), 0, 0, Number.MAX_SAFE_INTEGER),
     rank: offset + index + 1,
+    requestCount: coerceInteger(value(usage, 'requestCount'), 0, 0, Number.MAX_SAFE_INTEGER),
     totalTokens: coerceInteger(value(usage, 'totalTokens'), 0, 0, Number.MAX_SAFE_INTEGER)
   }));
 }
