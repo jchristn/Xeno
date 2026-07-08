@@ -138,7 +138,7 @@ const navGroups = [
       { to: '/dashboard/clients', key: 'clients', icon: Network },
       { to: '/dashboard/client-telemetry', key: 'clientTelemetry', icon: LineChart },
       { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit },
-      { to: '/dashboard/clients/advertised-models/leaderboard', key: 'modelLeaderboard', icon: BarChart3, nested: true },
+      { to: '/dashboard/clients/advertised-models/leaderboard', key: 'modelLeaderboard', icon: BarChart3 },
       { to: '/dashboard/routing-policies', key: 'routingPolicies', icon: GitBranch }
     ]
   },
