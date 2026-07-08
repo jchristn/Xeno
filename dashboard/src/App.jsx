@@ -164,7 +164,7 @@ const pageMeta = {
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
-  '/dashboard/clients/advertised-models/leaderboard': { title: 'modelLeaderboard', description: 'modelLeaderboardDescription' },
+  '/dashboard/clients/advertised-models/leaderboard': { title: 'xenoModelLeaderboard', description: 'modelLeaderboardDescription' },
   '/dashboard/client-telemetry': { title: 'clientTelemetry', description: 'clientTelemetryDescription' },
   '/dashboard/routing-policies': { title: 'routingPolicies', description: 'routingPoliciesDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
@@ -2067,7 +2067,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
         actions={<IconButton disabled={loading} icon={<RefreshCw size={16} />} label={t('refresh')} onClick={() => setRefreshNonce((current) => current + 1)} tooltip={t('tooltipManualRefresh')} />}
         className="model-leaderboard-panel"
         eyebrow={publicMode ? t('globalScope', 'Global') : t('tenantScope', 'Tenant')}
-        title={t('modelLeaderboard', 'Model Leaderboard')}
+        title={t('xenoModelLeaderboard', 'Xeno Model Leaderboard')}
       >
         <div className="leaderboard-quick-range-panel">
           <span>{t('quickRanges', 'Quick Ranges')}</span>
@@ -2192,7 +2192,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
           <img src="/logo.png" alt={t('appTitle')} />
           <div>
             <span className="eyebrow">{t('appTitle')}</span>
-            <h1>{t('modelLeaderboard', 'Model Leaderboard')}</h1>
+            <h1>{t('xenoModelLeaderboard', 'Xeno Model Leaderboard')}</h1>
             <p>{t('publicModelLeaderboardSubtitle', 'Global model token usage across tenants from public request history statistics.')}</p>
           </div>
         </div>
