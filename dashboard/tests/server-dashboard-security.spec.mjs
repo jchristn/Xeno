@@ -294,7 +294,7 @@ test('register existing organization omits username and continues into dashboard
   await expect(dialog.getByText('cred_registered')).toHaveCount(2);
   await expect(dialog.getByText('ak_registered')).toBeVisible();
   await expect(dialog.getByText('sk_registered')).toBeVisible();
-  await dialog.getByRole('button', { name: 'OK, Go To Dashboard' }).click();
+  await dialog.getByRole('button', { name: 'Dashboard' }).click();
   await expect(page).toHaveURL(/\/dashboard\/home$/);
 });
 
