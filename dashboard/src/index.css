@@ -2031,6 +2031,28 @@ html[data-theme='dark'] .primitive-list-item {
   padding: 0;
 }
 
+.leaderboard-quick-range-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-soft);
+  padding: 14px 16px;
+}
+
+.leaderboard-quick-range-panel > span {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.leaderboard-quick-ranges {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
 .leaderboard-filter-panel {
   display: flex;
   align-items: flex-end;
@@ -2126,6 +2148,45 @@ html[data-theme='dark'] .primitive-list-item {
   text-overflow: ellipsis;
   font-size: 22px !important;
   white-space: nowrap;
+}
+
+.not-found-public-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--color-bg);
+  padding: 32px;
+}
+
+.not-found-card {
+  min-height: min(420px, calc(100vh - 180px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(34px, 8vw, 86px) 24px;
+  text-align: center;
+}
+
+.not-found-card strong {
+  color: var(--color-accent);
+  font-size: clamp(82px, 17vw, 188px);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.9;
+}
+
+.not-found-card p {
+  max-width: 620px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: clamp(16px, 2vw, 20px);
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .muted-cell,

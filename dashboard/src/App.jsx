@@ -63,6 +63,12 @@ const modelLeaderboardEndpoint = `${requestHistoryEndpoint}/model-leaderboard`;
 const analyticsOverviewEndpoint = '/api/v1/analytics/overview';
 const defaultModelLeaderboardLimit = 10;
 const maximumModelLeaderboardLimit = 1000;
+const modelLeaderboardQuickRanges = [
+  { key: 'lastHour', durationMs: 60 * 60 * 1000 },
+  { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000 },
+  { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000 },
+  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000 }
+];
 const analyticsRanges = [
   { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 1 },
   { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 15 },
@@ -305,7 +311,7 @@ function navTooltipKey(key) {
 function Shell({ onLogout, onToggleTheme, session, theme }) {
   const { t } = useTranslation();
   const location = useLocation();
-  const meta = pageMeta[location.pathname] || pageMeta['/dashboard/home'];
+  const meta = pageMeta[location.pathname] || { title: 'notFoundTitle', description: 'notFoundDescription' };
 
   return (
     <div className="app-shell">
@@ -388,7 +394,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
             <Route path="settings" element={<SettingsView />} />
-            <Route path="*" element={<HomeView />} />
+            <Route path="*" element={<NotFoundView />} />
           </Routes>
         </main>
       </div>
@@ -2029,6 +2035,16 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
     setSearchParams({});
   }
 
+  function applyQuickRange(durationMs) {
+    const endUtc = new Date();
+    const startUtc = new Date(endUtc.getTime() - durationMs);
+    updateQuery({
+      endUtc: endUtc.toISOString(),
+      offset: 0,
+      startUtc: startUtc.toISOString()
+    });
+  }
+
   function updateTenantFilter(tenantId) {
     setSelectedTenantId(tenantId);
     updateQuery({ offset: 0 });
@@ -2053,6 +2069,16 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
         eyebrow={publicMode ? t('globalScope', 'Global') : t('tenantScope', 'Tenant')}
         title={t('modelLeaderboard', 'Model Leaderboard')}
       >
+        <div className="leaderboard-quick-range-panel">
+          <span>{t('quickRanges', 'Quick Ranges')}</span>
+          <div className="segmented-control leaderboard-quick-ranges">
+            {modelLeaderboardQuickRanges.map((range) => (
+              <button key={range.key} onClick={() => applyQuickRange(range.durationMs)} type="button">
+                {t(range.key)}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="leaderboard-filter-panel">
           <label className="form-field compact-field">
             <span>{t('startUtc')}</span>
@@ -2179,6 +2205,24 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
         {content}
       </main>
     </div>
+  );
+}
+
+function NotFoundView({ publicMode = false }) {
+  const { t } = useTranslation();
+  const content = (
+    <section className="not-found-card">
+      <strong>404</strong>
+      <p>{t('notFoundMessage')}</p>
+    </section>
+  );
+
+  if (!publicMode) return content;
+
+  return (
+    <main className="not-found-public-shell">
+      {content}
+    </main>
   );
 }
 
@@ -5355,6 +5399,7 @@ function AppRoutes() {
         <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
         <Route path="/leaderboard/models" element={<ModelLeaderboardView publicMode />} />
         <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
+        <Route path="*" element={<NotFoundView publicMode />} />
       </Routes>
       {loggingOut ? <LogoutOverlay /> : null}
     </>

@@ -149,12 +149,33 @@ test('login focuses password after email submit when one tenant is available', a
   await expect(page.getByLabel('Password')).toBeFocused();
 });
 
+test('unknown public routes render the styled not found page', async ({ page }) => {
+  await page.goto('/not-a-real-dashboard-page');
+
+  await expect(page.getByText('404')).toBeVisible();
+  await expect(page.getByText("We're sorry, but the page you requested could not be found.")).toBeVisible();
+});
+
+test('unknown authenticated dashboard routes render the styled not found page', async ({ page }) => {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_regular'));
+
+  await page.goto('/dashboard/not-a-real-page');
+
+  await expect(page.locator('h1', { hasText: 'Page Not Found' })).toBeVisible();
+  await expect(page.getByText('404')).toBeVisible();
+  await expect(page.getByText("We're sorry, but the page you requested could not be found.")).toBeVisible();
+});
+
 test('public model leaderboard uses the unauthenticated global API', async ({ page }) => {
   let leaderboardRequest = null;
+  let leaderboardRequests = [];
   await page.route(`${serverUrl}/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/v1.0/api/request-history/model-leaderboard') {
       leaderboardRequest = route.request();
+      leaderboardRequests = [...leaderboardRequests, route.request()];
       await fulfillLeaderboard(route);
       return;
     }
@@ -173,6 +194,14 @@ test('public model leaderboard uses the unauthenticated global API', async ({ pa
   expect(url.searchParams.get('tenantId')).toBeNull();
   expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
   expect(leaderboardRequest.headers()).not.toHaveProperty('x-tenant-id');
+
+  await page.getByRole('button', { name: 'Last Hour' }).click();
+  await expect.poll(() => leaderboardRequests.length).toBeGreaterThan(1);
+  const quickRangeUrl = new URL(leaderboardRequests[leaderboardRequests.length - 1].url());
+  expect(quickRangeUrl.searchParams.get('fromUtc')).toBeTruthy();
+  expect(quickRangeUrl.searchParams.get('toUtc')).toBeTruthy();
+  expect(quickRangeUrl.searchParams.get('offset')).toBe('0');
+  expect(quickRangeUrl.searchParams.get('tenantId')).toBeNull();
 });
 
 test('tenant model leaderboard scopes regular users to their session tenant', async ({ page }) => {
