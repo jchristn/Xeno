@@ -345,7 +345,8 @@ token telemetry into a rank-ordered model leaderboard. Omitting `tenantId`
 returns global model usage across tenants; supplying `tenantId` scopes the
 leaderboard to that tenant. Responses are keyed by model name and include
 `totalTokens`, `promptTokens`, `outputTokens`, plus a pre-pagination `total`
-count for dashboard paging.
+count for dashboard paging. `limit` and `offset` are optional integers; omit
+them or send JSON `null` to use defaults.
 
 The same bearer token is used for management APIs. Client WebSocket
 connections are different: they authenticate with `x-access-key` and

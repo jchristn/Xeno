@@ -3545,6 +3545,22 @@ namespace Test.Shared
                             if (alpha.TotalTokens != 1130 || alpha.PromptTokens != 550 || alpha.OutputTokens != 580) throw new InvalidOperationException("Anonymous leaderboard GET did not aggregate global token totals across tenants.");
                         }
 
+                        using (HttpResponseMessage leaderboardDefaultsResponse = await PostJsonAsync(anonymousClient, baseUrl + "/v1.0/api/request-history/model-leaderboard", "{}").ConfigureAwait(false))
+                        {
+                            string leaderboardJson = await leaderboardDefaultsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!leaderboardDefaultsResponse.IsSuccessStatusCode) throw new InvalidOperationException("Anonymous leaderboard POST with omitted pagination failed: " + leaderboardJson);
+                            ModelTokenLeaderboardResponse leaderboard = DeserializeRequired<ModelTokenLeaderboardResponse>(leaderboardJson);
+                            if (leaderboard.Limit != 100 || leaderboard.Offset != 0) throw new InvalidOperationException("Anonymous leaderboard POST did not apply omitted pagination defaults.");
+                        }
+
+                        using (HttpResponseMessage leaderboardNullResponse = await PostJsonAsync(anonymousClient, baseUrl + "/v1.0/api/request-history/model-leaderboard", "{\"limit\":null,\"offset\":null}").ConfigureAwait(false))
+                        {
+                            string leaderboardJson = await leaderboardNullResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!leaderboardNullResponse.IsSuccessStatusCode) throw new InvalidOperationException("Anonymous leaderboard POST with null pagination failed: " + leaderboardJson);
+                            ModelTokenLeaderboardResponse leaderboard = DeserializeRequired<ModelTokenLeaderboardResponse>(leaderboardJson);
+                            if (leaderboard.Limit != 100 || leaderboard.Offset != 0) throw new InvalidOperationException("Anonymous leaderboard POST did not treat null pagination as defaults.");
+                        }
+
                         ModelTokenLeaderboardRequest request = new ModelTokenLeaderboardRequest
                         {
                             TenantId = Constants.DefaultTenantId,

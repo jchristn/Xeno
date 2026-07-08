@@ -116,8 +116,8 @@ namespace Xeno.Core.Database
             ArgumentNullException.ThrowIfNull(request);
             token.ThrowIfCancellationRequested();
 
-            int limit = Math.Clamp(request.Limit, 1, 1000);
-            int offset = Math.Max(0, request.Offset);
+            int limit = request.Limit.HasValue ? Math.Clamp(request.Limit.Value, 1, 1000) : 100;
+            int offset = request.Offset.HasValue ? Math.Max(0, request.Offset.Value) : 0;
             IEnumerable<RequestHistoryEntry> entries = Platform.RequestHistory
                 .Where(item => !String.IsNullOrWhiteSpace(item.Model));
             if (!String.IsNullOrWhiteSpace(request.TenantId))

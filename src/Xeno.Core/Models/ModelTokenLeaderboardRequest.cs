@@ -23,13 +23,13 @@ namespace Xeno.Core.Models
         public DateTime? ToUtc { get; set; } = null;
 
         /// <summary>
-        /// Maximum number of ranked models to return. Defaults to 100 and is capped at 1000.
+        /// Maximum number of ranked models to return. Defaults to 100 when omitted or null and is capped at 1000.
         /// </summary>
-        public int Limit { get; set; } = 100;
+        public int? Limit { get; set; } = null;
 
         /// <summary>
-        /// Number of ranked models to skip. Defaults to 0.
+        /// Number of ranked models to skip. Defaults to 0 when omitted or null.
         /// </summary>
-        public int Offset { get; set; } = 0;
+        public int? Offset { get; set; } = null;
     }
 }

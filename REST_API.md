@@ -366,6 +366,8 @@ Tenant-scoped request:
 
 The response is rank ordered by total tokens descending. `total` is the number
 of matching model records before `limit` and `offset` are applied.
+`limit` and `offset` are optional integer fields. Omit them or send JSON
+`null` to use defaults (`limit` = `100`, `offset` = `0`).
 
 ```json
 {

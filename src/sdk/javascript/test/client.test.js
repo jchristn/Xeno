@@ -126,6 +126,9 @@ test('OpenAI and request history methods use expected routes', async () => {
   await client.listRequestHistory({ model: 'llama3.2:latest', empty: '' });
   await client.getModelTokenLeaderboard({ limit: 10, offset: 0, empty: '' });
   await client.queryModelTokenLeaderboard({ limit: 10, offset: 0 });
+  await client.getModelTokenLeaderboard();
+  await client.queryModelTokenLeaderboard();
+  await client.queryModelTokenLeaderboard(null);
   await client.getRequestHistorySummary({ bucketMinutes: 60 });
 
   assert.deepEqual(fetchImpl.calls.map((call) => [call.options.method, call.url]), [
@@ -139,9 +142,14 @@ test('OpenAI and request history methods use expected routes', async () => {
     ['GET', 'https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest'],
     ['GET', 'https://xeno.local/v1.0/api/request-history/model-leaderboard?limit=10&offset=0'],
     ['POST', 'https://xeno.local/v1.0/api/request-history/model-leaderboard'],
+    ['GET', 'https://xeno.local/v1.0/api/request-history/model-leaderboard'],
+    ['POST', 'https://xeno.local/v1.0/api/request-history/model-leaderboard'],
+    ['POST', 'https://xeno.local/v1.0/api/request-history/model-leaderboard'],
     ['GET', 'https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60']
   ]);
   assert.match(fetchImpl.calls[9].options.body, /"offset":0/);
+  assert.equal(fetchImpl.calls[11].options.body, '{}');
+  assert.equal(fetchImpl.calls[12].options.body, '{}');
 });
 
 test('credential options send tenant and access key headers', async () => {

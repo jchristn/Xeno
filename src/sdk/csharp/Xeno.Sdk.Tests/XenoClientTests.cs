@@ -138,6 +138,9 @@ namespace Xeno.Sdk.Tests
                 Assert.Equal(1, leaderboard.Total);
                 Assert.Equal(30, leaderboard.Models["llama3.2:latest"].TotalTokens);
                 await client.QueryModelTokenLeaderboardAsync(new { limit = 10, offset = 0 });
+                await client.GetModelTokenLeaderboardAsync();
+                await client.QueryModelTokenLeaderboardAsync(new { });
+                await client.QueryModelTokenLeaderboardAsync(null!);
                 await client.GetRequestHistorySummaryAsync(new Dictionary<string, string> { ["bucketMinutes"] = "60" });
 
                 Assert.Collection(
@@ -152,6 +155,9 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history?model=llama3.2%3Alatest"),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/model-leaderboard?limit=10&offset=0"),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/request-history/model-leaderboard", "\"offset\":0"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/model-leaderboard"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/request-history/model-leaderboard", "{}"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/request-history/model-leaderboard", "{}"),
                     request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/request-history/summary?bucketMinutes=60"));
             }
         }

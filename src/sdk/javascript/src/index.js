@@ -300,7 +300,7 @@ export class XenoClient {
   }
 
   async queryModelTokenLeaderboard(request = {}) {
-    return this.#request('POST', '/v1.0/api/request-history/model-leaderboard', request);
+    return this.#request('POST', '/v1.0/api/request-history/model-leaderboard', request ?? {});
   }
 
   async getRequestHistory(id) {

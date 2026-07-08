@@ -27,6 +27,8 @@ const leaderboard = await client.getModelTokenLeaderboard({ limit: 10, offset: 0
 
 The model token leaderboard is global when `tenantId` is omitted. Include
 `tenantId` in the filter object or POST body to scope results to one tenant.
+`limit` and `offset` are optional numbers; omit them or send `null` to use
+defaults.
 
 The SDK defaults to bearer token `default`, which works against the default local Docker server. Bearer credentials infer tenant context, so the SDK does not send `x-tenant-guid` unless `tenantId` is explicitly set. Production deployments should pass an issued bearer token or a globally unique tenant credential value as the bearer token:
 
