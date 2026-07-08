@@ -341,9 +341,11 @@ into input, output, and total token telemetry.
 
 The public `GET` and `POST`
 `/v1.0/api/request-history/model-leaderboard` APIs aggregate request-history
-token telemetry into a rank-ordered model leaderboard. Responses are keyed by
-model name and include `totalTokens`, `promptTokens`, `outputTokens`, plus a
-pre-pagination `total` count for dashboard paging.
+token telemetry into a rank-ordered model leaderboard. Omitting `tenantId`
+returns global model usage across tenants; supplying `tenantId` scopes the
+leaderboard to that tenant. Responses are keyed by model name and include
+`totalTokens`, `promptTokens`, `outputTokens`, plus a pre-pagination `total`
+count for dashboard paging.
 
 The same bearer token is used for management APIs. Client WebSocket
 connections are different: they authenticate with `x-access-key` and

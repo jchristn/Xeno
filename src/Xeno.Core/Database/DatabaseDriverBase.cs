@@ -116,12 +116,15 @@ namespace Xeno.Core.Database
             ArgumentNullException.ThrowIfNull(request);
             token.ThrowIfCancellationRequested();
 
-            string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? Constants.DefaultTenantId : request.TenantId;
             int limit = Math.Clamp(request.Limit, 1, 1000);
             int offset = Math.Max(0, request.Offset);
             IEnumerable<RequestHistoryEntry> entries = Platform.RequestHistory
-                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
                 .Where(item => !String.IsNullOrWhiteSpace(item.Model));
+            if (!String.IsNullOrWhiteSpace(request.TenantId))
+            {
+                string tenantId = request.TenantId;
+                entries = entries.Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            }
 
             if (request.FromUtc.HasValue)
             {

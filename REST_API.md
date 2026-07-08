@@ -338,8 +338,21 @@ Supported query parameters are `page` (default `1`), `pageSize` (default `100`, 
 `POST /v1.0/api/request-history/model-leaderboard`
 
 Returns a public, unauthenticated leaderboard of model token usage aggregated
-from request-history entries. The GET route accepts query-string parameters;
-the POST route accepts the same fields as JSON:
+from request-history entries. When `tenantId` is omitted, the leaderboard is
+global across all tenants. Include `tenantId` only when tenant-scoped results
+are required. The GET route accepts query-string parameters; the POST route
+accepts the same fields as JSON:
+
+```json
+{
+  "fromUtc": "2026-07-01T00:00:00Z",
+  "toUtc": "2026-07-08T00:00:00Z",
+  "limit": 10,
+  "offset": 0
+}
+```
+
+Tenant-scoped request:
 
 ```json
 {

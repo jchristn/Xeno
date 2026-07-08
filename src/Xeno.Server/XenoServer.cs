@@ -457,6 +457,7 @@ namespace Xeno.Server
             if (IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
             {
                 metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("tenantId", "Optional tenant identifier. When omitted, global model usage is returned.", false, OpenApiSchemaMetadata.String("Tenant identifier.")))
                     .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
                     .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")))
                     .WithParameter(OpenApiParameterMetadata.Query("limit", "Maximum ranked models to return. Defaults to 100 and is capped at 1000.", false, IntegerSchemaMetadata("Result limit.")))
@@ -503,7 +504,7 @@ namespace Xeno.Server
 
         private static bool SupportsTenantQuery(string path)
         {
-            return !IsPath(path, "/", "/health", "/metrics", "/openapi.json", "/swagger", "/v1.0/api/health");
+            return !IsPath(path, "/", "/health", "/metrics", "/openapi.json", "/swagger", "/v1.0/api/health", "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard");
         }
 
         private static OpenApiRequestBodyMetadata? BuildRequestBodyMetadata(HttpMethod method, string path)
@@ -910,14 +911,13 @@ namespace Xeno.Server
                     ObjectSchemaMetadata(
                         "Model token leaderboard request.",
                         Array.Empty<string>(),
-                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional tenant identifier. Defaults to ten_default.")),
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional tenant identifier. When omitted, global model usage is returned.")),
                         SchemaProperty("fromUtc", DateTimeSchema("Inclusive UTC start time.")),
                         SchemaProperty("toUtc", DateTimeSchema("Exclusive UTC end time.")),
                         SchemaProperty("limit", IntegerSchemaMetadata("Maximum ranked models to return. Defaults to 100 and is capped at 1000.")),
                         SchemaProperty("offset", IntegerSchemaMetadata("Number of ranked models to skip."))),
                     new Dictionary<string, object>
                     {
-                        ["tenantId"] = Constants.DefaultTenantId,
                         ["fromUtc"] = DateTime.UtcNow.AddDays(-7).ToString("O", CultureInfo.InvariantCulture),
                         ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                         ["limit"] = 10,
@@ -5423,7 +5423,7 @@ namespace Xeno.Server
         private static ModelTokenLeaderboardRequest NormalizeModelTokenLeaderboardRequest(ModelTokenLeaderboardRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);
-            request.TenantId = String.IsNullOrWhiteSpace(request.TenantId) ? Constants.DefaultTenantId : request.TenantId;
+            request.TenantId = String.IsNullOrWhiteSpace(request.TenantId) ? null : request.TenantId;
             request.Limit = Math.Clamp(request.Limit, 1, 1000);
             request.Offset = Math.Max(0, request.Offset);
             if (request.FromUtc.HasValue) request.FromUtc = request.FromUtc.Value.ToUniversalTime();
@@ -6125,7 +6125,7 @@ namespace Xeno.Server
 
             if (String.Equals(operationId, "getModelTokenLeaderboard", StringComparison.Ordinal))
             {
-                parameters.Add(Parameter("tenantId", "query", false, "Optional tenant identifier. Defaults to ten_default.", StringSchema()));
+                parameters.Add(Parameter("tenantId", "query", false, "Optional tenant identifier. When omitted, global model usage is returned.", StringSchema()));
                 parameters.Add(Parameter("fromUtc", "query", false, "Inclusive UTC start time.", StringSchema("date-time")));
                 parameters.Add(Parameter("toUtc", "query", false, "Exclusive UTC end time.", StringSchema("date-time")));
                 parameters.Add(Parameter("limit", "query", false, "Maximum ranked models to return. Defaults to 100 and is capped at 1000.", IntegerSchema()));
@@ -6456,7 +6456,6 @@ namespace Xeno.Server
                         Property("offset", IntegerSchema())),
                     new Dictionary<string, object>
                     {
-                        ["tenantId"] = Constants.DefaultTenantId,
                         ["fromUtc"] = DateTime.UtcNow.AddDays(-7).ToString("O", CultureInfo.InvariantCulture),
                         ["toUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
                         ["limit"] = 10,

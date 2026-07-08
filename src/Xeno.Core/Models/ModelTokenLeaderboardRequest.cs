@@ -8,7 +8,7 @@ namespace Xeno.Core.Models
     public class ModelTokenLeaderboardRequest
     {
         /// <summary>
-        /// Optional tenant identifier. Defaults to the default tenant when omitted.
+        /// Optional tenant identifier. When omitted, results include all tenants.
         /// </summary>
         public string? TenantId { get; set; } = null;
 

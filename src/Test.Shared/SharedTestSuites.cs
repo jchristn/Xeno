@@ -2109,6 +2109,19 @@ namespace Test.Shared
 
             using (DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
             {
+                ModelTokenLeaderboardResponse globalPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
+                {
+                    FromUtc = nowUtc.AddHours(-1),
+                    ToUtc = nowUtc.AddHours(1),
+                    Limit = 1,
+                    Offset = 0
+                }, CancellationToken.None).ConfigureAwait(false);
+
+                if (globalPage.Total != 2) throw new InvalidOperationException(settings.Type + " global leaderboard total should report two matching model records before pagination.");
+                KeyValuePair<string, ModelTokenUsage> globalModel = globalPage.Models.FirstOrDefault();
+                if (!String.Equals(globalModel.Key, "leader-alpha", StringComparison.Ordinal)) throw new InvalidOperationException(settings.Type + " global leaderboard did not rank the highest-token model first.");
+                if (globalModel.Value.TotalTokens != 1130 || globalModel.Value.PromptTokens != 550 || globalModel.Value.OutputTokens != 580) throw new InvalidOperationException(settings.Type + " global leaderboard did not aggregate token totals across tenants.");
+
                 ModelTokenLeaderboardResponse firstPage = await second.GetModelTokenLeaderboardAsync(new ModelTokenLeaderboardRequest
                 {
                     TenantId = tenantId,
@@ -3493,9 +3506,12 @@ namespace Test.Shared
 
             using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings.Database).ConfigureAwait(false))
             {
+                const string otherTenantId = "ten_public_leaderboard_other";
+                driver.Platform.Tenants.Add(new Tenant { Id = otherTenantId, Name = "Public Leaderboard Other" });
                 driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_1", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-20), 40, 60, 100));
                 driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_2", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-10), 10, 20, 30));
                 driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_beta_1", Constants.DefaultTenantId, "public-beta", nowUtc.AddMinutes(-5), 25, 35, 60));
+                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_other", otherTenantId, "public-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000));
                 driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_old", Constants.DefaultTenantId, "public-old", nowUtc.AddDays(-3), 1, 1, 2));
                 await driver.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
@@ -3518,7 +3534,7 @@ namespace Test.Shared
                             if ((int)settingsResponse.StatusCode != 401) throw new InvalidOperationException("Authenticated settings route should still reject anonymous requests.");
                         }
 
-                        using (HttpResponseMessage leaderboardResponse = await anonymousClient.GetAsync(baseUrl + "/v1.0/api/request-history/model-leaderboard?tenantId=" + Constants.DefaultTenantId + "&fromUtc=" + fromUtc + "&toUtc=" + toUtc + "&limit=1&offset=0").ConfigureAwait(false))
+                        using (HttpResponseMessage leaderboardResponse = await anonymousClient.GetAsync(baseUrl + "/v1.0/api/request-history/model-leaderboard?fromUtc=" + fromUtc + "&toUtc=" + toUtc + "&limit=1&offset=0").ConfigureAwait(false))
                         {
                             string leaderboardJson = await leaderboardResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!leaderboardResponse.IsSuccessStatusCode) throw new InvalidOperationException("Anonymous leaderboard GET failed: " + leaderboardJson);
@@ -3526,7 +3542,7 @@ namespace Test.Shared
                             if (leaderboard.Total != 2) throw new InvalidOperationException("Anonymous leaderboard GET did not include total matching model records.");
                             if (leaderboard.Models.Count != 1 || !leaderboard.Models.ContainsKey("public-alpha")) throw new InvalidOperationException("Anonymous leaderboard GET did not return the top-ranked model.");
                             ModelTokenUsage alpha = leaderboard.Models["public-alpha"];
-                            if (alpha.TotalTokens != 130 || alpha.PromptTokens != 50 || alpha.OutputTokens != 80) throw new InvalidOperationException("Anonymous leaderboard GET returned incorrect token totals.");
+                            if (alpha.TotalTokens != 1130 || alpha.PromptTokens != 550 || alpha.OutputTokens != 580) throw new InvalidOperationException("Anonymous leaderboard GET did not aggregate global token totals across tenants.");
                         }
 
                         ModelTokenLeaderboardRequest request = new ModelTokenLeaderboardRequest

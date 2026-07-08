@@ -26,6 +26,9 @@ using (XenoClient client = new XenoClient("http://localhost:9000"))
 }
 ```
 
+The model token leaderboard is global when `tenantId` is omitted. Include
+`tenantId` in the filter dictionary or POST body to scope results to one tenant.
+
 The SDK defaults to bearer token `default`, which works against the default local Docker server. Bearer credentials infer tenant context, so the SDK does not send `x-tenant-guid` unless `TenantId` is explicitly set. Production deployments should pass an issued bearer token or a globally unique tenant credential value as the bearer token:
 
 ```csharp
