@@ -51,6 +51,47 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
+        public async Task OnboardAsync_UsesPublicSignupRouteAndSurfacesConflict()
+        {
+            int callCount = 0;
+            RecordingHandler handler = new RecordingHandler(request =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return JsonResponse("{\"status\":\"success\",\"tenant\":{\"id\":\"ten_1\",\"name\":\"Tenant\",\"active\":true},\"user\":{\"id\":\"usr_1\",\"tenantId\":\"ten_1\",\"username\":\"owner@xeno\",\"email\":\"owner@xeno\",\"isAdmin\":false,\"isTenantAdmin\":true,\"active\":true},\"credential\":{\"id\":\"cred_1\",\"tenantId\":\"ten_1\",\"userId\":\"usr_1\",\"accessKey\":\"xeno_access\",\"secretKey\":\"xeno_secret\",\"active\":true},\"token\":{\"token\":\"tok_1\",\"tokenType\":\"Bearer\",\"tenantId\":\"ten_1\",\"userId\":\"usr_1\",\"sessionId\":\"sess_1\"}}");
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.Conflict)
+                {
+                    Content = new StringContent("{\"error\":\"EmailAlreadyExists\",\"message\":\"Email already exists in the tenant.\"}", Encoding.UTF8, "application/json")
+                };
+            });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", bearerToken: null, httpClient: httpClient))
+            {
+                AuthOnboardingResponse response = await client.OnboardAsync(new AuthOnboardingRequest
+                {
+                    TenantName = "Tenant",
+                    Email = "owner@xeno",
+                    Username = "owner@xeno",
+                    Password = "password"
+                });
+
+                Assert.Equal("ten_1", response.Tenant.Id);
+                Assert.Equal("xeno_access", response.Credential.AccessKey);
+                Assert.Equal("xeno_secret", response.Credential.SecretKey);
+                RecordedRequest request = handler.Requests[0];
+                AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/onboarding/signup", "\"tenantName\":\"Tenant\"");
+                Assert.Null(request.AuthorizationScheme);
+
+                XenoApiException conflict = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await client.OnboardAsync(new AuthOnboardingRequest { TenantId = "ten_1", Email = "owner@xeno", Password = "password" }));
+                Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+            }
+        }
+
+        [Fact]
         public async Task ManagementCrudMethods_UseExpectedRoutesAndBodies()
         {
             RecordingHandler handler = new RecordingHandler(request =>
@@ -65,9 +106,11 @@ namespace Xeno.Sdk.Tests
                 await client.CreateTenantAsync(new { name = "Tenant" });
                 await client.UpdateTenantAsync("ten_1", new { name = "Tenant 2" });
                 await client.DeleteTenantAsync("ten_1");
+                await client.NukeTenantAsync(new AdminNukeTenantRequest { TenantId = "ten_1", ConfirmTenantId = "ten_1", DryRun = true, Reason = "Testing tenant nuke" });
                 await client.CreateUserAsync(new { username = "user@xeno", password = "password" });
                 await client.UpdateUserAsync("usr_1", new { active = false });
                 await client.DeleteUserAsync("usr_1");
+                await client.NukeUserAsync(new AdminNukeUserRequest { TenantId = "ten_1", UserId = "usr_1", ConfirmUserId = "usr_1", DryRun = true, Reason = "Testing user nuke" });
                 await client.CreateCredentialAsync(new { userId = "usr_1" });
                 await client.UpdateCredentialAsync("cred_1", new { active = true });
                 await client.DeleteCredentialAsync("cred_1");
@@ -91,9 +134,11 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/tenants", "\"name\":\"Tenant\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/tenants/ten_1", "\"name\":\"Tenant 2\""),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/tenants/ten_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/admin/nuke/tenant", "\"confirmTenantId\":\"ten_1\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/users", "\"username\":\"user@xeno\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/users/usr_1", "\"active\":false"),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/users/usr_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/admin/nuke/user", "\"confirmUserId\":\"usr_1\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/credentials", "\"userId\":\"usr_1\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/credentials/cred_1", "\"active\":true"),
                     request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/credentials/cred_1"),

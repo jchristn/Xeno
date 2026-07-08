@@ -2781,6 +2781,11 @@ namespace Test.Shared
                         executeAsync: delegate { return RunModelTokenLeaderboardPublicSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
+                        "AdministrativeNukeContracts",
+                        "Administrative nuke APIs enforce role rules, onboarding global-admin email conflict, and cascade deletion",
+                        executeAsync: delegate { return RunAdministrativeNukeContractsAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
                         "ManagementDeleteRoutesSmoke",
                         "Management delete routes remove records and update OpenAPI",
                         executeAsync: delegate { return RunManagementDeleteSmokeAsync(); }),
@@ -3414,6 +3419,31 @@ namespace Test.Shared
                             if ((int)unauthenticatedSettings.StatusCode != 401) throw new InvalidOperationException("Authenticated route did not reject anonymous dashboard request.");
                         }
 
+                        using (HttpResponseMessage invalidSignupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        {
+                            TenantName = "Invalid Signup Tenant",
+                            Email = "invalid-signup-email",
+                            Password = "password"
+                        })).ConfigureAwait(false))
+                        {
+                            string invalidSignupJson = await invalidSignupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)invalidSignupResponse.StatusCode != 400) throw new InvalidOperationException("Invalid onboarding signup should return 400: " + invalidSignupJson);
+                            if (!invalidSignupJson.Contains("BadRequest", StringComparison.Ordinal)) throw new InvalidOperationException("Invalid onboarding signup should include BadRequest error: " + invalidSignupJson);
+                        }
+
+                        using (HttpResponseMessage missingTenantSignupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        {
+                            TenantId = "ten_missing_onboarding",
+                            Email = "missing-tenant@signup.test",
+                            Username = "missing-tenant@signup.test",
+                            Password = "password"
+                        })).ConfigureAwait(false))
+                        {
+                            string missingTenantSignupJson = await missingTenantSignupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)missingTenantSignupResponse.StatusCode != 404) throw new InvalidOperationException("Missing-tenant onboarding signup should return 404: " + missingTenantSignupJson);
+                            if (!missingTenantSignupJson.Contains("TenantNotFound", StringComparison.Ordinal)) throw new InvalidOperationException("Missing-tenant onboarding signup should include TenantNotFound error: " + missingTenantSignupJson);
+                        }
+
                         string loginBody = JsonUtil.Serialize(new AuthLoginRequest
                         {
                             TenantId = Constants.DefaultTenantId,
@@ -3441,7 +3471,7 @@ namespace Test.Shared
                             }
                         }
 
-                        AuthDashboardLoginResponse signup;
+                        AuthOnboardingResponse signup;
                         using (HttpResponseMessage signupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
                         {
                             TenantName = "Dashboard Signup Tenant",
@@ -3452,8 +3482,48 @@ namespace Test.Shared
                         {
                             string signupJson = await signupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!signupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Onboarding signup failed: " + signupJson);
-                            signup = DeserializeRequired<AuthDashboardLoginResponse>(signupJson);
-                            if (String.IsNullOrWhiteSpace(signup.TenantId)) throw new InvalidOperationException("Onboarding signup did not return a tenant ID.");
+                            signup = DeserializeRequired<AuthOnboardingResponse>(signupJson);
+                            if (!String.Equals(signup.Status, "success", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Onboarding signup did not return success.");
+                            if (String.IsNullOrWhiteSpace(signup.Tenant.Id)) throw new InvalidOperationException("Onboarding signup did not return a tenant ID.");
+                            if (!signup.User.IsTenantAdmin) throw new InvalidOperationException("New-tenant onboarding user should be a tenant admin.");
+                            if (signup.User.IsAdmin) throw new InvalidOperationException("New-tenant onboarding user should not be a system admin.");
+                            if (String.IsNullOrWhiteSpace(signup.Credential.AccessKey)) throw new InvalidOperationException("Onboarding signup did not return an access key.");
+                            if (String.IsNullOrWhiteSpace(signup.Credential.SecretKey)) throw new InvalidOperationException("Onboarding signup did not return a plaintext secret key.");
+                            if (String.IsNullOrWhiteSpace(signup.Token.Token)) throw new InvalidOperationException("Onboarding signup did not return a token.");
+                            if (String.IsNullOrWhiteSpace(signup.Token.SessionId)) throw new InvalidOperationException("Onboarding signup did not return a session ID.");
+                        }
+
+                        AuthOnboardingResponse regularSignup;
+                        using (HttpResponseMessage signupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        {
+                            TenantId = signup.Tenant.Id,
+                            Email = "regular-user@signup.test",
+                            Username = "regular-user@signup.test",
+                            Password = "password"
+                        })).ConfigureAwait(false))
+                        {
+                            string signupJson = await signupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!signupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant onboarding signup failed: " + signupJson);
+                            regularSignup = DeserializeRequired<AuthOnboardingResponse>(signupJson);
+                            if (!String.Equals(regularSignup.Tenant.Id, signup.Tenant.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Existing-tenant onboarding returned the wrong tenant.");
+                            if (regularSignup.User.IsTenantAdmin) throw new InvalidOperationException("Existing-tenant onboarding user should not be a tenant admin.");
+                            if (regularSignup.User.IsAdmin) throw new InvalidOperationException("Existing-tenant onboarding user should not be a system admin.");
+                            if (String.IsNullOrWhiteSpace(regularSignup.Credential.AccessKey)) throw new InvalidOperationException("Existing-tenant onboarding did not return an access key.");
+                            if (String.IsNullOrWhiteSpace(regularSignup.Credential.SecretKey)) throw new InvalidOperationException("Existing-tenant onboarding did not return a plaintext secret key.");
+                            if (String.IsNullOrWhiteSpace(regularSignup.Token.Token)) throw new InvalidOperationException("Existing-tenant onboarding did not return a token.");
+                        }
+
+                        using (HttpResponseMessage duplicateEmailSignupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        {
+                            TenantId = signup.Tenant.Id,
+                            Email = "regular-user@signup.test",
+                            Username = "duplicate-email@signup.test",
+                            Password = "password"
+                        })).ConfigureAwait(false))
+                        {
+                            string duplicateEmailSignupJson = await duplicateEmailSignupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)duplicateEmailSignupResponse.StatusCode != 409) throw new InvalidOperationException("Duplicate-email onboarding signup should return 409: " + duplicateEmailSignupJson);
+                            if (!duplicateEmailSignupJson.Contains("EmailAlreadyExists", StringComparison.Ordinal)) throw new InvalidOperationException("Duplicate-email onboarding signup should include EmailAlreadyExists error: " + duplicateEmailSignupJson);
                         }
 
                         await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
@@ -3462,8 +3532,12 @@ namespace Test.Shared
                             string usersJson = await usersResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!usersResponse.IsSuccessStatusCode) throw new InvalidOperationException("System admin could not inspect users after onboarding: " + usersJson);
                             List<User> users = DeserializeRequired<List<User>>(usersJson);
-                            bool copiedSeedAdmin = users.Any(item => item.TenantId == signup.TenantId && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase));
+                            bool copiedSeedAdmin = users.Any(item => item.TenantId == signup.Tenant.Id && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase));
                             if (copiedSeedAdmin) throw new InvalidOperationException("Onboarding should not create admin@xeno in the new tenant.");
+                            bool tenantAdminFound = users.Any(item => item.TenantId == signup.Tenant.Id && String.Equals(item.Email, "tenant-admin@signup.test", StringComparison.OrdinalIgnoreCase) && item.IsTenantAdmin);
+                            if (!tenantAdminFound) throw new InvalidOperationException("New-tenant onboarding did not persist a tenant-admin user.");
+                            bool regularUserFound = users.Any(item => item.TenantId == signup.Tenant.Id && String.Equals(item.Email, "regular-user@signup.test", StringComparison.OrdinalIgnoreCase) && !item.IsTenantAdmin && !item.IsAdmin);
+                            if (!regularUserFound) throw new InvalidOperationException("Existing-tenant onboarding did not persist a regular user.");
                         }
                     }
                 }
@@ -3582,6 +3656,246 @@ namespace Test.Shared
                             if (leaderboard.Offset != 1) throw new InvalidOperationException("Anonymous leaderboard POST did not report the applied offset.");
                             if (leaderboard.Models.Count != 1 || !leaderboard.Models.ContainsKey("public-beta")) throw new InvalidOperationException("Anonymous leaderboard POST did not return the second-ranked model.");
                             if (leaderboard.Models["public-beta"].RequestCount != 1) throw new InvalidOperationException("Anonymous leaderboard POST did not include request count for the second-ranked model.");
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunAdministrativeNukeContractsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-admin-nuke-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    RequireAuthentication = true,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    using (HttpClient anonymousClient = new HttpClient())
+                    {
+                        using (HttpResponseMessage globalAdminEmailSignup = await PostJsonAsync(anonymousClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        {
+                            TenantName = "Rejected Global Admin Email Tenant",
+                            Email = " ADMIN@XENO ",
+                            Username = "global-admin-copy",
+                            Password = "password"
+                        })).ConfigureAwait(false))
+                        {
+                            string globalAdminEmailJson = await globalAdminEmailSignup.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)globalAdminEmailSignup.StatusCode != 409) throw new InvalidOperationException("Global-admin email onboarding should return 409: " + globalAdminEmailJson);
+                            if (!globalAdminEmailJson.Contains("GlobalAdminEmailAlreadyExists", StringComparison.Ordinal)) throw new InvalidOperationException("Global-admin email onboarding should include GlobalAdminEmailAlreadyExists: " + globalAdminEmailJson);
+                        }
+                    }
+
+                    using (HttpClient adminClient = new HttpClient())
+                    {
+                        await AuthenticateSeedAdminAsync(adminClient, baseUrl).ConfigureAwait(false);
+                        string seedAdminId = await FindUserIdByEmailAsync(adminClient, baseUrl, "admin@xeno").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = Constants.DefaultTenantId, UserId = seedAdminId, ConfirmUserId = seedAdminId, DryRun = false, Reason = "Last system admin nuke denied" }, 409, "LastSystemAdminProtected").ConfigureAwait(false);
+                        string tenantAId = await CreateTenantViaApiAsync(adminClient, baseUrl, "Nuke Tenant A").ConfigureAwait(false);
+                        string tenantBId = await CreateTenantViaApiAsync(adminClient, baseUrl, "Nuke Tenant B").ConfigureAwait(false);
+                        string tenantAdminId = await CreateUserViaApiAsync(adminClient, baseUrl, tenantAId, "tenant-admin@nuke.test", "password", false, true).ConfigureAwait(false);
+                        string secondTenantAdminId = await CreateUserViaApiAsync(adminClient, baseUrl, tenantAId, "second-tenant-admin@nuke.test", "password", false, true).ConfigureAwait(false);
+                        string systemAdminInTenantAId = await CreateUserViaApiAsync(adminClient, baseUrl, tenantAId, "system-admin@nuke.test", "password", true, false).ConfigureAwait(false);
+                        string noAccessUserId = await CreateUserViaApiAsync(adminClient, baseUrl, tenantAId, "no-access@nuke.test", "password", false, false).ConfigureAwait(false);
+                        string regularUserId = await CreateUserViaApiAsync(adminClient, baseUrl, tenantAId, "regular@nuke.test", "password", false, false).ConfigureAwait(false);
+                        string tenantBUserId = await CreateUserViaApiAsync(adminClient, baseUrl, tenantBId, "tenant-b@nuke.test", "password", false, false).ConfigureAwait(false);
+
+                        using (HttpClient anonymousNukeClient = new HttpClient())
+                        {
+                            await AssertNukeStatusAsync(anonymousNukeClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = tenantAId, ConfirmTenantId = tenantAId, DryRun = true, Reason = "Anonymous tenant nuke denied" }, 401, "Unauthorized").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(anonymousNukeClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = regularUserId, ConfirmUserId = regularUserId, DryRun = true, Reason = "Anonymous user nuke denied" }, 401, "Unauthorized").ConfigureAwait(false);
+                            using (HttpResponseMessage existingTenantGlobalAdminEmailSignup = await PostJsonAsync(anonymousNukeClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                            {
+                                TenantId = tenantAId,
+                                Email = " admin@xeno ",
+                                Username = "global-admin-existing-tenant-copy",
+                                Password = "password"
+                            })).ConfigureAwait(false))
+                            {
+                                string existingTenantGlobalAdminEmailJson = await existingTenantGlobalAdminEmailSignup.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if ((int)existingTenantGlobalAdminEmailSignup.StatusCode != 409) throw new InvalidOperationException("Existing-tenant global-admin email onboarding should return 409: " + existingTenantGlobalAdminEmailJson);
+                                if (!existingTenantGlobalAdminEmailJson.Contains("GlobalAdminEmailAlreadyExists", StringComparison.Ordinal)) throw new InvalidOperationException("Existing-tenant global-admin email onboarding should include GlobalAdminEmailAlreadyExists: " + existingTenantGlobalAdminEmailJson);
+                            }
+                        }
+
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = null, ConfirmTenantId = tenantAId, DryRun = true, Reason = "Missing tenant id rejected" }, 400, "tenantId").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = tenantAId, ConfirmTenantId = tenantBId, DryRun = true, Reason = "Mismatched tenant confirmation rejected" }, 400, "confirmTenantId").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = tenantAId, ConfirmTenantId = tenantAId, DryRun = true, Reason = "short" }, 400, "reason").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = null, UserId = regularUserId, ConfirmUserId = regularUserId, DryRun = true, Reason = "Missing tenant id rejected" }, 400, "tenantId").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = null, ConfirmUserId = regularUserId, DryRun = true, Reason = "Missing user id rejected" }, 400, "userId").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = regularUserId, ConfirmUserId = noAccessUserId, DryRun = true, Reason = "Mismatched user confirmation rejected" }, 400, "confirmUserId").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = regularUserId, ConfirmUserId = regularUserId, DryRun = true, Reason = "short" }, 400, "reason").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = "missing-tenant", ConfirmTenantId = "missing-tenant", DryRun = true, Reason = "Missing tenant nuke rejected" }, 404, "TenantNotFound").ConfigureAwait(false);
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = "missing-user", ConfirmUserId = "missing-user", DryRun = true, Reason = "Missing user nuke rejected" }, 404, "UserNotFound").ConfigureAwait(false);
+                        using (HttpClient bogusTokenClient = new HttpClient())
+                        {
+                            bogusTokenClient.DefaultRequestHeaders.Add("Authorization", "Bearer invalid-token");
+                            bogusTokenClient.DefaultRequestHeaders.Add("x-token", "invalid-token");
+                            await AssertNukeStatusAsync(bogusTokenClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = regularUserId, ConfirmUserId = regularUserId, DryRun = true, Reason = "Invalid token rejected" }, 401, "Unauthorized").ConfigureAwait(false);
+                        }
+
+                        using (HttpResponseMessage invalidJsonResponse = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/user", "{").ConfigureAwait(false))
+                        {
+                            string invalidJson = await invalidJsonResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if ((int)invalidJsonResponse.StatusCode != 400) throw new InvalidOperationException("Invalid nuke JSON should return 400: " + invalidJson);
+                        }
+
+                        using (HttpResponseMessage credentialResponse = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/credentials", JsonUtil.Serialize(new
+                        {
+                            tenantId = tenantAId,
+                            userId = regularUserId,
+                            accessKey = "nuke-regular-access",
+                            active = true
+                        })).ConfigureAwait(false))
+                        {
+                            string credentialJson = await credentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!credentialResponse.IsSuccessStatusCode) throw new InvalidOperationException("Nuke test credential create failed: " + credentialJson);
+                        }
+
+                        using (HttpClient noAccessClient = new HttpClient())
+                        {
+                            await AuthenticateUserAsync(noAccessClient, baseUrl, tenantAId, "no-access@nuke.test", "password").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(noAccessClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = tenantAId, ConfirmTenantId = tenantAId, DryRun = true, Reason = "Regular user tenant nuke denied" }, 403, "SystemAdminRequired").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(noAccessClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = regularUserId, ConfirmUserId = regularUserId, DryRun = true, Reason = "Regular user nuke denied" }, 403, "TenantAdminRequired").ConfigureAwait(false);
+                        }
+
+                        using (HttpClient tenantAdminClient = new HttpClient())
+                        {
+                            await AuthenticateUserAsync(tenantAdminClient, baseUrl, tenantAId, "tenant-admin@nuke.test", "password").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = tenantAId, ConfirmTenantId = tenantAId, DryRun = true, Reason = "Tenant admin tenant nuke denied" }, 403, "SystemAdminRequired").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = tenantAdminId, ConfirmUserId = tenantAdminId, DryRun = false, Reason = "Tenant admin self nuke denied" }, 409, "TenantAdminSelfNukeProtected").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantBId, UserId = tenantBUserId, ConfirmUserId = tenantBUserId, DryRun = true, Reason = "Tenant admin cross tenant denied" }, 403, "TenantAdminRequired").ConfigureAwait(false);
+                            await AssertNukeStatusAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = systemAdminInTenantAId, ConfirmUserId = systemAdminInTenantAId, DryRun = true, Reason = "Tenant admin system admin target denied" }, 403, "SystemAdminProtected").ConfigureAwait(false);
+                            using (HttpResponseMessage tenantAdminTargetResponse = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", JsonUtil.Serialize(new AdminNukeUserRequest
+                            {
+                                TenantId = tenantAId,
+                                UserId = secondTenantAdminId,
+                                ConfirmUserId = secondTenantAdminId,
+                                DryRun = false,
+                                Reason = "Tenant admin nukes another tenant admin"
+                            })).ConfigureAwait(false))
+                            {
+                                string tenantAdminTargetJson = await tenantAdminTargetResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!tenantAdminTargetResponse.IsSuccessStatusCode) throw new InvalidOperationException("Tenant admin should be able to nuke another same-tenant admin: " + tenantAdminTargetJson);
+                            }
+
+                            using (HttpResponseMessage userDryRunResponse = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", JsonUtil.Serialize(new AdminNukeUserRequest
+                            {
+                                TenantId = tenantAId,
+                                UserId = regularUserId,
+                                ConfirmUserId = regularUserId,
+                                DryRun = true,
+                                Reason = "Tenant admin user nuke dry run"
+                            })).ConfigureAwait(false))
+                            {
+                                string userDryRunJson = await userDryRunResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!userDryRunResponse.IsSuccessStatusCode) throw new InvalidOperationException("Tenant admin user nuke dry-run failed: " + userDryRunJson);
+                                AdminNukeResponse userDryRun = DeserializeRequired<AdminNukeResponse>(userDryRunJson);
+                                if (!userDryRun.DryRun || userDryRun.Deleted.Users != 1) throw new InvalidOperationException("Tenant admin user nuke dry-run returned wrong counts: " + userDryRunJson);
+                            }
+
+                            using (HttpResponseMessage userNukeResponse = await PostJsonAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", JsonUtil.Serialize(new AdminNukeUserRequest
+                            {
+                                TenantId = tenantAId,
+                                UserId = regularUserId,
+                                ConfirmUserId = regularUserId,
+                                DryRun = false,
+                                Reason = "Tenant admin user nuke execute"
+                            })).ConfigureAwait(false))
+                            {
+                                string userNukeJson = await userNukeResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!userNukeResponse.IsSuccessStatusCode) throw new InvalidOperationException("Tenant admin user nuke execute failed: " + userNukeJson);
+                                AdminNukeResponse userNuke = DeserializeRequired<AdminNukeResponse>(userNukeJson);
+                                if (userNuke.Deleted.Users != 1) throw new InvalidOperationException("Tenant admin user nuke did not delete one user: " + userNukeJson);
+                                if (userNuke.Deleted.Credentials != 1) throw new InvalidOperationException("Tenant admin user nuke did not cascade credential deletion: " + userNukeJson);
+                            }
+                            await AssertNukeStatusAsync(tenantAdminClient, baseUrl + "/v1.0/api/admin/nuke/user", new AdminNukeUserRequest { TenantId = tenantAId, UserId = regularUserId, ConfirmUserId = regularUserId, DryRun = false, Reason = "User nuke retry rejected after deletion" }, 404, "UserNotFound").ConfigureAwait(false);
+                        }
+
+                        using (HttpResponseMessage usersAfterUserNuke = await adminClient.GetAsync(baseUrl + "/v1.0/api/users").ConfigureAwait(false))
+                        {
+                            string usersAfterUserNukeJson = await usersAfterUserNuke.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!usersAfterUserNuke.IsSuccessStatusCode) throw new InvalidOperationException("Could not list users after user nuke: " + usersAfterUserNukeJson);
+                            List<User> users = DeserializeRequired<List<User>>(usersAfterUserNukeJson);
+                            if (users.Any(item => String.Equals(item.Id, regularUserId, StringComparison.Ordinal))) throw new InvalidOperationException("User nuke left the target user.");
+                            if (!users.Any(item => String.Equals(item.Id, tenantAdminId, StringComparison.Ordinal))) throw new InvalidOperationException("User nuke removed the wrong tenant admin.");
+                        }
+
+                        using (HttpResponseMessage tenantDryRunResponse = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", JsonUtil.Serialize(new AdminNukeTenantRequest
+                        {
+                            TenantId = tenantAId,
+                            ConfirmTenantId = tenantAId,
+                            DryRun = true,
+                            Reason = "System admin tenant nuke dry run"
+                        })).ConfigureAwait(false))
+                        {
+                            string tenantDryRunJson = await tenantDryRunResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tenantDryRunResponse.IsSuccessStatusCode) throw new InvalidOperationException("System admin tenant nuke dry-run failed: " + tenantDryRunJson);
+                            AdminNukeResponse tenantDryRun = DeserializeRequired<AdminNukeResponse>(tenantDryRunJson);
+                            if (!tenantDryRun.DryRun || tenantDryRun.Deleted.Tenants != 1 || tenantDryRun.Deleted.Users < 1) throw new InvalidOperationException("Tenant nuke dry-run returned wrong counts: " + tenantDryRunJson);
+                            if (!tenantDryRunJson.Contains("\"dryRun\"", StringComparison.Ordinal) || tenantDryRunJson.Contains("\"DryRun\"", StringComparison.Ordinal)) throw new InvalidOperationException("Tenant nuke response should use lower-camel JSON fields: " + tenantDryRunJson);
+                        }
+
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = Constants.DefaultTenantId, ConfirmTenantId = Constants.DefaultTenantId, DryRun = false, Reason = "Protected tenant nuke denied" }, 409, "ProtectedTenant").ConfigureAwait(false);
+
+                        using (HttpResponseMessage tenantNukeResponse = await PostJsonAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", JsonUtil.Serialize(new AdminNukeTenantRequest
+                        {
+                            TenantId = tenantAId,
+                            ConfirmTenantId = tenantAId,
+                            DryRun = false,
+                            Reason = "System admin tenant nuke execute"
+                        })).ConfigureAwait(false))
+                        {
+                            string tenantNukeJson = await tenantNukeResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tenantNukeResponse.IsSuccessStatusCode) throw new InvalidOperationException("System admin tenant nuke execute failed: " + tenantNukeJson);
+                            AdminNukeResponse tenantNuke = DeserializeRequired<AdminNukeResponse>(tenantNukeJson);
+                            if (tenantNuke.Deleted.Tenants != 1) throw new InvalidOperationException("Tenant nuke did not delete one tenant: " + tenantNukeJson);
+                            if (tenantNuke.Deleted.Users < 1) throw new InvalidOperationException("Tenant nuke did not cascade user deletion: " + tenantNukeJson);
+                            if (tenantNuke.Deleted.Roles < 1 || tenantNuke.Deleted.Permissions < 1) throw new InvalidOperationException("Tenant nuke did not cascade authorization records: " + tenantNukeJson);
+                        }
+                        await AssertNukeStatusAsync(adminClient, baseUrl + "/v1.0/api/admin/nuke/tenant", new AdminNukeTenantRequest { TenantId = tenantAId, ConfirmTenantId = tenantAId, DryRun = false, Reason = "Tenant nuke retry rejected after deletion" }, 404, "TenantNotFound").ConfigureAwait(false);
+
+                        using (HttpResponseMessage tenantsAfterNuke = await adminClient.GetAsync(baseUrl + "/v1.0/api/tenants").ConfigureAwait(false))
+                        {
+                            string tenantsAfterNukeJson = await tenantsAfterNuke.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!tenantsAfterNuke.IsSuccessStatusCode) throw new InvalidOperationException("Could not list tenants after tenant nuke: " + tenantsAfterNukeJson);
+                            List<Tenant> tenants = DeserializeRequired<List<Tenant>>(tenantsAfterNukeJson);
+                            if (tenants.Any(item => String.Equals(item.Id, tenantAId, StringComparison.Ordinal))) throw new InvalidOperationException("Tenant nuke left the target tenant.");
+                            if (!tenants.Any(item => String.Equals(item.Id, tenantBId, StringComparison.Ordinal))) throw new InvalidOperationException("Tenant nuke removed another tenant.");
+                        }
+
+                        using (HttpResponseMessage usersAfterTenantNuke = await adminClient.GetAsync(baseUrl + "/v1.0/api/users").ConfigureAwait(false))
+                        {
+                            string usersAfterTenantNukeJson = await usersAfterTenantNuke.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!usersAfterTenantNuke.IsSuccessStatusCode) throw new InvalidOperationException("Could not list users after tenant nuke: " + usersAfterTenantNukeJson);
+                            List<User> users = DeserializeRequired<List<User>>(usersAfterTenantNukeJson);
+                            if (users.Any(item => String.Equals(item.TenantId, tenantAId, StringComparison.Ordinal))) throw new InvalidOperationException("Tenant nuke left user remnants.");
+                            if (!users.Any(item => String.Equals(item.Id, tenantBUserId, StringComparison.Ordinal))) throw new InvalidOperationException("Tenant nuke removed another tenant's user.");
                         }
                     }
                 }
@@ -5064,6 +5378,43 @@ namespace Test.Shared
                 string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException("User create failed for " + email + ": " + json);
                 return FirstRecordId("[" + json + "]");
+            }
+        }
+
+        private static async Task<string> CreateTenantViaApiAsync(HttpClient httpClient, string baseUrl, string name)
+        {
+            using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/tenants", JsonUtil.Serialize(new
+            {
+                name,
+                active = true
+            })).ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Tenant create failed for " + name + ": " + json);
+                return FirstRecordId("[" + json + "]");
+            }
+        }
+
+        private static async Task<string> FindUserIdByEmailAsync(HttpClient httpClient, string baseUrl, string email)
+        {
+            using (HttpResponseMessage response = await httpClient.GetAsync(baseUrl + "/v1.0/api/users").ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("User list failed while finding " + email + ": " + json);
+                List<User> users = DeserializeRequired<List<User>>(json);
+                User? user = users.FirstOrDefault(item => String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase));
+                if (user == null) throw new InvalidOperationException("Could not find user " + email + ".");
+                return user.Id;
+            }
+        }
+
+        private static async Task AssertNukeStatusAsync(HttpClient httpClient, string url, object body, int expectedStatus, string expectedError)
+        {
+            using (HttpResponseMessage response = await PostJsonAsync(httpClient, url, JsonUtil.Serialize(body)).ConfigureAwait(false))
+            {
+                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                if ((int)response.StatusCode != expectedStatus) throw new InvalidOperationException("Expected nuke status " + expectedStatus + " but received " + (int)response.StatusCode + ": " + json);
+                if (!json.Contains(expectedError, StringComparison.Ordinal)) throw new InvalidOperationException("Expected nuke error " + expectedError + " but received: " + json);
             }
         }
 

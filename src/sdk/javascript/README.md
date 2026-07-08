@@ -25,6 +25,40 @@ const policies = await client.listRoutingPolicies();
 const leaderboard = await client.getModelTokenLeaderboard({ limit: 10, offset: 0 });
 ```
 
+Onboarding is available through the unauthenticated signup route. Omit
+`tenantId` to create a tenant and first tenant administrator; include `tenantId`
+to add a regular user to an existing tenant. Validation failures return
+`400`; duplicate email or username in the target tenant returns `409`. Requests
+using an email address already held by a global administrator also return `409`
+with `GlobalAdminEmailAlreadyExists`.
+
+```javascript
+const publicClient = new XenoClient({ baseUrl: 'http://localhost:9000', bearerToken: null });
+const onboarding = await publicClient.onboard({
+  tenantName: 'Example Company',
+  email: 'owner@example.com',
+  username: 'owner@example.com',
+  password: 'password'
+});
+```
+
+Administrative nuke APIs are exposed through `nukeTenant` and `nukeUser`.
+Dashboard flows execute after exact-ID entry, an administrative reason, and a
+confirmation modal. API callers can still send `dryRun: true` to preview
+affected counts, but direct execution uses `dryRun: false`. Tenant nuke requires
+a global administrator. User nuke requires a global administrator or a
+same-tenant tenant administrator; tenant administrators cannot nuke themselves.
+
+```javascript
+const result = await client.nukeUser({
+  tenantId: 'ten_customer',
+  userId: 'usr_departed',
+  confirmUserId: 'usr_departed',
+  dryRun: false,
+  reason: 'User left the customer organization.'
+});
+```
+
 The model token leaderboard is global when `tenantId` is omitted. Include
 `tenantId` in the filter object or POST body to scope results to one tenant.
 `limit` and `offset` are optional numbers; omit them or send `null` to use
@@ -63,7 +97,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings, backup, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

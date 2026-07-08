@@ -44,6 +44,14 @@ class AuditRecord(XenoModel):
     pass
 
 
+class AuthOnboardingResponse(XenoModel):
+    pass
+
+
+class AdminNukeResponse(XenoModel):
+    pass
+
+
 class Credential(XenoModel):
     pass
 
@@ -210,6 +218,9 @@ class XenoClient:
     def login(self, username: str, password: str, tenant_id: str | None = None) -> dict[str, Any]:
         return self._request("POST", "/v1.0/api/auth/login", {"username": username, "password": password, "tenantId": tenant_id or self.tenant_id})
 
+    def onboard(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/onboarding/signup", request or {})
+
     def create_token(self, access_key: str) -> dict[str, Any]:
         return self._request("POST", "/v1.0/api/auth/token", {"accessKey": access_key})
 
@@ -234,6 +245,9 @@ class XenoClient:
     def delete_tenant(self, tenant_id: str) -> None:
         return self._request("DELETE", f"/v1.0/api/tenants/{tenant_id}")
 
+    def nuke_tenant(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/admin/nuke/tenant", request or {})
+
     def list_users(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/users")
 
@@ -245,6 +259,9 @@ class XenoClient:
 
     def delete_user(self, user_id: str) -> None:
         return self._request("DELETE", f"/v1.0/api/users/{user_id}")
+
+    def nuke_user(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/admin/nuke/user", request or {})
 
     def list_credentials(self) -> list[dict[str, Any]]:
         return self._request("GET", "/v1.0/api/credentials")

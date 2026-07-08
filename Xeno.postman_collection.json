@@ -54,6 +54,14 @@
       "value": "usr_..."
     },
     {
+      "key": "nukeTenantId",
+      "value": "ten_..."
+    },
+    {
+      "key": "nukeUserId",
+      "value": "usr_..."
+    },
+    {
       "key": "credentialId",
       "value": "cred_..."
     },
@@ -2106,7 +2114,7 @@
           "name": "Onboarding",
           "item": [
             {
-              "name": "Signup Tenant and First Admin",
+              "name": "Onboard New Tenant",
               "request": {
                 "method": "POST",
                 "header": [
@@ -2129,7 +2137,139 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"tenantId\": \"ten_new\",\n  \"tenantName\": \"New Tenant\",\n  \"username\": \"owner@xeno\",\n  \"email\": \"owner@xeno\",\n  \"password\": \"password\"\n}",
+                  "raw": "{\n  \"tenantName\": \"New Tenant\",\n  \"username\": \"owner@example.com\",\n  \"email\": \"owner@example.com\",\n  \"password\": \"password\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Onboard User Into Existing Tenant",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/onboarding/signup",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "onboarding",
+                    "signup"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantId\": \"{{tenantId}}\",\n  \"username\": \"new-user@example.com\",\n  \"email\": \"new-user@example.com\",\n  \"password\": \"password\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Onboard Invalid Request (400)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/onboarding/signup",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "onboarding",
+                    "signup"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantName\": \"Invalid Tenant\",\n  \"username\": \"invalid-email\",\n  \"email\": \"invalid-email\",\n  \"password\": \"short\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Onboard Duplicate Email Conflict (409)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/onboarding/signup",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "onboarding",
+                    "signup"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantId\": \"{{tenantId}}\",\n  \"username\": \"duplicate-user@example.com\",\n  \"email\": \"new-user@example.com\",\n  \"password\": \"password\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Onboard Global Admin Email Conflict (409)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/onboarding/signup",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "onboarding",
+                    "signup"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantName\": \"Rejected Tenant\",\n  \"username\": \"global-admin-copy@example.com\",\n  \"email\": \"admin@xeno\",\n  \"password\": \"password\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2244,6 +2384,40 @@
                   ]
                 }
               }
+            },
+            {
+              "name": "Nuke Tenant",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/admin/nuke/tenant",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "admin",
+                    "nuke",
+                    "tenant"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantId\": \"{{nukeTenantId}}\",\n  \"confirmTenantId\": \"{{nukeTenantId}}\",\n  \"dryRun\": false,\n  \"reason\": \"Execute complete tenant removal.\",\n  \"includeAuditRecords\": true,\n  \"includeRequestHistory\": true,\n  \"includeTelemetry\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
             }
           ]
         },
@@ -2349,6 +2523,40 @@
                     "users",
                     "{{userId}}"
                   ]
+                }
+              }
+            },
+            {
+              "name": "Nuke User",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/admin/nuke/user",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "admin",
+                    "nuke",
+                    "user"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantId\": \"{{tenantId}}\",\n  \"userId\": \"{{nukeUserId}}\",\n  \"confirmUserId\": \"{{nukeUserId}}\",\n  \"dryRun\": false,\n  \"reason\": \"Execute complete user removal.\",\n  \"includeAuditRecords\": false,\n  \"anonymizeRequestHistory\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             }

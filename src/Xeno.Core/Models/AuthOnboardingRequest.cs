@@ -3,18 +3,18 @@ namespace Xeno.Core.Models
     using System.Text.Json.Serialization;
 
     /// <summary>
-    /// Public onboarding request body for creating the first tenant administrator.
+    /// Public onboarding request body for creating a tenant administrator or adding a user to an existing tenant.
     /// </summary>
     public class AuthOnboardingRequest
     {
         /// <summary>
-        /// Optional tenant ID. Generated when omitted.
+        /// Optional existing tenant ID. When omitted, a new tenant is created.
         /// </summary>
         [JsonPropertyName("tenantId")]
         public string? TenantId { get; set; } = null;
 
         /// <summary>
-        /// Tenant display name.
+        /// Tenant display name. Required when <see cref="TenantId" /> is omitted.
         /// </summary>
         [JsonPropertyName("tenantName")]
         public string? TenantName { get; set; } = null;
@@ -36,11 +36,5 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("password")]
         public string? Password { get; set; } = null;
-
-        /// <summary>
-        /// Optional initial credential access key. Generated when omitted.
-        /// </summary>
-        [JsonPropertyName("accessKey")]
-        public string? AccessKey { get; set; } = null;
     }
 }

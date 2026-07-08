@@ -58,6 +58,42 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer default")
         self.assertNotIn("X-tenant-guid", request.headers)
 
+    def test_onboard_uses_public_signup_route_and_surfaces_conflict(self):
+        call_count = 0
+
+        def response_factory(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return FakeResponse(
+                    '{"status":"success","tenant":{"id":"ten_1","name":"Tenant","active":true},"user":{"id":"usr_1","tenantId":"ten_1","username":"owner@xeno","email":"owner@xeno","isAdmin":false,"isTenantAdmin":true,"active":true},"credential":{"id":"cred_1","tenantId":"ten_1","userId":"usr_1","accessKey":"xeno_access","secretKey":"xeno_secret","active":true},"token":{"token":"tok_1","tokenType":"Bearer","tenantId":"ten_1","userId":"usr_1","sessionId":"sess_1"}}'
+                )
+
+            return HTTPError(
+                "https://xeno.local/v1.0/api/onboarding/signup",
+                409,
+                "Conflict",
+                {},
+                FakeResponse('{"error":"EmailAlreadyExists","message":"Email already exists in the tenant."}', 409),
+            )
+
+        opener = FakeOpener(response_factory)
+        client = XenoClient("https://xeno.local", bearer_token=None, opener=opener)
+
+        response = client.onboard({"tenantName": "Tenant", "email": "owner@xeno", "username": "owner@xeno", "password": "password"})
+        self.assertEqual(response["tenant"]["id"], "ten_1")
+        self.assertEqual(response["credential"]["secretKey"], "xeno_secret")
+        request = opener.calls[0]["request"]
+        self.assertEqual(request.full_url, "https://xeno.local/v1.0/api/onboarding/signup")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertNotIn("Authorization", request.headers)
+        self.assertIn('"tenantName": "Tenant"', opener.calls[0]["body"])
+
+        with self.assertRaises(XenoApiError) as context:
+            client.onboard({"tenantId": "ten_1", "email": "owner@xeno", "password": "password"})
+        self.assertEqual(context.exception.status, 409)
+        self.assertEqual(context.exception.response["error"], "EmailAlreadyExists")
+
     def test_management_crud_methods_use_expected_routes_and_bodies(self):
         opener = FakeOpener(lambda request: FakeResponse("{}", 204 if request.get_method() == "DELETE" else 200))
         client = XenoClient("https://xeno.local", opener=opener)
@@ -65,9 +101,11 @@ class XenoClientTests(unittest.TestCase):
         client.create_tenant({"name": "Tenant"})
         client.update_tenant("ten_1", {"name": "Tenant 2"})
         client.delete_tenant("ten_1")
+        client.nuke_tenant({"tenantId": "ten_1", "confirmTenantId": "ten_1", "dryRun": True, "reason": "Testing tenant nuke"})
         client.create_user({"username": "user@xeno", "password": "password"})
         client.update_user("usr_1", {"active": False})
         client.delete_user("usr_1")
+        client.nuke_user({"tenantId": "ten_1", "userId": "usr_1", "confirmUserId": "usr_1", "dryRun": True, "reason": "Testing user nuke"})
         client.create_credential({"userId": "usr_1"})
         client.update_credential("cred_1", {"active": True})
         client.delete_credential("cred_1")
@@ -91,9 +129,11 @@ class XenoClientTests(unittest.TestCase):
                 ("POST", "https://xeno.local/v1.0/api/tenants"),
                 ("PUT", "https://xeno.local/v1.0/api/tenants/ten_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/tenants/ten_1"),
+                ("POST", "https://xeno.local/v1.0/api/admin/nuke/tenant"),
                 ("POST", "https://xeno.local/v1.0/api/users"),
                 ("PUT", "https://xeno.local/v1.0/api/users/usr_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/users/usr_1"),
+                ("POST", "https://xeno.local/v1.0/api/admin/nuke/user"),
                 ("POST", "https://xeno.local/v1.0/api/credentials"),
                 ("PUT", "https://xeno.local/v1.0/api/credentials/cred_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/credentials/cred_1"),
@@ -113,9 +153,11 @@ class XenoClientTests(unittest.TestCase):
             ],
         )
         self.assertIn('"name": "Tenant"', opener.calls[0]["body"])
-        self.assertIn('"permissionIds": ["perm_1"]', opener.calls[10]["body"])
-        self.assertIn('"principalId": "usr_1"', opener.calls[17]["body"])
-        self.assertIn('"modelName": "*"', opener.calls[19]["body"])
+        self.assertIn('"confirmTenantId": "ten_1"', opener.calls[3]["body"])
+        self.assertIn('"confirmUserId": "usr_1"', opener.calls[7]["body"])
+        self.assertIn('"permissionIds": ["perm_1"]', opener.calls[12]["body"])
+        self.assertIn('"principalId": "usr_1"', opener.calls[19]["body"])
+        self.assertIn('"modelName": "*"', opener.calls[21]["body"])
 
     def test_openai_and_request_history_methods_use_expected_routes(self):
         opener = FakeOpener()

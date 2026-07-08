@@ -311,19 +311,224 @@ namespace Xeno.Core.Services
         {
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
 
-            int removed = Users.RemoveAll(item => item.TenantId == tenantId);
-            removed += Credentials.RemoveAll(item => item.TenantId == tenantId);
-            removed += AuthSessions.RemoveAll(item => item.TenantId == tenantId);
-            removed += Roles.RemoveAll(item => item.TenantId == tenantId);
-            removed += Permissions.RemoveAll(item => item.TenantId == tenantId);
-            removed += RoleAssignments.RemoveAll(item => item.TenantId == tenantId);
-            removed += AuditRecords.RemoveAll(item => item.TenantId == tenantId);
-            removed += Clients.RemoveAll(item => item.TenantId == tenantId);
-            removed += ModelDefinitions.RemoveAll(item => item.TenantId == tenantId);
-            removed += ModelConfigurations.RemoveAll(item => item.TenantId == tenantId);
-            removed += RoutingPolicies.RemoveAll(item => item.TenantId == tenantId);
-            removed += RequestHistory.RemoveAll(item => item.TenantId == tenantId);
+            AdminNukeCounts counts = RemoveTenantScopedRecords(tenantId, true, true);
+            int removed = counts.Users;
+            removed += counts.Credentials;
+            removed += counts.AuthSessions;
+            removed += counts.Roles;
+            removed += counts.Permissions;
+            removed += counts.RoleAssignments;
+            removed += counts.AuditRecords;
+            removed += counts.Clients;
+            removed += counts.ModelDefinitions;
+            removed += counts.ModelConfigurations;
+            removed += counts.RoutingPolicies;
+            removed += counts.RequestHistory;
             return removed;
+        }
+
+        /// <summary>
+        /// Count tenant-scoped records for a nuke operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="includeAuditRecords">Whether audit records are included.</param>
+        /// <param name="includeRequestHistory">Whether request history is included.</param>
+        /// <returns>Object counts.</returns>
+        public AdminNukeCounts CountTenantScopedRecords(string tenantId, bool includeAuditRecords, bool includeRequestHistory)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+
+            return new AdminNukeCounts
+            {
+                Tenants = Tenants.Count(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Users = Users.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Credentials = Credentials.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                AuthSessions = AuthSessions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Roles = Roles.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Permissions = Permissions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                RoleAssignments = RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                AuditRecords = includeAuditRecords ? AuditRecords.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase)) : 0,
+                Clients = Clients.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                ModelDefinitions = ModelDefinitions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                ModelConfigurations = ModelConfigurations.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                RoutingPolicies = RoutingPolicies.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                RequestHistory = includeRequestHistory ? RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase)) : 0
+            };
+        }
+
+        /// <summary>
+        /// Remove tenant-scoped records for a nuke operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="includeAuditRecords">Whether audit records are included.</param>
+        /// <param name="includeRequestHistory">Whether request history is included.</param>
+        /// <returns>Deleted object counts.</returns>
+        public AdminNukeCounts RemoveTenantScopedRecords(string tenantId, bool includeAuditRecords, bool includeRequestHistory)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+
+            AdminNukeCounts counts = new AdminNukeCounts
+            {
+                Tenants = Tenants.RemoveAll(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Users = Users.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Credentials = Credentials.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                AuthSessions = AuthSessions.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Roles = Roles.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Permissions = Permissions.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                RoleAssignments = RoleAssignments.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                Clients = Clients.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                ModelDefinitions = ModelDefinitions.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                ModelConfigurations = ModelConfigurations.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                RoutingPolicies = RoutingPolicies.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            };
+
+            if (includeAuditRecords)
+            {
+                counts.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (includeRequestHistory)
+            {
+                counts.RequestHistory = RequestHistory.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return counts;
+        }
+
+        /// <summary>
+        /// Count user-scoped records for a nuke operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="userId">User ID.</param>
+        /// <param name="includeAuditRecords">Whether audit records are included.</param>
+        /// <param name="anonymizeRequestHistory">Whether request history references are anonymized.</param>
+        /// <returns>Object counts.</returns>
+        public AdminNukeResponse CountUserScopedRecords(string tenantId, string userId, bool includeAuditRecords, bool anonymizeRequestHistory)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.", nameof(userId));
+
+            List<string> credentialIds = Credentials
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Id)
+                .ToList();
+            List<string> sessionIds = AuthSessions
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && credentialIds.Contains(item.CredentialId))))
+                .Select(item => item.Id)
+                .ToList();
+
+            AdminNukeResponse response = new AdminNukeResponse
+            {
+                Deleted = new AdminNukeCounts
+                {
+                    Users = Users.Count(item => String.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                    Credentials = credentialIds.Count,
+                    AuthSessions = sessionIds.Count,
+                    RoleAssignments = RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && ((item.PrincipalType == PrincipalTypeEnum.User && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase)) || (item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId)))),
+                    AuditRecords = includeAuditRecords ? AuditRecords.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetResourceId, userId, StringComparison.OrdinalIgnoreCase))) : 0
+                },
+                Updated = new AdminNukeUpdatedCounts
+                {
+                    RequestHistoryAnonymized = anonymizeRequestHistory ? RequestHistory.Count(item => RequestHistoryReferencesUser(item, tenantId, userId, credentialIds, sessionIds)) : 0
+                }
+            };
+            return response;
+        }
+
+        /// <summary>
+        /// Remove user-scoped records for a nuke operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="userId">User ID.</param>
+        /// <param name="includeAuditRecords">Whether audit records are included.</param>
+        /// <param name="anonymizeRequestHistory">Whether request history references are anonymized.</param>
+        /// <returns>Deleted and updated object counts.</returns>
+        public AdminNukeResponse RemoveUserScopedRecords(string tenantId, string userId, bool includeAuditRecords, bool anonymizeRequestHistory)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.", nameof(userId));
+
+            List<string> credentialIds = Credentials
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Id)
+                .ToList();
+            List<string> sessionIds = AuthSessions
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && credentialIds.Contains(item.CredentialId))))
+                .Select(item => item.Id)
+                .ToList();
+
+            AdminNukeResponse response = new AdminNukeResponse
+            {
+                Deleted = new AdminNukeCounts
+                {
+                    Users = Users.RemoveAll(item => String.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
+                    Credentials = Credentials.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase)),
+                    AuthSessions = AuthSessions.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && credentialIds.Contains(item.CredentialId)))),
+                    RoleAssignments = RoleAssignments.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && ((item.PrincipalType == PrincipalTypeEnum.User && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase)) || (item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId))))
+                }
+            };
+
+            if (includeAuditRecords)
+            {
+                response.Deleted.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetResourceId, userId, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (anonymizeRequestHistory)
+            {
+                foreach (RequestHistoryEntry entry in RequestHistory.Where(item => RequestHistoryReferencesUser(item, tenantId, userId, credentialIds, sessionIds)))
+                {
+                    if (String.Equals(entry.UserId, userId, StringComparison.OrdinalIgnoreCase)) entry.UserId = null;
+                    if (String.Equals(entry.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)) entry.RequestorPrincipalId = null;
+                    if (!String.IsNullOrWhiteSpace(entry.CredentialId) && credentialIds.Contains(entry.CredentialId)) entry.CredentialId = null;
+                    if (!String.IsNullOrWhiteSpace(entry.SessionId) && sessionIds.Contains(entry.SessionId)) entry.SessionId = null;
+                    response.Updated.RequestHistoryAnonymized++;
+                }
+            }
+
+            return response;
+        }
+
+        /// <summary>
+        /// Count remaining records that still reference a tenant identifier.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <returns>Remaining record count.</returns>
+        public int CountTenantRemnants(string tenantId)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+
+            int count = Tenants.Count(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += Users.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += Credentials.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += AuthSessions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += Roles.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += Permissions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += Clients.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += ModelDefinitions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += ModelConfigurations.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += RoutingPolicies.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            return count;
+        }
+
+        /// <summary>
+        /// Count remaining records that still reference a user identifier.
+        /// </summary>
+        /// <param name="tenantId">Tenant ID.</param>
+        /// <param name="userId">User ID.</param>
+        /// <returns>Remaining record count.</returns>
+        public int CountUserRemnants(string tenantId, string userId)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.", nameof(userId));
+
+            int count = Users.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase));
+            count += Credentials.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase));
+            count += AuthSessions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase));
+            count += RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase));
+            count += RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)));
+            return count;
         }
 
         /// <summary>
@@ -531,6 +736,16 @@ namespace Xeno.Core.Services
             };
             Permissions.Add(permission);
             return permission;
+        }
+
+        private static bool RequestHistoryReferencesUser(RequestHistoryEntry entry, string tenantId, string userId, List<string> credentialIds, List<string> sessionIds)
+        {
+            if (!String.Equals(entry.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && !String.Equals(entry.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase)) return false;
+            if (String.Equals(entry.UserId, userId, StringComparison.OrdinalIgnoreCase)) return true;
+            if (String.Equals(entry.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!String.IsNullOrWhiteSpace(entry.CredentialId) && credentialIds.Contains(entry.CredentialId)) return true;
+            if (!String.IsNullOrWhiteSpace(entry.SessionId) && sessionIds.Contains(entry.SessionId)) return true;
+            return false;
         }
 
         private Role EnsureRole(string tenantId, string name, List<string> permissionIds)

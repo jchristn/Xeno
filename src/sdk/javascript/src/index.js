@@ -47,6 +47,10 @@ export class XenoClient {
     return this.#request('POST', '/v1.0/api/auth/login', { username, password, tenantId });
   }
 
+  async onboard(request = {}) {
+    return this.#request('POST', '/v1.0/api/onboarding/signup', request || {});
+  }
+
   async createToken(accessKey) {
     return this.#request('POST', '/v1.0/api/auth/token', { accessKey });
   }
@@ -79,6 +83,10 @@ export class XenoClient {
     return this.#request('DELETE', `/v1.0/api/tenants/${encodeURIComponent(id)}`);
   }
 
+  async nukeTenant(request = {}) {
+    return this.#request('POST', '/v1.0/api/admin/nuke/tenant', request || {});
+  }
+
   async listUsers() {
     return this.#request('GET', '/v1.0/api/users');
   }
@@ -93,6 +101,10 @@ export class XenoClient {
 
   async deleteUser(id) {
     return this.#request('DELETE', `/v1.0/api/users/${encodeURIComponent(id)}`);
+  }
+
+  async nukeUser(request = {}) {
+    return this.#request('POST', '/v1.0/api/admin/nuke/user', request || {});
   }
 
   async listCredentials() {

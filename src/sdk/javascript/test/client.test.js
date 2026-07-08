@@ -55,6 +55,40 @@ test('default options send seeded bearer without tenant header', async () => {
   assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], undefined);
 });
 
+test('onboard uses public signup route and surfaces conflict', async () => {
+  let callCount = 0;
+  const fetchImpl = createFetch(() => {
+    callCount += 1;
+    if (callCount === 1) {
+      return jsonResponse({
+        status: 'success',
+        tenant: { id: 'ten_1', name: 'Tenant', active: true },
+        user: { id: 'usr_1', tenantId: 'ten_1', username: 'owner@xeno', email: 'owner@xeno', isAdmin: false, isTenantAdmin: true, active: true },
+        credential: { id: 'cred_1', tenantId: 'ten_1', userId: 'usr_1', accessKey: 'xeno_access', secretKey: 'xeno_secret', active: true },
+        token: { token: 'tok_1', tokenType: 'Bearer', tenantId: 'ten_1', userId: 'usr_1', sessionId: 'sess_1' }
+      });
+    }
+
+    return jsonResponse({ error: 'EmailAlreadyExists', message: 'Email already exists in the tenant.' }, 409);
+  });
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', bearerToken: null, fetchImpl });
+
+  const response = await client.onboard({ tenantName: 'Tenant', email: 'owner@xeno', username: 'owner@xeno', password: 'password' });
+  assert.equal(response.tenant.id, 'ten_1');
+  assert.equal(response.credential.secretKey, 'xeno_secret');
+  assert.equal(fetchImpl.calls[0].url, 'https://xeno.local/v1.0/api/onboarding/signup');
+  assert.equal(fetchImpl.calls[0].options.method, 'POST');
+  assert.equal(fetchImpl.calls[0].options.headers.Authorization, undefined);
+  assert.match(fetchImpl.calls[0].options.body, /"tenantName":"Tenant"/);
+
+  await assert.rejects(() => client.onboard({ tenantId: 'ten_1', email: 'owner@xeno', password: 'password' }), (error) => {
+    assert.ok(error instanceof XenoApiError);
+    assert.equal(error.status, 409);
+    assert.equal(error.response.error, 'EmailAlreadyExists');
+    return true;
+  });
+});
+
 test('management CRUD methods use expected routes and bodies', async () => {
   const fetchImpl = createFetch((url, options) => jsonResponse({}, options.method === 'DELETE' ? 204 : 200));
   const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
@@ -62,9 +96,11 @@ test('management CRUD methods use expected routes and bodies', async () => {
   await client.createTenant({ name: 'Tenant' });
   await client.updateTenant('ten_1', { name: 'Tenant 2' });
   await client.deleteTenant('ten_1');
+  await client.nukeTenant({ tenantId: 'ten_1', confirmTenantId: 'ten_1', dryRun: true, reason: 'Testing tenant nuke' });
   await client.createUser({ username: 'user@xeno', password: 'password' });
   await client.updateUser('usr_1', { active: false });
   await client.deleteUser('usr_1');
+  await client.nukeUser({ tenantId: 'ten_1', userId: 'usr_1', confirmUserId: 'usr_1', dryRun: true, reason: 'Testing user nuke' });
   await client.createCredential({ userId: 'usr_1' });
   await client.updateCredential('cred_1', { active: true });
   await client.deleteCredential('cred_1');
@@ -86,9 +122,11 @@ test('management CRUD methods use expected routes and bodies', async () => {
     ['POST', 'https://xeno.local/v1.0/api/tenants'],
     ['PUT', 'https://xeno.local/v1.0/api/tenants/ten_1'],
     ['DELETE', 'https://xeno.local/v1.0/api/tenants/ten_1'],
+    ['POST', 'https://xeno.local/v1.0/api/admin/nuke/tenant'],
     ['POST', 'https://xeno.local/v1.0/api/users'],
     ['PUT', 'https://xeno.local/v1.0/api/users/usr_1'],
     ['DELETE', 'https://xeno.local/v1.0/api/users/usr_1'],
+    ['POST', 'https://xeno.local/v1.0/api/admin/nuke/user'],
     ['POST', 'https://xeno.local/v1.0/api/credentials'],
     ['PUT', 'https://xeno.local/v1.0/api/credentials/cred_1'],
     ['DELETE', 'https://xeno.local/v1.0/api/credentials/cred_1'],
@@ -107,9 +145,11 @@ test('management CRUD methods use expected routes and bodies', async () => {
     ['DELETE', 'https://xeno.local/v1.0/api/routing-policies/rpol_1']
   ]);
   assert.match(fetchImpl.calls[0].options.body, /"name":"Tenant"/);
-  assert.match(fetchImpl.calls[10].options.body, /"permissionIds":\["perm_1"\]/);
-  assert.match(fetchImpl.calls[17].options.body, /"principalId":"usr_1"/);
-  assert.match(fetchImpl.calls[19].options.body, /"modelName":"\*"/);
+  assert.match(fetchImpl.calls[3].options.body, /"confirmTenantId":"ten_1"/);
+  assert.match(fetchImpl.calls[7].options.body, /"confirmUserId":"usr_1"/);
+  assert.match(fetchImpl.calls[12].options.body, /"permissionIds":\["perm_1"\]/);
+  assert.match(fetchImpl.calls[19].options.body, /"principalId":"usr_1"/);
+  assert.match(fetchImpl.calls[21].options.body, /"modelName":"\*"/);
 });
 
 test('OpenAI and request history methods use expected routes', async () => {

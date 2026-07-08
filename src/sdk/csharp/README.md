@@ -26,6 +26,44 @@ using (XenoClient client = new XenoClient("http://localhost:9000"))
 }
 ```
 
+Onboarding is available through the unauthenticated signup route. Omit
+`TenantId` to create a tenant and first tenant administrator; include `TenantId`
+to add a regular user to an existing tenant. Validation failures return
+`400 BadRequest`; duplicate email or username in the target tenant returns
+`409 Conflict`. Requests using an email address already held by a global
+administrator also return `409 Conflict` with `GlobalAdminEmailAlreadyExists`.
+
+```csharp
+using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: null))
+{
+    AuthOnboardingResponse onboarding = await client.OnboardAsync(new AuthOnboardingRequest
+    {
+        TenantName = "Example Company",
+        Email = "owner@example.com",
+        Username = "owner@example.com",
+        Password = "password"
+    });
+}
+```
+
+Administrative nuke APIs are exposed through `NukeTenantAsync` and
+`NukeUserAsync`. Dashboard flows execute after exact-ID entry, an administrative
+reason, and a confirmation modal. API callers can still send `DryRun = true` to
+preview affected counts, but direct execution uses `DryRun = false`. Tenant nuke
+requires a global administrator. User nuke requires a global administrator or a
+same-tenant tenant administrator; tenant administrators cannot nuke themselves.
+
+```csharp
+AdminNukeResponse result = await client.NukeUserAsync(new AdminNukeUserRequest
+{
+    TenantId = "ten_customer",
+    UserId = "usr_departed",
+    ConfirmUserId = "usr_departed",
+    DryRun = false,
+    Reason = "User left the customer organization."
+});
+```
+
 The model token leaderboard is global when `tenantId` is omitted. Include
 `tenantId` in the filter dictionary or POST body to scope results to one tenant.
 `limit` and `offset` are optional integers; omit them or send `null` to use
@@ -73,7 +111,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 The SDK includes methods for:
 
-- authentication and token helpers;
+- authentication, onboarding, administrative nuke APIs, and token helpers;
 - tenants, users, credentials, roles, permissions, grantable permissions, role assignments, effective permissions, and audit;
 - clients and advertised client models;
 - model definitions, configurations, and routing policies;

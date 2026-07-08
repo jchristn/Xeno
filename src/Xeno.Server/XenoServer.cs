@@ -7,6 +7,7 @@ namespace Xeno.Server
     using System.IO;
     using System.Linq;
     using System.Net;
+    using System.Net.Mail;
     using System.Net.WebSockets;
     using System.Security.Cryptography;
     using System.Text;
@@ -49,6 +50,7 @@ namespace Xeno.Server
         private readonly Dictionary<string, PendingTelemetryResponse> _PendingTelemetryResponses = new Dictionary<string, PendingTelemetryResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<DateTime>> _AuthRateLimitAttempts = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingCallerDisconnects = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, byte> _ActiveNukeOperations = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         private readonly AuthenticationService _Authentication = new AuthenticationService();
         private readonly AuthorizationService _Authorization = new AuthorizationService();
         private readonly ClientTelemetryLatestCache _TelemetryLatestCache = new ClientTelemetryLatestCache();
@@ -174,6 +176,7 @@ namespace Xeno.Server
                 };
                 openApi.Tags.Add(new OpenApiTag { Name = "Health", Description = "Health check endpoints" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Authentication", Description = "Tenant-bound token endpoints" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Administration", Description = "Destructive administrative operations" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Tenants", Description = "Tenant administration" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Clients", Description = "Connected Xeno clients and their advertised models" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Client Telemetry", Description = "Server-collected client host and provider telemetry" });
@@ -259,8 +262,8 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/dashboard/login", "Dashboard login", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/dashboard/login", "Dashboard login", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/onboarding/signup", "Create tenant and first administrator", "Onboarding");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/onboarding/signup", "Create tenant and first administrator", "Onboarding");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/onboarding/signup", "Onboard tenant or user", "Onboarding");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/onboarding/signup", "Onboard tenant or user", "Onboarding");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/login", "Login and create client credential", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token", "Create token", "Authentication");
@@ -271,6 +274,10 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/token/refresh", "Refresh token", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/logout", "Logout", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/logout", "Logout", "Authentication");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/admin/nuke/tenant", "Nuke tenant", "Administration");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/admin/nuke/tenant", "Nuke tenant", "Administration");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/admin/nuke/user", "Nuke user", "Administration");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/admin/nuke/user", "Nuke user", "Administration");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/tenants", "List tenants", "Tenants");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/tenants", "List tenants", "Tenants");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/tenants", "Create tenant", "Tenants");
@@ -484,6 +491,14 @@ namespace Xeno.Server
                 .WithResponse(400, OpenApiResponseMetadata.BadRequest(OpenApiSchemaMetadata.Create("object", "Error response.")))
                 .WithResponse(401, OpenApiResponseMetadata.Unauthorized())
                 .WithResponse(500, OpenApiResponseMetadata.InternalError(OpenApiSchemaMetadata.Create("object", "Error response.")));
+            if (IsPath(path, "/api/v1/onboarding/signup", "/v1.0/api/onboarding/signup"))
+            {
+                metadata = metadata
+                    .WithResponse(404, OpenApiResponseMetadata.Json("Tenant not found.", OpenApiSchemaMetadata.Create("object", "Error response.")))
+                    .WithResponse(409, OpenApiResponseMetadata.Json("Tenant or user conflict.", OpenApiSchemaMetadata.Create("object", "Error response.")))
+                    .WithResponse(429, OpenApiResponseMetadata.Json("Rate limited.", OpenApiSchemaMetadata.Create("object", "Error response.")));
+            }
+
             return metadata;
         }
 
@@ -563,16 +578,15 @@ namespace Xeno.Server
             if (method == HttpMethod.POST && IsPath(path, "/api/v1/onboarding/signup", "/v1.0/api/onboarding/signup"))
             {
                 return JsonBody(
-                    "Onboarding request. Creates a tenant, first tenant administrator, initial credential, and dashboard session.",
+                    "Onboarding request. Creates a tenant and first tenant administrator when tenantId is omitted, or adds a regular user to an existing tenant when tenantId is supplied.",
                     ObjectSchemaMetadata(
                         "Onboarding signup request.",
-                        new[] { "tenantName", "email", "password" },
-                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional tenant identifier.")),
-                        SchemaProperty("tenantName", OpenApiSchemaMetadata.String("Tenant display name.")),
-                        SchemaProperty("email", OpenApiSchemaMetadata.String("First administrator email address.")),
+                        new[] { "email", "password" },
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional existing tenant identifier. Omit to create a new tenant.")),
+                        SchemaProperty("tenantName", OpenApiSchemaMetadata.String("Tenant display name. Required when tenantId is omitted.")),
+                        SchemaProperty("email", OpenApiSchemaMetadata.String("User email address.")),
                         SchemaProperty("username", OpenApiSchemaMetadata.String("Optional username. Defaults to email.")),
-                        SchemaProperty("password", OpenApiSchemaMetadata.String("Initial password.")),
-                        SchemaProperty("accessKey", OpenApiSchemaMetadata.String("Optional initial credential access key."))),
+                        SchemaProperty("password", OpenApiSchemaMetadata.String("Initial password."))),
                     new Dictionary<string, object>
                     {
                         ["tenantName"] = "Example Company",
@@ -1376,6 +1390,16 @@ namespace Xeno.Server
                 context.Response.StatusCode = 401;
                 await SendJsonAsync(context, new { error = "Unauthorized", message = ex.Message }).ConfigureAwait(false);
             }
+            catch (HttpStatusException ex)
+            {
+                context.Response.StatusCode = ex.StatusCode;
+                await SendJsonAsync(context, new { error = ex.ReasonCode, message = ex.Message }).ConfigureAwait(false);
+            }
+            catch (InvalidDataException ex)
+            {
+                context.Response.StatusCode = 400;
+                await SendJsonAsync(context, new { error = "BadRequest", message = ex.Message }).ConfigureAwait(false);
+            }
             catch (ArgumentException ex)
             {
                 context.Response.StatusCode = 400;
@@ -1518,6 +1542,20 @@ namespace Xeno.Server
                 bool revoked = _Authentication.RevokeSession(RequirePlatform(), requestContext.SessionId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { revoked }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/admin/nuke/tenant", "/v1.0/api/admin/nuke/tenant"))
+            {
+                AdminNukeResponse result = await HandleNukeTenantAsync(context, requestContext, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/admin/nuke/user", "/v1.0/api/admin/nuke/user"))
+            {
+                AdminNukeResponse result = await HandleNukeUserAsync(context, requestContext, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
                 return;
             }
 
@@ -4253,33 +4291,53 @@ namespace Xeno.Server
         private async Task HandleOnboardingSignupAsync(HttpContextBase context, CancellationToken token)
         {
             AuthOnboardingRequest body = ReadJsonBody<AuthOnboardingRequest>(context);
-            string tenantId = FirstNonEmpty(body.TenantId, IdGenerator.NewId("ten_")).Trim();
+            string requestedTenantId = FirstNonEmpty(body.TenantId).Trim();
             string tenantName = FirstNonEmpty(body.TenantName).Trim();
             string email = FirstNonEmpty(body.Email).Trim();
             string username = FirstNonEmpty(body.Username, email).Trim();
             string password = FirstNonEmpty(body.Password);
-            if (String.IsNullOrWhiteSpace(tenantName)) throw new ArgumentException("Tenant name is required.");
             if (String.IsNullOrWhiteSpace(email)) throw new ArgumentException("Email is required.");
             if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
             if (String.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password is required.");
+            if (!IsValidEmailAddress(email)) throw new ArgumentException("Email address is invalid.");
+            if (password.Length < 8) throw new ArgumentException("Password must be at least 8 characters.");
+            if (username.Length > 256) throw new ArgumentException("Username must be 256 characters or fewer.");
+            if (!String.IsNullOrWhiteSpace(requestedTenantId) && requestedTenantId.Length > 64) throw new ArgumentException("Tenant ID must be 64 characters or fewer.");
+            if (!String.IsNullOrWhiteSpace(tenantName) && tenantName.Length > 256) throw new ArgumentException("Tenant name must be 256 characters or fewer.");
 
             XenoPlatform platform = RequirePlatform();
-            if (platform.Tenants.Any(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Tenant ID already exists.");
-
-            Tenant tenant = new Tenant
+            if (platform.Users.Any(item => item.IsAdmin && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase)))
             {
-                Id = tenantId,
-                Name = tenantName,
-                Active = true,
-                CreatedUtc = DateTime.UtcNow,
-                LastUpdateUtc = DateTime.UtcNow
-            };
-            platform.Tenants.Add(tenant);
-            platform.EnsureTenantDefaults(tenant.Id);
-            RemoveSeedDevelopmentPrincipal(platform, tenant.Id);
+                throw new HttpStatusException(409, "GlobalAdminEmailAlreadyExists", "Email already belongs to a global administrator.");
+            }
 
-            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Username already exists in the tenant.");
-            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Email already exists in the tenant.");
+            bool creatingTenant = String.IsNullOrWhiteSpace(requestedTenantId);
+            Tenant tenant;
+            if (creatingTenant)
+            {
+                if (String.IsNullOrWhiteSpace(tenantName)) throw new ArgumentException("Tenant name is required when tenantId is omitted.");
+                tenant = new Tenant
+                {
+                    Id = IdGenerator.NewId("ten_"),
+                    Name = tenantName,
+                    Active = true,
+                    CreatedUtc = DateTime.UtcNow,
+                    LastUpdateUtc = DateTime.UtcNow
+                };
+                platform.Tenants.Add(tenant);
+                platform.EnsureTenantDefaults(tenant.Id);
+                RemoveSeedDevelopmentPrincipal(platform, tenant.Id);
+            }
+            else
+            {
+                Tenant? existingTenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, requestedTenantId, StringComparison.OrdinalIgnoreCase));
+                if (existingTenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant ID was not found.");
+                if (!existingTenant.Active) throw new HttpStatusException(409, "TenantInactive", "Tenant is inactive.");
+                tenant = existingTenant;
+            }
+
+            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase))) throw new HttpStatusException(409, "EmailAlreadyExists", "Email already exists in the tenant.");
+            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new HttpStatusException(409, "UsernameAlreadyExists", "Username already exists in the tenant.");
 
             User user = new User
             {
@@ -4287,26 +4345,31 @@ namespace Xeno.Server
                 Username = username,
                 Email = email,
                 IsAdmin = false,
-                IsTenantAdmin = true,
+                IsTenantAdmin = creatingTenant,
                 Active = true
             };
             _Authentication.SetUserPassword(user, password);
             platform.Users.Add(user);
 
-            string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
-            if (platform.Credentials.Any(item => item.TenantId == tenant.Id && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
+            string accessKey = IdGenerator.NewId("xeno_");
+            while (platform.Credentials.Any(item => item.TenantId == tenant.Id && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal)))
+            {
+                accessKey = IdGenerator.NewId("xeno_");
+            }
+
+            string secretKey = _Authentication.GenerateSecret();
             Credential credential = new Credential
             {
                 TenantId = tenant.Id,
                 UserId = user.Id,
                 AccessKey = accessKey,
-                SecretKey = _Authentication.HashCredentialSecret(_Authentication.GenerateSecret()),
+                SecretKey = _Authentication.HashCredentialSecret(secretKey),
                 Active = true
             };
             platform.Credentials.Add(credential);
 
             Role? tenantAdminRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantAdmin", StringComparison.OrdinalIgnoreCase) && item.Active);
-            if (tenantAdminRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantAdminRole.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == user.Id))
+            if (creatingTenant && tenantAdminRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantAdminRole.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == user.Id))
             {
                 platform.RoleAssignments.Add(new RoleAssignment
                 {
@@ -4333,18 +4396,45 @@ namespace Xeno.Server
             _Authentication.AppendAudit(platform, signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
 
-            await SendJsonAsync(context, new
+            await SendJsonAsync(context, new AuthOnboardingResponse
             {
-                token = tokenResult.Token,
-                tokenType = tokenResult.TokenType,
-                tenantId = tokenResult.TenantId,
-                tenantName = tenant.Name,
-                userId = user.Id,
-                email = user.Email,
-                sessionId = tokenResult.SessionId,
-                expiresUtc = tokenResult.ExpiresUtc,
-                credentialId = credential.Id,
-                accessKey = credential.AccessKey
+                Status = "success",
+                Tenant = new AuthOnboardingTenantDetails
+                {
+                    Id = tenant.Id,
+                    Name = tenant.Name,
+                    Active = tenant.Active,
+                    CreatedUtc = tenant.CreatedUtc,
+                    LastUpdateUtc = tenant.LastUpdateUtc
+                },
+                User = new AuthOnboardingUserDetails
+                {
+                    Id = user.Id,
+                    TenantId = user.TenantId,
+                    Username = user.Username,
+                    Email = user.Email,
+                    IsAdmin = user.IsAdmin,
+                    IsTenantAdmin = user.IsTenantAdmin,
+                    Active = user.Active
+                },
+                Credential = new AuthOnboardingCredentialDetails
+                {
+                    Id = credential.Id,
+                    TenantId = credential.TenantId,
+                    UserId = credential.UserId,
+                    AccessKey = credential.AccessKey,
+                    SecretKey = secretKey,
+                    Active = credential.Active
+                },
+                Token = new AuthOnboardingTokenDetails
+                {
+                    Token = tokenResult.Token,
+                    TokenType = tokenResult.TokenType,
+                    TenantId = tokenResult.TenantId,
+                    UserId = user.Id,
+                    SessionId = tokenResult.SessionId,
+                    ExpiresUtc = tokenResult.ExpiresUtc
+                }
             }).ConfigureAwait(false);
         }
 
@@ -4710,6 +4800,171 @@ namespace Xeno.Server
             return RequirePlatform().RoutingPolicies.RemoveAll(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
         }
 
+        private async Task<AdminNukeResponse> HandleNukeTenantAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            AdminNukeTenantRequest body = ReadJsonBody<AdminNukeTenantRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId).Trim();
+            string confirmTenantId = FirstNonEmpty(body.ConfirmTenantId).Trim();
+            ValidateNukeReason(body.Reason);
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenantId is required.");
+            if (!String.Equals(tenantId, confirmTenantId, StringComparison.Ordinal)) throw new ArgumentException("confirmTenantId must exactly match tenantId.");
+            EnsureSystemAdmin(requestContext, tenantId, tenantId);
+            if (String.Equals(tenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase)) throw new HttpStatusException(409, "ProtectedTenant", "The default/system tenant cannot be nuked.");
+
+            XenoPlatform platform = RequirePlatform();
+            Tenant? tenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase));
+            if (tenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant was not found.");
+
+            DateTime startedUtc = DateTime.UtcNow;
+            AdminNukeCounts counts = platform.CountTenantScopedRecords(tenantId, body.IncludeAuditRecords, body.IncludeRequestHistory);
+            AdminNukeResponse response = new AdminNukeResponse
+            {
+                Status = body.DryRun ? "dryRun" : "success",
+                OperationId = IdGenerator.NewId("nuke_"),
+                OperationType = "TenantNuke",
+                DryRun = body.DryRun,
+                Tenant = new AdminNukeTenantDetails
+                {
+                    TenantId = tenant.Id,
+                    Name = tenant.Name,
+                    Status = body.DryRun ? (tenant.Active ? "Active" : "Inactive") : "Deleted"
+                },
+                RequestedBy = BuildNukeRequestedBy(requestContext, tenantId),
+                Deleted = counts,
+                StartedUtc = startedUtc
+            };
+
+            if (body.DryRun)
+            {
+                response.Warnings.Add("Dry run only. No data was deleted.");
+                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeDryRun", 200, tenantId, tenantId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                response.CompletedUtc = DateTime.UtcNow;
+                return response;
+            }
+
+            string nukeKey = "tenant:" + tenantId;
+            if (!_ActiveNukeOperations.TryAdd(nukeKey, 0)) throw new HttpStatusException(409, "NukeAlreadyRunning", "A nuke operation is already running for this tenant.");
+            try
+            {
+                List<string> clientIds = platform.Clients
+                    .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                    .Select(item => item.Id)
+                    .ToList();
+                response.Deleted = platform.RemoveTenantScopedRecords(tenantId, body.IncludeAuditRecords, body.IncludeRequestHistory);
+                if (body.IncludeTelemetry && _Database != null)
+                {
+                    response.Deleted.TelemetryRecords = await _Database.PurgeTenantDataAsync(tenantId, token).ConfigureAwait(false);
+                }
+
+                _TelemetryLatestCache.ClearTenant(tenantId);
+                RemoveClientConnections(clientIds);
+                if (body.IncludeRequestHistory && platform.CountTenantRemnants(tenantId) > 0)
+                {
+                    throw new HttpStatusException(500, "TenantNukeRemnantsDetected", "Tenant nuke left tenant-scoped remnants.");
+                }
+
+                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeExecuted", 200, tenantId, tenantId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                response.CompletedUtc = DateTime.UtcNow;
+                return response;
+            }
+            finally
+            {
+                _ActiveNukeOperations.TryRemove(nukeKey, out _);
+            }
+        }
+
+        private async Task<AdminNukeResponse> HandleNukeUserAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            AdminNukeUserRequest body = ReadJsonBody<AdminNukeUserRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId).Trim();
+            string userId = FirstNonEmpty(body.UserId).Trim();
+            string confirmUserId = FirstNonEmpty(body.ConfirmUserId).Trim();
+            ValidateNukeReason(body.Reason);
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenantId is required.");
+            if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("userId is required.");
+            if (!String.Equals(userId, confirmUserId, StringComparison.Ordinal)) throw new ArgumentException("confirmUserId must exactly match userId.");
+
+            XenoPlatform platform = RequirePlatform();
+            bool isSystemAdmin = _Authorization.IsSystemAdmin(platform, requestContext);
+            bool isTenantAdmin = _Authorization.IsTenantAdmin(platform, requestContext, tenantId);
+            if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
+            if (!isSystemAdmin && !isTenantAdmin)
+            {
+                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, userId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                throw new AuthorizationDeniedException(403, "TenantAdminRequired", "Only a system administrator or same-tenant tenant administrator can nuke a user.");
+            }
+
+            Tenant? tenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase));
+            if (tenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant was not found.");
+            User? user = platform.Users.FirstOrDefault(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase));
+            if (user == null) throw new HttpStatusException(404, "UserNotFound", "User was not found.");
+            if (!isSystemAdmin && String.Equals(requestContext.UserId, userId, StringComparison.OrdinalIgnoreCase)) throw new HttpStatusException(409, "TenantAdminSelfNukeProtected", "Tenant administrators cannot nuke themselves.");
+            if (!isSystemAdmin && user.IsAdmin) throw new AuthorizationDeniedException(403, "SystemAdminProtected", "Tenant administrators cannot nuke global administrators.");
+            if (user.IsAdmin && platform.Users.Count(item => item.Active && item.IsAdmin) <= 1) throw new HttpStatusException(409, "LastSystemAdminProtected", "The last active system administrator cannot be nuked.");
+
+            DateTime startedUtc = DateTime.UtcNow;
+            AdminNukeResponse counted = platform.CountUserScopedRecords(tenantId, userId, body.IncludeAuditRecords, body.AnonymizeRequestHistory);
+            AdminNukeResponse response = new AdminNukeResponse
+            {
+                Status = body.DryRun ? "dryRun" : "success",
+                OperationId = IdGenerator.NewId("nuke_"),
+                OperationType = "UserNuke",
+                DryRun = body.DryRun,
+                Tenant = new AdminNukeTenantDetails
+                {
+                    TenantId = tenant.Id,
+                    Name = tenant.Name,
+                    Status = tenant.Active ? "Active" : "Inactive"
+                },
+                User = new AdminNukeUserDetails
+                {
+                    UserId = user.Id,
+                    Email = user.Email,
+                    Status = body.DryRun ? (user.Active ? "Active" : "Inactive") : "Deleted"
+                },
+                RequestedBy = BuildNukeRequestedBy(requestContext, tenantId),
+                Deleted = counted.Deleted,
+                Updated = counted.Updated,
+                StartedUtc = startedUtc
+            };
+
+            if (body.DryRun)
+            {
+                response.Warnings.Add("Dry run only. No data was deleted.");
+                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeDryRun", 200, tenantId, userId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                response.CompletedUtc = DateTime.UtcNow;
+                return response;
+            }
+
+            string nukeKey = "user:" + tenantId + ":" + userId;
+            if (!_ActiveNukeOperations.TryAdd(nukeKey, 0)) throw new HttpStatusException(409, "NukeAlreadyRunning", "A nuke operation is already running for this user.");
+            try
+            {
+                AdminNukeResponse removed = platform.RemoveUserScopedRecords(tenantId, userId, body.IncludeAuditRecords, body.AnonymizeRequestHistory);
+                response.Deleted = removed.Deleted;
+                response.Updated = removed.Updated;
+                if (body.AnonymizeRequestHistory && platform.CountUserRemnants(tenantId, userId) > 0)
+                {
+                    throw new HttpStatusException(500, "UserNukeRemnantsDetected", "User nuke left user-scoped remnants.");
+                }
+
+                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeExecuted", 200, tenantId, userId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                response.CompletedUtc = DateTime.UtcNow;
+                return response;
+            }
+            finally
+            {
+                _ActiveNukeOperations.TryRemove(nukeKey, out _);
+            }
+        }
+
         private async Task<int> DeleteTenantAsync(string tenantId, CancellationToken token)
         {
             XenoPlatform platform = RequirePlatform();
@@ -4723,11 +4978,7 @@ namespace Xeno.Server
 
             if (_Database != null) removed += await _Database.PurgeTenantDataAsync(tenantId, token).ConfigureAwait(false);
             _TelemetryLatestCache.ClearTenant(tenantId);
-
-            lock (_ClientConnectionsLock)
-            {
-                foreach (string clientId in clientIds) _ClientConnections.Remove(clientId);
-            }
+            RemoveClientConnections(clientIds);
 
             return removed;
         }
@@ -4849,6 +5100,42 @@ namespace Xeno.Server
 
             _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "LastSystemAdminProtected", 403, user.TenantId, user.Id);
             throw new AuthorizationDeniedException(403, "LastSystemAdminProtected", "The last active system administrator cannot remove their own system administrator flag.");
+        }
+
+        private void EnsureSystemAdmin(RequestContext requestContext, string targetTenantId, string? targetResourceId)
+        {
+            if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
+            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
+            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Admin.Nuke", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, targetTenantId, targetResourceId);
+            throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can perform this operation.");
+        }
+
+        private AdminNukeRequestedBy BuildNukeRequestedBy(RequestContext requestContext, string targetTenantId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            return new AdminNukeRequestedBy
+            {
+                TenantId = requestContext.TenantId,
+                UserId = requestContext.UserId,
+                IsGlobalAdmin = _Authorization.IsSystemAdmin(platform, requestContext),
+                IsTenantAdmin = _Authorization.IsTenantAdmin(platform, requestContext, targetTenantId)
+            };
+        }
+
+        private static string ValidateNukeReason(string? reason)
+        {
+            string normalized = FirstNonEmpty(reason).Trim();
+            if (normalized.Length < 10) throw new ArgumentException("reason must be at least 10 characters.");
+            if (normalized.Length > 2048) throw new ArgumentException("reason must be 2048 characters or fewer.");
+            return normalized;
+        }
+
+        private void RemoveClientConnections(List<string> clientIds)
+        {
+            lock (_ClientConnectionsLock)
+            {
+                foreach (string clientId in clientIds) _ClientConnections.Remove(clientId);
+            }
         }
 
         private void EnsureCanChangeTenantAdminFlag(RequestContext requestContext, string tenantId)
@@ -5595,6 +5882,20 @@ namespace Xeno.Server
             return String.Empty;
         }
 
+        private static bool IsValidEmailAddress(string email)
+        {
+            if (String.IsNullOrWhiteSpace(email)) return false;
+            try
+            {
+                MailAddress address = new MailAddress(email);
+                return String.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+        }
+
         private static void AddNonEmpty(List<string> values, string? value)
         {
             if (!String.IsNullOrWhiteSpace(value)) values.Add(value);
@@ -5615,11 +5916,13 @@ namespace Xeno.Server
                     ["/openapi.json"] = Path(Operation("get", "openApi", "Health", "OpenAPI document", "Returns the OpenAPI document.", "GenericObject", false)),
                     ["/v1.0/api/auth/tenants"] = Path(Operation("get", "lookupLoginTenants", "Authentication", "Lookup login tenants", "Returns active tenants for a login email query string.", "GenericObject", false), Operation("post", "lookupLoginTenantsByBody", "Authentication", "Lookup login tenants", "Returns active tenants for a login email request body.", "GenericObject", false)),
                     ["/v1.0/api/auth/login"] = Path(Operation("post", "login", "Authentication", "Login", "Validates a user password and returns a one-time-visible client credential for WebSocket use.", "CredentialLoginResponse", false)),
-                    ["/v1.0/api/onboarding/signup"] = Path(Operation("post", "signup", "Onboarding", "Sign up", "Creates a tenant, first tenant administrator, initial credential, and dashboard session.", "GenericObject", false)),
+                    ["/v1.0/api/onboarding/signup"] = Path(Operation("post", "signup", "Onboarding", "Sign up", "Creates a tenant and first tenant administrator when tenantId is omitted, or adds a regular user to an existing tenant when tenantId is supplied.", "AuthOnboardingResponse", false)),
                     ["/v1.0/api/auth/token"] = Path(Operation("post", "createToken", "Authentication", "Create token", "Creates a development session token.", "TokenResponse", false)),
                     ["/v1.0/api/auth/token/details"] = Path(Operation("get", "tokenDetails", "Authentication", "Token details", "Returns details for the current token.", "GenericObject", true)),
                     ["/v1.0/api/auth/token/refresh"] = Path(Operation("post", "refreshToken", "Authentication", "Refresh token", "Refreshes the current bearer token.", "TokenResponse", true)),
                     ["/v1.0/api/auth/logout"] = Path(Operation("post", "logout", "Authentication", "Logout", "Revokes the current session token.", "GenericObject", true)),
+                    ["/v1.0/api/admin/nuke/tenant"] = Path(Operation("post", "nukeTenant", "Administration", "Nuke tenant", "Dry-runs or executes permanent deletion of a tenant and all tenant-owned records. Requires global/system administrator.", "AdminNukeResponse", true)),
+                    ["/v1.0/api/admin/nuke/user"] = Path(Operation("post", "nukeUser", "Administration", "Nuke user", "Dry-runs or executes permanent deletion of a user and user-owned records. Requires global/system administrator or same-tenant tenant administrator for non-self targets.", "AdminNukeResponse", true)),
                     ["/v1.0/api/tenants"] = Path(Operation("get", "listTenants", "Tenants", "List tenants", "Lists tenants visible to the caller.", "TenantArray", true), Operation("post", "createTenant", "Tenants", "Create tenant", "Creates a tenant.", "Tenant", true)),
                     ["/v1.0/api/tenants/{id}"] = Path(Operation("put", "updateTenant", "Tenants", "Update tenant", "Updates tenant name and active state.", "Tenant", true), Operation("delete", "deleteTenant", "Tenants", "Delete tenant", "Deletes a tenant and its scoped records.", "GenericObject", true)),
                     ["/v1.0/api/users"] = Path(Operation("get", "listUsers", "Tenants", "List users", "Lists tenant users.", "UserArray", true), Operation("post", "createUser", "Tenants", "Create user", "Creates a tenant user with a required password.", "User", true)),
@@ -5694,6 +5997,82 @@ namespace Xeno.Server
                         ["HealthResponse"] = ObjectSchema(Property("status", StringSchema()), Property("product", StringSchema()), Property("version", StringSchema())),
                         ["CredentialLoginResponse"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("userId", StringSchema()), Property("accessKey", StringSchema()), Property("authScheme", StringSchema())),
                         ["TokenResponse"] = ObjectSchema(Property("token", StringSchema()), Property("tokenType", StringSchema()), Property("tenantId", StringSchema()), Property("expiresUtc", StringSchema("date-time"))),
+                        ["AuthOnboardingResponse"] = ObjectSchema(
+                            Property("status", StringSchema()),
+                            Property("tenant", SchemaRef("AuthOnboardingTenantDetails")),
+                            Property("user", SchemaRef("AuthOnboardingUserDetails")),
+                            Property("credential", SchemaRef("AuthOnboardingCredentialDetails")),
+                            Property("token", SchemaRef("AuthOnboardingTokenDetails"))),
+                        ["AuthOnboardingTenantDetails"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("name", StringSchema()),
+                            Property("active", BooleanSchema()),
+                            Property("createdUtc", StringSchema("date-time")),
+                            Property("lastUpdateUtc", StringSchema("date-time"))),
+                        ["AuthOnboardingUserDetails"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("username", StringSchema()),
+                            Property("email", StringSchema()),
+                            Property("isAdmin", BooleanSchema()),
+                            Property("isTenantAdmin", BooleanSchema()),
+                            Property("active", BooleanSchema())),
+                        ["AuthOnboardingCredentialDetails"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("userId", StringSchema()),
+                            Property("accessKey", StringSchema()),
+                            Property("secretKey", StringSchema()),
+                            Property("active", BooleanSchema())),
+                        ["AuthOnboardingTokenDetails"] = ObjectSchema(
+                            Property("token", StringSchema()),
+                            Property("tokenType", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("userId", StringSchema()),
+                            Property("sessionId", StringSchema()),
+                            Property("expiresUtc", StringSchema("date-time"))),
+                        ["AdminNukeResponse"] = ObjectSchema(
+                            Property("status", StringSchema()),
+                            Property("operationId", StringSchema()),
+                            Property("operationType", StringSchema()),
+                            Property("dryRun", BooleanSchema()),
+                            Property("tenant", SchemaRef("AdminNukeTenantDetails")),
+                            Property("user", SchemaRef("AdminNukeUserDetails")),
+                            Property("requestedBy", SchemaRef("AdminNukeRequestedBy")),
+                            Property("deleted", SchemaRef("AdminNukeCounts")),
+                            Property("updated", SchemaRef("AdminNukeUpdatedCounts")),
+                            Property("warnings", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() }),
+                            Property("startedUtc", StringSchema("date-time")),
+                            Property("completedUtc", StringSchema("date-time"))),
+                        ["AdminNukeTenantDetails"] = ObjectSchema(
+                            Property("tenantId", StringSchema()),
+                            Property("name", StringSchema()),
+                            Property("status", StringSchema())),
+                        ["AdminNukeUserDetails"] = ObjectSchema(
+                            Property("userId", StringSchema()),
+                            Property("email", StringSchema()),
+                            Property("status", StringSchema())),
+                        ["AdminNukeRequestedBy"] = ObjectSchema(
+                            Property("tenantId", StringSchema()),
+                            Property("userId", StringSchema()),
+                            Property("isGlobalAdmin", BooleanSchema()),
+                            Property("isTenantAdmin", BooleanSchema())),
+                        ["AdminNukeCounts"] = ObjectSchema(
+                            Property("tenants", IntegerSchema()),
+                            Property("users", IntegerSchema()),
+                            Property("credentials", IntegerSchema()),
+                            Property("authSessions", IntegerSchema()),
+                            Property("roles", IntegerSchema()),
+                            Property("permissions", IntegerSchema()),
+                            Property("roleAssignments", IntegerSchema()),
+                            Property("auditRecords", IntegerSchema()),
+                            Property("clients", IntegerSchema()),
+                            Property("modelDefinitions", IntegerSchema()),
+                            Property("modelConfigurations", IntegerSchema()),
+                            Property("routingPolicies", IntegerSchema()),
+                            Property("requestHistory", IntegerSchema()),
+                            Property("telemetryRecords", IntegerSchema())),
+                        ["AdminNukeUpdatedCounts"] = ObjectSchema(Property("requestHistoryAnonymized", IntegerSchema())),
                         ["TenantArray"] = ArraySchema("Tenant"),
                         ["UserArray"] = ArraySchema("User"),
                         ["CredentialArray"] = ArraySchema("Credential"),
@@ -6086,6 +6465,16 @@ namespace Xeno.Server
                 responses["401"] = ErrorResponse("Authentication required or invalid.");
                 responses["403"] = ErrorResponse("Authenticated caller lacks permission for the requested tenant or operation.");
             }
+
+            if (String.Equals(operationId, "signup", StringComparison.Ordinal))
+            {
+                Dictionary<string, object> responses = (Dictionary<string, object>)operation["responses"];
+                responses["400"] = ErrorResponse("Validation failed.");
+                responses["404"] = ErrorResponse("Supplied tenant ID was not found.");
+                responses["409"] = ErrorResponse("Tenant inactive, email already exists, or username already exists.");
+                responses["429"] = ErrorResponse("Rate limit exceeded.");
+            }
+
             return new KeyValuePair<string, object>(method, operation);
         }
 
@@ -6220,8 +6609,7 @@ namespace Xeno.Server
                         Property("tenantName", StringSchema()),
                         Property("email", StringSchema()),
                         Property("username", StringSchema()),
-                        Property("password", StringSchema()),
-                        Property("accessKey", StringSchema())),
+                        Property("password", StringSchema())),
                     new Dictionary<string, object>
                     {
                         ["tenantName"] = "Example Company",

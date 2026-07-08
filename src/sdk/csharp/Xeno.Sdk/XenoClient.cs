@@ -116,6 +116,17 @@
         }
 
         /// <summary>
+        /// Onboards a new tenant administrator or a regular user in an existing tenant.
+        /// </summary>
+        /// <param name="request">Onboarding request. Omit tenant ID to create a tenant; include tenant ID to add a regular user.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Onboarding response JSON.</returns>
+        public async Task<AuthOnboardingResponse> OnboardAsync(AuthOnboardingRequest request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<AuthOnboardingResponse>("/v1.0/api/onboarding/signup", request ?? new AuthOnboardingRequest(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Creates a bearer token from a direct access credential.
         /// </summary>
         /// <param name="accessKey">Access key.</param>
@@ -201,6 +212,17 @@
         }
 
         /// <summary>
+        /// Runs a tenant nuke dry run or execution.
+        /// </summary>
+        /// <param name="request">Tenant nuke request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Nuke response JSON.</returns>
+        public async Task<AdminNukeResponse> NukeTenantAsync(AdminNukeTenantRequest request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<AdminNukeResponse>("/v1.0/api/admin/nuke/tenant", request ?? new AdminNukeTenantRequest(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Lists users.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
@@ -242,6 +264,17 @@
         public async Task DeleteUserAsync(string id, CancellationToken token = default)
         {
             await DeleteAsync("/v1.0/api/users/" + Escape(id), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Runs a user nuke dry run or execution.
+        /// </summary>
+        /// <param name="request">User nuke request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Nuke response JSON.</returns>
+        public async Task<AdminNukeResponse> NukeUserAsync(AdminNukeUserRequest request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<AdminNukeResponse>("/v1.0/api/admin/nuke/user", request ?? new AdminNukeUserRequest(), token).ConfigureAwait(false);
         }
 
         /// <summary>

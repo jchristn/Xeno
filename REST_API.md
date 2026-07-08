@@ -93,6 +93,113 @@ Password login, dashboard login, and token creation are rate limited by source
 IP. The setting is `Auth.MaxLoginRequestsPerMinute` in the server JSON settings
 file. When the limit is exceeded the server returns 429 with `RateLimited`.
 
+## Onboarding
+
+`POST /api/v1/onboarding/signup`
+
+`POST /v1.0/api/onboarding/signup`
+
+The onboarding signup route is unauthenticated. It supports both initial tenant
+creation and adding a user to an existing tenant.
+
+- Omit `tenantId` to create a new tenant and onboard the first user as that tenant's tenant administrator. In this mode `tenantName`, `email`, and `password` are required.
+- Include `tenantId` to add the user to an existing active tenant as a regular user. In this mode `tenantName` is not required.
+- `username` is optional and defaults to `email`.
+- `accessKey` is not accepted in the request. The server generates credential material and returns the plaintext secret key only in the onboarding response.
+- Validation failures return `400 BadRequest`. The email address must be syntactically valid, password must be at least 8 characters, tenant IDs must be 64 characters or fewer, and tenant names and usernames must be 256 characters or fewer.
+- A supplied `tenantId` that does not resolve returns `404 TenantNotFound`.
+- An inactive tenant, duplicate email address, duplicate username in the target tenant, or an email address already held by a global administrator returns `409 Conflict` with `TenantInactive`, `EmailAlreadyExists`, `UsernameAlreadyExists`, or `GlobalAdminEmailAlreadyExists`.
+- Onboarding is rate limited with the same source-IP limiter as login. Rate-limited requests return `429 RateLimited`.
+
+New tenant request:
+
+```json
+{
+  "tenantName": "Example Company",
+  "email": "owner@example.com",
+  "username": "owner@example.com",
+  "password": "password"
+}
+```
+
+Existing tenant request:
+
+```json
+{
+  "tenantId": "ten_abc123",
+  "email": "user@example.com",
+  "username": "user@example.com",
+  "password": "password"
+}
+```
+
+Response:
+
+```json
+{
+  "status": "success",
+  "tenant": {
+    "id": "ten_abc123",
+    "name": "Example Company",
+    "active": true,
+    "createdUtc": "2026-07-08T16:00:00Z",
+    "lastUpdateUtc": "2026-07-08T16:00:00Z"
+  },
+  "user": {
+    "id": "usr_abc123",
+    "tenantId": "ten_abc123",
+    "username": "owner@example.com",
+    "email": "owner@example.com",
+    "isAdmin": false,
+    "isTenantAdmin": true,
+    "active": true
+  },
+  "credential": {
+    "id": "cred_abc123",
+    "tenantId": "ten_abc123",
+    "userId": "usr_abc123",
+    "accessKey": "xeno_abc123",
+    "secretKey": "xeno_secret_value",
+    "active": true
+  },
+  "token": {
+    "token": "session-token-value",
+    "tokenType": "Bearer",
+    "tenantId": "ten_abc123",
+    "userId": "usr_abc123",
+    "sessionId": "sess_abc123",
+    "expiresUtc": "2026-07-08T17:00:00Z"
+  }
+}
+```
+
+Validation error:
+
+```json
+{
+  "error": "BadRequest",
+  "message": "Email address is invalid."
+}
+```
+
+Duplicate email error:
+
+```json
+{
+  "error": "EmailAlreadyExists",
+  "message": "Email already exists in the tenant."
+}
+```
+
+Global administrator email conflict:
+
+```json
+{
+  "error": "GlobalAdminEmailAlreadyExists",
+  "message": "Email already belongs to a global administrator."
+}
+```
+
 ## Administration
 
 `GET /v1.0/api/tenants`
@@ -118,6 +225,10 @@ file. When the limit is exceeded the server returns 429 with `RateLimited`.
 `PUT /v1.0/api/credentials/{id}`
 
 `DELETE /v1.0/api/credentials/{id}`
+
+`POST /v1.0/api/admin/nuke/tenant`
+
+`POST /v1.0/api/admin/nuke/user`
 
 `GET /v1.0/api/roles`
 
@@ -197,6 +308,128 @@ except system admins and same-tenant tenant admins inside their authority.
 Seeded built-in roles and permissions are read-only through the management API.
 `GET /v1.0/api/permissions/grantable` returns the permission items the caller
 can assign to roles or principals.
+
+### Administrative Nuke APIs
+
+Administrative nuke APIs are authenticated destructive endpoints. Dashboard
+flows execute only after exact-ID entry, an administrative reason, and a final
+confirmation modal. API callers can send `dryRun:true` when they need an
+affected-record preview, but the documented default workflow is direct execution
+with `dryRun:false`.
+
+Tenant nuke:
+
+- `POST /v1.0/api/admin/nuke/tenant`
+- Requires a global/system administrator.
+- Tenant administrators always receive `403 SystemAdminRequired`.
+- The default/system tenant is protected and returns `409 ProtectedTenant`.
+- Deletes the tenant and tenant-owned users, credentials, sessions, roles,
+  permissions, role assignments, audit records when requested, clients, model
+  definitions, model configurations, routing policies, request history when
+  requested, provider telemetry when requested, and client connection remnants.
+
+Tenant nuke request:
+
+```json
+{
+  "tenantId": "ten_customer",
+  "confirmTenantId": "ten_customer",
+  "dryRun": false,
+  "reason": "Customer requested complete tenant removal.",
+  "includeAuditRecords": true,
+  "includeRequestHistory": true,
+  "includeTelemetry": true
+}
+```
+
+User nuke:
+
+- `POST /v1.0/api/admin/nuke/user`
+- Requires a global/system administrator or a tenant administrator in the target
+  tenant.
+- Tenant administrators may nuke any non-self user in their tenant, including
+  other tenant administrators.
+- Tenant administrators cannot nuke themselves, cannot nuke users in another
+  tenant, and cannot nuke global/system administrators.
+- Deletes the user, owned credentials, auth sessions, user and credential role
+  assignments, and optionally user-related audit records. Request history user,
+  credential, and session references are anonymized by default.
+
+User nuke request:
+
+```json
+{
+  "tenantId": "ten_customer",
+  "userId": "usr_departed",
+  "confirmUserId": "usr_departed",
+  "dryRun": false,
+  "reason": "User left the customer organization.",
+  "includeAuditRecords": false,
+  "anonymizeRequestHistory": true
+}
+```
+
+Nuke response:
+
+```json
+{
+  "status": "success",
+  "operationId": "nuke_abc123",
+  "operationType": "UserNuke",
+  "dryRun": false,
+  "tenant": {
+    "tenantId": "ten_customer",
+    "name": "Customer",
+    "status": "Active"
+  },
+  "user": {
+    "userId": "usr_departed",
+    "email": "departed@example.com",
+    "status": "Active"
+  },
+  "requestedBy": {
+    "tenantId": "ten_customer",
+    "userId": "usr_admin",
+    "isGlobalAdmin": false,
+    "isTenantAdmin": true
+  },
+  "deleted": {
+    "tenants": 0,
+    "users": 1,
+    "credentials": 2,
+    "authSessions": 3,
+    "roles": 0,
+    "permissions": 0,
+    "roleAssignments": 2,
+    "auditRecords": 0,
+    "clients": 0,
+    "modelDefinitions": 0,
+    "modelConfigurations": 0,
+    "routingPolicies": 0,
+    "requestHistory": 0,
+    "telemetryRecords": 0
+  },
+  "updated": {
+    "requestHistoryAnonymized": 12
+  },
+  "warnings": [],
+  "startedUtc": "2026-07-08T18:17:10.012Z",
+  "completedUtc": "2026-07-08T18:17:10.103Z"
+}
+```
+
+Nuke errors:
+
+- `400 BadRequest`: missing IDs, confirmation mismatch, or invalid reason.
+- `401 Unauthorized`: missing or invalid authentication.
+- `403 SystemAdminRequired`: tenant nuke attempted by a non-system admin.
+- `403 TenantAdminRequired`: user nuke attempted without same-tenant tenant
+  admin or system admin authority.
+- `403 SystemAdminProtected`: tenant admin attempted to nuke a global admin.
+- `404 TenantNotFound` or `404 UserNotFound`: target object does not exist.
+- `409 ProtectedTenant`: target tenant is protected.
+- `409 TenantAdminSelfNukeProtected`: tenant admin attempted to nuke itself.
+- `409 LastSystemAdminProtected`: target is the last active global admin.
 
 Legacy dashboard aliases under `/api/v1/...` are also registered for administration, clients, token bootstrap, settings, request history, and OpenAI-compatible routes.
 
