@@ -7,7 +7,7 @@
   "variable": [
     {
       "key": "serverBaseUrl",
-      "value": "http://app.xenocloud.ai:9000"
+      "value": "https://app.xenocloud.ai:9000"
     },
     {
       "key": "serverApiBaseUrl",
