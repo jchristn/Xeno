@@ -8,8 +8,11 @@ import {
   ArrowUpDown,
   BarChart3,
   BrainCircuit,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Cpu,
   Download,
   FileJson,
@@ -56,7 +59,10 @@ const dashboardSessionKey = 'xeno.dashboard.session';
 const portalSessionHashKey = 'xeno-portal-session';
 const requestHistoryEndpoint = '/v1.0/api/request-history';
 const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
+const modelLeaderboardEndpoint = `${requestHistoryEndpoint}/model-leaderboard`;
 const analyticsOverviewEndpoint = '/api/v1/analytics/overview';
+const defaultModelLeaderboardLimit = 10;
+const maximumModelLeaderboardLimit = 1000;
 const analyticsRanges = [
   { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 1 },
   { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 15 },
@@ -126,6 +132,7 @@ const navGroups = [
       { to: '/dashboard/clients', key: 'clients', icon: Network },
       { to: '/dashboard/client-telemetry', key: 'clientTelemetry', icon: LineChart },
       { to: '/dashboard/clients/advertised-models', key: 'advertisedModels', icon: BrainCircuit },
+      { to: '/dashboard/clients/advertised-models/leaderboard', key: 'modelLeaderboard', icon: BarChart3, nested: true },
       { to: '/dashboard/routing-policies', key: 'routingPolicies', icon: GitBranch }
     ]
   },
@@ -151,6 +158,7 @@ const pageMeta = {
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
+  '/dashboard/clients/advertised-models/leaderboard': { title: 'modelLeaderboard', description: 'modelLeaderboardDescription' },
   '/dashboard/client-telemetry': { title: 'clientTelemetry', description: 'clientTelemetryDescription' },
   '/dashboard/routing-policies': { title: 'routingPolicies', description: 'routingPoliciesDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
@@ -283,6 +291,7 @@ function navTooltipKey(key) {
     credentials: 'tooltipNavCredentials',
     explorer: 'tooltipNavExplorer',
     home: 'tooltipNavHome',
+    modelLeaderboard: 'tooltipNavModelLeaderboard',
     requests: 'tooltipNavRequests',
     routingPolicies: 'tooltipNavRoutingPolicies',
     security: 'tooltipNavSecurity',
@@ -374,6 +383,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="security" element={<SecurityView />} />
             <Route path="clients" element={<ClientsView />} />
             <Route path="clients/advertised-models" element={<AdvertisedModelsView />} />
+            <Route path="clients/advertised-models/leaderboard" element={<ModelLeaderboardView session={session} />} />
             <Route path="client-telemetry" element={<ClientTelemetryView />} />
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
@@ -1892,6 +1902,286 @@ function AdvertisedModelsView() {
   );
 }
 
+function ModelLeaderboardView({ publicMode = false, session = null }) {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = modelLeaderboardQueryFromSearch(searchParams);
+  const [draftStartUtc, setDraftStartUtc] = useState(query.startUtc);
+  const [draftEndUtc, setDraftEndUtc] = useState(query.endUtc);
+  const [draftLimit, setDraftLimit] = useState(String(query.limit));
+  const [response, setResponse] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [tenantOptions, setTenantOptions] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [selectedTenantId, setSelectedTenantId] = useState(session?.tenantId || '');
+  const isSystemAdmin = value(currentUser, 'isAdmin') === true;
+  const effectiveTenantId = publicMode ? '' : (isSystemAdmin ? selectedTenantId : (session?.tenantId || ''));
+  const rows = modelLeaderboardRows(response, query.offset);
+  const total = coerceInteger(value(response, 'total'), 0, 0, Number.MAX_SAFE_INTEGER);
+  const pageSize = Math.max(1, query.limit);
+  const currentPage = Math.floor(query.offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const lastOffset = Math.max(0, (totalPages - 1) * pageSize);
+  const pageStart = total === 0 || rows.length === 0 ? 0 : query.offset + 1;
+  const pageEnd = Math.min(total, query.offset + rows.length);
+  const largestTotal = Math.max(0, ...rows.map((row) => row.totalTokens));
+  const pageTokenTotal = rows.reduce((sum, row) => sum + row.totalTokens, 0);
+  const knownTenants = tenantOptions.length > 0
+    ? tenantOptions
+    : (session?.tenantId ? [{ id: session.tenantId, name: session.tenantName || session.tenantId }] : []);
+  const selectedTenant = knownTenants.find((tenant) => String(value(tenant, 'id') || '') === effectiveTenantId);
+  const scopeLabel = publicMode
+    ? t('globalScope', 'Global')
+    : (value(selectedTenant, 'name') || session?.tenantName || effectiveTenantId || t('tenantScope', 'Tenant'));
+
+  useEffect(() => {
+    setDraftStartUtc(query.startUtc);
+    setDraftEndUtc(query.endUtc);
+    setDraftLimit(String(query.limit));
+  }, [query.endUtc, query.limit, query.startUtc]);
+
+  useEffect(() => {
+    if (publicMode) {
+      setCurrentUser(null);
+      setTenantOptions([]);
+      return undefined;
+    }
+
+    let alive = true;
+    Promise.allSettled([
+      api.get('/api/v1/users'),
+      api.get('/api/v1/tenants')
+    ])
+      .then(([usersResult, tenantsResult]) => {
+        if (!alive) return;
+
+        const users = usersResult.status === 'fulfilled' ? collectionRows(usersResult.value) : [];
+        const current = users.find((user) => String(recordId(user) || '') === String(session?.userId || '')) || null;
+        const tenants = tenantsResult.status === 'fulfilled' ? collectionRows(tenantsResult.value) : [];
+        setCurrentUser(current);
+        setTenantOptions(tenants);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setCurrentUser(null);
+        setTenantOptions([]);
+      });
+    return () => { alive = false; };
+  }, [publicMode, session?.userId]);
+
+  useEffect(() => {
+    if (publicMode) return;
+    if (!isSystemAdmin) setSelectedTenantId(session?.tenantId || '');
+    else if (!selectedTenantId && session?.tenantId) setSelectedTenantId(session.tenantId);
+  }, [isSystemAdmin, publicMode, selectedTenantId, session?.tenantId]);
+
+  useEffect(() => {
+    if (!publicMode && !effectiveTenantId) {
+      setResponse(null);
+      setLoading(false);
+      return undefined;
+    }
+
+    let alive = true;
+    setLoading(true);
+    setError('');
+    api.get(modelLeaderboardPath({ ...query, tenantId: effectiveTenantId }), { skipAuth: true })
+      .then((result) => {
+        if (!alive) return;
+        if (value(result, 'error')) {
+          throw new Error(value(result, 'message') || value(result, 'error'));
+        }
+        setResponse(result);
+      })
+      .catch((nextError) => {
+        if (!alive) return;
+        setResponse(null);
+        setError(nextError instanceof Error ? nextError.message : String(nextError));
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => { alive = false; };
+  }, [effectiveTenantId, publicMode, query.endUtc, query.limit, query.offset, query.startUtc, refreshNonce]);
+
+  function updateQuery(next) {
+    const merged = { ...query, ...next };
+    const params = new URLSearchParams();
+    if (merged.startUtc) params.set('startUtc', merged.startUtc);
+    if (merged.endUtc) params.set('endUtc', merged.endUtc);
+    params.set('limit', String(coerceInteger(merged.limit, defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit)));
+    params.set('offset', String(coerceInteger(merged.offset, 0, 0, Number.MAX_SAFE_INTEGER)));
+    setSearchParams(params);
+  }
+
+  function applyFilters() {
+    updateQuery({
+      endUtc: draftEndUtc.trim(),
+      limit: coerceInteger(draftLimit, defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit),
+      offset: 0,
+      startUtc: draftStartUtc.trim()
+    });
+  }
+
+  function clearFilters() {
+    setSearchParams({});
+  }
+
+  function updateTenantFilter(tenantId) {
+    setSelectedTenantId(tenantId);
+    updateQuery({ offset: 0 });
+  }
+
+  function setPageOffset(offset) {
+    updateQuery({ offset: Math.max(0, Math.min(offset, lastOffset)) });
+  }
+
+  const content = (
+    <div className="view-stack model-leaderboard-view">
+      <div className="metric-grid compact">
+        <MetricCard icon={<BarChart3 size={18} />} label={t('modelResults', 'Model Results')} value={formatNumber(total)} tone="info" />
+        <MetricCard icon={<BrainCircuit size={18} />} label={t('visibleRows', 'Visible Rows')} value={formatNumber(rows.length)} />
+        <MetricCard icon={<Gauge size={18} />} label={t('totalTokens', 'Total Tokens')} value={formatNumber(pageTokenTotal)} tone="success" />
+        <MetricCard icon={<Layers3 size={18} />} label={t('leaderboardScope', 'Scope')} value={scopeLabel} valueClassName="metric-value-compact" />
+      </div>
+
+      <Panel
+        actions={<IconButton disabled={loading} icon={<RefreshCw size={16} />} label={t('refresh')} onClick={() => setRefreshNonce((current) => current + 1)} tooltip={t('tooltipManualRefresh')} />}
+        className="model-leaderboard-panel"
+        eyebrow={publicMode ? t('globalScope', 'Global') : t('tenantScope', 'Tenant')}
+        title={t('modelLeaderboard', 'Model Leaderboard')}
+      >
+        <div className="leaderboard-filter-panel">
+          <label className="form-field compact-field">
+            <span>{t('startUtc')}</span>
+            <input onChange={(event) => setDraftStartUtc(event.target.value)} placeholder="2026-07-01T00:00:00Z" type="text" value={draftStartUtc} />
+          </label>
+          <label className="form-field compact-field">
+            <span>{t('endUtc')}</span>
+            <input onChange={(event) => setDraftEndUtc(event.target.value)} placeholder="2026-07-08T00:00:00Z" type="text" value={draftEndUtc} />
+          </label>
+          <label className="form-field compact-field rows-field">
+            <span>{t('rowsPerPage', 'Rows Per Page')}</span>
+            <input max={maximumModelLeaderboardLimit} min="1" onChange={(event) => setDraftLimit(event.target.value)} type="number" value={draftLimit} />
+          </label>
+          {!publicMode && isSystemAdmin ? (
+            <label className="form-field compact-field tenant-filter-field">
+              <span>{t('tenantFilter', 'Tenant Filter')}</span>
+              <select onChange={(event) => updateTenantFilter(event.target.value)} value={selectedTenantId}>
+                {knownTenants.map((tenant) => {
+                  const tenantId = String(value(tenant, 'id') || '');
+                  return (
+                    <option key={tenantId || value(tenant, 'name')} value={tenantId}>
+                      {value(tenant, 'name') || tenantId}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+          ) : null}
+          <div className="leaderboard-filter-actions">
+            <IconButton icon={<Search size={16} />} label={t('applyFilters', 'Apply Filters')} onClick={applyFilters} tooltip={t('applyFilters', 'Apply Filters')} variant="primary" />
+            <IconButton icon={<Trash2 size={16} />} label={t('clearFilters', 'Clear Filters')} onClick={clearFilters} tooltip={t('clearFilters', 'Clear Filters')} />
+          </div>
+        </div>
+
+        {error ? <div className="leaderboard-error" role="alert">{error}</div> : null}
+
+        <div className="leaderboard-table-wrapper">
+          {loading ? (
+            <div className="table-loading-state">
+              <div aria-hidden="true" className="table-loading-spinner" />
+              <strong>{t('loading')}</strong>
+            </div>
+          ) : rows.length === 0 ? (
+            <EmptyState message={t('noLeaderboardData', 'No model usage matched the selected range.')} title={t('noData')} />
+          ) : (
+            <table className="data-table model-leaderboard-table">
+              <thead>
+                <tr>
+                  <th className="leaderboard-rank-column">{t('rank', 'Rank')}</th>
+                  <th>{t('model')}</th>
+                  <th>{t('totalTokens', 'Total Tokens')}</th>
+                  <th>{t('promptTokens', 'Prompt Tokens')}</th>
+                  <th>{t('outputTokens', 'Output Tokens')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const width = largestTotal > 0 ? Math.max(4, (row.totalTokens / largestTotal) * 100) : 0;
+                  return (
+                    <tr key={row.modelName}>
+                      <td className="leaderboard-rank-cell">{row.rank}</td>
+                      <td>
+                        <div className="leaderboard-model-cell">
+                          <strong>{row.modelName}</strong>
+                          <div aria-hidden="true" className="leaderboard-bar">
+                            <span style={{ width: `${width}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td>{formatNumber(row.totalTokens)}</td>
+                      <td>{formatNumber(row.promptTokens)}</td>
+                      <td>{formatNumber(row.outputTokens)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="leaderboard-pagination pagination-bar">
+          <div className="pagination-summary">
+            {t('showingRange', { start: formatNumber(pageStart), end: formatNumber(pageEnd), total: formatNumber(total) })}
+          </div>
+          <div className="pagination-controls">
+            <button className="pagination-button" disabled={query.offset === 0 || loading} onClick={() => setPageOffset(0)} title={t('tooltipFirstPage')} type="button">
+              <ChevronsLeft size={15} />
+            </button>
+            <button className="pagination-button" disabled={query.offset === 0 || loading} onClick={() => setPageOffset(query.offset - pageSize)} title={t('tooltipPreviousPage')} type="button">
+              <ChevronLeft size={15} />
+            </button>
+            <span className="pagination-page">{t('pageOf', { page: formatNumber(currentPage), total: formatNumber(totalPages) })}</span>
+            <button className="pagination-button" disabled={query.offset >= lastOffset || loading || total === 0} onClick={() => setPageOffset(query.offset + pageSize)} title={t('tooltipNextPage')} type="button">
+              <ChevronRight size={15} />
+            </button>
+            <button className="pagination-button" disabled={query.offset >= lastOffset || loading || total === 0} onClick={() => setPageOffset(lastOffset)} title={t('tooltipLastPage')} type="button">
+              <ChevronsRight size={15} />
+            </button>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+
+  if (!publicMode) return content;
+
+  return (
+    <div className="public-leaderboard-shell">
+      <header className="public-leaderboard-header">
+        <div className="public-leaderboard-brand">
+          <img src="/logo.png" alt={t('appTitle')} />
+          <div>
+            <span className="eyebrow">{t('appTitle')}</span>
+            <h1>{t('modelLeaderboard', 'Model Leaderboard')}</h1>
+            <p>{t('publicModelLeaderboardSubtitle', 'Global model token usage across tenants from public request history statistics.')}</p>
+          </div>
+        </div>
+        <div className="public-leaderboard-actions">
+          <CopyButton value={api.baseUrl} label={t('copyServerUrl')} />
+          <LanguageSelector />
+        </div>
+      </header>
+      <main className="public-leaderboard-main">
+        {content}
+      </main>
+    </div>
+  );
+}
+
 function RoutingPoliciesView() {
   const { t } = useTranslation();
   const policies = useResource('/api/v1/routingpolicies', []);
@@ -3164,12 +3454,10 @@ function UserEditModal({ actorUser, data, mode = 'edit', onClose, onSave, sessio
             <input checked={draft.isTenantAdmin} disabled={!canEditTenantAdmin} onChange={(event) => updateField('isTenantAdmin', event.target.checked)} type="checkbox" />
             <span>{t('isTenantAdmin')}</span>
           </label>
-          {canEditSystemAdmin ? (
-            <label className="toggle-field">
-              <input checked={draft.isAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
-              <span>{t('isAdmin')}</span>
-            </label>
-          ) : null}
+          <label className="toggle-field">
+            <input checked={draft.isAdmin} disabled={!canEditSystemAdmin} onChange={(event) => updateField('isAdmin', event.target.checked)} type="checkbox" />
+            <span>{t('isAdmin')}</span>
+          </label>
         </div>
         <label className="form-field">
           <span>{t('newPassword')}</span>
@@ -4655,6 +4943,44 @@ function value(row, key) {
   return row[key] ?? row[pascal];
 }
 
+function coerceInteger(input, fallback, minimum, maximum) {
+  const number = Number(input);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(minimum, Math.min(maximum, Math.trunc(number)));
+}
+
+function modelLeaderboardQueryFromSearch(searchParams) {
+  return {
+    endUtc: searchParams.get('endUtc') || '',
+    limit: coerceInteger(searchParams.get('limit'), defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit),
+    offset: coerceInteger(searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER),
+    startUtc: searchParams.get('startUtc') || ''
+  };
+}
+
+function modelLeaderboardPath(query) {
+  const params = new URLSearchParams();
+  if (query.startUtc) params.set('fromUtc', query.startUtc);
+  if (query.endUtc) params.set('toUtc', query.endUtc);
+  if (query.tenantId) params.set('tenantId', query.tenantId);
+  params.set('limit', String(coerceInteger(query.limit, defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit)));
+  params.set('offset', String(coerceInteger(query.offset, 0, 0, Number.MAX_SAFE_INTEGER)));
+  return `${modelLeaderboardEndpoint}?${params.toString()}`;
+}
+
+function modelLeaderboardRows(response, offset) {
+  const models = value(response, 'models');
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return [];
+
+  return Object.entries(models).map(([modelName, usage], index) => ({
+    modelName,
+    outputTokens: coerceInteger(value(usage, 'outputTokens'), 0, 0, Number.MAX_SAFE_INTEGER),
+    promptTokens: coerceInteger(value(usage, 'promptTokens'), 0, 0, Number.MAX_SAFE_INTEGER),
+    rank: offset + index + 1,
+    totalTokens: coerceInteger(value(usage, 'totalTokens'), 0, 0, Number.MAX_SAFE_INTEGER)
+  }));
+}
+
 function average(values) {
   const numbers = values.map(Number).filter((item) => Number.isFinite(item));
   if (numbers.length === 0) return 0;
@@ -5027,6 +5353,7 @@ function AppRoutes() {
     <>
       <Routes>
         <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
+        <Route path="/leaderboard/models" element={<ModelLeaderboardView publicMode />} />
         <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
       </Routes>
       {loggingOut ? <LogoutOverlay /> : null}

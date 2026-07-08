@@ -118,6 +118,20 @@ async function openLoginWithTenantLookup(page, tenants) {
   await page.getByRole('textbox', { name: 'Email' }).press('Enter');
 }
 
+async function fulfillLeaderboard(route) {
+  await route.fulfill({
+    json: {
+      models: {
+        'llama3.2:latest': { totalTokens: 130, promptTokens: 50, outputTokens: 80 },
+        'mistral:latest': { totalTokens: 60, promptTokens: 25, outputTokens: 35 }
+      },
+      total: 2,
+      limit: 10,
+      offset: 0
+    }
+  });
+}
+
 test('login focuses tenant selector after email submit when multiple tenants are available', async ({ page }) => {
   await openLoginWithTenantLookup(page, [
     { id: 'ten_default', name: 'Default' },
@@ -133,6 +147,106 @@ test('login focuses password after email submit when one tenant is available', a
   ]);
 
   await expect(page.getByLabel('Password')).toBeFocused();
+});
+
+test('public model leaderboard uses the unauthenticated global API', async ({ page }) => {
+  let leaderboardRequest = null;
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/v1.0/api/request-history/model-leaderboard') {
+      leaderboardRequest = route.request();
+      await fulfillLeaderboard(route);
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/leaderboard/models?startUtc=2026-07-01T00%3A00%3A00Z&endUtc=2026-07-08T00%3A00%3A00Z&limit=10&offset=0');
+  await expect(page.getByRole('heading', { name: 'Model Leaderboard' }).first()).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect.poll(() => leaderboardRequest).not.toBeNull();
+
+  const url = new URL(leaderboardRequest.url());
+  expect(url.searchParams.get('fromUtc')).toBe('2026-07-01T00:00:00Z');
+  expect(url.searchParams.get('toUtc')).toBe('2026-07-08T00:00:00Z');
+  expect(url.searchParams.get('tenantId')).toBeNull();
+  expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
+  expect(leaderboardRequest.headers()).not.toHaveProperty('x-tenant-id');
+});
+
+test('tenant model leaderboard scopes regular users to their session tenant', async ({ page }) => {
+  let leaderboardRequest = null;
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_regular'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/v1/users') {
+      await route.fulfill({ json: [{ id: 'usr_regular', tenantId: 'ten_default', email: 'regular@xeno.test', isAdmin: false }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/tenants') {
+      await route.fulfill({ json: [{ id: 'ten_default', name: 'Default' }] });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/request-history/model-leaderboard') {
+      leaderboardRequest = route.request();
+      await fulfillLeaderboard(route);
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/clients/advertised-models/leaderboard?limit=10&offset=0');
+  await expect(page.locator('h1', { hasText: 'Model Leaderboard' })).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Tenant Filter' })).toHaveCount(0);
+  await expect.poll(() => leaderboardRequest).not.toBeNull();
+
+  const url = new URL(leaderboardRequest.url());
+  expect(url.searchParams.get('tenantId')).toBe('ten_default');
+  expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
+});
+
+test('system admin model leaderboard can filter to a selected tenant', async ({ page }) => {
+  let leaderboardRequests = [];
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_admin'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/v1/users') {
+      await route.fulfill({ json: [{ id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/tenants') {
+      await route.fulfill({
+        json: [
+          { id: 'ten_default', name: 'Default' },
+          { id: 'ten_ops', name: 'Operations' }
+        ]
+      });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/request-history/model-leaderboard') {
+      leaderboardRequests = [...leaderboardRequests, route.request()];
+      await fulfillLeaderboard(route);
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/clients/advertised-models/leaderboard?limit=10&offset=0');
+  await expect(page.locator('h1', { hasText: 'Model Leaderboard' })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Tenant Filter' }).selectOption('ten_ops');
+  await expect.poll(() => leaderboardRequests.some((request) => new URL(request.url()).searchParams.get('tenantId') === 'ten_ops')).toBe(true);
 });
 
 test('regular user editor disables admin flags and omits them from saves', async ({ page }) => {
