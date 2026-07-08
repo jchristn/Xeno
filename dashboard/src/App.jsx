@@ -62,7 +62,7 @@ const requestHistorySummaryEndpoint = `${requestHistoryEndpoint}/summary`;
 const modelLeaderboardEndpoint = `${requestHistoryEndpoint}/model-leaderboard`;
 const analyticsOverviewEndpoint = '/api/v1/analytics/overview';
 const defaultModelLeaderboardLimit = 10;
-const maximumModelLeaderboardLimit = 1000;
+const modelLeaderboardPageSizes = [10, 25, 50, 100];
 const modelLeaderboardQuickRanges = [
   { key: 'lastHour', durationMs: 60 * 60 * 1000 },
   { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000 },
@@ -1914,7 +1914,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
   const query = modelLeaderboardQueryFromSearch(searchParams);
   const [draftStartUtc, setDraftStartUtc] = useState(query.startUtc);
   const [draftEndUtc, setDraftEndUtc] = useState(query.endUtc);
-  const [draftLimit, setDraftLimit] = useState(String(query.limit));
+  const [draftLimit, setDraftLimit] = useState(query.limit);
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1945,7 +1945,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
   useEffect(() => {
     setDraftStartUtc(query.startUtc);
     setDraftEndUtc(query.endUtc);
-    setDraftLimit(String(query.limit));
+    setDraftLimit(query.limit);
   }, [query.endUtc, query.limit, query.startUtc]);
 
   useEffect(() => {
@@ -2017,7 +2017,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
     const params = new URLSearchParams();
     if (merged.startUtc) params.set('startUtc', merged.startUtc);
     if (merged.endUtc) params.set('endUtc', merged.endUtc);
-    params.set('limit', String(coerceInteger(merged.limit, defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit)));
+    params.set('limit', String(coerceLeaderboardLimit(merged.limit)));
     params.set('offset', String(coerceInteger(merged.offset, 0, 0, Number.MAX_SAFE_INTEGER)));
     setSearchParams(params);
   }
@@ -2025,7 +2025,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
   function applyFilters() {
     updateQuery({
       endUtc: draftEndUtc.trim(),
-      limit: coerceInteger(draftLimit, defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit),
+      limit: coerceLeaderboardLimit(draftLimit),
       offset: 0,
       startUtc: draftStartUtc.trim()
     });
@@ -2090,7 +2090,9 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
           </label>
           <label className="form-field compact-field rows-field">
             <span>{t('rowsPerPage', 'Rows Per Page')}</span>
-            <input max={maximumModelLeaderboardLimit} min="1" onChange={(event) => setDraftLimit(event.target.value)} type="number" value={draftLimit} />
+            <select onChange={(event) => setDraftLimit(Number(event.target.value))} value={draftLimit}>
+              {modelLeaderboardPageSizes.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
           </label>
           {!publicMode && isSystemAdmin ? (
             <label className="form-field compact-field tenant-filter-field">
@@ -4993,10 +4995,15 @@ function coerceInteger(input, fallback, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Math.trunc(number)));
 }
 
+function coerceLeaderboardLimit(input) {
+  const limit = coerceInteger(input, defaultModelLeaderboardLimit, 1, Number.MAX_SAFE_INTEGER);
+  return modelLeaderboardPageSizes.includes(limit) ? limit : defaultModelLeaderboardLimit;
+}
+
 function modelLeaderboardQueryFromSearch(searchParams) {
   return {
     endUtc: searchParams.get('endUtc') || '',
-    limit: coerceInteger(searchParams.get('limit'), defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit),
+    limit: coerceLeaderboardLimit(searchParams.get('limit')),
     offset: coerceInteger(searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER),
     startUtc: searchParams.get('startUtc') || ''
   };
@@ -5007,7 +5014,7 @@ function modelLeaderboardPath(query) {
   if (query.startUtc) params.set('fromUtc', query.startUtc);
   if (query.endUtc) params.set('toUtc', query.endUtc);
   if (query.tenantId) params.set('tenantId', query.tenantId);
-  params.set('limit', String(coerceInteger(query.limit, defaultModelLeaderboardLimit, 1, maximumModelLeaderboardLimit)));
+  params.set('limit', String(coerceLeaderboardLimit(query.limit)));
   params.set('offset', String(coerceInteger(query.offset, 0, 0, Number.MAX_SAFE_INTEGER)));
   return `${modelLeaderboardEndpoint}?${params.toString()}`;
 }

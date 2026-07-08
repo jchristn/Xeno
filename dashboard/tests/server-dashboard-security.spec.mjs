@@ -183,14 +183,18 @@ test('public model leaderboard uses the unauthenticated global API', async ({ pa
     await route.fulfill({ json: [] });
   });
 
-  await page.goto('/leaderboard/models?startUtc=2026-07-01T00%3A00%3A00Z&endUtc=2026-07-08T00%3A00%3A00Z&limit=10&offset=0');
+  await page.goto('/leaderboard/models?startUtc=2026-07-01T00%3A00%3A00Z&endUtc=2026-07-08T00%3A00%3A00Z');
   await expect(page.getByRole('heading', { name: 'Model Leaderboard' }).first()).toBeVisible();
   await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Rows Per Page' })).toHaveValue('10');
+  await expect(page.getByRole('combobox', { name: 'Rows Per Page' }).locator('option')).toHaveText(['10', '25', '50', '100']);
   await expect.poll(() => leaderboardRequest).not.toBeNull();
 
   const url = new URL(leaderboardRequest.url());
   expect(url.searchParams.get('fromUtc')).toBe('2026-07-01T00:00:00Z');
   expect(url.searchParams.get('toUtc')).toBe('2026-07-08T00:00:00Z');
+  expect(url.searchParams.get('limit')).toBe('10');
+  expect(url.searchParams.get('offset')).toBe('0');
   expect(url.searchParams.get('tenantId')).toBeNull();
   expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
   expect(leaderboardRequest.headers()).not.toHaveProperty('x-tenant-id');
@@ -230,14 +234,18 @@ test('tenant model leaderboard scopes regular users to their session tenant', as
     await route.fulfill({ json: [] });
   });
 
-  await page.goto('/dashboard/clients/advertised-models/leaderboard?limit=10&offset=0');
+  await page.goto('/dashboard/clients/advertised-models/leaderboard');
   await expect(page.locator('h1', { hasText: 'Model Leaderboard' })).toBeVisible();
   await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Rows Per Page' })).toHaveValue('10');
+  await expect(page.getByRole('combobox', { name: 'Rows Per Page' }).locator('option')).toHaveText(['10', '25', '50', '100']);
   await expect(page.getByRole('combobox', { name: 'Tenant Filter' })).toHaveCount(0);
   await expect.poll(() => leaderboardRequest).not.toBeNull();
 
   const url = new URL(leaderboardRequest.url());
   expect(url.searchParams.get('tenantId')).toBe('ten_default');
+  expect(url.searchParams.get('limit')).toBe('10');
+  expect(url.searchParams.get('offset')).toBe('0');
   expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
 });
 
