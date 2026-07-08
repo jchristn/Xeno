@@ -257,7 +257,7 @@ test('login tenant selector stays within the login card for long tenant names', 
   expect(selectorWidth).toBeLessThanOrEqual(cardWidth);
 });
 
-test('register existing organization omits username and continues into dashboard after success', async ({ page }) => {
+test('register existing organization omits username and stays in dashboard after success', async ({ page }) => {
   await page.route(`${serverUrl}/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/v1.0/api/onboarding/signup') {
@@ -275,7 +275,10 @@ test('register existing organization omits username and continues into dashboard
       return;
     }
 
-    await route.fulfill({ json: [] });
+    await route.fulfill({
+      status: 403,
+      json: { error: 'PermissionDenied', message: 'The registered user does not have this dashboard permission.' }
+    });
   });
 
   await page.goto('/register');
@@ -296,6 +299,9 @@ test('register existing organization omits username and continues into dashboard
   await expect(dialog.getByText('sk_registered')).toBeVisible();
   await dialog.getByRole('button', { name: 'Dashboard' }).click();
   await expect(page).toHaveURL(/\/dashboard\/home$/);
+  await page.waitForTimeout(250);
+  await expect(page).toHaveURL(/\/dashboard\/home$/);
+  await expect(page.getByRole('heading', { name: 'Sign In To Dashboard' })).toHaveCount(0);
 });
 
 test('unknown public routes render the styled not found page', async ({ page }) => {

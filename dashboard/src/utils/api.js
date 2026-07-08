@@ -219,7 +219,7 @@ function parseResponseText(text, ok) {
 }
 
 function isAuthenticationFailure(response) {
-  return response.status === 401 || response.status === 403;
+  return response.status === 401;
 }
 
 function throwAuthenticationFailure(response, payload) {
