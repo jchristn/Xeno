@@ -13,13 +13,14 @@ dotnet add <your-project>.csproj reference .\src\sdk\csharp\Xeno.Sdk\Xeno.Sdk.cs
 ## Quick Start
 
 ```csharp
+using System.Collections.Generic;
 using Xeno.Sdk;
 
 using (XenoClient client = new XenoClient("http://localhost:9000"))
 {
-    XenoApiResponse health = await client.GetHealthAsync();
-    XenoApiResponse models = await client.ListOpenAiModelsAsync();
-    XenoApiResponse policies = await client.ListRoutingPoliciesAsync();
+    HealthResponse health = await client.GetHealthAsync();
+    OpenAiModelList models = await client.ListOpenAiModelsAsync();
+    List<RoutingPolicy> policies = await client.ListRoutingPoliciesAsync();
 }
 ```
 
@@ -28,7 +29,7 @@ The SDK defaults to bearer token `default`, which works against the default loca
 ```csharp
 using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: token))
 {
-    XenoApiResponse health = await client.GetHealthAsync();
+    HealthResponse health = await client.GetHealthAsync();
 }
 ```
 
@@ -43,7 +44,7 @@ using (XenoClient client = new XenoClient(new XenoClientOptions
     AccessKey = accessKey
 }))
 {
-    XenoApiResponse models = await client.ListOpenAiModelsAsync();
+    OpenAiModelList models = await client.ListOpenAiModelsAsync();
 }
 ```
 
