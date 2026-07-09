@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -1285,6 +1285,7 @@ function HomeView() {
 
 function RegisterView({ onComplete, onToggleTheme, theme }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [mode, setMode] = useState('new');
   const [serverUrl, setServerUrl] = useState(api.baseUrl || defaultServerUrl());
   const [tenantName, setTenantName] = useState('');
@@ -1390,6 +1391,7 @@ function RegisterView({ onComplete, onToggleTheme, theme }) {
       tokenType: result.token.tokenType || 'Bearer',
       userId: result.user.id
     });
+    navigate('/dashboard/home', { replace: true });
   }
 
   const joining = mode === 'existing';
@@ -5904,6 +5906,14 @@ function LogoutOverlay() {
   );
 }
 
+function RegisterRoute({ onComplete, onSessionClear, onToggleTheme, theme }) {
+  useEffect(() => {
+    onSessionClear();
+  }, [onSessionClear]);
+
+  return <RegisterView onComplete={onComplete} onToggleTheme={onToggleTheme} theme={theme} />;
+}
+
 function AppRoutes() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('xeno.theme') || 'light');
   const [loggingOut, setLoggingOut] = useState(false);
@@ -5952,6 +5962,12 @@ function AppRoutes() {
     setSession(nextSession);
   }
 
+  const clearSessionForRegistration = useCallback(() => {
+    writeDashboardSession(null);
+    api.clearAuth();
+    setSession(null);
+  }, []);
+
   async function logout() {
     if (loggingOut) return;
 
@@ -5977,7 +5993,7 @@ function AppRoutes() {
     <>
       <Routes>
         <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
-        <Route path="/register" element={session ? <Navigate replace to="/dashboard/home" /> : <RegisterView onComplete={login} onToggleTheme={toggleTheme} theme={theme} />} />
+        <Route path="/register" element={<RegisterRoute onComplete={login} onSessionClear={clearSessionForRegistration} onToggleTheme={toggleTheme} theme={theme} />} />
         <Route path="/leaderboard/models" element={<ModelLeaderboardView publicMode />} />
         <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
         <Route path="*" element={<NotFoundView publicMode />} />

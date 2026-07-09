@@ -274,6 +274,20 @@ test('register existing organization omits username and stays in dashboard after
   await expect(page.getByRole('heading', { name: 'Sign In To Dashboard' })).toHaveCount(0);
 });
 
+test('register route clears an existing dashboard session before onboarding', async ({ page }) => {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_existing'));
+
+  await page.goto('/register');
+
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.getByRole('heading', { name: 'Set up your dashboard account' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'I am creating a new organization' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign In To Dashboard' })).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(() => window.localStorage.getItem('xeno.dashboard.session'))).toBeNull();
+});
+
 test('unknown public routes render the styled not found page', async ({ page }) => {
   await page.goto('/not-a-real-dashboard-page');
 
