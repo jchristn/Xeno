@@ -301,6 +301,18 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(context.exception.endpoint, "/v1.0/api/clients")
         self.assertEqual(str(context.exception), "denied")
 
+    def test_update_settings_passes_through_email_settings(self):
+        opener = FakeOpener()
+        client = XenoClient("https://xeno.local", opener=opener)
+
+        client.update_settings({"Email": {"Enabled": True, "Provider": "File", "File": {"Directory": "data/email-outbox"}}})
+
+        request = opener.calls[0]["request"]
+        self.assertEqual(request.full_url, "https://xeno.local/v1.0/api/settings")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertIn('"Email"', opener.calls[0]["body"])
+        self.assertIn('"Provider": "File"', opener.calls[0]["body"])
+
 
 if __name__ == "__main__":
     unittest.main()

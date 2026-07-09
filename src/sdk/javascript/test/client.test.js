@@ -282,3 +282,21 @@ test('text and error responses are handled', async () => {
     return true;
   });
 });
+
+test('updateSettings passes through email settings', async () => {
+  const fetchImpl = createFetch();
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
+
+  await client.updateSettings({
+    Email: {
+      Enabled: true,
+      Provider: 'File',
+      File: { Directory: 'data/email-outbox' }
+    }
+  });
+
+  assert.equal(fetchImpl.calls[0].url, 'https://xeno.local/v1.0/api/settings');
+  assert.equal(fetchImpl.calls[0].options.method, 'POST');
+  assert.match(fetchImpl.calls[0].options.body, /"Email":/);
+  assert.match(fetchImpl.calls[0].options.body, /"Provider":"File"/);
+});

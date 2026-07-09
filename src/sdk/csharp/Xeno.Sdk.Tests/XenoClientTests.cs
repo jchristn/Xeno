@@ -367,6 +367,32 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
+        public async Task UpdateSettingsAsync_PassesThroughEmailSettings()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                await client.UpdateSettingsAsync(new
+                {
+                    Email = new
+                    {
+                        Enabled = true,
+                        Provider = "File",
+                        File = new
+                        {
+                            Directory = "data/email-outbox"
+                        }
+                    }
+                });
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/settings", "\"Provider\":\"File\"");
+                Assert.Contains("\"Email\"", request.Body);
+            }
+        }
+
+        [Fact]
         public async Task TypedResponses_AreMaterialized()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.1.0\"}"));

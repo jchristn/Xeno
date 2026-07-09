@@ -419,7 +419,7 @@ Use the linked slides below to review the primary server-dashboard surfaces.
 
 ## Configuration
 
-The server configuration file controls REST, CORS, logging, WebSocket, database, routing, and other operational settings. The default local file is [xeno.json](xeno.json), and the Docker deployment uses [docker/xeno.json](docker/xeno.json).
+The server configuration file controls REST, CORS, logging, WebSocket, database, routing, email, and other operational settings. The default local file is [xeno.json](xeno.json), and the Docker deployment uses [docker/xeno.json](docker/xeno.json).
 
 Supported database engines:
 
@@ -431,6 +431,8 @@ Supported database engines:
 The selected database engine stores server platform state and server-collected client telemetry, including host samples, provider samples, collection attempts, details, deletes, rollups, and tenant purge data.
 
 The default Docker compose stack uses PostgreSQL. Optional MySQL and SQL Server services are present in [docker/compose.yaml](docker/compose.yaml) for alternate deployments.
+
+Server email notifications are disabled by default. Set `Email.Enabled` to `true`, choose `Email.Provider`, and configure the provider-specific section such as `Email.Mailgun` to send onboarding and administrative notifications. Xeno never includes passwords, bearer tokens, access keys, or secret keys in notification email.
 
 ## SDKs
 

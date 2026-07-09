@@ -28,6 +28,10 @@ namespace Test.Shared
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
     using Xeno.Core.Settings;
+    using Xeno.Email;
+    using Xeno.Email.Providers;
+    using Xeno.Email.Templates;
+    using Xeno.Email.Workflows;
     using Xeno.Server;
     using Xeno.Server.Services;
     using Xeno.Tray;
@@ -96,6 +100,128 @@ namespace Test.Shared
                             if (!settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-token", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers do not allow x-token.");
                             if (settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-secret-key", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers still allow x-secret-key.");
                             return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "DefaultEmailSettingsAreDisabledAndSerializable",
+                        displayName: "Default email settings are disabled and serializable",
+                        executeAsync: delegate
+                        {
+                            XenoSettings settings = new XenoSettings();
+                            if (settings.Email == null) throw new InvalidOperationException("Email settings missing.");
+                            if (settings.Email.Enabled) throw new InvalidOperationException("Email should be disabled by default.");
+                            if (settings.Email.Provider != EmailProviderTypeEnum.Disabled) throw new InvalidOperationException("Default email provider should be disabled.");
+                            string json = JsonUtil.Serialize(settings, true);
+                            if (!json.Contains("\"Email\"", StringComparison.Ordinal)) throw new InvalidOperationException("Serialized settings do not include Email.");
+                            XenoSettings? roundTrip = JsonUtil.Deserialize<XenoSettings>(json);
+                            if (roundTrip == null || roundTrip.Email == null) throw new InvalidOperationException("Email settings did not deserialize.");
+                            if (roundTrip.Email.Provider != EmailProviderTypeEnum.Disabled) throw new InvalidOperationException("Email provider did not round trip.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "EmailTemplatesEncodeAndRedactSensitiveValues",
+                        displayName: "Email templates encode and redact sensitive values",
+                        executeAsync: async delegate
+                        {
+                            EmailSettings emailSettings = new EmailSettings();
+                            OnboardingEmailContext context = new OnboardingEmailContext
+                            {
+                                CreatedTenant = true,
+                                TenantId = "ten_<script>",
+                                TenantName = "ACME <script>alert(1)</script>",
+                                UserId = "usr_test",
+                                Username = "alice <admin>",
+                                UserEmail = "alice@example.com",
+                                IsTenantAdmin = true,
+                                SourceIp = "127.0.0.1",
+                                EventUtc = DateTime.UtcNow
+                            };
+                            OnboardingAdminAlertEmailTemplate template = new OnboardingAdminAlertEmailTemplate(emailSettings);
+                            EmailTemplateRenderResult rendered = await template.RenderAsync(context, CancellationToken.None).ConfigureAwait(false);
+                            if (!rendered.HtmlBody.Contains("&lt;script&gt;", StringComparison.Ordinal)) throw new InvalidOperationException("Template did not encode tenant name.");
+                            if (rendered.HtmlBody.Contains("<script>alert", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Template emitted raw script content.");
+                            string redacted = EmailRedactionHelpers.RedactSensitiveJson("{\"password\":\"secret\",\"token\":\"abc\",\"tenant\":\"ok\"}");
+                            if (redacted.Contains("secret", StringComparison.Ordinal) || redacted.Contains("abc", StringComparison.Ordinal)) throw new InvalidOperationException("Sensitive JSON was not redacted.");
+                            if (!redacted.Contains("ok", StringComparison.Ordinal)) throw new InvalidOperationException("Non-sensitive JSON was unexpectedly removed.");
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "DisabledEmailProviderSkipsMessages",
+                        displayName: "Disabled email provider skips messages",
+                        executeAsync: async delegate
+                        {
+                            DisabledEmailProvider provider = new DisabledEmailProvider();
+                            EmailSendResult result = await provider.SendAsync(new EmailMessage { Subject = "Test", TemplateId = "test.template" }, CancellationToken.None).ConfigureAwait(false);
+                            if (!result.Skipped) throw new InvalidOperationException("Disabled provider did not skip.");
+                            if (result.TemplateId != "test.template") throw new InvalidOperationException("Disabled provider did not preserve template ID.");
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "FileEmailProviderWritesRenderedMessages",
+                        displayName: "File email provider writes rendered messages",
+                        executeAsync: async delegate
+                        {
+                            string directory = Path.Combine(Path.GetTempPath(), "xeno-email-" + Guid.NewGuid().ToString("N"));
+                            try
+                            {
+                                FileEmailProvider provider = new FileEmailProvider(new EmailFileSettings { Directory = directory });
+                                EmailMessage message = new EmailMessage
+                                {
+                                    From = EmailAddress.Create("noreply@example.com", "Xeno"),
+                                    Subject = "Test",
+                                    HtmlBody = "<p>Hello</p>",
+                                    TextBody = "Hello",
+                                    TemplateId = "test.template"
+                                };
+                                message.To.Add(EmailAddress.Create("admin@example.com", "Admin"));
+                                EmailSendResult result = await provider.SendAsync(message, CancellationToken.None).ConfigureAwait(false);
+                                if (!result.Accepted) throw new InvalidOperationException("File provider did not accept message.");
+                                if (!Directory.GetFiles(directory, "*.html").Any()) throw new InvalidOperationException("File provider did not write HTML.");
+                                if (!Directory.GetFiles(directory, "*.txt").Any()) throw new InvalidOperationException("File provider did not write text.");
+                                if (!Directory.GetFiles(directory, "*.json").Any()) throw new InvalidOperationException("File provider did not write metadata.");
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "OnboardingEmailWorkflowSendsExpectedFileMessages",
+                        displayName: "Onboarding email workflow sends expected file messages",
+                        executeAsync: async delegate
+                        {
+                            string directory = Path.Combine(Path.GetTempPath(), "xeno-email-workflow-" + Guid.NewGuid().ToString("N"));
+                            try
+                            {
+                                EmailSettings emailSettings = new EmailSettings
+                                {
+                                    Enabled = true,
+                                    Provider = EmailProviderTypeEnum.File,
+                                    File = new EmailFileSettings { Directory = directory }
+                                };
+                                OnboardingEmailWorkflow workflow = new OnboardingEmailWorkflow(emailSettings, new FileEmailProvider(emailSettings.File));
+                                OnboardingEmailContext context = new OnboardingEmailContext
+                                {
+                                    CreatedTenant = false,
+                                    TenantId = "ten_test",
+                                    TenantName = "Test Tenant",
+                                    UserId = "usr_new",
+                                    Username = "new-user",
+                                    UserEmail = "new@example.com",
+                                    EventUtc = DateTime.UtcNow
+                                };
+                                context.PlatformAdministrators.Add(EmailAddress.Create("platform@example.com"));
+                                context.TenantAdministrators.Add(EmailAddress.Create("admin@example.com"));
+                                IReadOnlyList<EmailSendResult> results = await workflow.SendAsync(context, CancellationToken.None).ConfigureAwait(false);
+                                if (results.Count != 2) throw new InvalidOperationException("Unexpected onboarding email result count.");
+                                if (Directory.GetFiles(directory, "*.json").Length != 2) throw new InvalidOperationException("Unexpected onboarding email file count.");
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+                            }
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
@@ -2895,6 +3021,12 @@ namespace Test.Shared
                 {
                     Type = DatabaseTypeEnum.Sqlite,
                     Filename = dbFile
+                },
+                Email = new EmailSettings
+                {
+                    Enabled = true,
+                    Provider = EmailProviderTypeEnum.File,
+                    File = new EmailFileSettings { Directory = Path.Combine(Path.GetTempPath(), "xeno-management-email-" + Guid.NewGuid().ToString("N")) }
                 }
             };
 
@@ -2917,6 +3049,8 @@ namespace Test.Shared
                         {
                             string saveSettingsBody = await saveSettingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!saveSettingsResponse.IsSuccessStatusCode || !File.Exists(settingsFile)) throw new InvalidOperationException("Settings save failed: " + saveSettingsBody);
+                            string savedSettingsJson = await File.ReadAllTextAsync(settingsFile).ConfigureAwait(false);
+                            if (!savedSettingsJson.Contains("\"Email\"", StringComparison.Ordinal) || !savedSettingsJson.Contains("\"Provider\": \"File\"", StringComparison.Ordinal)) throw new InvalidOperationException("Settings save did not persist Email provider settings.");
                         }
 
                         string backup = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/backup").ConfigureAwait(false);

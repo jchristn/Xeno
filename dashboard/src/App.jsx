@@ -3014,6 +3014,10 @@ function SettingsView() {
     }));
   }
 
+  function updateEmailRecipientSetting(inputValue) {
+    updateNestedSetting('Email', 'Notifications', 'PlatformAdministratorRecipients', recipientTextToList(inputValue));
+  }
+
   async function saveSettings() {
     const result = await api.post('/api/v1/settings', draft);
     const normalized = normalizeSettings(unwrapSettings(result));
@@ -3222,6 +3226,100 @@ function SettingsView() {
             </label>
           </div>
         </Panel>
+        <Panel actions={<SettingImpactBadge type="mixed" />} title={t('emailSettings')}>
+          <SettingImpactNote live={t('emailLiveNote')} restart={t('emailRestartNote')} />
+          <div className="form-grid two">
+            <label className="toggle-field" title={t('tooltipSettingsEmailEnabled')}>
+              <input checked={draft.Email.Enabled} onChange={(event) => updateSetting('Email', 'Enabled', event.target.checked)} title={t('tooltipSettingsEmailEnabled')} type="checkbox" />
+              <span>{t('enabled')}</span>
+              <small className="setting-impact live inline">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailProvider')}>
+              <span>{t('provider')}</span>
+              <select value={draft.Email.Provider} onChange={(event) => updateSetting('Email', 'Provider', event.target.value)} title={t('tooltipSettingsEmailProvider')}>
+                {['Disabled', 'File', 'Mailgun'].map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailFromAddress')}>
+              <span>{t('fromAddress')}</span>
+              <input value={draft.Email.FromAddress} onChange={(event) => updateSetting('Email', 'FromAddress', event.target.value)} title={t('tooltipSettingsEmailFromAddress')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailFromName')}>
+              <span>{t('fromName')}</span>
+              <input value={draft.Email.FromName} onChange={(event) => updateSetting('Email', 'FromName', event.target.value)} title={t('tooltipSettingsEmailFromName')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailReplyToAddress')}>
+              <span>{t('replyToAddress')}</span>
+              <input value={draft.Email.ReplyToAddress} onChange={(event) => updateSetting('Email', 'ReplyToAddress', event.target.value)} title={t('tooltipSettingsEmailReplyToAddress')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailSupportAddress')}>
+              <span>{t('supportAddress')}</span>
+              <input value={draft.Email.SupportAddress} onChange={(event) => updateSetting('Email', 'SupportAddress', event.target.value)} title={t('tooltipSettingsEmailSupportAddress')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailApplicationBaseUrl')}>
+              <span>{t('applicationBaseUrl')}</span>
+              <input value={draft.Email.ApplicationBaseUrl} onChange={(event) => updateSetting('Email', 'ApplicationBaseUrl', event.target.value)} title={t('tooltipSettingsEmailApplicationBaseUrl')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailSubjectPrefix')}>
+              <span>{t('subjectPrefix')}</span>
+              <input value={draft.Email.SubjectPrefix} onChange={(event) => updateSetting('Email', 'SubjectPrefix', event.target.value)} title={t('tooltipSettingsEmailSubjectPrefix')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailMailgunDomain')}>
+              <span>{t('mailgunDomain')}</span>
+              <input value={draft.Email.Mailgun.Domain} onChange={(event) => updateNestedSetting('Email', 'Mailgun', 'Domain', event.target.value)} title={t('tooltipSettingsEmailMailgunDomain')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailMailgunApiKey')}>
+              <span>{t('mailgunApiKey')}</span>
+              <input type="password" value={draft.Email.Mailgun.ApiKey} onChange={(event) => updateNestedSetting('Email', 'Mailgun', 'ApiKey', event.target.value)} title={t('tooltipSettingsEmailMailgunApiKey')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailFileDirectory')}>
+              <span>{t('emailFileDirectory')}</span>
+              <input value={draft.Email.File.Directory} onChange={(event) => updateNestedSetting('Email', 'File', 'Directory', event.target.value)} title={t('tooltipSettingsEmailFileDirectory')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailMaxBodyBytes')}>
+              <span>{t('maxBodyBytes')}</span>
+              <input min="1024" type="number" value={draft.Email.MaxBodyBytes} onChange={(event) => updateSetting('Email', 'MaxBodyBytes', Number(event.target.value))} title={t('tooltipSettingsEmailMaxBodyBytes')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+          </div>
+          <div className="form-grid two">
+            <label className="toggle-field" title={t('tooltipSettingsEmailNotifyPlatformTenant')}>
+              <input checked={draft.Email.Notifications.NotifyPlatformAdministratorsOnTenantCreated} onChange={(event) => updateNestedSetting('Email', 'Notifications', 'NotifyPlatformAdministratorsOnTenantCreated', event.target.checked)} title={t('tooltipSettingsEmailNotifyPlatformTenant')} type="checkbox" />
+              <span>{t('notifyPlatformTenantCreated')}</span>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsEmailNotifyPlatformUser')}>
+              <input checked={draft.Email.Notifications.NotifyPlatformAdministratorsOnUserJoined} onChange={(event) => updateNestedSetting('Email', 'Notifications', 'NotifyPlatformAdministratorsOnUserJoined', event.target.checked)} title={t('tooltipSettingsEmailNotifyPlatformUser')} type="checkbox" />
+              <span>{t('notifyPlatformUserJoined')}</span>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsEmailNotifyTenantAdmin')}>
+              <input checked={draft.Email.Notifications.NotifyTenantAdministratorsOnUserJoined} onChange={(event) => updateNestedSetting('Email', 'Notifications', 'NotifyTenantAdministratorsOnUserJoined', event.target.checked)} title={t('tooltipSettingsEmailNotifyTenantAdmin')} type="checkbox" />
+              <span>{t('notifyTenantAdminsUserJoined')}</span>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsEmailNotifyNewTenantAdmin')}>
+              <input checked={draft.Email.Notifications.NotifyNewTenantAdministrator} onChange={(event) => updateNestedSetting('Email', 'Notifications', 'NotifyNewTenantAdministrator', event.target.checked)} title={t('tooltipSettingsEmailNotifyNewTenantAdmin')} type="checkbox" />
+              <span>{t('notifyNewTenantAdministrator')}</span>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsEmailNotifyNewTenantMember')}>
+              <input checked={draft.Email.Notifications.NotifyNewTenantMember} onChange={(event) => updateNestedSetting('Email', 'Notifications', 'NotifyNewTenantMember', event.target.checked)} title={t('tooltipSettingsEmailNotifyNewTenantMember')} type="checkbox" />
+              <span>{t('notifyNewTenantMember')}</span>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsEmailPlatformRecipients')}>
+              <span>{t('platformAdminRecipients')}</span>
+              <textarea rows={3} value={recipientListToText(draft.Email.Notifications.PlatformAdministratorRecipients)} onChange={(event) => updateEmailRecipientSetting(event.target.value)} title={t('tooltipSettingsEmailPlatformRecipients')} />
+              <small className="setting-impact live">{t('appliesImmediately')}</small>
+            </label>
+          </div>
+        </Panel>
         <Panel actions={<SettingImpactBadge type="restart" />} title={t('loggingSettings')}>
           <SettingImpactNote restart={t('loggingRestartNote')} />
           <div className="form-grid two">
@@ -3401,7 +3499,28 @@ function defaultServerSettings() {
       MaxConcurrentClientRequests: 8
     },
     Database: { Type: 'Sqlite', Filename: 'data/xeno.db', Server: '', Port: 0, DatabaseName: '', Username: '', Password: '', ConnectionString: '' },
-    Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' }
+    Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' },
+    Email: {
+      Enabled: false,
+      Provider: 'Disabled',
+      FromAddress: 'noreply@xenocloud.ai',
+      FromName: 'Xeno',
+      ReplyToAddress: 'support@xenocloud.ai',
+      SupportAddress: 'support@xenocloud.ai',
+      ApplicationBaseUrl: 'https://portal.xenocloud.ai',
+      SubjectPrefix: '',
+      MaxBodyBytes: 262144,
+      Mailgun: { Domain: '', ApiKey: '', Region: 'US' },
+      File: { Directory: 'data/email-outbox' },
+      Notifications: {
+        NotifyPlatformAdministratorsOnTenantCreated: true,
+        NotifyPlatformAdministratorsOnUserJoined: true,
+        NotifyTenantAdministratorsOnUserJoined: true,
+        NotifyNewTenantAdministrator: true,
+        NotifyNewTenantMember: false,
+        PlatformAdministratorRecipients: []
+      }
+    }
   };
 }
 
@@ -3434,12 +3553,43 @@ function normalizeSettings(input) {
       ...(source.TelemetryCollection || source.telemetryCollection || {})
     },
     Database: { ...defaults.Database, ...(source.Database || source.database || {}) },
-    Logging: { ...defaults.Logging, ...(source.Logging || source.logging || {}) }
+    Logging: { ...defaults.Logging, ...(source.Logging || source.logging || {}) },
+    Email: {
+      ...defaults.Email,
+      ...(source.Email || source.email || {}),
+      Mailgun: {
+        ...defaults.Email.Mailgun,
+        ...((source.Email || source.email || {}).Mailgun || (source.Email || source.email || {}).mailgun || {})
+      },
+      File: {
+        ...defaults.Email.File,
+        ...((source.Email || source.email || {}).File || (source.Email || source.email || {}).file || {})
+      },
+      Notifications: {
+        ...defaults.Email.Notifications,
+        ...((source.Email || source.email || {}).Notifications || (source.Email || source.email || {}).notifications || {})
+      }
+    }
   };
 }
 
 function listToText(input) {
   return Array.isArray(input) ? input.join('\n') : '';
+}
+
+function recipientListToText(input) {
+  return Array.isArray(input) ? input.map((item) => [item.Email || item.email || '', item.Name || item.name || ''].filter(Boolean).join('|')).join('\n') : '';
+}
+
+function recipientTextToList(inputValue) {
+  return inputValue.split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const parts = item.split('|').map((part) => part.trim());
+      return { Email: parts[0] || '', Name: parts[1] || '' };
+    })
+    .filter((item) => item.Email);
 }
 
 function MetricCard({ icon, label, subtext, tone = 'neutral', value, valueClassName = '' }) {
