@@ -616,11 +616,12 @@ test('tenant row actions expose Nuke Tenant only for global admins and show moda
   await page.getByRole('button', { name: 'Nuke Tenant' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Nuke Tenant' })).toBeVisible();
+  await expect(dialog.getByLabel('Include Audit Records')).toBeChecked();
   await dialog.getByLabel('Confirm Tenant ID').fill('ten_ops');
   await dialog.getByLabel('Reason').fill('Row menu tenant nuke execution');
   await dialog.getByRole('button', { name: 'Execute' }).click();
   await expect.poll(() => nukeCalls.length).toBe(1);
-  expect(nukeCalls[0]).toMatchObject({ kind: 'tenant', body: { tenantId: 'ten_ops', confirmTenantId: 'ten_ops', dryRun: false } });
+  expect(nukeCalls[0]).toMatchObject({ kind: 'tenant', body: { tenantId: 'ten_ops', confirmTenantId: 'ten_ops', dryRun: false, includeAuditRecords: true } });
   await expect(dialog.getByText('row_nuke_tenant_result')).toBeVisible();
   await expect(dialog.getByText('Deleted Records')).toBeVisible();
 });
@@ -676,11 +677,12 @@ test('user row actions expose Nuke User for tenant admins and show modal results
   await page.getByRole('button', { name: 'Nuke User' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Nuke User' })).toBeVisible();
+  await expect(dialog.getByLabel('Include Audit Records')).toBeChecked();
   await dialog.getByLabel('Confirm User ID').fill('usr_target');
   await dialog.getByLabel('Reason').fill('Row menu user nuke execution');
   await dialog.getByRole('button', { name: 'Execute' }).click();
   await expect.poll(() => nukeCalls.length).toBe(1);
-  expect(nukeCalls[0]).toMatchObject({ kind: 'user', body: { tenantId: 'ten_default', userId: 'usr_target', confirmUserId: 'usr_target', dryRun: false } });
+  expect(nukeCalls[0]).toMatchObject({ kind: 'user', body: { tenantId: 'ten_default', userId: 'usr_target', confirmUserId: 'usr_target', dryRun: false, includeAuditRecords: true } });
   await expect(dialog.getByText('row_nuke_user_result')).toBeVisible();
   await expect(dialog.getByText('Deleted Records')).toBeVisible();
 });

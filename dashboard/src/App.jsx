@@ -2152,7 +2152,7 @@ function NukeRecordModal({ kind, onClose, onComplete, record }) {
   const tenantId = isTenant ? targetId : String(value(record, 'tenantId') || '');
   const [confirmId, setConfirmId] = useState('');
   const [reason, setReason] = useState('');
-  const [includeAuditRecords, setIncludeAuditRecords] = useState(isTenant);
+  const [includeAuditRecords, setIncludeAuditRecords] = useState(true);
   const [includeRequestHistory, setIncludeRequestHistory] = useState(true);
   const [includeTelemetry, setIncludeTelemetry] = useState(true);
   const [anonymizeRequestHistory, setAnonymizeRequestHistory] = useState(true);
