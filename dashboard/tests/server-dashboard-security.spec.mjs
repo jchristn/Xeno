@@ -119,7 +119,16 @@ async function openSecurity(page, fixtures, onCreateRoleAssignment) {
     }
 
     if (url.pathname === '/api/v1/users' && method === 'GET') {
-      await route.fulfill({ json: fixtures.users || [] });
+      const fixtureUsers = fixtures.users || [];
+      const hasActor = fixtureUsers.some((user) => user.id === 'usr_tenant_admin');
+      await route.fulfill({
+        json: hasActor
+          ? fixtureUsers
+          : [
+            { id: 'usr_tenant_admin', tenantId: 'ten_default', email: 'tenant-admin@xeno.test', username: 'tenant-admin@xeno.test', isAdmin: false, isTenantAdmin: true, active: true },
+            ...fixtureUsers
+          ]
+      });
       return;
     }
 
@@ -142,68 +151,6 @@ async function openSecurity(page, fixtures, onCreateRoleAssignment) {
   });
   await page.goto('/dashboard/security');
   await expect(page.locator('h1', { hasText: 'Security' })).toBeVisible();
-}
-
-async function openDangerZone(page, userId, fixtures, onNuke) {
-  await page.addInitScript((storedSession) => {
-    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
-  }, session(userId));
-  await page.route(`${serverUrl}/**`, async (route) => {
-    const url = new URL(route.request().url());
-    const method = route.request().method();
-    if (url.pathname === '/api/v1/users' && method === 'GET') {
-      await route.fulfill({ json: fixtures.users || [] });
-      return;
-    }
-
-    if (url.pathname === '/api/v1/tenants' && method === 'GET') {
-      await route.fulfill({ json: fixtures.tenants || [] });
-      return;
-    }
-
-    if (url.pathname === '/v1.0/api/admin/nuke/tenant' && method === 'POST') {
-      const body = route.request().postDataJSON();
-      onNuke?.('tenant', body);
-      await route.fulfill({
-        json: {
-          status: 'success',
-          operationId: 'nuke_tenant_test',
-          operationType: 'TenantNuke',
-          dryRun: false,
-          tenant: { tenantId: body.tenantId, name: 'Default', status: 'Deleted' },
-          requestedBy: { tenantId: 'ten_default', userId, isGlobalAdmin: true, isTenantAdmin: false },
-          deleted: { tenants: 1, users: 2, credentials: 1 },
-          updated: {},
-          warnings: []
-        }
-      });
-      return;
-    }
-
-    if (url.pathname === '/v1.0/api/admin/nuke/user' && method === 'POST') {
-      const body = route.request().postDataJSON();
-      onNuke?.('user', body);
-      await route.fulfill({
-        json: {
-          status: 'success',
-          operationId: 'nuke_user_test',
-          operationType: 'UserNuke',
-          dryRun: false,
-          tenant: { tenantId: body.tenantId, name: 'Default', status: 'Active' },
-          user: { userId: body.userId, email: 'target@xeno.test', status: 'Deleted' },
-          requestedBy: { tenantId: 'ten_default', userId, isGlobalAdmin: userId === 'usr_admin', isTenantAdmin: userId === 'usr_tenant_admin' },
-          deleted: { users: 1, credentials: 1 },
-          updated: { requestHistoryAnonymized: 2 },
-          warnings: []
-        }
-      });
-      return;
-    }
-
-    await route.fulfill({ json: [] });
-  });
-  await page.goto('/dashboard/danger-zone');
-  await expect(page.locator('h1', { hasText: 'Danger Zone' })).toBeVisible();
 }
 
 async function openLoginWithTenantLookup(page, tenants) {
@@ -346,6 +293,27 @@ test('unknown authenticated dashboard routes render the styled not found page', 
   await expect(page.getByText("We're sorry, but the page you requested could not be found.")).toBeVisible();
 });
 
+test('danger zone route is removed from authenticated navigation', async ({ page }) => {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_admin'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/v1/users') {
+      await route.fulfill({ json: [{ id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false }] });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/danger-zone');
+
+  await expect(page.getByRole('link', { name: 'Danger Zone' })).toHaveCount(0);
+  await expect(page.locator('h1', { hasText: 'Page Not Found' })).toBeVisible();
+  await expect(page.getByText('404')).toBeVisible();
+});
+
 test('public model leaderboard uses the unauthenticated global API', async ({ page }) => {
   let leaderboardRequest = null;
   let leaderboardRequests = [];
@@ -431,6 +399,106 @@ test('tenant model leaderboard scopes regular users to their session tenant', as
   expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
 });
 
+test('regular tenant members see member dashboard surfaces without admin routes', async ({ page }) => {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_regular'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname === '/api/v1/users' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'usr_regular', tenantId: 'ten_default', username: 'regular@xeno.test', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false, active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/tenants' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'ten_default', name: 'Default', active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/credentials' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'cred_regular', tenantId: 'ten_default', userId: 'usr_regular', accessKey: 'ak_regular', active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/credentials' && method === 'POST') {
+      const body = route.request().postDataJSON();
+      expect(body.userId || '').toBe('');
+      await route.fulfill({ json: { id: 'cred_new', tenantId: 'ten_default', userId: 'usr_regular', accessKey: 'xeno_new', active: true } });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/roles' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'role_member', tenantId: 'ten_default', name: 'TenantMember', builtIn: true, active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/permissions' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'perm_clients_read', tenantId: 'ten_default', resourceType: 'Clients', operationType: 'Read', permit: true, builtIn: true, active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/effective-permissions' && method === 'GET') {
+      await route.fulfill({ json: [{ resourceType: 'Clients', operationType: 'Read', permit: true, sourceRole: 'TenantMember' }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/clients' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'client_regular', name: 'member-client', connected: true, models: [] }] });
+      return;
+    }
+
+    if (url.pathname.startsWith('/v1.0/api/client-telemetry')) {
+      await route.fulfill({ json: url.pathname.endsWith('/status') ? { connectedClientCount: 1 } : [] });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/home');
+  await expect(page.getByRole('link', { name: 'Tenants' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Users' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Credentials' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Security' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Clients', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Client Telemetry' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Danger Zone' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Settings' })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Tenants' }).click();
+  await expect(page.locator('h1', { hasText: 'Tenants' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create Tenant' })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Users' }).click();
+  await expect(page.locator('h1', { hasText: 'Users' })).toBeVisible();
+  await expect(page.getByText('regular@xeno.test').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create User' })).toHaveCount(0);
+  await page.getByText('regular@xeno.test').first().click();
+  await expect(page.getByRole('heading', { name: 'Edit User' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Active' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await page.getByRole('link', { name: 'Credentials' }).click();
+  await expect(page.locator('h1', { hasText: 'Credentials' })).toBeVisible();
+  await expect(page.getByText('ak_regular')).toBeVisible();
+  await page.getByRole('button', { name: 'Create Credential' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('cred_new')).toBeVisible();
+
+  await page.getByRole('link', { name: 'Security' }).click();
+  await expect(page.locator('h1', { hasText: 'Security' })).toBeVisible();
+  await expect(page.getByText('TenantMember').first()).toBeVisible();
+  await expect(page.getByText('Clients').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create Role' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Create Permission' })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Clients', exact: true }).click();
+  await expect(page.getByText('member-client')).toBeVisible();
+  await page.getByRole('link', { name: 'Client Telemetry' }).click();
+  await expect(page.getByRole('button', { name: 'Collect Now' })).toHaveCount(0);
+});
+
 test('system admin model leaderboard can filter to a selected tenant', async ({ page }) => {
   let leaderboardRequests = [];
   await page.addInitScript((storedSession) => {
@@ -466,88 +534,6 @@ test('system admin model leaderboard can filter to a selected tenant', async ({ 
   await expect(page.locator('h1', { hasText: 'Model Leaderboard' })).toBeVisible();
   await page.getByRole('combobox', { name: 'Tenant Filter' }).selectOption('ten_ops');
   await expect.poll(() => leaderboardRequests.some((request) => new URL(request.url()).searchParams.get('tenantId') === 'ten_ops')).toBe(true);
-});
-
-test('regular users cannot access Danger Zone nuke controls', async ({ page }) => {
-  await openDangerZone(page, 'usr_regular', {
-    tenants: [{ id: 'ten_default', name: 'Default' }],
-    users: [{ id: 'usr_regular', tenantId: 'ten_default', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false }]
-  });
-
-  await expect(page.getByText('Access Denied')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Nuke Tenant' })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Nuke User' })).toHaveCount(0);
-});
-
-test('tenant admins can execute user nukes but not tenant nukes', async ({ page }) => {
-  const nukeCalls = [];
-  await openDangerZone(page, 'usr_tenant_admin', {
-    tenants: [{ id: 'ten_default', name: 'Default' }],
-    users: [
-      { id: 'usr_tenant_admin', tenantId: 'ten_default', email: 'tenant-admin@xeno.test', isAdmin: false, isTenantAdmin: true },
-      { id: 'usr_target', tenantId: 'ten_default', email: 'target@xeno.test', isAdmin: false, isTenantAdmin: false }
-    ]
-  }, (kind, body) => { nukeCalls.push({ kind, body }); });
-
-  await expect(page.getByRole('heading', { name: 'Nuke Tenant' })).toHaveCount(0);
-  const userPanel = page.locator('section.workspace-card').filter({ hasText: 'Nuke User' });
-  await expect(userPanel.getByRole('combobox', { name: 'Tenant' })).toBeDisabled();
-  await userPanel.getByLabel('Confirm User ID').fill('usr_target');
-  await userPanel.getByLabel('Reason').fill('Tenant admin removes inactive account');
-  await userPanel.getByRole('button', { name: 'Execute' }).click();
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Execute User Nuke' })).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Execute' }).click();
-  await expect.poll(() => nukeCalls.length).toBe(1);
-  expect(nukeCalls[0]).toMatchObject({ kind: 'user', body: { tenantId: 'ten_default', userId: 'usr_target', confirmUserId: 'usr_target', dryRun: false } });
-  await expect(page.getByText('nuke_user_test')).toBeVisible();
-  await expect(page.getByText('Deleted Records')).toBeVisible();
-});
-
-test('global admins can execute tenant nukes after confirmation', async ({ page }) => {
-  const nukeCalls = [];
-  await openDangerZone(page, 'usr_admin', {
-    tenants: [
-      { id: 'ten_default', name: 'Default' },
-      { id: 'ten_ops', name: 'Operations' }
-    ],
-    users: [
-      { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false },
-      { id: 'usr_target', tenantId: 'ten_ops', email: 'target@xeno.test', isAdmin: false, isTenantAdmin: false }
-    ]
-  }, (kind, body) => { nukeCalls.push({ kind, body }); });
-
-  const tenantPanel = page.locator('section.workspace-card').filter({ hasText: 'Nuke Tenant' });
-  await tenantPanel.getByRole('combobox', { name: 'Tenant' }).selectOption('ten_ops');
-  await tenantPanel.getByLabel('Confirm Tenant ID').fill('ten_ops');
-  await tenantPanel.getByLabel('Reason').fill('Global admin removes retired tenant');
-  await tenantPanel.getByRole('button', { name: 'Execute' }).click();
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Execute Tenant Nuke' })).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Execute' }).click();
-  await expect.poll(() => nukeCalls.length).toBe(1);
-  expect(nukeCalls[0]).toMatchObject({ kind: 'tenant', body: { tenantId: 'ten_ops', confirmTenantId: 'ten_ops', dryRun: false } });
-  await expect(page.getByText('nuke_tenant_test')).toBeVisible();
-  await expect(page.getByText('Deleted Records')).toBeVisible();
-});
-
-test('global admins can execute tenant nukes from Danger Zone with only confirmation', async ({ page }) => {
-  const nukeCalls = [];
-  await openDangerZone(page, 'usr_admin', {
-    tenants: [
-      { id: 'ten_default', name: 'Default' },
-      { id: 'ten_ops', name: 'Operations' }
-    ],
-    users: [{ id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false }]
-  }, (kind, body) => { nukeCalls.push({ kind, body }); });
-
-  const tenantPanel = page.locator('section.workspace-card').filter({ hasText: 'Nuke Tenant' });
-  await tenantPanel.getByRole('combobox', { name: 'Tenant' }).selectOption('ten_ops');
-  await tenantPanel.getByLabel('Confirm Tenant ID').fill('ten_ops');
-  await tenantPanel.getByLabel('Reason').fill('Global admin direct tenant nuke execute');
-  await tenantPanel.getByRole('button', { name: 'Execute' }).click();
-  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Execute Tenant Nuke' })).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Execute' }).click();
-  await expect.poll(() => nukeCalls.length).toBe(1);
-  expect(nukeCalls[0]).toMatchObject({ kind: 'tenant', body: { tenantId: 'ten_ops', confirmTenantId: 'ten_ops', dryRun: false } });
 });
 
 test('tenant row actions expose Nuke Tenant only for global admins and show modal results', async ({ page }) => {
@@ -659,14 +645,16 @@ test('regular user editor disables admin flags and omits them from saves', async
   let updatePayload = null;
   await openUsers(page, 'usr_regular', users, (body) => { updatePayload = body; });
 
-  await page.getByText('target@xeno.test').first().click();
+  await page.getByText('regular@xeno.test').first().click();
   await expect(page.getByRole('heading', { name: 'Edit User' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Active' })).toBeDisabled();
   await expect(page.getByRole('checkbox', { name: 'Tenant Admin' })).toBeDisabled();
   await expect(page.getByRole('checkbox', { name: 'Global Admin' })).toBeDisabled();
 
-  await page.getByRole('textbox', { name: 'Email', exact: true }).fill('target-updated@xeno.test');
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill('regular-updated@xeno.test');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect.poll(() => updatePayload).not.toBeNull();
+  expect(updatePayload).not.toHaveProperty('active');
   expect(updatePayload).not.toHaveProperty('isAdmin');
   expect(updatePayload).not.toHaveProperty('isTenantAdmin');
 });

@@ -153,7 +153,6 @@ const navGroups = [
       { to: '/dashboard/users', key: 'users', icon: ShieldCheck },
       { to: '/dashboard/credentials', key: 'credentials', icon: KeyRound },
       { to: '/dashboard/security', key: 'security', icon: LockKeyhole },
-      { to: '/dashboard/danger-zone', key: 'dangerZone', icon: Shield },
       { to: '/dashboard/settings', key: 'settings', icon: SettingsIcon }
     ]
   }
@@ -167,7 +166,6 @@ const pageMeta = {
   '/dashboard/users': { title: 'users', description: 'usersDescription' },
   '/dashboard/credentials': { title: 'credentials', description: 'credentialsDescription' },
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
-  '/dashboard/danger-zone': { title: 'dangerZone', description: 'dangerZoneDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
   '/dashboard/clients/advertised-models/leaderboard': { title: 'xenoModelLeaderboard', description: 'modelLeaderboardDescription' },
@@ -307,7 +305,6 @@ function navTooltipKey(key) {
     requests: 'tooltipNavRequests',
     routingPolicies: 'tooltipNavRoutingPolicies',
     security: 'tooltipNavSecurity',
-    dangerZone: 'tooltipNavDangerZone',
     settings: 'tooltipNavSettings',
     tenants: 'tooltipNavTenants',
     users: 'tooltipNavUsers'
@@ -315,9 +312,30 @@ function navTooltipKey(key) {
   return mapped[key] || 'tooltipGenericLink';
 }
 
+function isGlobalAdminUser(user) {
+  return value(user, 'isAdmin') === true;
+}
+
+function isTenantAdminUser(user, session) {
+  return value(user, 'isTenantAdmin') === true && String(value(user, 'tenantId') || '') === String(session?.tenantId || '');
+}
+
+function dashboardLinkVisible(link, actor, session) {
+  const isGlobalAdmin = isGlobalAdminUser(actor);
+  const isTenantAdmin = isTenantAdminUser(actor, session);
+  if (link.key === 'settings') return isGlobalAdmin;
+  if (link.key === 'routingPolicies') return isGlobalAdmin || isTenantAdmin;
+  if (link.key === 'requests' || link.key === 'explorer' || link.key === 'analytics') return isGlobalAdmin || isTenantAdmin;
+  return true;
+}
+
 function Shell({ onLogout, onToggleTheme, session, theme }) {
   const { t } = useTranslation();
   const location = useLocation();
+  const users = useResource('/api/v1/users', []);
+  const actor = users.data.find((item) => recordId(item) === session?.userId);
+  const isGlobalAdmin = isGlobalAdminUser(actor);
+  const isTenantAdmin = isTenantAdminUser(actor, session);
   const meta = pageMeta[location.pathname] || { title: 'notFoundTitle', description: 'notFoundDescription' };
 
   return (
@@ -333,7 +351,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
           {navGroups.map((group) => (
             <div className="sidebar-group" key={group.key}>
               <div className="sidebar-group-label">{t(group.key)}</div>
-              {group.links.map((link) => {
+              {group.links.filter((link) => dashboardLinkVisible(link, actor, session)).map((link) => {
                 const Icon = link.icon;
                 return (
                   <NavLink className={`sidebar-link ${link.nested ? 'nested' : ''}`.trim()} end key={link.to} title={t(navTooltipKey(link.key), { label: t(link.key) })} to={link.to}>
@@ -392,16 +410,15 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="explorer" element={<ApiExplorerView />} />
             <Route path="tenants" element={<TenantsView session={session} />} />
             <Route path="users" element={<UsersView session={session} />} />
-            <Route path="credentials" element={<CredentialsView />} />
-            <Route path="security" element={<SecurityView />} />
-            <Route path="danger-zone" element={<DangerZoneView session={session} />} />
+            <Route path="credentials" element={<CredentialsView session={session} />} />
+            <Route path="security" element={<SecurityView session={session} />} />
             <Route path="clients" element={<ClientsView />} />
             <Route path="clients/advertised-models" element={<AdvertisedModelsView />} />
             <Route path="clients/advertised-models/leaderboard" element={<ModelLeaderboardView session={session} />} />
-            <Route path="client-telemetry" element={<ClientTelemetryView />} />
+            <Route path="client-telemetry" element={<ClientTelemetryView canCollect={isGlobalAdmin || isTenantAdmin} />} />
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
-            <Route path="settings" element={<SettingsView />} />
+            <Route path="settings" element={isGlobalAdmin ? <SettingsView /> : <NotFoundView />} />
             <Route path="*" element={<NotFoundView />} />
           </Routes>
         </main>
@@ -410,7 +427,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
   );
 }
 
-function ClientTelemetryView() {
+function ClientTelemetryView({ canCollect = false }) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const clients = useResource('/api/v1/clients', []);
@@ -569,7 +586,7 @@ function ClientTelemetryView() {
         <div className="chart-action-row home-range-actions">
           <TimeRangeSelector onChange={updateTelemetryRange} range={telemetryRange} />
           <IconButton iconOnly disabled={summaryLoading || attemptsLoading || chartLoading} onClick={refreshWithCurrentTime} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
-          <IconButton iconOnly disabled={collecting} onClick={collectNow} label={t('collectNow', 'Collect Now')} tooltip={t('collectNow', 'Collect Now')} icon={<Play size={16} />} />
+          {canCollect ? <IconButton iconOnly disabled={collecting} onClick={collectNow} label={t('collectNow', 'Collect Now')} tooltip={t('collectNow', 'Collect Now')} icon={<Play size={16} />} /> : null}
         </div>
       </div>
 
@@ -1844,16 +1861,18 @@ function ApiExplorerView() {
   );
 }
 
-function SecurityView() {
+function SecurityView({ session }) {
   const { t } = useTranslation();
+  const users = useResource('/api/v1/users', []);
+  const actor = users.data.find((item) => recordId(item) === session?.userId);
+  const canManageSecurity = isGlobalAdminUser(actor) || isTenantAdminUser(actor, session);
   const roles = useResource('/api/v1/roles', []);
   const permissions = useResource('/api/v1/permissions', []);
-  const grantablePermissions = useResource('/api/v1/permissions/grantable', []);
-  const roleAssignments = useResource('/api/v1/roleassignments', []);
-  const users = useResource('/api/v1/users', []);
-  const credentials = useResource('/api/v1/credentials', []);
+  const grantablePermissions = useResource(canManageSecurity ? '/api/v1/permissions/grantable' : null, []);
+  const roleAssignments = useResource(canManageSecurity ? '/api/v1/roleassignments' : null, []);
+  const credentials = useResource(canManageSecurity ? '/api/v1/credentials' : null, []);
   const effective = useResource('/api/v1/effective-permissions', []);
-  const audit = useResource('/api/v1/audit', []);
+  const audit = useResource(canManageSecurity ? '/api/v1/audit' : null, []);
   const [selectedRole, setSelectedRole] = useState(null);
   const [selectedPermission, setSelectedPermission] = useState(null);
   const [creatingRole, setCreatingRole] = useState(false);
@@ -1910,38 +1929,38 @@ function SecurityView() {
       <div className="metric-grid compact">
         <MetricCard icon={<LockKeyhole size={18} />} label={t('roles')} value={formatNumber(roles.data.length)} />
         <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
-        <MetricCard icon={<KeyRound size={18} />} label={t('roleAssignments')} value={formatNumber(roleAssignments.data.length)} tone="info" />
-        <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" />
+        {canManageSecurity ? <MetricCard icon={<KeyRound size={18} />} label={t('roleAssignments')} value={formatNumber(roleAssignments.data.length)} tone="info" /> : null}
+        {canManageSecurity ? <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" /> : null}
       </div>
       <DataTable
         title={t('roles')}
         rows={roles.data}
         columns={['id', 'tenantId', 'name', 'builtIn', 'active']}
-        onDelete={(row) => {
+        onDelete={canManageSecurity ? (row) => {
           if (recordId(selectedRole) === recordId(row)) setSelectedRole(null);
           return deleteRecord('/api/v1/roles', row);
-        }}
+        } : null}
         onRefresh={roles.refresh}
-        onRowClick={setSelectedRole}
+        onRowClick={canManageSecurity ? setSelectedRole : null}
         loading={roles.loading}
-        rowActionLabel={t('edit')}
-        actions={<IconButton onClick={() => setCreatingRole(true)} label={t('createRole')} tooltip={t('tooltipCreateRole')} icon={<Plus size={16} />} variant="primary" />}
+        rowActionLabel={canManageSecurity ? t('edit') : t('viewDetails')}
+        actions={canManageSecurity ? <IconButton onClick={() => setCreatingRole(true)} label={t('createRole')} tooltip={t('tooltipCreateRole')} icon={<Plus size={16} />} variant="primary" /> : null}
       />
       <DataTable
         title={t('permissions')}
         rows={permissions.data}
         columns={['id', 'tenantId', 'resourceType', 'operationType', 'permit', 'builtIn', 'active']}
-        onDelete={(row) => {
+        onDelete={canManageSecurity ? (row) => {
           if (recordId(selectedPermission) === recordId(row)) setSelectedPermission(null);
           return deleteRecord('/api/v1/permissions', row);
-        }}
+        } : null}
         onRefresh={permissions.refresh}
-        onRowClick={setSelectedPermission}
+        onRowClick={canManageSecurity ? setSelectedPermission : null}
         loading={permissions.loading}
-        rowActionLabel={t('edit')}
-        actions={<IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} tooltip={t('tooltipCreatePermission')} icon={<Plus size={16} />} variant="primary" />}
+        rowActionLabel={canManageSecurity ? t('edit') : t('viewDetails')}
+        actions={canManageSecurity ? <IconButton onClick={() => setCreatingPermission(true)} label={t('createPermission')} tooltip={t('tooltipCreatePermission')} icon={<Plus size={16} />} variant="primary" /> : null}
       />
-      <DataTable
+      {canManageSecurity ? <DataTable
         title={t('roleAssignments')}
         rows={roleAssignmentRows}
         columns={[
@@ -1958,9 +1977,9 @@ function SecurityView() {
         onRefresh={roleAssignments.refresh}
         loading={roleAssignments.loading || roles.loading}
         actions={<IconButton onClick={() => setCreatingRoleAssignment(true)} label={t('createRoleAssignment')} tooltip={t('tooltipCreateRoleAssignment')} icon={<Plus size={16} />} variant="primary" />}
-      />
+      /> : null}
       <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} loading={effective.loading} onRefresh={effective.refresh} />
-      <DataTable
+      {canManageSecurity ? <DataTable
         columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode', 'principalType', 'principalId', 'targetTenantId']}
         onDelete={(row) => deleteRecord('/api/v1/audit', row)}
         onRefresh={audit.refresh}
@@ -1968,7 +1987,7 @@ function SecurityView() {
         rows={audit.data}
         subtitle={t('auditSubtitle')}
         title={t('audit')}
-      />
+      /> : null}
       {creatingRole && <RoleEditModal data={null} mode="create" onClose={() => setCreatingRole(false)} onSave={saveRole} permissions={grantablePermissions.data} />}
       {selectedRole && <RoleEditModal data={selectedRole} onClose={() => setSelectedRole(null)} onSave={saveRole} permissions={grantablePermissions.data} />}
       {creatingPermission && <PermissionEditModal data={null} mode="create" onClose={() => setCreatingPermission(false)} onSave={savePermission} />}
@@ -1993,6 +2012,7 @@ function TenantsView({ session }) {
   const actor = users.data.find((item) => recordId(item) === session?.userId);
   const isGlobalAdmin = value(actor, 'isAdmin') === true;
   const [selected, setSelected] = useState(null);
+  const [details, setDetails] = useState(null);
   const [creating, setCreating] = useState(false);
   const [nukeTenant, setNukeTenant] = useState(null);
 
@@ -2010,11 +2030,11 @@ function TenantsView({ session }) {
     <div className="view-stack">
       <DataTable
         columns={['id', 'name', 'active', 'createdUtc', 'lastUpdateUtc']}
-        onDelete={(row) => {
+        onDelete={isGlobalAdmin ? (row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
           return deleteRecord('/api/v1/tenants', row);
-        }}
-        onRowClick={setSelected}
+        } : null}
+        onRowClick={isGlobalAdmin ? setSelected : setDetails}
         onRefresh={tenants.refresh}
         getRowActions={(row) => isGlobalAdmin ? [{
           destructive: true,
@@ -2027,13 +2047,14 @@ function TenantsView({ session }) {
         }] : []}
         loading={tenants.loading}
         rows={tenants.data}
-        rowActionLabel={t('edit')}
+        rowActionLabel={isGlobalAdmin ? t('edit') : t('viewDetails')}
         subtitle={t('tenantsTableSubtitle')}
         title={t('tenants')}
-        actions={<IconButton onClick={() => setCreating(true)} label={t('createTenant')} tooltip={t('tooltipCreateTenant')} icon={<Plus size={16} />} variant="primary" />}
+        actions={isGlobalAdmin ? <IconButton onClick={() => setCreating(true)} label={t('createTenant')} tooltip={t('tooltipCreateTenant')} icon={<Plus size={16} />} variant="primary" /> : null}
       />
       {creating && <TenantEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveTenant} />}
       {selected && <TenantEditModal data={selected} onClose={() => setSelected(null)} onSave={saveTenant} />}
+      {details && <EditRecordModal title={t('tenantDetails')} data={details} onClose={() => setDetails(null)} />}
       {nukeTenant ? (
         <NukeRecordModal
           kind="tenant"
@@ -2056,7 +2077,9 @@ function UsersView({ session }) {
   const actor = users.data.find((item) => recordId(item) === session?.userId);
   const isGlobalAdmin = value(actor, 'isAdmin') === true;
   const isTenantAdmin = value(actor, 'isTenantAdmin') === true;
+  const canManageUsers = isGlobalAdmin || isTenantAdmin;
   const [selected, setSelected] = useState(null);
+  const [details, setDetails] = useState(null);
   const [creating, setCreating] = useState(false);
   const [nukeUser, setNukeUser] = useState(null);
 
@@ -2074,11 +2097,14 @@ function UsersView({ session }) {
     <div className="view-stack">
       <DataTable
         columns={['id', 'tenantId', 'username', 'email', 'isAdmin', 'isTenantAdmin', 'active']}
-        onDelete={(row) => {
+        onDelete={canManageUsers ? (row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
           return deleteRecord('/api/v1/users', row);
+        } : null}
+        onRowClick={(row) => {
+          if (canManageUsers || recordId(row) === session?.userId) setSelected(row);
+          else setDetails(row);
         }}
-        onRowClick={setSelected}
         onRefresh={users.refresh}
         getRowActions={(row) => {
           const targetTenantId = String(value(row, 'tenantId') || '');
@@ -2099,10 +2125,11 @@ function UsersView({ session }) {
         rowActionLabel={t('edit')}
         subtitle={t('usersTableSubtitle')}
         title={t('users')}
-        actions={<IconButton onClick={() => setCreating(true)} label={t('createUser')} tooltip={t('tooltipCreateUser')} icon={<Plus size={16} />} variant="primary" />}
+        actions={canManageUsers ? <IconButton onClick={() => setCreating(true)} label={t('createUser')} tooltip={t('tooltipCreateUser')} icon={<Plus size={16} />} variant="primary" /> : null}
       />
       {creating && <UserEditModal actorUser={users.data.find((item) => recordId(item) === session?.userId)} data={null} mode="create" onClose={() => setCreating(false)} onSave={saveUser} session={session} />}
       {selected && <UserEditModal actorUser={users.data.find((item) => recordId(item) === session?.userId)} data={selected} onClose={() => setSelected(null)} onSave={saveUser} session={session} />}
+      {details && <EditRecordModal title={t('userDetails')} data={details} onClose={() => setDetails(null)} />}
       {nukeUser ? (
         <NukeRecordModal
           kind="user"
@@ -2298,190 +2325,12 @@ function nukeCountEntries(counts) {
     .map(([key, count]) => [key, Number(count)]);
 }
 
-function DangerZoneView({ session }) {
-  const { t } = useTranslation();
-  const tenants = useResource('/api/v1/tenants', []);
-  const users = useResource('/api/v1/users', []);
-  const actor = users.data.find((item) => recordId(item) === session?.userId);
-  const isGlobalAdmin = value(actor, 'isAdmin') === true;
-  const isTenantAdmin = value(actor, 'isTenantAdmin') === true;
-  const [tenantForm, setTenantForm] = useState({ tenantId: '', confirmTenantId: '', reason: '', includeAuditRecords: true, includeRequestHistory: true, includeTelemetry: true });
-  const [userForm, setUserForm] = useState({ tenantId: session?.tenantId || '', userId: '', confirmUserId: '', reason: '', includeAuditRecords: false, anonymizeRequestHistory: true });
-  const [tenantResult, setTenantResult] = useState(null);
-  const [userResult, setUserResult] = useState(null);
-  const [tenantError, setTenantError] = useState('');
-  const [userError, setUserError] = useState('');
-  const [tenantBusy, setTenantBusy] = useState(false);
-  const [userBusy, setUserBusy] = useState(false);
-  const [pendingExecute, setPendingExecute] = useState(null);
-  const tenantOptions = tenants.data.filter((tenant) => recordId(tenant));
-  const userOptions = users.data
-    .filter((user) => isGlobalAdmin || String(value(user, 'tenantId') || '') === session?.tenantId)
-    .filter((user) => recordId(user) !== session?.userId);
-  const canUseUserNuke = isGlobalAdmin || isTenantAdmin;
-  const selectedTenantId = tenantForm.tenantId || recordId(tenantOptions[0]) || '';
-  const selectedUserTenantId = isGlobalAdmin ? userForm.tenantId : session?.tenantId || '';
-  const userTenantOptions = isGlobalAdmin ? tenantOptions : tenants.data.filter((tenant) => recordId(tenant) === session?.tenantId);
-  const canExecuteTenant = isGlobalAdmin && selectedTenantId && tenantForm.confirmTenantId === selectedTenantId && tenantForm.reason.trim().length >= 10;
-  const canExecuteUser = canUseUserNuke && selectedUserTenantId && userForm.userId && userForm.confirmUserId === userForm.userId && userForm.reason.trim().length >= 10;
-
-  useEffect(() => {
-    if (!tenantForm.tenantId && tenantOptions.length > 0) {
-      setTenantForm((current) => ({ ...current, tenantId: recordId(tenantOptions[0]) }));
-    }
-  }, [tenantForm.tenantId, tenantOptions]);
-
-  useEffect(() => {
-    if (!userForm.userId && userOptions.length > 0) {
-      setUserForm((current) => ({ ...current, userId: recordId(userOptions[0]), tenantId: value(userOptions[0], 'tenantId') || current.tenantId }));
-    }
-  }, [userForm.userId, userOptions]);
-
-  async function runTenantNuke() {
-    setTenantBusy(true);
-    setTenantError('');
-    try {
-      const result = await api.post('/v1.0/api/admin/nuke/tenant', {
-        tenantId: selectedTenantId,
-        confirmTenantId: tenantForm.confirmTenantId,
-        dryRun: false,
-        reason: tenantForm.reason,
-        includeAuditRecords: tenantForm.includeAuditRecords,
-        includeRequestHistory: tenantForm.includeRequestHistory,
-        includeTelemetry: tenantForm.includeTelemetry
-      });
-      if (result?.error) throw new Error(result.message || result.error);
-      setTenantResult(result);
-      tenants.refresh();
-      users.refresh();
-    } catch (error) {
-      setTenantError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTenantBusy(false);
-    }
-  }
-
-  async function runUserNuke() {
-    setUserBusy(true);
-    setUserError('');
-    try {
-      const result = await api.post('/v1.0/api/admin/nuke/user', {
-        tenantId: selectedUserTenantId,
-        userId: userForm.userId,
-        confirmUserId: userForm.confirmUserId,
-        dryRun: false,
-        reason: userForm.reason,
-        includeAuditRecords: userForm.includeAuditRecords,
-        anonymizeRequestHistory: userForm.anonymizeRequestHistory
-      });
-      if (result?.error) throw new Error(result.message || result.error);
-      setUserResult(result);
-      users.refresh();
-    } catch (error) {
-      setUserError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setUserBusy(false);
-    }
-  }
-
-  return (
-    <div className="view-stack">
-      {!isGlobalAdmin && !isTenantAdmin ? <EmptyState title={t('accessDenied')} message={t('dangerZoneAccessDenied')} /> : null}
-      {isGlobalAdmin ? (
-        <Panel eyebrow={t('tenant')} title={t('nukeTenant')}>
-          <div className="form-grid two">
-            <label className="form-field">
-              <span>{t('tenant')}</span>
-              <select value={selectedTenantId} onChange={(event) => setTenantForm((current) => ({ ...current, tenantId: event.target.value, confirmTenantId: '' }))}>
-                {tenantOptions.map((tenant) => (
-                  <option key={recordId(tenant)} value={recordId(tenant)}>{value(tenant, 'name') || recordId(tenant)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>{t('confirmTenantId')}</span>
-              <input value={tenantForm.confirmTenantId} onChange={(event) => setTenantForm((current) => ({ ...current, confirmTenantId: event.target.value }))} />
-            </label>
-          </div>
-          <label className="form-field">
-            <span>{t('reason')}</span>
-            <textarea rows={3} value={tenantForm.reason} onChange={(event) => setTenantForm((current) => ({ ...current, reason: event.target.value }))} />
-          </label>
-          <div className="toolbar">
-            <label className="checkbox-field"><input checked={tenantForm.includeAuditRecords} onChange={(event) => setTenantForm((current) => ({ ...current, includeAuditRecords: event.target.checked }))} type="checkbox" /> {t('includeAuditRecords')}</label>
-            <label className="checkbox-field"><input checked={tenantForm.includeRequestHistory} onChange={(event) => setTenantForm((current) => ({ ...current, includeRequestHistory: event.target.checked }))} type="checkbox" /> {t('includeRequestHistory')}</label>
-            <label className="checkbox-field"><input checked={tenantForm.includeTelemetry} onChange={(event) => setTenantForm((current) => ({ ...current, includeTelemetry: event.target.checked }))} type="checkbox" /> {t('includeTelemetry')}</label>
-          </div>
-          {tenantError ? <div className="leaderboard-error" role="alert">{tenantError}</div> : null}
-          <div className="toolbar align-end">
-            <IconButton disabled={!canExecuteTenant || tenantBusy} icon={<Trash2 size={16} />} label={t('execute')} onClick={() => setPendingExecute('tenant')} variant="danger" />
-          </div>
-        </Panel>
-      ) : null}
-      {canUseUserNuke ? (
-        <Panel eyebrow={t('user')} title={t('nukeUser')}>
-          <div className="form-grid two">
-            <label className="form-field">
-              <span>{t('tenant')}</span>
-              <select disabled={!isGlobalAdmin} value={selectedUserTenantId} onChange={(event) => setUserForm((current) => ({ ...current, tenantId: event.target.value, userId: '', confirmUserId: '' }))}>
-                {userTenantOptions.map((tenant) => (
-                  <option key={recordId(tenant)} value={recordId(tenant)}>{value(tenant, 'name') || recordId(tenant)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>{t('user')}</span>
-              <select value={userForm.userId} onChange={(event) => setUserForm((current) => ({ ...current, userId: event.target.value, confirmUserId: '' }))}>
-                {userOptions.filter((user) => !selectedUserTenantId || value(user, 'tenantId') === selectedUserTenantId).map((user) => (
-                  <option key={recordId(user)} value={recordId(user)}>{value(user, 'email') || recordId(user)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label className="form-field">
-            <span>{t('confirmUserId')}</span>
-            <input value={userForm.confirmUserId} onChange={(event) => setUserForm((current) => ({ ...current, confirmUserId: event.target.value }))} />
-          </label>
-          <label className="form-field">
-            <span>{t('reason')}</span>
-            <textarea rows={3} value={userForm.reason} onChange={(event) => setUserForm((current) => ({ ...current, reason: event.target.value }))} />
-          </label>
-          <div className="toolbar">
-            <label className="checkbox-field"><input checked={userForm.includeAuditRecords} onChange={(event) => setUserForm((current) => ({ ...current, includeAuditRecords: event.target.checked }))} type="checkbox" /> {t('includeAuditRecords')}</label>
-            <label className="checkbox-field"><input checked={userForm.anonymizeRequestHistory} onChange={(event) => setUserForm((current) => ({ ...current, anonymizeRequestHistory: event.target.checked }))} type="checkbox" /> {t('anonymizeRequestHistory')}</label>
-          </div>
-          {userError ? <div className="leaderboard-error" role="alert">{userError}</div> : null}
-          <div className="toolbar align-end">
-            <IconButton disabled={!canExecuteUser || userBusy} icon={<Trash2 size={16} />} label={t('execute')} onClick={() => setPendingExecute('user')} variant="danger" />
-          </div>
-        </Panel>
-      ) : null}
-      {tenantResult ? <NukeResultPanel data={tenantResult} title={t('tenantNukeResult')} /> : null}
-      {userResult ? <NukeResultPanel data={userResult} title={t('userNukeResult')} /> : null}
-      <ConfirmModal
-        confirmLabel={t('execute')}
-        destructive
-        message={pendingExecute === 'tenant' ? t('executeTenantNukeMessage') : t('executeUserNukeMessage')}
-        onCancel={() => setPendingExecute(null)}
-        onConfirm={async () => {
-          const operation = pendingExecute;
-          setPendingExecute(null);
-          if (operation === 'tenant') {
-            await runTenantNuke();
-          } else if (operation === 'user') {
-            await runUserNuke();
-          }
-        }}
-        open={Boolean(pendingExecute)}
-        title={pendingExecute === 'tenant' ? t('executeTenantNukeTitle') : t('executeUserNukeTitle')}
-      />
-    </div>
-  );
-}
-
-function CredentialsView() {
+function CredentialsView({ session }) {
   const { t } = useTranslation();
   const credentials = useResource('/api/v1/credentials', []);
+  const users = useResource('/api/v1/users', []);
+  const actor = users.data.find((item) => recordId(item) === session?.userId);
+  const canManageCredentials = isGlobalAdminUser(actor) || isTenantAdminUser(actor, session);
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState(null);
@@ -2508,15 +2357,15 @@ function CredentialsView() {
       {created ? <JsonPanelInline title={t('newCredential')} data={created} /> : null}
       <DataTable
         columns={['id', 'tenantId', 'userId', 'accessKey', 'active']}
-        onDelete={(row) => {
+        onDelete={canManageCredentials ? (row) => {
           if (recordId(selected) === recordId(row)) setSelected(null);
           return deleteRecord('/api/v1/credentials', row);
-        }}
-        onRowClick={setSelected}
+        } : null}
+        onRowClick={canManageCredentials ? setSelected : null}
         onRefresh={credentials.refresh}
         loading={credentials.loading}
         rows={credentials.data}
-        rowActionLabel={t('edit')}
+        rowActionLabel={canManageCredentials ? t('edit') : t('viewDetails')}
         subtitle={t('credentialsTableSubtitle')}
         title={t('credentials')}
       />
@@ -3444,6 +3293,13 @@ function useResource(path, fallback) {
 
   useEffect(() => {
     let alive = true;
+    if (!path) {
+      setData(fallback);
+      setUpdatedAt(Date.now());
+      setLoading(false);
+      return () => { alive = false; };
+    }
+
     setLoading(true);
     api.get(path)
       .then((result) => {
@@ -4155,6 +4011,7 @@ function UserEditModal({ actorUser, data, mode = 'edit', onClose, onSave, sessio
   const actorIsTenantAdmin = value(actorUser, 'isTenantAdmin') === true && value(actorUser, 'tenantId') === targetTenantId;
   const canEditSystemAdmin = actorIsSystemAdmin;
   const canEditTenantAdmin = actorIsSystemAdmin || actorIsTenantAdmin;
+  const canEditAccountState = canEditTenantAdmin;
 
   function updateField(key, fieldValue) {
     setDraft((current) => ({ ...current, [key]: fieldValue }));
@@ -4169,9 +4026,9 @@ function UserEditModal({ actorUser, data, mode = 'edit', onClose, onSave, sessio
     try {
       const payload = {
         username: draft.username,
-        email: draft.email,
-        active: draft.active
+        email: draft.email
       };
+      if (canEditAccountState) payload.active = draft.active;
       if (canEditSystemAdmin) payload.isAdmin = draft.isAdmin;
       if (canEditTenantAdmin) payload.isTenantAdmin = draft.isTenantAdmin;
       if (draft.password.trim()) payload.password = draft.password;
@@ -4217,7 +4074,7 @@ function UserEditModal({ actorUser, data, mode = 'edit', onClose, onSave, sessio
         </div>
         <div className="form-grid two">
           <label className="toggle-field">
-            <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
+            <input checked={draft.active} disabled={!canEditAccountState} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
             <span>{t('active')}</span>
           </label>
           <label className="toggle-field">

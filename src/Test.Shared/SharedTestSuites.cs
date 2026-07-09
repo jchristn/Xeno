@@ -3513,10 +3513,92 @@ namespace Test.Shared
                             if (String.IsNullOrWhiteSpace(regularSignup.Token.Token)) throw new InvalidOperationException("Existing-tenant onboarding did not return a token.");
                         }
 
+                        using (HttpClient regularClient = new HttpClient())
+                        {
+                            ApplyBearerHeaders(regularClient, regularSignup.Token.TenantId, regularSignup.Token.Token);
+                            using (HttpResponseMessage tenantsResponse = await regularClient.GetAsync(baseUrl + "/v1.0/api/tenants").ConfigureAwait(false))
+                            {
+                                string tenantsJson = await tenantsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!tenantsResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member could not list tenants: " + tenantsJson);
+                                List<Tenant> tenants = DeserializeRequired<List<Tenant>>(tenantsJson);
+                                if (tenants.Count != 1 || tenants[0].Id != signup.Tenant.Id) throw new InvalidOperationException("Existing-tenant member should see only its tenant: " + tenantsJson);
+                            }
+
+                            using (HttpResponseMessage usersResponse = await regularClient.GetAsync(baseUrl + "/v1.0/api/users").ConfigureAwait(false))
+                            {
+                                string usersJson = await usersResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!usersResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member could not list users: " + usersJson);
+                                List<User> users = DeserializeRequired<List<User>>(usersJson);
+                                if (users.Count != 1 || users[0].Id != regularSignup.User.Id) throw new InvalidOperationException("Existing-tenant member should see only its user account: " + usersJson);
+                            }
+
+                            using (HttpResponseMessage credentialsResponse = await regularClient.GetAsync(baseUrl + "/v1.0/api/credentials").ConfigureAwait(false))
+                            {
+                                string credentialsJson = await credentialsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!credentialsResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member could not list credentials: " + credentialsJson);
+                                List<Credential> credentials = DeserializeRequired<List<Credential>>(credentialsJson);
+                                if (credentials.Count != 1 || credentials[0].UserId != regularSignup.User.Id) throw new InvalidOperationException("Existing-tenant member should see only its credential: " + credentialsJson);
+                            }
+
+                            using (HttpResponseMessage createCredentialResponse = await PostJsonAsync(regularClient, baseUrl + "/v1.0/api/credentials", "{}").ConfigureAwait(false))
+                            {
+                                string createCredentialJson = await createCredentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!createCredentialResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member could not create own credential: " + createCredentialJson);
+                                if (!createCredentialJson.Contains(regularSignup.User.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Existing-tenant member credential was not assigned to self: " + createCredentialJson);
+                            }
+
+                            using (HttpResponseMessage rolesResponse = await regularClient.GetAsync(baseUrl + "/v1.0/api/roles").ConfigureAwait(false))
+                            {
+                                string rolesJson = await rolesResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!rolesResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member could not list roles: " + rolesJson);
+                                if (!rolesJson.Contains("TenantMember", StringComparison.Ordinal)) throw new InvalidOperationException("Existing-tenant member roles response missing TenantMember: " + rolesJson);
+                            }
+
+                            using (HttpResponseMessage permissionsResponse = await regularClient.GetAsync(baseUrl + "/v1.0/api/permissions").ConfigureAwait(false))
+                            {
+                                string permissionsJson = await permissionsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!permissionsResponse.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member could not list permissions: " + permissionsJson);
+                                if (!permissionsJson.Contains("Credentials", StringComparison.Ordinal)) throw new InvalidOperationException("Existing-tenant member permissions response missing Credentials permission: " + permissionsJson);
+                            }
+
+                            using (HttpResponseMessage createRoleDenied = await PostJsonAsync(regularClient, baseUrl + "/v1.0/api/roles", JsonUtil.Serialize(new { name = "MemberCreatedRole" })).ConfigureAwait(false))
+                            {
+                                string createRoleDeniedJson = await createRoleDenied.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if ((int)createRoleDenied.StatusCode != 403) throw new InvalidOperationException("Existing-tenant member should not create roles: " + createRoleDeniedJson);
+                            }
+
+                            using (HttpResponseMessage settingsDenied = await regularClient.GetAsync(baseUrl + "/v1.0/api/settings").ConfigureAwait(false))
+                            {
+                                string settingsDeniedJson = await settingsDenied.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if ((int)settingsDenied.StatusCode != 403) throw new InvalidOperationException("Existing-tenant member should not see settings: " + settingsDeniedJson);
+                                if (!settingsDeniedJson.Contains("SystemAdminRequired", StringComparison.Ordinal)) throw new InvalidOperationException("Settings denial should require system admin: " + settingsDeniedJson);
+                            }
+
+                            using (HttpResponseMessage duplicateEmailUpdate = await PutJsonAsync(regularClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(regularSignup.User.Id), JsonUtil.Serialize(new
+                            {
+                                email = "tenant-admin@signup.test"
+                            })).ConfigureAwait(false))
+                            {
+                                string duplicateEmailUpdateJson = await duplicateEmailUpdate.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if ((int)duplicateEmailUpdate.StatusCode != 409) throw new InvalidOperationException("Existing-tenant member duplicate email update should return 409: " + duplicateEmailUpdateJson);
+                                if (!duplicateEmailUpdateJson.Contains("EmailAlreadyExists", StringComparison.Ordinal)) throw new InvalidOperationException("Duplicate email update should include EmailAlreadyExists: " + duplicateEmailUpdateJson);
+                            }
+
+                            using (HttpResponseMessage selfUpdate = await PutJsonAsync(regularClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(regularSignup.User.Id), JsonUtil.Serialize(new
+                            {
+                                email = "regular-user-updated@signup.test"
+                            })).ConfigureAwait(false))
+                            {
+                                string selfUpdateJson = await selfUpdate.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!selfUpdate.IsSuccessStatusCode) throw new InvalidOperationException("Existing-tenant member self update failed: " + selfUpdateJson);
+                                if (!selfUpdateJson.Contains("regular-user-updated@signup.test", StringComparison.Ordinal)) throw new InvalidOperationException("Existing-tenant member self update did not persist email: " + selfUpdateJson);
+                            }
+                        }
+
                         using (HttpResponseMessage duplicateEmailSignupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
                         {
                             TenantId = signup.Tenant.Id,
-                            Email = "regular-user@signup.test",
+                            Email = "regular-user-updated@signup.test",
                             Username = "duplicate-email@signup.test",
                             Password = "password"
                         })).ConfigureAwait(false))
@@ -3536,7 +3618,7 @@ namespace Test.Shared
                             if (copiedSeedAdmin) throw new InvalidOperationException("Onboarding should not create admin@xeno in the new tenant.");
                             bool tenantAdminFound = users.Any(item => item.TenantId == signup.Tenant.Id && String.Equals(item.Email, "tenant-admin@signup.test", StringComparison.OrdinalIgnoreCase) && item.IsTenantAdmin);
                             if (!tenantAdminFound) throw new InvalidOperationException("New-tenant onboarding did not persist a tenant-admin user.");
-                            bool regularUserFound = users.Any(item => item.TenantId == signup.Tenant.Id && String.Equals(item.Email, "regular-user@signup.test", StringComparison.OrdinalIgnoreCase) && !item.IsTenantAdmin && !item.IsAdmin);
+                            bool regularUserFound = users.Any(item => item.TenantId == signup.Tenant.Id && String.Equals(item.Email, "regular-user-updated@signup.test", StringComparison.OrdinalIgnoreCase) && !item.IsTenantAdmin && !item.IsAdmin);
                             if (!regularUserFound) throw new InvalidOperationException("Existing-tenant onboarding did not persist a regular user.");
                         }
                     }

@@ -1598,7 +1598,7 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
             {
                 await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Users.Where(item => IsTenantVisible(requestContext, item.TenantId)).Select(RedactUser).ToList()).ConfigureAwait(false);
+                await SendJsonAsync(context, ListVisibleUsers(requestContext).Select(RedactUser).ToList()).ConfigureAwait(false);
                 return;
             }
 
@@ -1614,7 +1614,7 @@ namespace Xeno.Server
 
             if (method == "PUT" && TryGetPathId(path, "/api/v1/users/", "/v1.0/api/users/") is string updateUserId)
             {
-                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                await RequireUserUpdatePermissionAsync(requestContext, updateUserId, token).ConfigureAwait(false);
                 User user = UpdateUser(requestContext, updateUserId, context);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
@@ -1633,7 +1633,7 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
             {
                 await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Credentials.Where(item => item.TenantId == requestContext.TenantId).Select(RedactCredential).ToList()).ConfigureAwait(false);
+                await SendJsonAsync(context, ListVisibleCredentials(requestContext).Select(RedactCredential).ToList()).ConfigureAwait(false);
                 return;
             }
 
@@ -1674,7 +1674,7 @@ namespace Xeno.Server
 
             if (method == "GET" && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
             {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await RequirePermissionAsync(requestContext, "Roles", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Roles.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
                 return;
             }
@@ -1709,7 +1709,7 @@ namespace Xeno.Server
 
             if (method == "GET" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
             {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                await RequirePermissionAsync(requestContext, "Permissions", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().Permissions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
                 return;
             }
@@ -2125,14 +2125,14 @@ namespace Xeno.Server
 
             if (method == "GET" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
             {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
                 await SendJsonAsync(context, new { settings = _Settings, settingsFile = _SettingsFile }).ConfigureAwait(false);
                 return;
             }
 
             if (method == "POST" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
             {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
                 XenoSettings? incoming = JsonUtil.Deserialize<XenoSettings>(context.Request.DataAsString ?? "{}");
                 if (incoming == null) throw new ArgumentException("Settings payload is invalid.");
                 ApplySettings(incoming);
@@ -2143,14 +2143,14 @@ namespace Xeno.Server
 
             if (method == "GET" && IsPath(path, "/api/v1/backup", "/v1.0/api/backup"))
             {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
                 await SendJsonAsync(context, RequirePlatform().ToState()).ConfigureAwait(false);
                 return;
             }
 
             if (method == "POST" && IsPath(path, "/api/v1/restore", "/v1.0/api/restore"))
             {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
                 PlatformState? state = JsonUtil.Deserialize<PlatformState>(context.Request.DataAsString ?? "{}");
                 if (state == null) throw new ArgumentException("Restore payload is invalid.");
                 RequirePlatform().LoadState(state);
@@ -4335,6 +4335,7 @@ namespace Xeno.Server
                 if (!existingTenant.Active) throw new HttpStatusException(409, "TenantInactive", "Tenant is inactive.");
                 tenant = existingTenant;
             }
+            platform.EnsureTenantDefaults(tenant.Id);
 
             if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase))) throw new HttpStatusException(409, "EmailAlreadyExists", "Email already exists in the tenant.");
             if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new HttpStatusException(409, "UsernameAlreadyExists", "Username already exists in the tenant.");
@@ -4381,6 +4382,52 @@ namespace Xeno.Server
                     CreatedUtc = DateTime.UtcNow,
                     LastUpdateUtc = DateTime.UtcNow
                 });
+            }
+
+            if (creatingTenant && tenantAdminRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantAdminRole.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credential.Id))
+            {
+                platform.RoleAssignments.Add(new RoleAssignment
+                {
+                    TenantId = tenant.Id,
+                    RoleId = tenantAdminRole.Id,
+                    PrincipalType = PrincipalTypeEnum.Credential,
+                    PrincipalId = credential.Id,
+                    Active = true,
+                    CreatedUtc = DateTime.UtcNow,
+                    LastUpdateUtc = DateTime.UtcNow
+                });
+            }
+
+            if (!creatingTenant)
+            {
+                Role? tenantMemberRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantMember", StringComparison.OrdinalIgnoreCase) && item.Active);
+                if (tenantMemberRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMemberRole.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == user.Id))
+                {
+                    platform.RoleAssignments.Add(new RoleAssignment
+                    {
+                        TenantId = tenant.Id,
+                        RoleId = tenantMemberRole.Id,
+                        PrincipalType = PrincipalTypeEnum.User,
+                        PrincipalId = user.Id,
+                        Active = true,
+                        CreatedUtc = DateTime.UtcNow,
+                        LastUpdateUtc = DateTime.UtcNow
+                    });
+                }
+
+                if (tenantMemberRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMemberRole.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credential.Id))
+                {
+                    platform.RoleAssignments.Add(new RoleAssignment
+                    {
+                        TenantId = tenant.Id,
+                        RoleId = tenantMemberRole.Id,
+                        PrincipalType = PrincipalTypeEnum.Credential,
+                        PrincipalId = credential.Id,
+                        Active = true,
+                        CreatedUtc = DateTime.UtcNow,
+                        LastUpdateUtc = DateTime.UtcNow
+                    });
+                }
             }
 
             RequestContext signupContext = new RequestContext
@@ -4488,6 +4535,55 @@ namespace Xeno.Server
                     await SavePlatformAsync(token).ConfigureAwait(false);
                 }
             }
+        }
+
+        private async Task RequireUserUpdatePermissionAsync(RequestContext context, string userId, CancellationToken token)
+        {
+            AuthorizationDecision decision = _Authorization.Authorize(RequirePlatform(), new AuthorizationRequest
+            {
+                Context = context,
+                TargetTenantId = context.TenantId,
+                ResourceType = "Users",
+                OperationType = OperationTypeEnum.Write
+            });
+            if (decision.Allowed) return;
+            if (String.Equals(context.UserId, userId, StringComparison.Ordinal))
+            {
+                User? self = RequirePlatform().Users.FirstOrDefault(item => item.Id == userId && item.TenantId == context.TenantId && item.Active);
+                if (self != null) return;
+            }
+
+            _Authentication.AppendAudit(RequirePlatform(), context, "Users", OperationTypeEnum.Write, false, decision.ReasonCode, decision.StatusCode, context.TenantId, userId);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+            throw new AuthorizationDeniedException(decision.StatusCode, decision.ReasonCode, decision.Message);
+        }
+
+        private List<User> ListVisibleUsers(RequestContext requestContext)
+        {
+            XenoPlatform platform = RequirePlatform();
+            if (CanManageTenant(requestContext, requestContext.TenantId))
+            {
+                return platform.Users.Where(item => IsTenantVisible(requestContext, item.TenantId)).ToList();
+            }
+
+            return platform.Users.Where(item => item.TenantId == requestContext.TenantId && item.Id == requestContext.UserId).ToList();
+        }
+
+        private List<Credential> ListVisibleCredentials(RequestContext requestContext)
+        {
+            XenoPlatform platform = RequirePlatform();
+            if (CanManageTenant(requestContext, requestContext.TenantId))
+            {
+                return platform.Credentials.Where(item => item.TenantId == requestContext.TenantId).ToList();
+            }
+
+            return platform.Credentials.Where(item => item.TenantId == requestContext.TenantId && item.UserId == requestContext.UserId).ToList();
+        }
+
+        private bool CanManageTenant(RequestContext requestContext, string tenantId)
+        {
+            XenoPlatform platform = RequirePlatform();
+            return _Authorization.IsSystemAdmin(platform, requestContext) || _Authorization.IsTenantAdmin(platform, requestContext, tenantId);
         }
 
         private async Task<bool> RejectRateLimitedAuthAttemptAsync(HttpContextBase context)
@@ -4610,6 +4706,10 @@ namespace Xeno.Server
 
             if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.");
             if (!platform.Users.Any(item => item.Id == userId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("Credential user does not exist or is inactive.");
+            if (!CanManageTenant(requestContext, tenantId) && !String.Equals(userId, requestContext.UserId, StringComparison.Ordinal))
+            {
+                throw new AuthorizationDeniedException(403, "SelfServiceCredentialOnly", "Regular users can create credentials only for their own account.");
+            }
 
             string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
             if (platform.Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
@@ -5051,15 +5151,43 @@ namespace Xeno.Server
             if (user == null) throw new KeyNotFoundException("User not found.");
 
             UserSaveRequest body = ReadJsonBody<UserSaveRequest>(context);
+            bool selfService = !CanManageTenant(requestContext, user.TenantId);
+            if (selfService && !String.Equals(user.Id, requestContext.UserId, StringComparison.Ordinal))
+            {
+                throw new AuthorizationDeniedException(403, "SelfServiceUserOnly", "Regular users can update only their own account.");
+            }
+
+            if (selfService && (body.IsAdmin.HasValue || body.IsTenantAdmin.HasValue || body.Active.HasValue))
+            {
+                throw new AuthorizationDeniedException(403, "SelfServiceUserFieldDenied", "Regular users cannot change administrative or account-state fields.");
+            }
+
             string? username = body.Username;
             if (username != null)
             {
                 if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
-                user.Username = username.Trim();
+                string normalizedUsername = username.Trim();
+                if (platform.Users.Any(item => item.TenantId == user.TenantId && item.Id != user.Id && String.Equals(item.Username, normalizedUsername, StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new HttpStatusException(409, "UsernameAlreadyExists", "Username already exists in the tenant.");
+                }
+
+                user.Username = normalizedUsername;
             }
 
             string? email = body.Email;
-            if (email != null) user.Email = email.Trim();
+            if (email != null)
+            {
+                string normalizedEmail = email.Trim();
+                if (String.IsNullOrWhiteSpace(normalizedEmail)) throw new ArgumentException("Email is required.");
+                if (!IsValidEmailAddress(normalizedEmail)) throw new ArgumentException("Email address is invalid.");
+                if (platform.Users.Any(item => item.TenantId == user.TenantId && item.Id != user.Id && String.Equals(item.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new HttpStatusException(409, "EmailAlreadyExists", "Email already exists in the tenant.");
+                }
+
+                user.Email = normalizedEmail;
+            }
 
             if (body.IsAdmin.HasValue && body.IsAdmin.Value != user.IsAdmin)
             {
@@ -5150,16 +5278,30 @@ namespace Xeno.Server
         {
             Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
             if (credential == null) throw new KeyNotFoundException("Credential not found.");
+            if (!CanManageTenant(requestContext, credential.TenantId) && !String.Equals(credential.UserId, requestContext.UserId, StringComparison.Ordinal))
+            {
+                throw new AuthorizationDeniedException(403, "SelfServiceCredentialOnly", "Regular users can update only their own credentials.");
+            }
 
             CredentialSaveRequest body = ReadJsonBody<CredentialSaveRequest>(context);
             string? userId = body.UserId;
-            if (userId != null) credential.UserId = userId.Trim();
+            if (userId != null)
+            {
+                if (!CanManageTenant(requestContext, credential.TenantId)) throw new AuthorizationDeniedException(403, "SelfServiceCredentialOwnerDenied", "Regular users cannot reassign credentials.");
+                credential.UserId = userId.Trim();
+            }
 
             string? accessKey = body.AccessKey;
             if (accessKey != null)
             {
                 if (String.IsNullOrWhiteSpace(accessKey)) throw new ArgumentException("Access key is required.");
-                credential.AccessKey = accessKey.Trim();
+                string normalizedAccessKey = accessKey.Trim();
+                if (RequirePlatform().Credentials.Any(item => item.TenantId == credential.TenantId && item.Id != credential.Id && String.Equals(item.AccessKey, normalizedAccessKey, StringComparison.Ordinal)))
+                {
+                    throw new HttpStatusException(409, "AccessKeyAlreadyExists", "Access key already exists in the tenant.");
+                }
+
+                credential.AccessKey = normalizedAccessKey;
             }
 
             if (!String.IsNullOrWhiteSpace(body.SecretKey)) throw new ArgumentException("Secret keys are not accepted for credential updates.");

@@ -664,12 +664,33 @@ namespace Xeno.Core.Services
             Permission writePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Write);
             Permission deletePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Delete);
             Permission executePermission = EnsurePermission(tenantId, "*", OperationTypeEnum.Execute);
+            Permission authenticationReadPermission = EnsurePermission(tenantId, "Authentication", OperationTypeEnum.Read);
+            Permission tenantsReadPermission = EnsurePermission(tenantId, "Tenants", OperationTypeEnum.Read);
+            Permission usersReadPermission = EnsurePermission(tenantId, "Users", OperationTypeEnum.Read);
+            Permission credentialsReadPermission = EnsurePermission(tenantId, "Credentials", OperationTypeEnum.Read);
+            Permission credentialsWritePermission = EnsurePermission(tenantId, "Credentials", OperationTypeEnum.Write);
+            Permission rolesReadPermission = EnsurePermission(tenantId, "Roles", OperationTypeEnum.Read);
+            Permission permissionsReadPermission = EnsurePermission(tenantId, "Permissions", OperationTypeEnum.Read);
+            Permission clientsReadPermission = EnsurePermission(tenantId, "Clients", OperationTypeEnum.Read);
+            Permission clientTelemetryReadPermission = EnsurePermission(tenantId, "ClientTelemetry", OperationTypeEnum.Read);
             Permission inferenceReadPermission = EnsurePermission(tenantId, "Inference", OperationTypeEnum.Read);
             Permission inferenceExecutePermission = EnsurePermission(tenantId, "Inference", OperationTypeEnum.Execute);
             Permission adminPermission = EnsurePermission(tenantId, "Admin", OperationTypeEnum.Admin);
             Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, adminPermission.Id });
             EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
-            EnsureRole(tenantId, "TenantMember", new List<string> { readPermission.Id });
+            EnsureRole(tenantId, "TenantMember", new List<string>
+            {
+                authenticationReadPermission.Id,
+                tenantsReadPermission.Id,
+                usersReadPermission.Id,
+                credentialsReadPermission.Id,
+                credentialsWritePermission.Id,
+                rolesReadPermission.Id,
+                permissionsReadPermission.Id,
+                clientsReadPermission.Id,
+                clientTelemetryReadPermission.Id,
+                inferenceReadPermission.Id
+            });
 
             if (adminUser != null)
             {
