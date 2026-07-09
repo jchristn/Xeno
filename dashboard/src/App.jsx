@@ -1292,24 +1292,20 @@ function RegisterView({ onComplete, onToggleTheme, theme }) {
   const [tenantId, setTenantId] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [status, setStatus] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(null);
 
   function updateMode(nextMode) {
     setMode(nextMode);
-    setStatus('');
     setFieldErrors({});
   }
 
   async function submitRegistration(event) {
     event.preventDefault();
-    setStatus('');
     const validation = validateRegistration();
     setFieldErrors(validation);
     if (Object.keys(validation).length > 0) {
-      setStatus(t('registerValidationFailed'));
       return;
     }
 
@@ -1336,10 +1332,10 @@ function RegisterView({ onComplete, onToggleTheme, theme }) {
         serverUrl: normalizedServerUrl
       });
     } catch (error) {
-      setStatus(error?.message || t('registerFailed'));
+      const field = error?.field || 'serverUrl';
       setFieldErrors((current) => ({
         ...current,
-        ...(error?.field ? { [error.field]: error.message } : {})
+        [field]: error?.message || t('registerFailed')
       }));
     } finally {
       setLoading(false);
@@ -1369,6 +1365,9 @@ function RegisterView({ onComplete, onToggleTheme, theme }) {
       error.field = 'tenantId';
     } else if (code === 'EmailAlreadyExists') {
       error.message = t('registerEmailConflict');
+      error.field = 'email';
+    } else if (code === 'GlobalAdminEmailAlreadyExists') {
+      error.message = t('registerGlobalAdminEmailConflict', 'Email already belongs to a global administrator.');
       error.field = 'email';
     } else if (code === 'UsernameAlreadyExists') {
       error.message = t('registerEmailConflict');
@@ -1472,7 +1471,6 @@ function RegisterView({ onComplete, onToggleTheme, theme }) {
               </label>
             </RegisterFieldError>
 
-            {status ? <div className="form-status danger register-status" role="alert">{status}</div> : null}
             <div className="button-row">
               <button className="primary-button" disabled={!canSubmit} title={t('tooltipRegisterSubmit')} type="submit">
                 <ShieldCheck size={16} />

@@ -288,6 +288,40 @@ test('register route clears an existing dashboard session before onboarding', as
   await expect.poll(async () => page.evaluate(() => window.localStorage.getItem('xeno.dashboard.session'))).toBeNull();
 });
 
+test('register errors render only under their matching fields', async ({ page }) => {
+  await page.route(`${serverUrl}/v1.0/api/onboarding/signup`, async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.tenantId === 'ten_missing') {
+      await route.fulfill({
+        status: 404,
+        json: { error: 'TenantNotFound', message: 'Tenant ID was not found.' }
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 409,
+      json: { error: 'GlobalAdminEmailAlreadyExists', message: 'Email already belongs to a global administrator.' }
+    });
+  });
+
+  await page.goto('/register');
+  await page.getByRole('radio', { name: 'I am joining an existing organization' }).click();
+  await page.getByLabel('Tenant ID').fill('ten_missing');
+  await page.getByLabel('Email').fill('member@xeno.test');
+  await page.getByLabel('Password').fill('password123');
+  await page.getByRole('button', { name: 'Create Account' }).click();
+  await expect(page.getByText('That tenant ID could not be found.')).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await page.getByLabel('Tenant ID').fill('ten_default');
+  await page.getByLabel('Email').fill('admin@xeno.test');
+  await page.getByRole('button', { name: 'Create Account' }).click();
+  await expect(page.getByText('Email already belongs to a global administrator.')).toHaveCount(1);
+  await expect(page.getByText('That tenant ID could not be found.')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('unknown public routes render the styled not found page', async ({ page }) => {
   await page.goto('/not-a-real-dashboard-page');
 
