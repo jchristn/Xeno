@@ -286,6 +286,22 @@ The clients response includes connection state, capacity fields, authenticated o
 
 `POST /v1.0/api/settings`
 
+The server settings payload includes an `Email` section for administrative
+notification workflows. `Email.Provider` supports `Disabled`, `File`, and
+`Mailgun`. `Disabled` is the default. `File` writes rendered `.json`, `.html`,
+and `.txt` messages to `Email.File.Directory` for local development and tests.
+`Mailgun` uses `Email.Mailgun.Domain` and `Email.Mailgun.ApiKey` through the
+provider abstraction in `Xeno.Email`.
+
+Onboarding can trigger email side effects when email is enabled: platform
+administrator alerts for tenant/user onboarding, tenant administrator alerts
+when users join an organization, and welcome messages for new tenant
+administrators or members when the corresponding notification toggles are on.
+The onboarding response body does not change. Notification failures are
+best-effort operational failures and do not roll back tenant or user creation.
+Email templates never include passwords, bearer tokens, access keys, secret
+keys, or hashed secret material.
+
 `GET /v1.0/api/backup`
 
 `POST /v1.0/api/restore`

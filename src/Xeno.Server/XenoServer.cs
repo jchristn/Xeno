@@ -28,6 +28,9 @@ namespace Xeno.Server
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
     using Xeno.Core.Settings;
+    using Xeno.Email;
+    using Xeno.Email.Providers;
+    using Xeno.Email.Workflows;
     using Xeno.Server.Services;
 
     /// <summary>
@@ -51,9 +54,13 @@ namespace Xeno.Server
         private readonly Dictionary<string, List<DateTime>> _AuthRateLimitAttempts = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingCallerDisconnects = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, byte> _ActiveNukeOperations = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, long> _EmailSentByProviderTemplate = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, long> _EmailSkippedByProviderTemplate = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, long> _EmailFailedByProviderTemplate = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private readonly AuthenticationService _Authentication = new AuthenticationService();
         private readonly AuthorizationService _Authorization = new AuthorizationService();
         private readonly ClientTelemetryLatestCache _TelemetryLatestCache = new ClientTelemetryLatestCache();
+        private readonly IXenoEmailService _Email;
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
         private CancellationTokenSource? _TelemetryCollectionCancellation;
@@ -67,6 +74,10 @@ namespace Xeno.Server
         private long _AuthFailureCount;
         private long _AuthorizationDenialCount;
         private long _PrivilegedBypassCount;
+        private long _EmailSentCount;
+        private long _EmailSkippedCount;
+        private long _EmailFailureCount;
+        private long _EmailLastFailureTicks;
         private bool _Disposed;
 
         /// <summary>
@@ -89,6 +100,7 @@ namespace Xeno.Server
             webserverSettings.WebSockets.Enable = _Settings.WebSocket.Enabled;
 
             _Webserver = new Webserver(webserverSettings, DefaultRouteAsync);
+            _Email = new XenoEmailService(_Settings.Email, EmailProviderFactory.Create(_Settings.Email));
             ConfigureWatson();
         }
 
@@ -1331,7 +1343,8 @@ namespace Xeno.Server
                 SchemaProperty("database", OpenApiSchemaMetadata.Create("object", "Database settings.")),
                 SchemaProperty("auth", OpenApiSchemaMetadata.Create("object", "Authentication settings.")),
                 SchemaProperty("requestHistory", OpenApiSchemaMetadata.Create("object", "Request history settings.")),
-                SchemaProperty("routing", OpenApiSchemaMetadata.Create("object", "Routing settings.")));
+                SchemaProperty("routing", OpenApiSchemaMetadata.Create("object", "Routing settings.")),
+                SchemaProperty("email", OpenApiSchemaMetadata.Create("object", "Email notification settings.")));
         }
 
         private async Task PreflightRouteAsync(HttpContextBase context)
@@ -4105,6 +4118,7 @@ namespace Xeno.Server
             _Settings.Auth = incoming.Auth ?? new AuthSettings();
             _Settings.RequestHistory = incoming.RequestHistory ?? new RequestHistorySettings();
             _Settings.Routing = incoming.Routing ?? new RoutingSettings();
+            _Settings.Email = incoming.Email ?? new EmailSettings();
             if (_Database != null) _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
         }
 
@@ -4443,7 +4457,7 @@ namespace Xeno.Server
             _Authentication.AppendAudit(platform, signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
 
-            await SendJsonAsync(context, new AuthOnboardingResponse
+            AuthOnboardingResponse response = new AuthOnboardingResponse
             {
                 Status = "success",
                 Tenant = new AuthOnboardingTenantDetails
@@ -4482,7 +4496,11 @@ namespace Xeno.Server
                     SessionId = tokenResult.SessionId,
                     ExpiresUtc = tokenResult.ExpiresUtc
                 }
-            }).ConfigureAwait(false);
+            };
+
+            OnboardingEmailContext emailContext = BuildOnboardingEmailContext(platform, context, tenant, user, creatingTenant);
+            await SendOnboardingNotificationsSafeAsync(emailContext, signupContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
         }
 
         private static void RemoveSeedDevelopmentPrincipal(XenoPlatform platform, string tenantId)
@@ -4496,6 +4514,88 @@ namespace Xeno.Server
             platform.Credentials.RemoveAll(item => item.TenantId == tenantId && (seedUserIds.Contains(item.UserId) || String.Equals(item.AccessKey, "default", StringComparison.Ordinal)));
             platform.RoleAssignments.RemoveAll(item => item.TenantId == tenantId && item.PrincipalType == PrincipalTypeEnum.User && seedUserIds.Contains(item.PrincipalId));
             platform.Users.RemoveAll(item => item.TenantId == tenantId && seedUserIds.Contains(item.Id));
+        }
+
+        private OnboardingEmailContext BuildOnboardingEmailContext(XenoPlatform platform, HttpContextBase context, Tenant tenant, User user, bool createdTenant)
+        {
+            return new OnboardingEmailContext
+            {
+                CreatedTenant = createdTenant,
+                TenantId = tenant.Id,
+                TenantName = tenant.Name,
+                UserId = user.Id,
+                Username = user.Username,
+                UserEmail = user.Email,
+                IsTenantAdmin = user.IsTenantAdmin,
+                SourceIp = context.Request.Source.IpAddress,
+                CorrelationId = FirstNonEmpty(context.Request.Headers.Get("x-xeno-request-id"), context.Request.Headers.Get("X-Xeno-Request-ID")),
+                EventUtc = DateTime.UtcNow,
+                PlatformAdministrators = BuildConfiguredEmailRecipients(_Settings.Email.Notifications.PlatformAdministratorRecipients),
+                TenantAdministrators = platform.Users
+                    .Where(item => item.TenantId == tenant.Id && item.Active && item.IsTenantAdmin && !String.IsNullOrWhiteSpace(item.Email))
+                    .Select(item => EmailAddress.Create(item.Email, item.Username))
+                    .ToList()
+            };
+        }
+
+        private static List<EmailAddress> BuildConfiguredEmailRecipients(List<EmailRecipientSettings> recipients)
+        {
+            List<EmailAddress> results = new List<EmailAddress>();
+            if (recipients == null) return results;
+
+            foreach (EmailRecipientSettings recipient in recipients)
+            {
+                if (recipient == null || String.IsNullOrWhiteSpace(recipient.Email)) continue;
+                results.Add(EmailAddress.Create(recipient.Email, recipient.Name));
+            }
+
+            return results;
+        }
+
+        private async Task SendOnboardingNotificationsSafeAsync(OnboardingEmailContext emailContext, RequestContext auditContext, CancellationToken token)
+        {
+            if (!_Settings.Email.Enabled) return;
+
+            try
+            {
+                using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+                {
+                    timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                    IReadOnlyList<EmailSendResult> results = await _Email.SendOnboardingNotificationsAsync(emailContext, timeout.Token).ConfigureAwait(false);
+                    foreach (EmailSendResult result in results)
+                    {
+                        RecordEmailResult(result);
+                        string reasonCode = result.Skipped ? "EmailSkipped" : "EmailAccepted";
+                        _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, result.Skipped ? 202 : 200, emailContext.TenantId, emailContext.UserId);
+                    }
+                }
+
+                await SavePlatformAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailCanceled", 499, emailContext.TenantId, emailContext.UserId);
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (EmailDeliveryException)
+            {
+                RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailDeliveryFailed", 502, emailContext.TenantId, emailContext.UserId);
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException)
+            {
+                RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailInvalidOperation", 500, emailContext.TenantId, emailContext.UserId);
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (ArgumentException)
+            {
+                RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailConfigurationInvalid", 500, emailContext.TenantId, emailContext.UserId);
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            }
         }
 
         private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
@@ -5743,8 +5843,104 @@ namespace Xeno.Server
                 "xeno_authorization_denial_total " + Interlocked.Read(ref _AuthorizationDenialCount).ToString(CultureInfo.InvariantCulture) + "\n" +
                 "# HELP xeno_privileged_bypass_total System-admin and tenant-admin bypass authorizations\n" +
                 "# TYPE xeno_privileged_bypass_total counter\n" +
-                "xeno_privileged_bypass_total " + Interlocked.Read(ref _PrivilegedBypassCount).ToString(CultureInfo.InvariantCulture) + "\n";
+                "xeno_privileged_bypass_total " + Interlocked.Read(ref _PrivilegedBypassCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                "# HELP xeno_email_sent_total Accepted email messages\n" +
+                "# TYPE xeno_email_sent_total counter\n" +
+                "xeno_email_sent_total " + Interlocked.Read(ref _EmailSentCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                BuildEmailMetricSeries("xeno_email_sent_by_template_total", "Accepted email messages by provider and template", _EmailSentByProviderTemplate) +
+                "# HELP xeno_email_skipped_total Skipped email messages\n" +
+                "# TYPE xeno_email_skipped_total counter\n" +
+                "xeno_email_skipped_total " + Interlocked.Read(ref _EmailSkippedCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                BuildEmailMetricSeries("xeno_email_skipped_by_template_total", "Skipped email messages by provider and template", _EmailSkippedByProviderTemplate) +
+                "# HELP xeno_email_failed_total Failed email messages\n" +
+                "# TYPE xeno_email_failed_total counter\n" +
+                "xeno_email_failed_total " + Interlocked.Read(ref _EmailFailureCount).ToString(CultureInfo.InvariantCulture) + "\n" +
+                BuildEmailMetricSeries("xeno_email_failed_by_template_total", "Failed email messages by provider and template", _EmailFailedByProviderTemplate) +
+                "# HELP xeno_email_last_failure_unix_seconds Last email failure timestamp\n" +
+                "# TYPE xeno_email_last_failure_unix_seconds gauge\n" +
+                "xeno_email_last_failure_unix_seconds " + EmailLastFailureUnixSeconds().ToString(CultureInfo.InvariantCulture) + "\n";
             await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
+        }
+
+        private void RecordEmailResult(EmailSendResult result)
+        {
+            if (result == null) return;
+            if (result.Skipped)
+            {
+                Interlocked.Increment(ref _EmailSkippedCount);
+                IncrementEmailSeries(_EmailSkippedByProviderTemplate, result.Provider, result.TemplateId);
+                return;
+            }
+
+            if (result.Accepted)
+            {
+                Interlocked.Increment(ref _EmailSentCount);
+                IncrementEmailSeries(_EmailSentByProviderTemplate, result.Provider, result.TemplateId);
+            }
+            else
+            {
+                RecordEmailFailure(result.Provider, result.TemplateId);
+            }
+        }
+
+        private void RecordEmailFailure(string provider, string templateId)
+        {
+            Interlocked.Increment(ref _EmailFailureCount);
+            Interlocked.Exchange(ref _EmailLastFailureTicks, DateTime.UtcNow.Ticks);
+            IncrementEmailSeries(_EmailFailedByProviderTemplate, provider, templateId);
+        }
+
+        private static void IncrementEmailSeries(ConcurrentDictionary<string, long> series, string provider, string templateId)
+        {
+            string key = FirstNonEmpty(provider, "unknown") + "|" + FirstNonEmpty(templateId, "unknown");
+            series.AddOrUpdate(key, 1, delegate(string existingKey, long current)
+            {
+                return current + 1;
+            });
+        }
+
+        private string BuildEmailMetricSeries(string metricName, string help, ConcurrentDictionary<string, long> series)
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.Append("# HELP ");
+            builder.Append(metricName);
+            builder.Append(' ');
+            builder.Append(help);
+            builder.Append('\n');
+            builder.Append("# TYPE ");
+            builder.Append(metricName);
+            builder.Append(" counter\n");
+            foreach (KeyValuePair<string, long> item in series.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                string[] parts = item.Key.Split('|');
+                string provider = parts.Length > 0 ? parts[0] : "unknown";
+                string template = parts.Length > 1 ? parts[1] : "unknown";
+                builder.Append(metricName);
+                builder.Append("{provider=\"");
+                builder.Append(EscapePrometheusLabel(provider));
+                builder.Append("\",template=\"");
+                builder.Append(EscapePrometheusLabel(template));
+                builder.Append("\"} ");
+                builder.Append(item.Value.ToString(CultureInfo.InvariantCulture));
+                builder.Append('\n');
+            }
+
+            return builder.ToString();
+        }
+
+        private double EmailLastFailureUnixSeconds()
+        {
+            long ticks = Interlocked.Read(ref _EmailLastFailureTicks);
+            if (ticks <= 0) return 0;
+            return new DateTimeOffset(new DateTime(ticks, DateTimeKind.Utc)).ToUnixTimeSeconds();
+        }
+
+        private static string EscapePrometheusLabel(string value)
+        {
+            return (value ?? String.Empty)
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("\"", "\\\"", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal);
         }
 
         private object AnalyticsOverview(RequestContext requestContext, HttpContextBase context)
@@ -7006,12 +7202,34 @@ namespace Xeno.Server
                         Property("database", ObjectSchema()),
                         Property("auth", ObjectSchema()),
                         Property("requestHistory", ObjectSchema()),
-                        Property("routing", ObjectSchema())),
+                        Property("routing", ObjectSchema()),
+                        Property("email", ObjectSchema())),
                     new Dictionary<string, object>
                     {
                         ["rest"] = new Dictionary<string, object> { ["hostname"] = "0.0.0.0", ["port"] = 9000, ["ssl"] = false },
                         ["cors"] = new Dictionary<string, object> { ["enabled"] = true, ["allowedOrigins"] = new[] { "*" } },
-                        ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" }
+                        ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" },
+                        ["email"] = new Dictionary<string, object>
+                        {
+                            ["enabled"] = false,
+                            ["provider"] = "Disabled",
+                            ["fromAddress"] = "noreply@xenocloud.ai",
+                            ["fromName"] = "Xeno",
+                            ["replyToAddress"] = "support@xenocloud.ai",
+                            ["supportAddress"] = "support@xenocloud.ai",
+                            ["applicationBaseUrl"] = "https://portal.xenocloud.ai",
+                            ["mailgun"] = new Dictionary<string, object> { ["domain"] = "", ["apiKey"] = "", ["region"] = "US" },
+                            ["file"] = new Dictionary<string, object> { ["directory"] = "data/email-outbox" },
+                            ["notifications"] = new Dictionary<string, object>
+                            {
+                                ["notifyPlatformAdministratorsOnTenantCreated"] = true,
+                                ["notifyPlatformAdministratorsOnUserJoined"] = true,
+                                ["notifyTenantAdministratorsOnUserJoined"] = true,
+                                ["notifyNewTenantAdministrator"] = true,
+                                ["notifyNewTenantMember"] = false,
+                                ["platformAdministratorRecipients"] = Array.Empty<object>()
+                            }
+                        }
                     });
             }
 

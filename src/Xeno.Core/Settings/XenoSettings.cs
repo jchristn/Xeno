@@ -56,5 +56,10 @@ namespace Xeno.Core.Settings
         /// Routing settings.
         /// </summary>
         public RoutingSettings Routing { get; set; } = new RoutingSettings();
+
+        /// <summary>
+        /// Email notification settings.
+        /// </summary>
+        public EmailSettings Email { get; set; } = new EmailSettings();
     }
 }

@@ -149,6 +149,8 @@ Xeno records server request history and local client request history. Server req
 
 Headers are redacted for common sensitive names such as authorization, tokens, cookies, secrets, credentials, and API keys. Redaction is not a substitute for data minimization. Prompts and responses can carry secrets even when headers do not.
 
+Server email settings can contain provider secrets such as `Email.Mailgun.ApiKey`. Treat them the same way as database passwords and signing keys: keep them out of committed production settings, rotate them after exposure, and avoid copying them into screenshots or issue reports. Xeno notification templates are intentionally non-secret; they must not include user passwords, bearer tokens, access keys, secret keys, or hashed credential material. Use the file email provider for local inspection rather than sending test messages to real recipients.
+
 For sensitive environments:
 
 - Disable body persistence where inspection is not required.

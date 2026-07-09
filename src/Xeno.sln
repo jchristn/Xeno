@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -30,6 +30,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Xeno.DataLoader", "Xeno.DataLoader\Xeno.DataLoader.csproj", "{A536C634-5228-4749-84F1-29823B752976}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Xeno.Tray", "Xeno.Tray\Xeno.Tray.csproj", "{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Xeno.Email", "Xeno.Email\Xeno.Email.csproj", "{21B060B1-D014-414A-BDBF-0061528E512D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -185,6 +187,18 @@ Global
 		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x64.Build.0 = Release|Any CPU
 		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x86.ActiveCfg = Release|Any CPU
 		{3EE4F276-F1DB-4B3A-A668-28B069D9A08A}.Release|x86.Build.0 = Release|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Debug|x64.Build.0 = Debug|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Debug|x86.Build.0 = Debug|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Release|x64.ActiveCfg = Release|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Release|x64.Build.0 = Release|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Release|x86.ActiveCfg = Release|Any CPU
+		{21B060B1-D014-414A-BDBF-0061528E512D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

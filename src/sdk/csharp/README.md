@@ -120,7 +120,8 @@ The SDK includes methods for:
 - server-collected client telemetry status, latest samples, manual collection,
   history search, rollups, detail reads, deletes, provider telemetry, and the
   telemetry metric catalog;
-- request history, public model token leaderboard, analytics, settings, backup,
+- request history, public model token leaderboard, analytics, settings including
+  email provider configuration, backup,
   restore, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,

@@ -57,6 +57,33 @@
     "Enabled": true,
     "Mode": "Monitor"
   },
+  "Email": {
+    "Enabled": false,
+    "Provider": "Disabled",
+    "FromAddress": "noreply@xenocloud.ai",
+    "FromName": "Xeno",
+    "ReplyToAddress": "support@xenocloud.ai",
+    "SupportAddress": "support@xenocloud.ai",
+    "ApplicationBaseUrl": "https://portal.xenocloud.ai",
+    "SubjectPrefix": "",
+    "MaxBodyBytes": 262144,
+    "Mailgun": {
+      "Domain": "",
+      "ApiKey": "",
+      "Region": "US"
+    },
+    "File": {
+      "Directory": "data/email-outbox"
+    },
+    "Notifications": {
+      "NotifyPlatformAdministratorsOnTenantCreated": true,
+      "NotifyPlatformAdministratorsOnUserJoined": true,
+      "NotifyTenantAdministratorsOnUserJoined": true,
+      "NotifyNewTenantAdministrator": true,
+      "NotifyNewTenantMember": false,
+      "PlatformAdministratorRecipients": []
+    }
+  },
   "Routing": {
     "DefaultTimeoutMs": 300000,
     "LoadBalancingMode": "RoundRobin",
