@@ -4972,43 +4972,8 @@ function JsonPanelInline({ title, data }) {
 
 function JsonBlock({ data }) {
   return (
-    <div className="json-viewer">
-      <JsonTreeNode data={data} />
-    </div>
+    <pre className="json-preview"><code>{stringifyJson(data)}</code></pre>
   );
-}
-
-function JsonTreeNode({ data, fieldKey = '' }) {
-  if (data === null || data === undefined) return <span className="json-null">null</span>;
-  if (Array.isArray(data)) {
-    return (
-      <div className="json-array">
-        {data.length === 0 ? <span className="json-null">[]</span> : data.map((item, index) => (
-          <div className="json-row" key={index}>
-            <span className="json-key">{index}</span>
-            <JsonTreeNode data={item} fieldKey={fieldKey} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (typeof data === 'object') {
-    const entries = Object.entries(data);
-    return (
-      <div className="json-object">
-        {entries.length === 0 ? <span className="json-null">{'{}'}</span> : entries.map(([key, value]) => (
-          <div className="json-row" key={key}>
-            <span className="json-key">{key}</span>
-            <JsonTreeNode data={value} fieldKey={key} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (isIdentifierColumn(fieldKey)) return <CopyableValue value={data} />;
-  if (typeof data === 'boolean') return <StatusChip tone={data ? 'success' : 'danger'} value={String(data)} />;
-  if (typeof data === 'number') return <span className="json-number">{data}</span>;
-  return <span className="json-string">{String(data)}</span>;
 }
 
 function stringifyJson(data) {

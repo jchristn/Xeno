@@ -1094,8 +1094,64 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             await RunAuthorizationKernelContractsAsync().ConfigureAwait(false);
+                        }),
+                    new TestCaseDescriptor(
+                        "Authentication",
+                        "TenantMemberBackfill",
+                        "Tenant defaults backfill legacy regular users with dashboard read permissions",
+                        executeAsync: async delegate
+                        {
+                            await RunTenantMemberBackfillAsync().ConfigureAwait(false);
                         })
                 });
+        }
+
+        private static async Task RunTenantMemberBackfillAsync()
+        {
+            XenoPlatform platform = new XenoPlatform();
+            await platform.InitializeAsync().ConfigureAwait(false);
+            Tenant tenant = platform.GetDefaultTenant();
+            User legacyUser = new User
+            {
+                TenantId = tenant.Id,
+                Username = "legacy-member@xeno.test",
+                Email = "legacy-member@xeno.test",
+                IsAdmin = false,
+                IsTenantAdmin = false,
+                Active = true
+            };
+            platform.Users.Add(legacyUser);
+            Credential legacyCredential = new Credential
+            {
+                TenantId = tenant.Id,
+                UserId = legacyUser.Id,
+                AccessKey = "legacy-member-key",
+                SecretKey = "legacy-member-secret",
+                Active = true
+            };
+            platform.Credentials.Add(legacyCredential);
+
+            if (platform.RoleAssignments.Any(item => item.PrincipalId == legacyUser.Id || item.PrincipalId == legacyCredential.Id)) throw new InvalidOperationException("Legacy user fixture unexpectedly started with role assignments.");
+
+            platform.EnsureTenantDefaults(tenant.Id);
+
+            Role? tenantMember = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantMember", StringComparison.OrdinalIgnoreCase));
+            if (tenantMember == null) throw new InvalidOperationException("TenantMember role was not created.");
+            if (!platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMember.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == legacyUser.Id && item.Active)) throw new InvalidOperationException("Legacy user did not receive TenantMember.");
+            if (!platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMember.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == legacyCredential.Id && item.Active)) throw new InvalidOperationException("Legacy credential did not receive TenantMember.");
+
+            AuthorizationService authorization = new AuthorizationService();
+            RequestContext userContext = new RequestContext { TenantId = tenant.Id, UserId = legacyUser.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
+            foreach (string resourceType in new List<string> { "Authentication", "Tenants", "Users", "Credentials", "Roles", "Permissions", "Clients", "ClientTelemetry", "Inference" })
+            {
+                AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = resourceType, OperationType = OperationTypeEnum.Read }), "TenantMember should read " + resourceType + ".");
+            }
+
+            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = "Credentials", OperationType = OperationTypeEnum.Write }), "TenantMember should create credentials.");
+            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Write }), "PermissionDenied");
+
+            RequestContext credentialContext = new RequestContext { TenantId = tenant.Id, UserId = legacyUser.Id, CredentialId = legacyCredential.Id, PrincipalType = PrincipalTypeEnum.Credential, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Credential };
+            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = credentialContext, TargetTenantId = tenant.Id, ResourceType = "Clients", OperationType = OperationTypeEnum.Read }), "TenantMember credential should read clients.");
         }
 
         private static async Task RunAuthorizationKernelContractsAsync()

@@ -678,7 +678,7 @@ namespace Xeno.Core.Services
             Permission adminPermission = EnsurePermission(tenantId, "Admin", OperationTypeEnum.Admin);
             Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, adminPermission.Id });
             EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
-            EnsureRole(tenantId, "TenantMember", new List<string>
+            Role tenantMember = EnsureRole(tenantId, "TenantMember", new List<string>
             {
                 authenticationReadPermission.Id,
                 tenantsReadPermission.Id,
@@ -691,6 +691,7 @@ namespace Xeno.Core.Services
                 clientTelemetryReadPermission.Id,
                 inferenceReadPermission.Id
             });
+            EnsureTenantMemberBackfill(tenantId, tenantMember);
 
             if (adminUser != null)
             {
@@ -730,6 +731,44 @@ namespace Xeno.Core.Services
                     });
                 }
             }
+        }
+
+        private void EnsureTenantMemberBackfill(string tenantId, Role tenantMember)
+        {
+            List<User> regularUsers = Users
+                .Where(item => item.TenantId == tenantId)
+                .Where(item => item.Active)
+                .Where(item => !item.IsAdmin && !item.IsTenantAdmin)
+                .ToList();
+            foreach (User user in regularUsers)
+            {
+                EnsureTenantMemberAssignment(tenantId, tenantMember.Id, PrincipalTypeEnum.User, user.Id);
+            }
+
+            List<string> regularUserIds = regularUsers.Select(item => item.Id).ToList();
+            foreach (Credential credential in Credentials.Where(item => item.TenantId == tenantId && item.Active && regularUserIds.Contains(item.UserId)).ToList())
+            {
+                EnsureTenantMemberAssignment(tenantId, tenantMember.Id, PrincipalTypeEnum.Credential, credential.Id);
+            }
+        }
+
+        private void EnsureTenantMemberAssignment(string tenantId, string roleId, PrincipalTypeEnum principalType, string principalId)
+        {
+            bool hasActiveAssignment = RoleAssignments.Any(item =>
+                item.TenantId == tenantId &&
+                item.PrincipalType == principalType &&
+                item.PrincipalId == principalId &&
+                item.Active);
+            if (hasActiveAssignment) return;
+
+            RoleAssignments.Add(new RoleAssignment
+            {
+                TenantId = tenantId,
+                RoleId = roleId,
+                PrincipalType = principalType,
+                PrincipalId = principalId,
+                Active = true
+            });
         }
 
         private Permission EnsurePermission(string tenantId, string resourceType, OperationTypeEnum operationType)

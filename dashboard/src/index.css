@@ -2541,20 +2541,19 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: var(--color-panel-soft);
+  background: color-mix(in srgb, var(--color-panel-soft) 88%, #9ca3af);
   color: var(--color-text);
   padding: 14px;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.55;
-  white-space: pre-wrap;
+  white-space: pre;
 }
 
 .json-preview code {
   font-family: inherit;
 }
 
-.json-block,
 .metrics-output {
   width: 100%;
   max-height: 520px;
@@ -2568,94 +2567,6 @@ html[data-theme='dark'] .primitive-list-item {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.55;
-}
-
-.json-viewer {
-  width: 100%;
-  max-height: 560px;
-  overflow: auto;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: #11181d;
-  color: #dbe7ef;
-  padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.json-object,
-.json-array {
-  display: grid;
-  gap: 6px;
-}
-
-.json-row {
-  display: grid;
-  grid-template-columns: minmax(90px, 180px) minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  padding-bottom: 6px;
-}
-
-.json-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.json-key {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  color: #8fb7c2;
-  overflow-wrap: anywhere;
-}
-
-.json-string {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  color: #f2d38d;
-  overflow-wrap: anywhere;
-}
-
-.json-number {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  color: #98c6ff;
-}
-
-.json-null {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  color: #93a1aa;
-}
-
-.json-viewer .status-chip {
-  min-height: 24px;
-}
-
-.json-viewer .copyable-value {
-  background: transparent;
-  border-color: transparent;
-}
-
-.json-viewer .copyable-value code {
-  color: #ffffff;
-}
-
-.json-viewer .copy-button {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #dbe7ef;
-}
-
-.json-viewer .copy-button.copied {
-  background: rgba(22, 128, 61, 0.32);
-  color: #8af0aa;
 }
 
 .form-stack {
@@ -3527,11 +3438,6 @@ html[data-theme='dark'] .primitive-list-item {
   border-radius: 8px;
   background: var(--color-panel);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
-}
-
-.modal-body .json-block {
-  margin: 16px;
-  width: calc(100% - 32px);
 }
 
 @media (max-width: 1120px) {
