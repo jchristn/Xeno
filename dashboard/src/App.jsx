@@ -153,6 +153,7 @@ const navGroups = [
       { to: '/dashboard/users', key: 'users', icon: ShieldCheck },
       { to: '/dashboard/credentials', key: 'credentials', icon: KeyRound },
       { to: '/dashboard/security', key: 'security', icon: LockKeyhole },
+      { to: '/dashboard/audit-logs', key: 'auditLogs', icon: FileJson },
       { to: '/dashboard/settings', key: 'settings', icon: SettingsIcon }
     ]
   }
@@ -166,6 +167,7 @@ const pageMeta = {
   '/dashboard/users': { title: 'users', description: 'usersDescription' },
   '/dashboard/credentials': { title: 'credentials', description: 'credentialsDescription' },
   '/dashboard/security': { title: 'security', description: 'securityDescription' },
+  '/dashboard/audit-logs': { title: 'auditLogs', description: 'auditLogsDescription' },
   '/dashboard/clients': { title: 'clients', description: 'clientsDescription' },
   '/dashboard/clients/advertised-models': { title: 'advertisedModels', description: 'advertisedModelsDescription' },
   '/dashboard/clients/advertised-models/leaderboard': { title: 'xenoModelLeaderboard', description: 'modelLeaderboardDescription' },
@@ -305,6 +307,7 @@ function navTooltipKey(key) {
     requests: 'tooltipNavRequests',
     routingPolicies: 'tooltipNavRoutingPolicies',
     security: 'tooltipNavSecurity',
+    auditLogs: 'tooltipNavAuditLogs',
     settings: 'tooltipNavSettings',
     tenants: 'tooltipNavTenants',
     users: 'tooltipNavUsers'
@@ -324,6 +327,7 @@ function dashboardLinkVisible(link, actor, session) {
   const isGlobalAdmin = isGlobalAdminUser(actor);
   const isTenantAdmin = isTenantAdminUser(actor, session);
   if (link.key === 'settings') return isGlobalAdmin;
+  if (link.key === 'auditLogs') return isGlobalAdmin || isTenantAdmin;
   if (link.key === 'routingPolicies') return isGlobalAdmin || isTenantAdmin;
   if (link.key === 'requests' || link.key === 'explorer' || link.key === 'analytics') return isGlobalAdmin || isTenantAdmin;
   return true;
@@ -412,6 +416,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="users" element={<UsersView session={session} />} />
             <Route path="credentials" element={<CredentialsView session={session} />} />
             <Route path="security" element={<SecurityView session={session} />} />
+            <Route path="audit-logs" element={<AuditLogsView session={session} />} />
             <Route path="clients" element={<ClientsView />} />
             <Route path="clients/advertised-models" element={<AdvertisedModelsView />} />
             <Route path="clients/advertised-models/leaderboard" element={<ModelLeaderboardView session={session} />} />
@@ -1872,7 +1877,6 @@ function SecurityView({ session }) {
   const roleAssignments = useResource(canManageSecurity ? '/api/v1/roleassignments' : null, []);
   const credentials = useResource(canManageSecurity ? '/api/v1/credentials' : null, []);
   const effective = useResource('/api/v1/effective-permissions', []);
-  const audit = useResource(canManageSecurity ? '/api/v1/audit' : null, []);
   const [selectedRole, setSelectedRole] = useState(null);
   const [selectedPermission, setSelectedPermission] = useState(null);
   const [creatingRole, setCreatingRole] = useState(false);
@@ -1930,7 +1934,6 @@ function SecurityView({ session }) {
         <MetricCard icon={<LockKeyhole size={18} />} label={t('roles')} value={formatNumber(roles.data.length)} />
         <MetricCard icon={<ShieldCheck size={18} />} label={t('permissions')} value={formatNumber(permissions.data.length)} />
         {canManageSecurity ? <MetricCard icon={<KeyRound size={18} />} label={t('roleAssignments')} value={formatNumber(roleAssignments.data.length)} tone="info" /> : null}
-        {canManageSecurity ? <MetricCard icon={<Activity size={18} />} label={t('audit')} value={formatNumber(audit.data.length)} tone="info" /> : null}
       </div>
       <DataTable
         title={t('roles')}
@@ -1979,15 +1982,6 @@ function SecurityView({ session }) {
         actions={<IconButton onClick={() => setCreatingRoleAssignment(true)} label={t('createRoleAssignment')} tooltip={t('tooltipCreateRoleAssignment')} icon={<Plus size={16} />} variant="primary" />}
       /> : null}
       <DataTable title={t('effectivePermissions')} rows={effective.data} columns={['resourceType', 'operationType', 'permit', 'sourceRole']} loading={effective.loading} onRefresh={effective.refresh} />
-      {canManageSecurity ? <DataTable
-        columns={['createdUtc', 'resourceType', 'operationType', 'reasonCode', 'statusCode', 'principalType', 'principalId', 'targetTenantId']}
-        onDelete={(row) => deleteRecord('/api/v1/audit', row)}
-        onRefresh={audit.refresh}
-        loading={audit.loading}
-        rows={audit.data}
-        subtitle={t('auditSubtitle')}
-        title={t('audit')}
-      /> : null}
       {creatingRole && <RoleEditModal data={null} mode="create" onClose={() => setCreatingRole(false)} onSave={saveRole} permissions={grantablePermissions.data} />}
       {selectedRole && <RoleEditModal data={selectedRole} onClose={() => setSelectedRole(null)} onSave={saveRole} permissions={grantablePermissions.data} />}
       {creatingPermission && <PermissionEditModal data={null} mode="create" onClose={() => setCreatingPermission(false)} onSave={savePermission} />}
@@ -2001,6 +1995,41 @@ function SecurityView({ session }) {
           users={users.data}
         />
       )}
+    </div>
+  );
+}
+
+function AuditLogsView({ session }) {
+  const { t } = useTranslation();
+  const users = useResource('/api/v1/users', []);
+  const actor = users.data.find((item) => recordId(item) === session?.userId);
+  const canViewAudit = isGlobalAdminUser(actor) || isTenantAdminUser(actor, session);
+  const audit = useResource(canViewAudit ? '/api/v1/audit' : null, []);
+
+  if (!canViewAudit) return <NotFoundView />;
+
+  return (
+    <div className="view-stack">
+      <div className="metric-grid compact">
+        <MetricCard icon={<Activity size={18} />} label={t('auditLogs')} value={formatNumber(audit.data.length)} tone="info" />
+      </div>
+      <DataTable
+        columns={[
+          { key: 'createdUtc', className: 'column-createdUtc' },
+          'resourceType',
+          'operationType',
+          'reasonCode',
+          'statusCode',
+          'principalType',
+          'principalId'
+        ]}
+        onDelete={(row) => deleteRecord('/api/v1/audit', row)}
+        onRefresh={audit.refresh}
+        loading={audit.loading}
+        rows={audit.data}
+        subtitle={t('auditSubtitle')}
+        title={t('auditLogs')}
+      />
     </div>
   );
 }

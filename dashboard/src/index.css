@@ -1869,6 +1869,8 @@ html[data-theme='dark'] .primitive-list-item {
 
 .data-table th.column-id,
 .data-table td.column-id,
+.data-table th.column-createdUtc,
+.data-table td.column-createdUtc,
 .data-table th.column-receivedUtc,
 .data-table td.column-receivedUtc,
 .data-table th.column-collectedUtc,

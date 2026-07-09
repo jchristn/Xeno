@@ -362,6 +362,68 @@ test('danger zone route is removed from authenticated navigation', async ({ page
   await expect(page.getByText('404')).toBeVisible();
 });
 
+test('audit logs are a top-level admin page outside security', async ({ page }) => {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_admin'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname === '/api/v1/users' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/roles' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'role_admin', tenantId: 'ten_default', name: 'SystemAdmin', builtIn: true, active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/permissions' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'perm_security_read', tenantId: 'ten_default', resourceType: 'Security', operationType: 'Read', permit: true, builtIn: true, active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/effective-permissions' && method === 'GET') {
+      await route.fulfill({ json: [{ resourceType: 'Security', operationType: 'Read', permit: true, sourceRole: 'SystemAdmin' }] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/audit' && method === 'GET') {
+      await route.fulfill({
+        json: [{
+          id: 'audit_admin_login',
+          createdUtc: '2026-07-08T12:34:56Z',
+          resourceType: 'Users',
+          operationType: 'Read',
+          reasonCode: 'Allowed',
+          statusCode: 200,
+          principalType: 'User',
+          principalId: 'usr_admin',
+          targetTenantId: 'ten_default'
+        }]
+      });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/security');
+  await expect(page.locator('h1', { hasText: 'Security' })).toBeVisible();
+  const administrationLinks = await page.locator('.sidebar-group').filter({ hasText: 'Administration' }).locator('.sidebar-link span').allTextContents();
+  expect(administrationLinks.slice(administrationLinks.indexOf('Security'), administrationLinks.indexOf('Security') + 2)).toEqual(['Security', 'Audit Logs']);
+  await expect(page.locator('main').getByRole('heading', { name: 'Audit Logs' })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Audit Logs' }).click();
+  await expect(page.locator('h1', { hasText: 'Audit Logs' })).toBeVisible();
+  await expect(page.getByText('2026-07-08T12:34:56Z')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Target Tenant ID' })).toHaveCount(0);
+  const createdUtcHeader = page.getByRole('columnheader', { name: 'Created UTC' }).first();
+  await expect(createdUtcHeader).toBeVisible();
+  await expect(createdUtcHeader).toHaveCSS('white-space', 'nowrap');
+});
+
 test('public model leaderboard uses the unauthenticated global API', async ({ page }) => {
   let leaderboardRequest = null;
   let leaderboardRequests = [];
@@ -511,6 +573,7 @@ test('regular tenant members see member dashboard surfaces without admin routes'
   await expect(page.getByRole('link', { name: 'Security' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Clients', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Client Telemetry' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Audit Logs' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Danger Zone' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Settings' })).toHaveCount(0);
 
