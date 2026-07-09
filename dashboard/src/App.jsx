@@ -1485,18 +1485,48 @@ function RegistrationSuccessModal({ onContinue, response }) {
   const tenant = response?.tenant || {};
   const user = response?.user || {};
   const credential = response?.credential || {};
-  const userDisplayName = user.name || user.username || user.email || user.id || '';
   const credentialId = credential.id || credential.credentialId || '';
+  const registrationExport = {
+    tenant: {
+      id: tenant.id || tenant.tenantId || '',
+      name: tenant.name || ''
+    },
+    user: {
+      id: user.id || user.userId || '',
+      email: user.email || ''
+    },
+    credential: {
+      accessKey: credential.accessKey || '',
+      secretKey: credential.secretKey || ''
+    }
+  };
   const rows = [
-    { id: tenant.id || tenant.tenantId || '', key: 'tenant', value: tenant.name || '' },
-    { id: user.id || user.userId || '', key: 'user', value: userDisplayName },
-    { id: credentialId, key: 'accessKey', value: credential.accessKey || '' },
-    { id: credentialId, key: 'secretKey', value: credential.secretKey || '' }
+    { id: registrationExport.tenant.id, key: 'tenant', value: registrationExport.tenant.name },
+    { id: registrationExport.user.id, key: 'user', value: registrationExport.user.email },
+    { id: credentialId, key: 'accessKey', value: registrationExport.credential.accessKey },
+    { id: credentialId, key: 'secretKey', value: registrationExport.credential.secretKey }
   ];
+
+  function downloadJson() {
+    const blob = new Blob([JSON.stringify(registrationExport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'xeno-registration-credentials.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <Modal
-      actions={<button className="primary-button" onClick={onContinue} type="button"><CheckCircle2 size={16} />{t('registerOkDashboard')}</button>}
+      actions={(
+        <>
+          <button className="action-button secondary" onClick={downloadJson} type="button"><Download size={16} />{t('downloadJson')}</button>
+          <button className="primary-button" onClick={onContinue} type="button"><CheckCircle2 size={16} />{t('registerOkDashboard')}</button>
+        </>
+      )}
       onClose={undefined}
       open
       size="large"

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import fs from 'node:fs/promises';
 
 const serverUrl = 'http://localhost:9000';
 
@@ -297,6 +298,28 @@ test('register existing organization omits username and stays in dashboard after
   await expect(dialog.getByText('cred_registered')).toHaveCount(2);
   await expect(dialog.getByText('ak_registered')).toBeVisible();
   await expect(dialog.getByText('sk_registered')).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    dialog.getByRole('button', { name: 'Download JSON' }).click()
+  ]);
+  expect(download.suggestedFilename()).toBe('xeno-registration-credentials.json');
+  const downloadPath = await download.path();
+  expect(downloadPath).toBeTruthy();
+  const downloadedJson = JSON.parse(await fs.readFile(downloadPath, 'utf8'));
+  expect(downloadedJson).toEqual({
+    tenant: {
+      id: 'ten_existing',
+      name: 'Existing Organization'
+    },
+    user: {
+      id: 'usr_registered',
+      email: 'new-user@xeno.test'
+    },
+    credential: {
+      accessKey: 'ak_registered',
+      secretKey: 'sk_registered'
+    }
+  });
   await dialog.getByRole('button', { name: 'Dashboard' }).click();
   await expect(page).toHaveURL(/\/dashboard\/home$/);
   await page.waitForTimeout(250);
