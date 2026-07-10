@@ -2,7 +2,6 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno open ai model list DTO.
@@ -17,6 +16,6 @@
         /// <summary>
         /// Gets or sets the data.
         /// </summary>
-        public List<JsonElement> Data { get; set; } = new List<JsonElement>();
+        public List<RawJsonValue> Data { get; set; } = new List<RawJsonValue>();
     }
 }

@@ -11,7 +11,7 @@ namespace Xeno.Sdk
         /// <summary>
         /// Gets or sets the response JSON value.
         /// </summary>
-        public JsonElement Value { get; set; }
+        public RawJsonValue Value { get; set; } = new RawJsonValue();
 
         /// <summary>
         /// Creates a response from raw JSON.
@@ -25,7 +25,7 @@ namespace Xeno.Sdk
             {
                 return new XenoObjectResponse
                 {
-                    Value = document.RootElement.Clone()
+                    Value = new RawJsonValue(String.IsNullOrWhiteSpace(json) ? "{}" : json)
                 };
             }
         }
@@ -36,7 +36,7 @@ namespace Xeno.Sdk
         /// <returns>JSON payload.</returns>
         public override string ToString()
         {
-            return Value.ValueKind == JsonValueKind.Undefined ? "{}" : Value.GetRawText();
+            return Value.ToString();
         }
     }
 }

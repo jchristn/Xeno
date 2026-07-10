@@ -2,7 +2,6 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno open ai embedding list DTO.
@@ -22,11 +21,11 @@
         /// <summary>
         /// Gets or sets the data.
         /// </summary>
-        public List<JsonElement> Data { get; set; } = new List<JsonElement>();
+        public List<RawJsonValue> Data { get; set; } = new List<RawJsonValue>();
 
         /// <summary>
         /// Gets or sets the usage.
         /// </summary>
-        public JsonElement Usage { get; set; }
+        public RawJsonValue Usage { get; set; } = new RawJsonValue();
     }
 }

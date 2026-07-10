@@ -1,7 +1,7 @@
 ﻿namespace Xeno.Sdk
 {
     using System;
-    using System.Text.Json;
+    using System.Collections.Generic;
 
     /// <summary>
     /// Xeno open ai chat completion DTO.
@@ -26,11 +26,11 @@
         /// <summary>
         /// Gets or sets the choices.
         /// </summary>
-        public JsonElement Choices { get; set; }
+        public List<RawJsonValue> Choices { get; set; } = new List<RawJsonValue>();
 
         /// <summary>
         /// Gets or sets the usage.
         /// </summary>
-        public JsonElement Usage { get; set; }
+        public RawJsonValue Usage { get; set; } = new RawJsonValue();
     }
 }

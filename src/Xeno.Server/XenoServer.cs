@@ -3853,51 +3853,11 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(body)) return body;
             try
             {
-                using (JsonDocument document = JsonDocument.Parse(body))
-                {
-                    object? redacted = RedactSensitiveJsonElement(document.RootElement, null);
-                    return JsonUtil.Serialize(redacted);
-                }
+                return JsonRedactionHelper.RedactSensitiveJson(body, IsSensitiveBodyField, "(redacted)", false);
             }
             catch (JsonException)
             {
                 return body;
-            }
-        }
-
-        private static object? RedactSensitiveJsonElement(JsonElement element, string? propertyName)
-        {
-            if (IsSensitiveBodyField(propertyName)) return "(redacted)";
-            switch (element.ValueKind)
-            {
-                case JsonValueKind.Object:
-                    Dictionary<string, object?> obj = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                    foreach (JsonProperty property in element.EnumerateObject())
-                    {
-                        obj[property.Name] = RedactSensitiveJsonElement(property.Value, property.Name);
-                    }
-
-                    return obj;
-                case JsonValueKind.Array:
-                    List<object?> values = new List<object?>();
-                    foreach (JsonElement value in element.EnumerateArray())
-                    {
-                        values.Add(RedactSensitiveJsonElement(value, propertyName));
-                    }
-
-                    return values;
-                case JsonValueKind.String:
-                    return element.GetString();
-                case JsonValueKind.Number:
-                    if (element.TryGetInt64(out long longValue)) return longValue;
-                    if (element.TryGetDecimal(out decimal decimalValue)) return decimalValue;
-                    return element.GetDouble();
-                case JsonValueKind.True:
-                    return true;
-                case JsonValueKind.False:
-                    return false;
-                default:
-                    return null;
             }
         }
 

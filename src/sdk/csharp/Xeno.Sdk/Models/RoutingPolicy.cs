@@ -1,7 +1,6 @@
 ﻿namespace Xeno.Sdk
 {
     using System;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno routing policy DTO.
@@ -46,7 +45,7 @@
         /// <summary>
         /// Gets or sets the adaptive.
         /// </summary>
-        public JsonElement Adaptive { get; set; }
+        public RawJsonValue Adaptive { get; set; } = new RawJsonValue();
 
         /// <summary>
         /// Gets or sets the is default.

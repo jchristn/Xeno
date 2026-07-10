@@ -2,7 +2,6 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno server client telemetry sample detail DTO.
@@ -17,7 +16,7 @@
         /// <summary>
         /// Gets or sets the gpu samples.
         /// </summary>
-        public List<JsonElement> GpuSamples { get; set; } = new List<JsonElement>();
+        public List<RawJsonValue> GpuSamples { get; set; } = new List<RawJsonValue>();
 
         /// <summary>
         /// Gets or sets the raw snapshot json.

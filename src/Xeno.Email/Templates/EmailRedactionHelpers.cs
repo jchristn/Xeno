@@ -4,8 +4,8 @@ namespace Xeno.Email.Templates
     using System.Collections.Generic;
     using System.Linq;
     using System.Text.Json;
-    using System.Text.Json.Nodes;
     using System.Text.RegularExpressions;
+    using Xeno.Core.Helpers;
 
     /// <summary>
     /// Email redaction helpers.
@@ -47,11 +47,7 @@ namespace Xeno.Email.Templates
 
             try
             {
-                JsonNode? node = JsonNode.Parse(value);
-                if (node == null) return RedactSensitiveStringValues(value);
-
-                RedactSensitiveJsonNode(node);
-                return node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+                return JsonRedactionHelper.RedactSensitiveJson(value, IsSensitiveJsonProperty, RedactedValue, true);
             }
             catch (JsonException)
             {
@@ -63,32 +59,9 @@ namespace Xeno.Email.Templates
             }
         }
 
-        private static void RedactSensitiveJsonNode(JsonNode node)
+        private static bool IsSensitiveJsonProperty(string? name)
         {
-            if (node is JsonObject obj)
-            {
-                foreach (KeyValuePair<string, JsonNode?> property in obj.ToList())
-                {
-                    if (SensitiveJsonProperties.Contains(property.Key))
-                    {
-                        obj[property.Key] = RedactedValue;
-                    }
-                    else if (property.Value != null)
-                    {
-                        RedactSensitiveJsonNode(property.Value);
-                    }
-                }
-
-                return;
-            }
-
-            if (node is JsonArray arr)
-            {
-                foreach (JsonNode? child in arr)
-                {
-                    if (child != null) RedactSensitiveJsonNode(child);
-                }
-            }
+            return !String.IsNullOrWhiteSpace(name) && SensitiveJsonProperties.Contains(name);
         }
 
         private static string RedactSensitiveStringValues(string value)

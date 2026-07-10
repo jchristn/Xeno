@@ -1,7 +1,6 @@
 ﻿namespace Xeno.Sdk
 {
     using System;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno settings response DTO.
@@ -11,7 +10,7 @@
         /// <summary>
         /// Gets or sets the settings.
         /// </summary>
-        public JsonElement Settings { get; set; }
+        public RawJsonValue Settings { get; set; } = new RawJsonValue();
 
         /// <summary>
         /// Gets or sets the settings file.

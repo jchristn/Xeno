@@ -1,7 +1,6 @@
 ﻿namespace Xeno.Sdk
 {
     using System.Collections.Generic;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno request history summary DTO.
@@ -11,6 +10,6 @@
         /// <summary>
         /// Gets or sets the buckets.
         /// </summary>
-        public List<JsonElement> Buckets { get; set; } = new List<JsonElement>();
+        public List<RawJsonValue> Buckets { get; set; } = new List<RawJsonValue>();
     }
 }

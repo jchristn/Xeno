@@ -10,7 +10,6 @@ namespace Xeno.Client
     using System.Net.WebSockets;
     using System.Text;
     using System.Text.Json;
-    using System.Text.Json.Nodes;
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Client.LocalDashboard;
@@ -1993,19 +1992,23 @@ namespace Xeno.Client
 
             try
             {
-                JsonNode? node = JsonNode.Parse(body);
-                JsonObject? root = node as JsonObject;
+                Dictionary<string, object?>? root = JsonSerializer.Deserialize<Dictionary<string, object?>>(body);
                 if (root == null) return body;
 
-                JsonObject? streamOptions = root["stream_options"] as JsonObject;
+                Dictionary<string, object?>? streamOptions = null;
+                if (root.TryGetValue("stream_options", out object? streamOptionsValue) && streamOptionsValue != null)
+                {
+                    streamOptions = JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(streamOptionsValue));
+                }
+
                 if (streamOptions == null)
                 {
-                    streamOptions = new JsonObject();
-                    root["stream_options"] = streamOptions;
+                    streamOptions = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                 }
 
                 streamOptions["include_usage"] = true;
-                return root.ToJsonString();
+                root["stream_options"] = streamOptions;
+                return JsonSerializer.Serialize(root);
             }
             catch (JsonException)
             {

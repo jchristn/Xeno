@@ -105,11 +105,11 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
-                        caseId: "CSharpStyleRejectsImplicitLocalsAndTuples",
-                        displayName: "C# style rejects implicit locals and tuples",
+                        caseId: "CSharpStyleRejectsBannedConstructs",
+                        displayName: "C# style rejects banned constructs",
                         executeAsync: delegate
                         {
-                            AssertNoImplicitLocalsOrTuples();
+                            AssertNoBannedCSharpStyleConstructs();
                             return Task.CompletedTask;
                         }),
                     new TestCaseDescriptor(
@@ -5919,7 +5919,7 @@ namespace Test.Shared
             return pathItem.ContainsKey(method);
         }
 
-        private static void AssertNoImplicitLocalsOrTuples()
+        private static void AssertNoBannedCSharpStyleConstructs()
         {
             string root = FindRepositoryRoot();
             string sourceRoot = Path.Combine(root, "src");
@@ -5928,11 +5928,13 @@ namespace Test.Shared
             string implicitForeachPattern = "\\bforeach\\s*\\(\\s*" + "v" + "ar" + "\\b";
             string tupleTypePattern = "\\b(Value" + "Tuple|Tuple)\\s*<|\\b(Task|ValueTask|IEnumerable|IReadOnlyList|List|Dictionary)\\s*<\\s*\\(|^\\s*(public|private|protected|internal|static|async|sealed|override|virtual|partial|readonly|extern|new|unsafe|ref|abstract|\\s)+\\s*\\([^\\n]*,[^\\n]*\\)\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\(";
             string tupleLocalPattern = "^\\s*\\([^\\n;=]*\\b[A-Za-z_][A-Za-z0-9_<>?\\[\\]]+\\s+[A-Za-z_][A-Za-z0-9_]*\\s*,[^\\n;=]*\\)\\s+[A-Za-z_][A-Za-z0-9_]*\\s*(=|;)";
+            string jsonDomPattern = "\\b(Json" + "Node|Json" + "Element|Json" + "Array|Json" + "Object)\\b|System\\.Text\\.Json\\.Nodes";
             Regex implicitLocal = new Regex(implicitLocalPattern, RegexOptions.Compiled);
             Regex implicitUsing = new Regex(implicitUsingPattern, RegexOptions.Compiled);
             Regex implicitForeach = new Regex(implicitForeachPattern, RegexOptions.Compiled);
             Regex tupleType = new Regex(tupleTypePattern, RegexOptions.Compiled);
             Regex tupleLocal = new Regex(tupleLocalPattern, RegexOptions.Compiled);
+            Regex jsonDom = new Regex(jsonDomPattern, RegexOptions.Compiled);
             List<string> violations = new List<string>();
 
             foreach (string file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
@@ -5943,7 +5945,7 @@ namespace Test.Shared
                 for (int index = 0; index < lines.Length; index++)
                 {
                     string line = lines[index];
-                    if (implicitLocal.IsMatch(line) || implicitUsing.IsMatch(line) || implicitForeach.IsMatch(line) || tupleType.IsMatch(line) || tupleLocal.IsMatch(line))
+                    if (implicitLocal.IsMatch(line) || implicitUsing.IsMatch(line) || implicitForeach.IsMatch(line) || tupleType.IsMatch(line) || tupleLocal.IsMatch(line) || jsonDom.IsMatch(line))
                     {
                         violations.Add(Path.GetRelativePath(root, file) + ":" + (index + 1).ToString(CultureInfo.InvariantCulture) + ": " + line.Trim());
                     }

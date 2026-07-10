@@ -2,7 +2,6 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Text.Json;
 
     /// <summary>
     /// Xeno server provider telemetry sample detail DTO.
@@ -17,12 +16,12 @@
         /// <summary>
         /// Gets or sets the models.
         /// </summary>
-        public List<JsonElement> Models { get; set; } = new List<JsonElement>();
+        public List<RawJsonValue> Models { get; set; } = new List<RawJsonValue>();
 
         /// <summary>
         /// Gets or sets the metrics.
         /// </summary>
-        public List<JsonElement> Metrics { get; set; } = new List<JsonElement>();
+        public List<RawJsonValue> Metrics { get; set; } = new List<RawJsonValue>();
 
         /// <summary>
         /// Gets or sets the raw snapshot json.
