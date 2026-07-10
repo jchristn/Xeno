@@ -353,6 +353,14 @@ namespace Xeno.Core.Services
                 Allowed = allowed,
                 ReasonCode = reasonCode,
                 SourceIp = context.SourceIp,
+                ForwardedFor = context.ForwardedFor,
+                UserAgent = context.UserAgent,
+                Origin = context.Origin,
+                Referer = context.Referer,
+                Host = context.Host,
+                RequestMethod = context.RequestMethod,
+                RequestPath = context.RequestPath,
+                CorrelationId = context.CorrelationId,
                 StatusCode = statusCode
             };
             platform.AuditRecords.Add(record);

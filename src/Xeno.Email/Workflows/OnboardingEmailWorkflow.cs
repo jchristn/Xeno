@@ -95,6 +95,9 @@ namespace Xeno.Email.Workflows
             message.Tags["workflow"] = "onboarding";
             message.Tags["template"] = rendered.TemplateId;
             message.Tags["tenantId"] = context.TenantId;
+            message.Tags["requestId"] = context.RequestId;
+            message.Tags["sourceIp"] = context.SourceIp;
+            message.Tags["correlationId"] = context.CorrelationId;
             EmailSendResult result = await _Provider.SendAsync(message, token).ConfigureAwait(false);
             results.Add(result);
         }

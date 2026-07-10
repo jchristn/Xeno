@@ -54,9 +54,17 @@ namespace Xeno.Email.Templates
                 EmailTemplateField.Create("Username", context.Username),
                 EmailTemplateField.Create("Email", context.UserEmail),
                 EmailTemplateField.Create("Tenant admin", context.IsTenantAdmin ? "yes" : "no"),
+                EmailTemplateField.Create("Request ID", context.RequestId),
+                EmailTemplateField.Create("Correlation ID", context.CorrelationId),
+                EmailTemplateField.Create("Method", context.RequestMethod),
+                EmailTemplateField.Create("Path", context.RequestPath),
                 EmailTemplateField.Create("Source IP", context.SourceIp),
+                EmailTemplateField.Create("Forwarded for", context.ForwardedFor),
+                EmailTemplateField.Create("User agent", context.UserAgent),
+                EmailTemplateField.Create("Origin", context.Origin),
+                EmailTemplateField.Create("Referer", context.Referer),
+                EmailTemplateField.Create("Host", context.Host),
                 EmailTemplateField.Create("Event UTC", context.EventUtc.ToString("O", CultureInfo.InvariantCulture)),
-                EmailTemplateField.Create("Correlation ID", context.CorrelationId)
             };
         }
     }

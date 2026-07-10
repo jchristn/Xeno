@@ -110,6 +110,7 @@ creation and adding a user to an existing tenant.
 - A supplied `tenantId` that does not resolve returns `404 TenantNotFound`.
 - An inactive tenant, duplicate email address, duplicate username in the target tenant, or an email address already held by a global administrator returns `409 Conflict` with `TenantInactive`, `EmailAlreadyExists`, `UsernameAlreadyExists`, or `GlobalAdminEmailAlreadyExists`.
 - Onboarding is rate limited with the same source-IP limiter as login. Rate-limited requests return `429 RateLimited`.
+- Successful responses include a `request` object with non-secret metadata for drill-down and telemetry: request ID, optional correlation ID, method, path, source IP, forwarded-for, user agent, origin, referer, host, and event timestamp. The same metadata is persisted on audit records.
 
 New tenant request:
 
@@ -169,6 +170,19 @@ Response:
     "userId": "usr_abc123",
     "sessionId": "sess_abc123",
     "expiresUtc": "2026-07-08T17:00:00Z"
+  },
+  "request": {
+    "requestId": "req_abc123",
+    "correlationId": "corr_abc123",
+    "method": "POST",
+    "path": "/v1.0/api/onboarding/signup",
+    "sourceIp": "203.0.113.10",
+    "forwardedFor": "203.0.113.10, 198.51.100.7",
+    "userAgent": "ExampleClient/1.0",
+    "origin": "https://app.xenocloud.ai",
+    "referer": "https://app.xenocloud.ai/signup",
+    "host": "api.xenocloud.ai",
+    "eventUtc": "2026-07-08T16:00:00Z"
   }
 }
 ```
@@ -297,10 +311,12 @@ Onboarding can trigger email side effects when email is enabled: platform
 administrator alerts for tenant/user onboarding, tenant administrator alerts
 when users join an organization, and welcome messages for new tenant
 administrators or members when the corresponding notification toggles are on.
-The onboarding response body does not change. Notification failures are
-best-effort operational failures and do not roll back tenant or user creation.
-Email templates never include passwords, bearer tokens, access keys, secret
-keys, or hashed secret material.
+Notification failures are best-effort operational failures and do not roll back
+tenant or user creation. Email templates never include passwords, bearer tokens,
+access keys, secret keys, or hashed secret material. Administrator onboarding
+notifications include bounded request metadata such as source IP, forwarded-for,
+user agent, origin, referer, host, request path, request ID, and correlation ID
+for operator drill-down.
 
 `GET /v1.0/api/backup`
 

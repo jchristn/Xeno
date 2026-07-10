@@ -211,7 +211,7 @@ Each template should have a stable `TemplateId`, for example `onboarding.admin-a
 | Communication | Trigger | Recipients | Why it belongs here | First-pass behavior |
 | --- | --- | --- | --- | --- |
 | Platform admin tenant-created alert | `POST /v1.0/api/onboarding/signup` when `tenantId` is omitted | `Email.Notifications.PlatformAdministratorRecipients` | The platform owner needs to know new companies are appearing. | Send after platform save succeeds; failure to send must not roll back onboarding. |
-| Platform admin user-joined alert | `POST /v1.0/api/onboarding/signup` when `tenantId` is supplied | `Email.Notifications.PlatformAdministratorRecipients` | Human operators may want to review unusual growth or support new users. | Send after platform save succeeds; include tenant/user IDs and source IP, no password/secret/token. |
+| Platform admin user-joined alert | `POST /v1.0/api/onboarding/signup` when `tenantId` is supplied | `Email.Notifications.PlatformAdministratorRecipients` | Human operators may want to review unusual growth or support new users. | Send after platform save succeeds; include tenant/user IDs and bounded request metadata such as source IP, forwarded-for, user agent, origin, referer, host, request path, request ID, and correlation ID; no password/secret/token. |
 | Tenant admin user-joined alert | `POST /v1.0/api/onboarding/signup` when a non-admin user joins an existing tenant | Active tenant admins in that tenant | A company administrator should know someone joined their org. | Send to active tenant admins other than the new user. If no tenant admin exists, skip and log a warning. |
 | New tenant administrator welcome | `POST /v1.0/api/onboarding/signup` when a new tenant is created | New tenant admin email | The person who created the company should receive confirmation and next steps. | Send a product email with tenant ID, dashboard link, and support link. Do not include password, token, access key, or secret key. |
 | New tenant member welcome | `POST /v1.0/api/onboarding/signup` when joining an existing tenant | New user email | The new user needs confirmation that their account exists. | Optional in first pass behind `NotifyNewTenantMember`; keep copy terse and non-sensitive. |
@@ -362,7 +362,7 @@ Documentation updates:
 Suggested README snippet:
 
 ```markdown
-Server email notifications are disabled by default. Set `Email.Enabled` to `true`, choose `Email.Provider`, and configure the provider-specific section such as `Email.Mailgun` to send onboarding and administrative notifications. Xeno never includes passwords, bearer tokens, access keys, or secret keys in notification email.
+Server email notifications are disabled by default. Set `Email.Enabled` to `true`, choose `Email.Provider`, and configure the provider-specific section such as `Email.Mailgun` to send onboarding and administrative notifications. Xeno never includes passwords, bearer tokens, access keys, or secret keys in notification email. Administrative onboarding notifications include non-secret request metadata for operator drill-down.
 ```
 
 ## Tests

@@ -68,6 +68,46 @@ namespace Xeno.Core.Models
         public string? SourceIp { get; set; } = null;
 
         /// <summary>
+        /// X-Forwarded-For header value.
+        /// </summary>
+        public string? ForwardedFor { get; set; } = null;
+
+        /// <summary>
+        /// User-Agent header value.
+        /// </summary>
+        public string? UserAgent { get; set; } = null;
+
+        /// <summary>
+        /// Origin header value.
+        /// </summary>
+        public string? Origin { get; set; } = null;
+
+        /// <summary>
+        /// Referer header value.
+        /// </summary>
+        public string? Referer { get; set; } = null;
+
+        /// <summary>
+        /// Host header value.
+        /// </summary>
+        public string? Host { get; set; } = null;
+
+        /// <summary>
+        /// HTTP request method.
+        /// </summary>
+        public string? RequestMethod { get; set; } = null;
+
+        /// <summary>
+        /// HTTP request path.
+        /// </summary>
+        public string? RequestPath { get; set; } = null;
+
+        /// <summary>
+        /// Optional caller-supplied correlation identifier.
+        /// </summary>
+        public string? CorrelationId { get; set; } = null;
+
+        /// <summary>
         /// Whether the request is authenticated.
         /// </summary>
         public bool IsAuthenticated { get; set; } = false;

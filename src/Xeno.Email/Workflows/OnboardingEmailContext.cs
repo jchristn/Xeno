@@ -50,6 +50,46 @@ namespace Xeno.Email.Workflows
         public string SourceIp { get; set; } = String.Empty;
 
         /// <summary>
+        /// X-Forwarded-For header value.
+        /// </summary>
+        public string ForwardedFor { get; set; } = String.Empty;
+
+        /// <summary>
+        /// User-Agent header value.
+        /// </summary>
+        public string UserAgent { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Origin header value.
+        /// </summary>
+        public string Origin { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Referer header value.
+        /// </summary>
+        public string Referer { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Host header value.
+        /// </summary>
+        public string Host { get; set; } = String.Empty;
+
+        /// <summary>
+        /// HTTP request method.
+        /// </summary>
+        public string RequestMethod { get; set; } = String.Empty;
+
+        /// <summary>
+        /// HTTP request path.
+        /// </summary>
+        public string RequestPath { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Server request identifier.
+        /// </summary>
+        public string RequestId { get; set; } = String.Empty;
+
+        /// <summary>
         /// Correlation identifier.
         /// </summary>
         public string CorrelationId { get; set; } = String.Empty;

@@ -36,5 +36,11 @@ namespace Xeno.Sdk
         /// </summary>
         [JsonPropertyName("token")]
         public AuthOnboardingTokenDetails Token { get; set; } = new AuthOnboardingTokenDetails();
+
+        /// <summary>
+        /// Request metadata useful for onboarding drill-down and telemetry.
+        /// </summary>
+        [JsonPropertyName("request")]
+        public AuthOnboardingRequestMetadata Request { get; set; } = new AuthOnboardingRequestMetadata();
     }
 }

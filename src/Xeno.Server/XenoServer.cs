@@ -4177,12 +4177,12 @@ namespace Xeno.Server
             RequestContext loginContext = new RequestContext
             {
                 TenantId = tenantId,
-                SourceIp = context.Request.Source.IpAddress,
                 PrincipalType = PrincipalTypeEnum.User,
                 UserId = user?.Id,
                 IsAuthenticated = user != null,
                 AuthScheme = AuthSchemeEnum.Password
             };
+            ApplyRequestMetadata(context, loginContext);
 
             if (user == null)
             {
@@ -4262,12 +4262,12 @@ namespace Xeno.Server
             RequestContext loginContext = new RequestContext
             {
                 TenantId = tenantId,
-                SourceIp = context.Request.Source.IpAddress,
                 PrincipalType = PrincipalTypeEnum.User,
                 UserId = user?.Id,
                 IsAuthenticated = user != null,
                 AuthScheme = AuthSchemeEnum.Password
             };
+            ApplyRequestMetadata(context, loginContext);
 
             if (user == null)
             {
@@ -4447,12 +4447,14 @@ namespace Xeno.Server
             RequestContext signupContext = new RequestContext
             {
                 TenantId = tenant.Id,
-                SourceIp = context.Request.Source.IpAddress,
                 PrincipalType = PrincipalTypeEnum.User,
                 UserId = user.Id,
                 IsAuthenticated = true,
                 AuthScheme = AuthSchemeEnum.Password
             };
+            ApplyRequestMetadata(context, signupContext);
+            signupContext.CorrelationId = FirstNonEmpty(signupContext.CorrelationId, signupContext.RequestId);
+            DateTime eventUtc = DateTime.UtcNow;
             AuthTokenResult tokenResult = _Authentication.IssueToken(platform, _Settings.Auth, tenant.Id, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Bearer);
             _Authentication.AppendAudit(platform, signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
@@ -4495,10 +4497,11 @@ namespace Xeno.Server
                     UserId = user.Id,
                     SessionId = tokenResult.SessionId,
                     ExpiresUtc = tokenResult.ExpiresUtc
-                }
+                },
+                Request = BuildOnboardingRequestMetadata(signupContext, eventUtc)
             };
 
-            OnboardingEmailContext emailContext = BuildOnboardingEmailContext(platform, context, tenant, user, creatingTenant);
+            OnboardingEmailContext emailContext = BuildOnboardingEmailContext(platform, signupContext, tenant, user, creatingTenant, eventUtc);
             await SendOnboardingNotificationsSafeAsync(emailContext, signupContext, token).ConfigureAwait(false);
             await SendJsonAsync(context, response).ConfigureAwait(false);
         }
@@ -4516,7 +4519,7 @@ namespace Xeno.Server
             platform.Users.RemoveAll(item => item.TenantId == tenantId && seedUserIds.Contains(item.Id));
         }
 
-        private OnboardingEmailContext BuildOnboardingEmailContext(XenoPlatform platform, HttpContextBase context, Tenant tenant, User user, bool createdTenant)
+        private OnboardingEmailContext BuildOnboardingEmailContext(XenoPlatform platform, RequestContext requestContext, Tenant tenant, User user, bool createdTenant, DateTime eventUtc)
         {
             return new OnboardingEmailContext
             {
@@ -4527,14 +4530,40 @@ namespace Xeno.Server
                 Username = user.Username,
                 UserEmail = user.Email,
                 IsTenantAdmin = user.IsTenantAdmin,
-                SourceIp = context.Request.Source.IpAddress,
-                CorrelationId = FirstNonEmpty(context.Request.Headers.Get("x-xeno-request-id"), context.Request.Headers.Get("X-Xeno-Request-ID")),
-                EventUtc = DateTime.UtcNow,
+                SourceIp = requestContext.SourceIp ?? String.Empty,
+                ForwardedFor = requestContext.ForwardedFor ?? String.Empty,
+                UserAgent = requestContext.UserAgent ?? String.Empty,
+                Origin = requestContext.Origin ?? String.Empty,
+                Referer = requestContext.Referer ?? String.Empty,
+                Host = requestContext.Host ?? String.Empty,
+                RequestMethod = requestContext.RequestMethod ?? String.Empty,
+                RequestPath = requestContext.RequestPath ?? String.Empty,
+                RequestId = requestContext.RequestId,
+                CorrelationId = requestContext.CorrelationId ?? String.Empty,
+                EventUtc = eventUtc,
                 PlatformAdministrators = BuildConfiguredEmailRecipients(_Settings.Email.Notifications.PlatformAdministratorRecipients),
                 TenantAdministrators = platform.Users
                     .Where(item => item.TenantId == tenant.Id && item.Active && item.IsTenantAdmin && !String.IsNullOrWhiteSpace(item.Email))
                     .Select(item => EmailAddress.Create(item.Email, item.Username))
                     .ToList()
+            };
+        }
+
+        private static AuthOnboardingRequestMetadata BuildOnboardingRequestMetadata(RequestContext context, DateTime eventUtc)
+        {
+            return new AuthOnboardingRequestMetadata
+            {
+                RequestId = context.RequestId,
+                CorrelationId = context.CorrelationId ?? String.Empty,
+                Method = context.RequestMethod ?? String.Empty,
+                Path = context.RequestPath ?? String.Empty,
+                SourceIp = context.SourceIp ?? String.Empty,
+                ForwardedFor = context.ForwardedFor ?? String.Empty,
+                UserAgent = context.UserAgent ?? String.Empty,
+                Origin = context.Origin ?? String.Empty,
+                Referer = context.Referer ?? String.Empty,
+                Host = context.Host ?? String.Empty,
+                EventUtc = eventUtc
             };
         }
 
@@ -5633,9 +5662,9 @@ namespace Xeno.Server
             RequestContext requestContext = new RequestContext
             {
                 TenantId = tenantId,
-                SourceIp = context.Request.Source.IpAddress,
                 IsAuthenticated = false
             };
+            ApplyRequestMetadata(context, requestContext);
 
             if (!String.IsNullOrWhiteSpace(sessionToken))
             {
@@ -5703,9 +5732,9 @@ namespace Xeno.Server
             RequestContext requestContext = new RequestContext
             {
                 TenantId = tenantId,
-                SourceIp = context.Request.Source.IpAddress,
                 IsAuthenticated = false
             };
+            ApplyRequestMetadata(context, requestContext);
 
             if (!String.IsNullOrWhiteSpace(accessKey))
             {
@@ -5720,6 +5749,30 @@ namespace Xeno.Server
             }
 
             throw new UnauthorizedAccessException("WebSocket authentication requires a client access key.");
+        }
+
+        private static void ApplyRequestMetadata(HttpContextBase context, RequestContext requestContext)
+        {
+            if (context == null) throw new ArgumentNullException(nameof(context));
+            if (requestContext == null) throw new ArgumentNullException(nameof(requestContext));
+
+            requestContext.SourceIp = BoundMetadataValue(context.Request.Source.IpAddress, 128);
+            requestContext.ForwardedFor = BoundMetadataValue(FirstNonEmpty(context.Request.Headers.Get("X-Forwarded-For"), context.Request.Headers.Get("x-forwarded-for")), 512);
+            requestContext.UserAgent = BoundMetadataValue(FirstNonEmpty(context.Request.Headers.Get("User-Agent"), context.Request.Headers.Get("user-agent")), 512);
+            requestContext.Origin = BoundMetadataValue(FirstNonEmpty(context.Request.Headers.Get("Origin"), context.Request.Headers.Get("origin")), 512);
+            requestContext.Referer = BoundMetadataValue(FirstNonEmpty(context.Request.Headers.Get("Referer"), context.Request.Headers.Get("Referrer"), context.Request.Headers.Get("referer"), context.Request.Headers.Get("referrer")), 512);
+            requestContext.Host = BoundMetadataValue(FirstNonEmpty(context.Request.Headers.Get("Host"), context.Request.Headers.Get("host")), 256);
+            requestContext.RequestMethod = BoundMetadataValue(context.Request.Method.ToString().ToUpperInvariant(), 16);
+            requestContext.RequestPath = BoundMetadataValue(context.Request.Url.RawWithoutQuery ?? "/", 512);
+            requestContext.CorrelationId = BoundMetadataValue(FirstNonEmpty(context.Request.Headers.Get("X-Xeno-Request-ID"), context.Request.Headers.Get("x-xeno-request-id"), context.Request.Headers.Get("X-Request-ID"), context.Request.Headers.Get("x-request-id")), 128);
+        }
+
+        private static string BoundMetadataValue(string? value, int maximumLength)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return String.Empty;
+            string normalized = value.Trim();
+            if (maximumLength <= 0 || normalized.Length <= maximumLength) return normalized;
+            return normalized.Substring(0, maximumLength);
         }
 
         private static string ResolveTenantId(HttpContextBase context, string? bodyTenantId)
@@ -6340,7 +6393,20 @@ namespace Xeno.Server
                             Property("tenant", SchemaRef("AuthOnboardingTenantDetails")),
                             Property("user", SchemaRef("AuthOnboardingUserDetails")),
                             Property("credential", SchemaRef("AuthOnboardingCredentialDetails")),
-                            Property("token", SchemaRef("AuthOnboardingTokenDetails"))),
+                            Property("token", SchemaRef("AuthOnboardingTokenDetails")),
+                            Property("request", SchemaRef("AuthOnboardingRequestMetadata"))),
+                        ["AuthOnboardingRequestMetadata"] = ObjectSchema(
+                            Property("requestId", StringSchema()),
+                            Property("correlationId", StringSchema()),
+                            Property("method", StringSchema()),
+                            Property("path", StringSchema()),
+                            Property("sourceIp", StringSchema()),
+                            Property("forwardedFor", StringSchema()),
+                            Property("userAgent", StringSchema()),
+                            Property("origin", StringSchema()),
+                            Property("referer", StringSchema()),
+                            Property("host", StringSchema()),
+                            Property("eventUtc", StringSchema("date-time"))),
                         ["AuthOnboardingTenantDetails"] = ObjectSchema(
                             Property("id", StringSchema()),
                             Property("name", StringSchema()),
@@ -6467,7 +6533,27 @@ namespace Xeno.Server
                         ["Permission"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("resourceType", StringSchema()), Property("operationType", StringSchema()), Property("permit", BooleanSchema()), Property("builtIn", BooleanSchema())),
                         ["RoleAssignment"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("roleId", StringSchema()), Property("principalType", StringSchema()), Property("principalId", StringSchema()), Property("active", BooleanSchema())),
                         ["EffectivePermission"] = ObjectSchema(Property("resourceType", StringSchema()), Property("sourceRole", StringSchema())),
-                        ["AuditRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("reasonCode", StringSchema())),
+                        ["AuditRecord"] = ObjectSchema(
+                            Property("id", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("targetTenantId", StringSchema()),
+                            Property("targetResourceId", StringSchema()),
+                            Property("requestId", StringSchema()),
+                            Property("resourceType", StringSchema()),
+                            Property("operationType", StringSchema()),
+                            Property("allowed", BooleanSchema()),
+                            Property("reasonCode", StringSchema()),
+                            Property("sourceIp", StringSchema()),
+                            Property("forwardedFor", StringSchema()),
+                            Property("userAgent", StringSchema()),
+                            Property("origin", StringSchema()),
+                            Property("referer", StringSchema()),
+                            Property("host", StringSchema()),
+                            Property("requestMethod", StringSchema()),
+                            Property("requestPath", StringSchema()),
+                            Property("correlationId", StringSchema()),
+                            Property("statusCode", IntegerSchema()),
+                            Property("createdUtc", StringSchema("date-time"))),
                         ["XenoClientRecord"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("name", StringSchema()), Property("ownerUserId", StringSchema()), Property("ownerCredentialId", StringSchema()), Property("ownerPrincipalType", StringSchema()), Property("connected", BooleanSchema()), Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ServerClientTelemetryCollectionStatusResponse"] = ObjectSchema(
                             Property("enabled", BooleanSchema()),

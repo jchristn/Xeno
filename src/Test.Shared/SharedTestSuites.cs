@@ -136,6 +136,15 @@ namespace Test.Shared
                                 UserEmail = "alice@example.com",
                                 IsTenantAdmin = true,
                                 SourceIp = "127.0.0.1",
+                                ForwardedFor = "203.0.113.10, 198.51.100.2",
+                                UserAgent = "Touchstone/EmailMetadata",
+                                Origin = "https://app.xenocloud.ai",
+                                Referer = "https://app.xenocloud.ai/signup",
+                                Host = "api.xenocloud.ai",
+                                RequestMethod = "POST",
+                                RequestPath = "/v1.0/api/onboarding/signup",
+                                RequestId = "req_email_metadata",
+                                CorrelationId = "corr_email_metadata",
                                 EventUtc = DateTime.UtcNow
                             };
                             OnboardingAdminAlertEmailTemplate template = new OnboardingAdminAlertEmailTemplate(emailSettings);
@@ -148,6 +157,8 @@ namespace Test.Shared
                             if (!rendered.HtmlBody.Contains("https://app.xenocloud.ai", StringComparison.Ordinal)) throw new InvalidOperationException("Template footer did not include the dashboard link.");
                             if (!rendered.HtmlBody.Contains("https://github.com/jchristn/Xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Template footer did not include the GitHub link.");
                             if (!rendered.TextBody.Contains("GitHub: https://github.com/jchristn/Xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Template text body did not include the footer links.");
+                            if (!rendered.TextBody.Contains("Touchstone/EmailMetadata", StringComparison.Ordinal)) throw new InvalidOperationException("Template text body did not include onboarding user agent metadata.");
+                            if (!rendered.HtmlBody.Contains("corr_email_metadata", StringComparison.Ordinal)) throw new InvalidOperationException("Template HTML body did not include onboarding correlation metadata.");
                             string redacted = EmailRedactionHelpers.RedactSensitiveJson("{\"password\":\"secret\",\"token\":\"abc\",\"tenant\":\"ok\"}");
                             if (redacted.Contains("secret", StringComparison.Ordinal) || redacted.Contains("abc", StringComparison.Ordinal)) throw new InvalidOperationException("Sensitive JSON was not redacted.");
                             if (!redacted.Contains("ok", StringComparison.Ordinal)) throw new InvalidOperationException("Non-sensitive JSON was unexpectedly removed.");
@@ -3669,25 +3680,58 @@ namespace Test.Shared
                         }
 
                         AuthOnboardingResponse signup;
-                        using (HttpResponseMessage signupResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/onboarding/signup", JsonUtil.Serialize(new AuthOnboardingRequest
+                        using (HttpRequestMessage signupRequest = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/v1.0/api/onboarding/signup"))
                         {
-                            TenantName = "Dashboard Signup Tenant",
-                            Email = "tenant-admin@signup.test",
-                            Username = "tenant-admin@signup.test",
-                            Password = "password"
-                        })).ConfigureAwait(false))
+                            signupRequest.Content = new StringContent(JsonUtil.Serialize(new AuthOnboardingRequest
+                            {
+                                TenantName = "Dashboard Signup Tenant",
+                                Email = "tenant-admin@signup.test",
+                                Username = "tenant-admin@signup.test",
+                                Password = "password"
+                            }), Encoding.UTF8, "application/json");
+                            signupRequest.Headers.TryAddWithoutValidation("X-Forwarded-For", "203.0.113.66, 198.51.100.7");
+                            signupRequest.Headers.TryAddWithoutValidation("User-Agent", "Touchstone-Onboarding/1.0");
+                            signupRequest.Headers.TryAddWithoutValidation("Origin", "https://app.xenocloud.ai");
+                            signupRequest.Headers.TryAddWithoutValidation("Referer", "https://app.xenocloud.ai/signup");
+                            signupRequest.Headers.TryAddWithoutValidation("X-Xeno-Request-ID", "corr_signup_metadata");
+                            signupRequest.Headers.Host = "signup.xenocloud.ai";
+                            using (HttpResponseMessage signupResponse = await httpClient.SendAsync(signupRequest).ConfigureAwait(false))
+                            {
+                                string signupJson = await signupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!signupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Onboarding signup failed: " + signupJson);
+                                signup = DeserializeRequired<AuthOnboardingResponse>(signupJson);
+                                if (!String.Equals(signup.Status, "success", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Onboarding signup did not return success.");
+                                if (String.IsNullOrWhiteSpace(signup.Tenant.Id)) throw new InvalidOperationException("Onboarding signup did not return a tenant ID.");
+                                if (!signup.User.IsTenantAdmin) throw new InvalidOperationException("New-tenant onboarding user should be a tenant admin.");
+                                if (signup.User.IsAdmin) throw new InvalidOperationException("New-tenant onboarding user should not be a system admin.");
+                                if (String.IsNullOrWhiteSpace(signup.Credential.AccessKey)) throw new InvalidOperationException("Onboarding signup did not return an access key.");
+                                if (String.IsNullOrWhiteSpace(signup.Credential.SecretKey)) throw new InvalidOperationException("Onboarding signup did not return a plaintext secret key.");
+                                if (String.IsNullOrWhiteSpace(signup.Token.Token)) throw new InvalidOperationException("Onboarding signup did not return a token.");
+                                if (String.IsNullOrWhiteSpace(signup.Token.SessionId)) throw new InvalidOperationException("Onboarding signup did not return a session ID.");
+                                if (String.IsNullOrWhiteSpace(signup.Request.RequestId)) throw new InvalidOperationException("Onboarding signup did not return request metadata.");
+                                if (!String.Equals(signup.Request.CorrelationId, "corr_signup_metadata", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding signup did not return correlation metadata.");
+                                if (!signup.Request.ForwardedFor.Contains("203.0.113.66", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding signup did not return forwarded-for metadata.");
+                                if (!String.Equals(signup.Request.UserAgent, "Touchstone-Onboarding/1.0", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding signup did not return user-agent metadata.");
+                                if (!String.Equals(signup.Request.Method, "POST", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding signup did not return request method metadata.");
+                                if (!String.Equals(signup.Request.Path, "/v1.0/api/onboarding/signup", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding signup did not return request path metadata.");
+                            }
+                        }
+
+                        using (HttpClient signupAdminClient = new HttpClient())
                         {
-                            string signupJson = await signupResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            if (!signupResponse.IsSuccessStatusCode) throw new InvalidOperationException("Onboarding signup failed: " + signupJson);
-                            signup = DeserializeRequired<AuthOnboardingResponse>(signupJson);
-                            if (!String.Equals(signup.Status, "success", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Onboarding signup did not return success.");
-                            if (String.IsNullOrWhiteSpace(signup.Tenant.Id)) throw new InvalidOperationException("Onboarding signup did not return a tenant ID.");
-                            if (!signup.User.IsTenantAdmin) throw new InvalidOperationException("New-tenant onboarding user should be a tenant admin.");
-                            if (signup.User.IsAdmin) throw new InvalidOperationException("New-tenant onboarding user should not be a system admin.");
-                            if (String.IsNullOrWhiteSpace(signup.Credential.AccessKey)) throw new InvalidOperationException("Onboarding signup did not return an access key.");
-                            if (String.IsNullOrWhiteSpace(signup.Credential.SecretKey)) throw new InvalidOperationException("Onboarding signup did not return a plaintext secret key.");
-                            if (String.IsNullOrWhiteSpace(signup.Token.Token)) throw new InvalidOperationException("Onboarding signup did not return a token.");
-                            if (String.IsNullOrWhiteSpace(signup.Token.SessionId)) throw new InvalidOperationException("Onboarding signup did not return a session ID.");
+                            ApplyBearerHeaders(signupAdminClient, signup.Token.TenantId, signup.Token.Token);
+                            using (HttpResponseMessage auditResponse = await signupAdminClient.GetAsync(baseUrl + "/v1.0/api/audit").ConfigureAwait(false))
+                            {
+                                string auditJson = await auditResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!auditResponse.IsSuccessStatusCode) throw new InvalidOperationException("Tenant admin could not inspect onboarding audit records: " + auditJson);
+                                List<AuditRecord> auditRecords = DeserializeRequired<List<AuditRecord>>(auditJson);
+                                AuditRecord? signupAudit = auditRecords.FirstOrDefault(item => String.Equals(item.RequestId, signup.Request.RequestId, StringComparison.Ordinal) && String.Equals(item.ResourceType, "Onboarding", StringComparison.Ordinal));
+                                if (signupAudit == null) throw new InvalidOperationException("Onboarding audit record was not persisted with the request ID.");
+                                if (!String.Equals(signupAudit.CorrelationId, "corr_signup_metadata", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding audit record did not persist correlation metadata.");
+                                if (!String.Equals(signupAudit.UserAgent, "Touchstone-Onboarding/1.0", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding audit record did not persist user-agent metadata.");
+                                if (!String.Equals(signupAudit.RequestPath, "/v1.0/api/onboarding/signup", StringComparison.Ordinal)) throw new InvalidOperationException("Onboarding audit record did not persist request path metadata.");
+                                if (String.IsNullOrWhiteSpace(signupAudit.SourceIp)) throw new InvalidOperationException("Onboarding audit record did not persist source IP metadata.");
+                            }
                         }
 
                         AuthOnboardingResponse regularSignup;

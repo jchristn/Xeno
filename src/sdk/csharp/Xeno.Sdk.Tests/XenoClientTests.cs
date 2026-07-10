@@ -59,7 +59,7 @@ namespace Xeno.Sdk.Tests
                 callCount++;
                 if (callCount == 1)
                 {
-                    return JsonResponse("{\"status\":\"success\",\"tenant\":{\"id\":\"ten_1\",\"name\":\"Tenant\",\"active\":true},\"user\":{\"id\":\"usr_1\",\"tenantId\":\"ten_1\",\"username\":\"owner@xeno\",\"email\":\"owner@xeno\",\"isAdmin\":false,\"isTenantAdmin\":true,\"active\":true},\"credential\":{\"id\":\"cred_1\",\"tenantId\":\"ten_1\",\"userId\":\"usr_1\",\"accessKey\":\"xeno_access\",\"secretKey\":\"xeno_secret\",\"active\":true},\"token\":{\"token\":\"tok_1\",\"tokenType\":\"Bearer\",\"tenantId\":\"ten_1\",\"userId\":\"usr_1\",\"sessionId\":\"sess_1\"}}");
+                    return JsonResponse("{\"status\":\"success\",\"tenant\":{\"id\":\"ten_1\",\"name\":\"Tenant\",\"active\":true},\"user\":{\"id\":\"usr_1\",\"tenantId\":\"ten_1\",\"username\":\"owner@xeno\",\"email\":\"owner@xeno\",\"isAdmin\":false,\"isTenantAdmin\":true,\"active\":true},\"credential\":{\"id\":\"cred_1\",\"tenantId\":\"ten_1\",\"userId\":\"usr_1\",\"accessKey\":\"xeno_access\",\"secretKey\":\"xeno_secret\",\"active\":true},\"token\":{\"token\":\"tok_1\",\"tokenType\":\"Bearer\",\"tenantId\":\"ten_1\",\"userId\":\"usr_1\",\"sessionId\":\"sess_1\"},\"request\":{\"requestId\":\"req_1\",\"correlationId\":\"corr_1\",\"method\":\"POST\",\"path\":\"/v1.0/api/onboarding/signup\",\"sourceIp\":\"127.0.0.1\",\"forwardedFor\":\"203.0.113.66\",\"userAgent\":\"sdk-test\",\"origin\":\"https://app.xenocloud.ai\",\"referer\":\"https://app.xenocloud.ai/signup\",\"host\":\"xeno.local\",\"eventUtc\":\"2026-07-10T00:00:00Z\"}}");
                 }
 
                 return new HttpResponseMessage(HttpStatusCode.Conflict)
@@ -81,6 +81,8 @@ namespace Xeno.Sdk.Tests
                 Assert.Equal("ten_1", response.Tenant.Id);
                 Assert.Equal("xeno_access", response.Credential.AccessKey);
                 Assert.Equal("xeno_secret", response.Credential.SecretKey);
+                Assert.Equal("req_1", response.Request.RequestId);
+                Assert.Equal("sdk-test", response.Request.UserAgent);
                 RecordedRequest request = handler.Requests[0];
                 AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/onboarding/signup", "\"tenantName\":\"Tenant\"");
                 Assert.Null(request.AuthorizationScheme);
