@@ -4105,7 +4105,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"toEmail\": \"joel.christner@gmail.com\",\n  \"title\": \"Xeno Test Email\",\n  \"subject\": \"Xeno test email\",\n  \"body\": \"hello world\"\n}",
+                  "raw": "{\n  \"toEmail\": \"test@user.com\",\n  \"title\": \"Xeno Test Email\",\n  \"subject\": \"Xeno test email\",\n  \"body\": \"hello world\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
