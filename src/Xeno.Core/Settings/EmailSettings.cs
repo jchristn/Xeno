@@ -41,7 +41,7 @@ namespace Xeno.Core.Settings
         /// <summary>
         /// Application base URL used by templates.
         /// </summary>
-        public string ApplicationBaseUrl { get; set; } = "https://portal.xenocloud.ai";
+        public string ApplicationBaseUrl { get; set; } = "https://app.xenocloud.ai";
 
         /// <summary>
         /// Optional subject prefix.

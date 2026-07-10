@@ -7,7 +7,7 @@
   },
   "Cors": {
     "Enabled": true,
-    "AllowedOrigins": ["http://localhost:9100", "http://localhost:9200", "https://portal.xenocloud.ai"],
+    "AllowedOrigins": ["http://localhost:9100", "http://localhost:9200", "https://app.xenocloud.ai"],
     "AllowedHeaders": ["Authorization", "Content-Type", "x-token", "x-tenant-guid", "x-tenant-id", "x-access-key", "x-signature"],
     "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   },
@@ -52,7 +52,7 @@
     "FromName": "Xeno",
     "ReplyToAddress": "support@xenocloud.ai",
     "SupportAddress": "support@xenocloud.ai",
-    "ApplicationBaseUrl": "https://portal.xenocloud.ai",
+    "ApplicationBaseUrl": "https://app.xenocloud.ai",
     "SubjectPrefix": "",
     "MaxBodyBytes": 262144,
     "Mailgun": {

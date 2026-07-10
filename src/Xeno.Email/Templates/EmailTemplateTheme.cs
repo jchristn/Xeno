@@ -13,6 +13,26 @@ namespace Xeno.Email.Templates
         public string BrandName { get; set; } = "Xeno";
 
         /// <summary>
+        /// Logo URL.
+        /// </summary>
+        public string LogoUrl { get; set; } = "https://xenocloud.ai/assets/logo.png";
+
+        /// <summary>
+        /// Home URL.
+        /// </summary>
+        public string HomeUrl { get; set; } = "https://xenocloud.ai";
+
+        /// <summary>
+        /// Dashboard URL.
+        /// </summary>
+        public string DashboardUrl { get; set; } = "https://app.xenocloud.ai";
+
+        /// <summary>
+        /// GitHub URL.
+        /// </summary>
+        public string GitHubUrl { get; set; } = "https://github.com/jchristn/Xeno";
+
+        /// <summary>
         /// Accent color.
         /// </summary>
         public string AccentColor { get; set; } = "#1f6feb";

@@ -35,12 +35,10 @@ namespace Xeno.Email.Templates
             token.ThrowIfCancellationRequested();
             if (context == null) throw new ArgumentNullException(nameof(context));
 
-            string bodyHtml =
-                "<h1 style=\"font-size:20px;line-height:1.3;margin:0 0 12px;\">Welcome to Xeno</h1>" +
-                "<p style=\"margin:0 0 12px;\">Your account was created for " + EmailHtmlEncoder.Encode(context.TenantName) + ".</p>";
+            string bodyHtml = RenderHeading("Welcome to Xeno") + RenderParagraph("Your account was created for " + context.TenantName + ".");
             string bodyText = "Welcome to Xeno" + Environment.NewLine + Environment.NewLine + "Your account was created for " + context.TenantName + ".";
             string ctaUrl = String.IsNullOrWhiteSpace(Settings.ApplicationBaseUrl) ? String.Empty : Settings.ApplicationBaseUrl.TrimEnd('/');
-            EmailTemplateRenderResult result = RenderLayout("Welcome to Xeno", "Your Xeno account is ready.", bodyHtml, bodyText, "Open Xeno", ctaUrl);
+            EmailTemplateRenderResult result = RenderLayout("Welcome to Xeno", "Welcome to Xeno", "Your Xeno account is ready.", bodyHtml, bodyText, "Open Xeno", ctaUrl);
             return Task.FromResult(result);
         }
     }

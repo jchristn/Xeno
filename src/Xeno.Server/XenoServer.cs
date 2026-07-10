@@ -7217,7 +7217,7 @@ namespace Xeno.Server
                             ["fromName"] = "Xeno",
                             ["replyToAddress"] = "support@xenocloud.ai",
                             ["supportAddress"] = "support@xenocloud.ai",
-                            ["applicationBaseUrl"] = "https://portal.xenocloud.ai",
+                            ["applicationBaseUrl"] = "https://app.xenocloud.ai",
                             ["mailgun"] = new Dictionary<string, object> { ["domain"] = "", ["apiKey"] = "", ["region"] = "US" },
                             ["file"] = new Dictionary<string, object> { ["directory"] = "data/email-outbox" },
                             ["notifications"] = new Dictionary<string, object>

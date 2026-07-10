@@ -45,11 +45,11 @@ namespace Xeno.Email.Templates
                 EmailTemplateField.Create("Event UTC", context.EventUtc.ToString("O", CultureInfo.InvariantCulture))
             };
             string bodyHtml =
-                "<h1 style=\"font-size:20px;line-height:1.3;margin:0 0 12px;\">A user joined your organization</h1>" +
-                "<p style=\"margin:0 0 12px;\">A new user account was created in your Xeno tenant.</p>" +
+                RenderHeading("A user joined your organization") +
+                RenderParagraph("A new user account was created in your Xeno tenant.") +
                 RenderKeyValueTable(fields);
             string bodyText = "A user joined your organization" + Environment.NewLine + Environment.NewLine + RenderKeyValueText(fields);
-            EmailTemplateRenderResult result = RenderLayout(subject, subject, bodyHtml, bodyText);
+            EmailTemplateRenderResult result = RenderLayout("A user joined your organization", subject, subject, bodyHtml, bodyText);
             return Task.FromResult(result);
         }
     }

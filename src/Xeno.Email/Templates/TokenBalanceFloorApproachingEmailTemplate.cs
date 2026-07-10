@@ -42,11 +42,11 @@ namespace Xeno.Email.Templates
                 EmailTemplateField.Create("Floor", context.Floor.ToString(CultureInfo.InvariantCulture))
             };
             string bodyHtml =
-                "<h1 style=\"font-size:20px;line-height:1.3;margin:0 0 12px;\">Token balance is approaching its floor</h1>" +
-                "<p style=\"margin:0 0 12px;\">Your configured token balance warning threshold is close.</p>" +
+                RenderHeading("Token balance is approaching its floor") +
+                RenderParagraph("Your configured token balance warning threshold is close.") +
                 RenderKeyValueTable(fields);
             string bodyText = "Token balance is approaching its floor" + Environment.NewLine + Environment.NewLine + RenderKeyValueText(fields);
-            EmailTemplateRenderResult result = RenderLayout("Token balance warning", "Your token balance is approaching its configured floor.", bodyHtml, bodyText);
+            EmailTemplateRenderResult result = RenderLayout("Token balance warning", "Token balance warning", "Your token balance is approaching its configured floor.", bodyHtml, bodyText);
             return Task.FromResult(result);
         }
     }

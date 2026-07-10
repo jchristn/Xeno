@@ -1,9 +1,11 @@
 namespace Xeno.Email.Templates
 {
     using System;
+    using System.Data;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    using HtmlPageBuilder;
     using Xeno.Core.Settings;
 
     /// <summary>
@@ -48,6 +50,7 @@ namespace Xeno.Email.Templates
         /// <summary>
         /// Render the shared email layout.
         /// </summary>
+        /// <param name="title">Email title.</param>
         /// <param name="subject">Subject.</param>
         /// <param name="preheader">Preheader.</param>
         /// <param name="bodyHtml">Body HTML.</param>
@@ -55,40 +58,111 @@ namespace Xeno.Email.Templates
         /// <param name="ctaText">Optional call-to-action text.</param>
         /// <param name="ctaUrl">Optional call-to-action URL.</param>
         /// <returns>Rendered result.</returns>
-        protected EmailTemplateRenderResult RenderLayout(string subject, string preheader, string bodyHtml, string bodyText, string? ctaText = null, string? ctaUrl = null)
+        protected EmailTemplateRenderResult RenderLayout(string title, string subject, string preheader, string bodyHtml, string bodyText, string? ctaText = null, string? ctaUrl = null)
         {
+            if (String.IsNullOrWhiteSpace(title)) throw new ArgumentException("Email title is required.", nameof(title));
+
             string finalSubject = String.IsNullOrWhiteSpace(Settings.SubjectPrefix) ? subject : Settings.SubjectPrefix.Trim() + " " + subject;
             string supportAddress = String.IsNullOrWhiteSpace(Settings.SupportAddress) ? Settings.ReplyToAddress : Settings.SupportAddress;
             string encodedSupportAddress = EmailHtmlEncoder.Encode(supportAddress);
             string supportHref = "mailto:" + EmailHtmlEncoder.Attribute(supportAddress);
-            string ctaHtml = String.Empty;
+            HtmlBody emailBody = new HtmlBody();
+            HtmlPage page = new HtmlPage();
+            page.Head.Title = EmailHtmlEncoder.Encode(finalSubject);
+            page.Head.AdditionalElements.Add("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             string ctaTextBlock = String.Empty;
+            string contentHtml = bodyHtml;
             if (!String.IsNullOrWhiteSpace(ctaText) && !String.IsNullOrWhiteSpace(ctaUrl))
             {
-                ctaHtml = "<p style=\"margin:24px 0;\"><a href=\"" + EmailHtmlEncoder.Attribute(ctaUrl) + "\" style=\"display:inline-block;background:" + Theme.AccentColor + ";color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:700;\">" + EmailHtmlEncoder.Encode(ctaText) + "</a></p>";
+                string encodedCtaText = EmailHtmlEncoder.Encode(ctaText);
+                string encodedCtaUrl = EmailHtmlEncoder.Attribute(ctaUrl);
+                contentHtml += emailBody.Paragraph(
+                    emailBody.Link(
+                        encodedCtaText,
+                        encodedCtaUrl,
+                        false,
+                        null,
+                        null,
+                        "display:inline-block;background:" + Theme.AccentColor + ";color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:700;"),
+                    null,
+                    null,
+                    "margin:24px 0;");
                 ctaTextBlock = Environment.NewLine + ctaText + ": " + ctaUrl + Environment.NewLine;
             }
 
-            string html =
-                "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + EmailHtmlEncoder.Encode(finalSubject) + "</title></head>" +
-                "<body style=\"margin:0;background:" + Theme.BackgroundColor + ";font-family:Arial,Helvetica,sans-serif;color:" + Theme.TextColor + ";\">" +
-                "<span style=\"display:none!important;color:transparent;height:0;max-height:0;max-width:0;opacity:0;overflow:hidden;\">" + EmailHtmlEncoder.Encode(preheader) + "</span>" +
-                "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:" + Theme.BackgroundColor + ";padding:24px 0;\"><tr><td align=\"center\">" +
-                "<table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:640px;max-width:94%;background:" + Theme.SurfaceColor + ";border:1px solid " + Theme.BorderColor + ";border-radius:8px;overflow:hidden;\">" +
-                "<tr><td style=\"padding:20px 24px;border-bottom:1px solid " + Theme.BorderColor + ";font-size:20px;font-weight:700;\">" + EmailHtmlEncoder.Encode(Theme.BrandName) + "</td></tr>" +
-                "<tr><td style=\"padding:24px;font-size:14px;line-height:1.55;\">" + bodyHtml + ctaHtml + "</td></tr>" +
-                "<tr><td style=\"padding:18px 24px;border-top:1px solid " + Theme.BorderColor + ";font-size:12px;line-height:1.45;color:" + Theme.MutedTextColor + ";\">Questions? Email <a href=\"" + supportHref + "\" style=\"color:" + Theme.AccentColor + ";\">" + encodedSupportAddress + "</a>.</td></tr>" +
-                "</table></td></tr></table></body></html>";
+            string headerHtml =
+                emailBody.Image(
+                    EmailHtmlEncoder.Attribute(Theme.BrandName + " logo"),
+                    EmailHtmlEncoder.Attribute(Theme.LogoUrl),
+                    null,
+                    null,
+                    "display:block;width:64px;height:64px;max-width:96px;max-height:96px;margin:0 auto 12px;") +
+                emailBody.Div(EmailHtmlEncoder.Encode(title), null, null, "font-size:22px;line-height:1.25;font-weight:700;text-align:center;color:" + Theme.TextColor + ";");
+            string footerLinks =
+                emailBody.Link("Home", EmailHtmlEncoder.Attribute(Theme.HomeUrl), false, null, null, "color:" + Theme.AccentColor + ";") +
+                " &nbsp;|&nbsp; " +
+                emailBody.Link("Dashboard", EmailHtmlEncoder.Attribute(Theme.DashboardUrl), false, null, null, "color:" + Theme.AccentColor + ";") +
+                " &nbsp;|&nbsp; " +
+                emailBody.Link("GitHub", EmailHtmlEncoder.Attribute(Theme.GitHubUrl), false, null, null, "color:" + Theme.AccentColor + ";");
+            string footerHtml = footerLinks + emailBody.Div("Questions? Email " + emailBody.Link(encodedSupportAddress, supportHref, false, null, null, "color:" + Theme.AccentColor + ";") + ".", null, null, "margin-top:10px;");
+            page.Body.Content =
+                emailBody.Div(EmailHtmlEncoder.Encode(preheader), null, null, "display:none!important;color:transparent;height:0;max-height:0;max-width:0;opacity:0;overflow:hidden;") +
+                emailBody.Div(
+                    emailBody.Div(
+                        emailBody.Div(headerHtml, null, null, "padding:20px 24px;border-bottom:1px solid " + Theme.BorderColor + ";") +
+                        emailBody.Div(contentHtml, null, null, "padding:24px;font-size:14px;line-height:1.55;") +
+                        emailBody.Div(footerHtml, null, null, "padding:18px 24px;border-top:1px solid " + Theme.BorderColor + ";font-size:12px;line-height:1.45;color:" + Theme.MutedTextColor + ";"),
+                        null,
+                        null,
+                        "width:640px;max-width:94%;background:" + Theme.SurfaceColor + ";border:1px solid " + Theme.BorderColor + ";border-radius:8px;overflow:hidden;margin:0 auto;"),
+                    null,
+                    null,
+                    "background:" + Theme.BackgroundColor + ";font-family:Arial,Helvetica,sans-serif;color:" + Theme.TextColor + ";padding:24px 0;");
 
-            string text = bodyText + ctaTextBlock + Environment.NewLine + "Questions? Email " + supportAddress + ".";
+            string text =
+                title +
+                Environment.NewLine +
+                Environment.NewLine +
+                bodyText +
+                ctaTextBlock +
+                Environment.NewLine +
+                "Home: " + Theme.HomeUrl +
+                Environment.NewLine +
+                "Dashboard: " + Theme.DashboardUrl +
+                Environment.NewLine +
+                "GitHub: " + Theme.GitHubUrl +
+                Environment.NewLine +
+                "Questions? Email " + supportAddress + ".";
 
             return new EmailTemplateRenderResult
             {
                 TemplateId = TemplateId,
                 Subject = finalSubject,
-                HtmlBody = BoundBody(html),
+                HtmlBody = BoundBody(page.ToString()),
                 TextBody = BoundBody(text)
             };
+        }
+
+        /// <summary>
+        /// Render an HTML heading.
+        /// </summary>
+        /// <param name="text">Heading text.</param>
+        /// <returns>HTML heading.</returns>
+        protected static string RenderHeading(string text)
+        {
+            HtmlBody body = new HtmlBody();
+            return body.H1Text(EmailHtmlEncoder.Encode(text), null, null, "font-size:20px;line-height:1.3;margin:0 0 12px;");
+        }
+
+        /// <summary>
+        /// Render an HTML paragraph.
+        /// </summary>
+        /// <param name="text">Paragraph text.</param>
+        /// <returns>HTML paragraph.</returns>
+        protected static string RenderParagraph(string text)
+        {
+            HtmlBody body = new HtmlBody();
+            return body.Paragraph(EmailHtmlEncoder.Encode(text), null, null, "margin:0 0 12px;");
         }
 
         /// <summary>
@@ -98,19 +172,16 @@ namespace Xeno.Email.Templates
         /// <returns>HTML table.</returns>
         protected static string RenderKeyValueTable(params EmailTemplateField[] items)
         {
-            StringBuilder builder = new StringBuilder();
-            builder.Append("<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;margin:16px 0;\">");
+            using DataTable table = new DataTable("EmailTemplateFields");
+            table.Columns.Add("Field", typeof(string));
+            table.Columns.Add("Value", typeof(string));
             foreach (EmailTemplateField item in items)
             {
-                builder.Append("<tr><td style=\"border:1px solid #d8dee9;padding:8px;font-weight:700;width:34%;\">");
-                builder.Append(EmailHtmlEncoder.Encode(item.Label));
-                builder.Append("</td><td style=\"border:1px solid #d8dee9;padding:8px;\">");
-                builder.Append(EmailHtmlEncoder.Encode(item.Value));
-                builder.Append("</td></tr>");
+                table.Rows.Add(EmailHtmlEncoder.Encode(item.Label), EmailHtmlEncoder.Encode(item.Value));
             }
 
-            builder.Append("</table>");
-            return builder.ToString();
+            HtmlBody body = new HtmlBody();
+            return body.Table(table, null, null, "border-collapse:collapse;margin:16px 0;width:100%;");
         }
 
         /// <summary>

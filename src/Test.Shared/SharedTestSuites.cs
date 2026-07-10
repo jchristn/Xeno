@@ -111,6 +111,7 @@ namespace Test.Shared
                             if (settings.Email == null) throw new InvalidOperationException("Email settings missing.");
                             if (settings.Email.Enabled) throw new InvalidOperationException("Email should be disabled by default.");
                             if (settings.Email.Provider != EmailProviderTypeEnum.Disabled) throw new InvalidOperationException("Default email provider should be disabled.");
+                            if (!String.Equals(settings.Email.ApplicationBaseUrl, "https://app.xenocloud.ai", StringComparison.Ordinal)) throw new InvalidOperationException("Default email application base URL should use app.xenocloud.ai.");
                             string json = JsonUtil.Serialize(settings, true);
                             if (!json.Contains("\"Email\"", StringComparison.Ordinal)) throw new InvalidOperationException("Serialized settings do not include Email.");
                             XenoSettings? roundTrip = JsonUtil.Deserialize<XenoSettings>(json);
@@ -141,6 +142,12 @@ namespace Test.Shared
                             EmailTemplateRenderResult rendered = await template.RenderAsync(context, CancellationToken.None).ConfigureAwait(false);
                             if (!rendered.HtmlBody.Contains("&lt;script&gt;", StringComparison.Ordinal)) throw new InvalidOperationException("Template did not encode tenant name.");
                             if (rendered.HtmlBody.Contains("<script>alert", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Template emitted raw script content.");
+                            if (!rendered.HtmlBody.Contains("https://xenocloud.ai/assets/logo.png", StringComparison.Ordinal)) throw new InvalidOperationException("Template did not include the email header logo.");
+                            if (!rendered.HtmlBody.Contains("max-width:96px", StringComparison.Ordinal) || !rendered.HtmlBody.Contains("max-height:96px", StringComparison.Ordinal)) throw new InvalidOperationException("Template logo size was not bounded to 96 pixels.");
+                            if (!rendered.HtmlBody.Contains("https://xenocloud.ai", StringComparison.Ordinal)) throw new InvalidOperationException("Template footer did not include the home link.");
+                            if (!rendered.HtmlBody.Contains("https://app.xenocloud.ai", StringComparison.Ordinal)) throw new InvalidOperationException("Template footer did not include the dashboard link.");
+                            if (!rendered.HtmlBody.Contains("https://github.com/jchristn/Xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Template footer did not include the GitHub link.");
+                            if (!rendered.TextBody.Contains("GitHub: https://github.com/jchristn/Xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Template text body did not include the footer links.");
                             string redacted = EmailRedactionHelpers.RedactSensitiveJson("{\"password\":\"secret\",\"token\":\"abc\",\"tenant\":\"ok\"}");
                             if (redacted.Contains("secret", StringComparison.Ordinal) || redacted.Contains("abc", StringComparison.Ordinal)) throw new InvalidOperationException("Sensitive JSON was not redacted.");
                             if (!redacted.Contains("ok", StringComparison.Ordinal)) throw new InvalidOperationException("Non-sensitive JSON was unexpectedly removed.");

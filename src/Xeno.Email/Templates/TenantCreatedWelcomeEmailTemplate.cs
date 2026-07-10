@@ -42,12 +42,12 @@ namespace Xeno.Email.Templates
                 EmailTemplateField.Create("Username", context.Username)
             };
             string bodyHtml =
-                "<h1 style=\"font-size:20px;line-height:1.3;margin:0 0 12px;\">Your Xeno tenant is ready</h1>" +
-                "<p style=\"margin:0 0 12px;\">Your organization has been created. Use the dashboard to configure clients, credentials, roles, routing, and request history.</p>" +
+                RenderHeading("Your Xeno tenant is ready") +
+                RenderParagraph("Your organization has been created. Use the dashboard to configure clients, credentials, roles, routing, and request history.") +
                 RenderKeyValueTable(fields);
             string bodyText = "Your Xeno tenant is ready" + Environment.NewLine + Environment.NewLine + RenderKeyValueText(fields);
             string ctaUrl = String.IsNullOrWhiteSpace(Settings.ApplicationBaseUrl) ? String.Empty : Settings.ApplicationBaseUrl.TrimEnd('/');
-            EmailTemplateRenderResult result = RenderLayout("Your Xeno tenant is ready", "Your Xeno tenant is ready.", bodyHtml, bodyText, "Open Xeno", ctaUrl);
+            EmailTemplateRenderResult result = RenderLayout("Your Xeno tenant is ready", "Your Xeno tenant is ready", "Your Xeno tenant is ready.", bodyHtml, bodyText, "Open Xeno", ctaUrl);
             return Task.FromResult(result);
         }
     }

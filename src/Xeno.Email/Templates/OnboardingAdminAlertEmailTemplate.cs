@@ -38,12 +38,9 @@ namespace Xeno.Email.Templates
 
             string action = context.CreatedTenant ? "New tenant onboarded" : "New user onboarded";
             EmailTemplateField[] fields = BuildFields(context);
-            string bodyHtml =
-                "<h1 style=\"font-size:20px;line-height:1.3;margin:0 0 12px;\">" + EmailHtmlEncoder.Encode(action) + "</h1>" +
-                "<p style=\"margin:0 0 12px;\">An onboarding workflow completed in Xeno.</p>" +
-                RenderKeyValueTable(fields);
+            string bodyHtml = RenderHeading(action) + RenderParagraph("An onboarding workflow completed in Xeno.") + RenderKeyValueTable(fields);
             string bodyText = action + Environment.NewLine + Environment.NewLine + RenderKeyValueText(fields);
-            EmailTemplateRenderResult result = RenderLayout(action, action, bodyHtml, bodyText);
+            EmailTemplateRenderResult result = RenderLayout(action, action, action, bodyHtml, bodyText);
             return Task.FromResult(result);
         }
 

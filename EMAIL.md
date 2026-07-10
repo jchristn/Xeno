@@ -90,7 +90,7 @@ Suggested JSON shape:
     "FromName": "Xeno",
     "ReplyToAddress": "support@xenocloud.ai",
     "SupportAddress": "support@xenocloud.ai",
-    "ApplicationBaseUrl": "https://portal.xenocloud.ai",
+    "ApplicationBaseUrl": "https://app.xenocloud.ai",
     "SubjectPrefix": "",
     "MaxBodyBytes": 262144,
     "Mailgun": {
