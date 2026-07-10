@@ -1387,6 +1387,7 @@ namespace Test.Shared
             Credential adminOwnedCredential = new Credential { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, AccessKey = "admin-owned", SecretKey = "secret", Active = true };
             platform.Credentials.Add(adminOwnedCredential);
             RequestContext credentialContext = new RequestContext { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, CredentialId = adminOwnedCredential.Id, PrincipalType = PrincipalTypeEnum.Credential, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Credential };
+            if (!authorization.IsSystemAdmin(platform, credentialContext)) throw new InvalidOperationException("System-admin-owned credential should satisfy system admin checks.");
             AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = credentialContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "TenantMismatch");
         }
 
@@ -3113,6 +3114,21 @@ namespace Test.Shared
                             if (htmlFiles.Length == 0) throw new InvalidOperationException("Test email did not write HTML output.");
                             string html = await File.ReadAllTextAsync(htmlFiles[0]).ConfigureAwait(false);
                             if (!html.Contains("hello world", StringComparison.Ordinal)) throw new InvalidOperationException("Test email output did not contain requested body.");
+                        }
+
+                        using (HttpClient defaultCredentialClient = new HttpClient())
+                        using (HttpRequestMessage defaultCredentialRequest = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/v1.0/api/email/test"))
+                        {
+                            defaultCredentialRequest.Headers.Add("Authorization", "Bearer default");
+                            defaultCredentialRequest.Content = new StringContent(JsonUtil.Serialize(new EmailTestRequest { ToEmail = "admin@example.com", Body = "hello from default bearer" }), Encoding.UTF8, "application/json");
+                            using (HttpResponseMessage defaultCredentialResponse = await defaultCredentialClient.SendAsync(defaultCredentialRequest).ConfigureAwait(false))
+                            {
+                                string defaultCredentialBody = await defaultCredentialResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!defaultCredentialResponse.IsSuccessStatusCode) throw new InvalidOperationException("Default bearer credential should send test email: " + defaultCredentialBody);
+                                EmailTestResponse defaultCredentialEmail = DeserializeRequired<EmailTestResponse>(defaultCredentialBody);
+                                if (!defaultCredentialEmail.Accepted || defaultCredentialEmail.Skipped) throw new InvalidOperationException("Default bearer test email response was not accepted.");
+                                if (!String.Equals(defaultCredentialEmail.Provider, "File", StringComparison.Ordinal)) throw new InvalidOperationException("Default bearer test email did not use file provider.");
+                            }
                         }
 
                         string backup = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/backup").ConfigureAwait(false);

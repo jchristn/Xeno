@@ -180,7 +180,12 @@ namespace Xeno.Core.Services
             if (context == null) throw new ArgumentNullException(nameof(context));
 
             User? user = ResolveUser(platform, context);
-            return CanUseUserAdminBypass(context) && user != null && user.IsAdmin;
+            if (CanUseUserAdminBypass(context) && user != null && user.IsAdmin) return true;
+            if (context.PrincipalType != PrincipalTypeEnum.Credential) return false;
+
+            Credential? credential = ResolveCredential(platform, context);
+            if (credential == null || !String.Equals(credential.UserId, context.UserId, StringComparison.Ordinal)) return false;
+            return user != null && user.IsAdmin;
         }
 
         /// <summary>
