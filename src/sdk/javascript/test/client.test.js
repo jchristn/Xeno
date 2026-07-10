@@ -284,10 +284,10 @@ test('text and error responses are handled', async () => {
 });
 
 test('updateSettings passes through email settings', async () => {
-  const fetchImpl = createFetch();
+  const fetchImpl = createFetch(() => jsonResponse({ Email: { Provider: 'File' } }));
   const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
 
-  await client.updateSettings({
+  const response = await client.updateSettings({
     Email: {
       Enabled: true,
       Provider: 'File',
@@ -299,6 +299,8 @@ test('updateSettings passes through email settings', async () => {
   assert.equal(fetchImpl.calls[0].options.method, 'POST');
   assert.match(fetchImpl.calls[0].options.body, /"Email":/);
   assert.match(fetchImpl.calls[0].options.body, /"Provider":"File"/);
+  assert.equal(response.Email.Provider, 'File');
+  assert.equal(response.settings, undefined);
 });
 
 test('sendTestEmail uses administrative email route', async () => {

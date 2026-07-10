@@ -2984,7 +2984,7 @@ function SettingsView() {
   const [testEmailBody, setTestEmailBody] = useState('hello world');
 
   useEffect(() => {
-    const normalized = normalizeSettings(unwrapSettings(settings.data));
+    const normalized = normalizeSettings(settings.data);
     setDraft(normalized);
     setConfigText(JSON.stringify(normalized, null, 2));
   }, [settings.data]);
@@ -3022,21 +3022,21 @@ function SettingsView() {
 
   async function saveSettings() {
     const result = await api.post('/api/v1/settings', draft);
-    const normalized = normalizeSettings(unwrapSettings(result));
+    const normalized = normalizeSettings(result);
     setDraft(normalized);
     setConfigText(JSON.stringify(normalized, null, 2));
     settings.refresh();
-    setStatus(settingSaveRequiresRestart(result) ? t('settingsSavedRestartRequired') : t('settingsSaved'));
+    setStatus(t('settingsSavedRestartRequired'));
   }
 
   async function saveJsonSettings() {
     const parsed = JSON.parse(configText || '{}');
     const result = await api.post('/api/v1/settings', parsed);
-    const normalized = normalizeSettings(unwrapSettings(result));
+    const normalized = normalizeSettings(result);
     setDraft(normalized);
     setConfigText(JSON.stringify(normalized, null, 2));
     settings.refresh();
-    setStatus(settingSaveRequiresRestart(result) ? t('settingsSavedRestartRequired') : t('settingsSaved'));
+    setStatus(t('settingsSavedRestartRequired'));
   }
 
   async function downloadBackup() {
@@ -3560,14 +3560,6 @@ function defaultServerSettings() {
       }
     }
   };
-}
-
-function unwrapSettings(input) {
-  return input?.settings || input?.Settings || input || {};
-}
-
-function settingSaveRequiresRestart(input) {
-  return input?.restartRequired === true || input?.RestartRequired === true;
 }
 
 function normalizeSettings(input) {

@@ -302,16 +302,18 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(str(context.exception), "denied")
 
     def test_update_settings_passes_through_email_settings(self):
-        opener = FakeOpener()
+        opener = FakeOpener(lambda request: FakeResponse('{"Email":{"Provider":"File"}}'))
         client = XenoClient("https://xeno.local", opener=opener)
 
-        client.update_settings({"Email": {"Enabled": True, "Provider": "File", "File": {"Directory": "data/email-outbox"}}})
+        response = client.update_settings({"Email": {"Enabled": True, "Provider": "File", "File": {"Directory": "data/email-outbox"}}})
 
         request = opener.calls[0]["request"]
         self.assertEqual(request.full_url, "https://xeno.local/v1.0/api/settings")
         self.assertEqual(request.get_method(), "POST")
         self.assertIn('"Email"', opener.calls[0]["body"])
         self.assertIn('"Provider": "File"', opener.calls[0]["body"])
+        self.assertEqual(response["Email"]["Provider"], "File")
+        self.assertNotIn("settings", response)
 
     def test_send_test_email_uses_administrative_email_route(self):
         opener = FakeOpener(lambda request: FakeResponse('{"accepted":true,"skipped":false,"provider":"Mailgun","providerMessageId":"msg_1","statusMessage":"Email accepted by Mailgun.","templateId":"administrative-test","toEmail":"joel.christner@gmail.com","subject":"Xeno test email","sentUtc":"2026-07-10T00:00:00Z"}'))

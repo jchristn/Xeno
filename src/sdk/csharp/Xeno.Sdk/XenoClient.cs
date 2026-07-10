@@ -960,10 +960,10 @@
         /// Gets server settings.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
-        /// <returns>Settings response JSON.</returns>
-        public async Task<SettingsResponse> GetSettingsAsync(CancellationToken token = default)
+        /// <returns>Settings JSON.</returns>
+        public async Task<XenoObjectResponse> GetSettingsAsync(CancellationToken token = default)
         {
-            return await GetJsonAsync<SettingsResponse>("/v1.0/api/settings", token).ConfigureAwait(false);
+            return await GetJsonAsync<XenoObjectResponse>("/v1.0/api/settings", token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -971,10 +971,10 @@
         /// </summary>
         /// <param name="settings">Settings payload.</param>
         /// <param name="token">Cancellation token.</param>
-        /// <returns>Settings response JSON.</returns>
-        public async Task<SettingsResponse> UpdateSettingsAsync(object settings, CancellationToken token = default)
+        /// <returns>Settings JSON.</returns>
+        public async Task<XenoObjectResponse> UpdateSettingsAsync(object settings, CancellationToken token = default)
         {
-            return await PostJsonAsync<SettingsResponse>("/v1.0/api/settings", settings ?? new object(), token).ConfigureAwait(false);
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/settings", settings ?? new object(), token).ConfigureAwait(false);
         }
 
         /// <summary>

@@ -111,6 +111,9 @@ for application traffic. Credential values may be sent as bearer tokens.
 Tenant headers are optional selectors or compatibility hints; they do not
 authenticate the request.
 
+`GetSettingsAsync` and `UpdateSettingsAsync` return an `XenoObjectResponse`
+whose raw JSON is the server settings object itself.
+
 ## Interactive Console
 
 ```powershell

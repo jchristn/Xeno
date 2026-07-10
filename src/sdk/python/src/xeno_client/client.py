@@ -164,10 +164,6 @@ class ServerProviderTelemetrySearchResult(XenoModel):
     pass
 
 
-class SettingsResponse(XenoModel):
-    pass
-
-
 class EmailTestResponse(XenoModel):
     pass
 

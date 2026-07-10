@@ -333,7 +333,7 @@ No SDK should gain a `SendEmail` method in the first pass.
 SDK work:
 
 - [ ] Confirm C#, JavaScript, and Python settings update helpers preserve unknown nested settings, including `Email`.
-- [ ] Add typed C# settings models only if the SDK moves away from `JsonElement` for settings. Today `SettingsResponse.Settings` is already generic.
+- [ ] Add typed C# settings models only if the SDK moves away from raw JSON for settings. The server settings API returns the `XenoSettings` JSON object directly.
 - [ ] Update SDK README coverage statements to mention email settings only as part of server settings management.
 - [ ] Add SDK tests around settings payload passthrough if any SDK currently normalizes or filters settings.
 

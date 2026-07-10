@@ -300,6 +300,11 @@ The clients response includes connection state, capacity fields, authenticated o
 
 `POST /v1.0/api/settings`
 
+Both settings operations use the same body shape: the raw `XenoSettings` JSON
+object. `GET` returns the settings object directly. `POST` accepts the settings
+object directly and returns the saved settings object directly. The response is
+not wrapped in `settings`, `settingsFile`, or `restartRequired` metadata.
+
 The server settings payload includes an `Email` section for administrative
 notification workflows. `Email.Provider` supports `Disabled`, `File`, and
 `Mailgun`. `Disabled` is the default. `File` writes rendered `.json`, `.html`,

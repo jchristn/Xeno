@@ -3092,12 +3092,17 @@ namespace Test.Shared
                         string baseUrl = "http://127.0.0.1:" + port;
                         await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         string settingsBody = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/settings").ConfigureAwait(false);
-                        if (!settingsBody.Contains("settingsFile", StringComparison.Ordinal)) throw new InvalidOperationException("Settings response missing settingsFile.");
+                        XenoSettings readSettings = DeserializeRequired<XenoSettings>(settingsBody);
+                        if (readSettings.Rest.Port != settings.Rest.Port) throw new InvalidOperationException("Settings response did not return the server settings object.");
+                        if (settingsBody.Contains("\"settings\"", StringComparison.Ordinal) || settingsBody.Contains("\"settingsFile\"", StringComparison.Ordinal) || settingsBody.Contains("\"restartRequired\"", StringComparison.Ordinal)) throw new InvalidOperationException("Settings GET response should not include the legacy wrapper: " + settingsBody);
 
                         using (HttpResponseMessage saveSettingsResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/settings", JsonUtil.Serialize(settings)).ConfigureAwait(false))
                         {
                             string saveSettingsBody = await saveSettingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                             if (!saveSettingsResponse.IsSuccessStatusCode || !File.Exists(settingsFile)) throw new InvalidOperationException("Settings save failed: " + saveSettingsBody);
+                            XenoSettings savedResponseSettings = DeserializeRequired<XenoSettings>(saveSettingsBody);
+                            if (savedResponseSettings.Email.Provider != EmailProviderTypeEnum.File) throw new InvalidOperationException("Settings POST response did not return the saved settings object.");
+                            if (saveSettingsBody.Contains("\"settings\"", StringComparison.Ordinal) || saveSettingsBody.Contains("\"settingsFile\"", StringComparison.Ordinal) || saveSettingsBody.Contains("\"restartRequired\"", StringComparison.Ordinal)) throw new InvalidOperationException("Settings POST response should not include the legacy wrapper: " + saveSettingsBody);
                             string savedSettingsJson = await File.ReadAllTextAsync(settingsFile).ConfigureAwait(false);
                             if (!savedSettingsJson.Contains("\"Email\"", StringComparison.Ordinal) || !savedSettingsJson.Contains("\"Provider\": \"File\"", StringComparison.Ordinal)) throw new InvalidOperationException("Settings save did not persist Email provider settings.");
                         }
@@ -3735,7 +3740,9 @@ namespace Test.Shared
                                 {
                                     string settingsJson = await settingsResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                                     if (!settingsResponse.IsSuccessStatusCode) throw new InvalidOperationException("Bearer-authenticated settings request failed: " + settingsJson);
-                                    if (!settingsJson.Contains("settingsFile", StringComparison.Ordinal)) throw new InvalidOperationException("Authenticated settings response missing settingsFile.");
+                                    XenoSettings authenticatedSettings = DeserializeRequired<XenoSettings>(settingsJson);
+                                    if (authenticatedSettings.Rest.Port != settings.Rest.Port) throw new InvalidOperationException("Authenticated settings response did not return the server settings object.");
+                                    if (settingsJson.Contains("\"settings\"", StringComparison.Ordinal) || settingsJson.Contains("\"settingsFile\"", StringComparison.Ordinal) || settingsJson.Contains("\"restartRequired\"", StringComparison.Ordinal)) throw new InvalidOperationException("Authenticated settings response should not include the legacy wrapper: " + settingsJson);
                                 }
                             }
                         }

@@ -95,6 +95,8 @@ for application traffic. Credential values may be sent as bearer tokens.
 Tenant headers are optional selectors or compatibility hints; they do not
 authenticate the request.
 
+`get_settings()` and `update_settings()` return the server settings object itself.
+
 ## Interactive Console
 
 ```bash

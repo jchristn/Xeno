@@ -982,9 +982,9 @@ namespace Xeno.Server
                     XenoSettingsBodySchema(),
                     new Dictionary<string, object>
                     {
-                        ["rest"] = new Dictionary<string, object> { ["hostname"] = "0.0.0.0", ["port"] = 9000, ["ssl"] = false },
-                        ["cors"] = new Dictionary<string, object> { ["enabled"] = true, ["allowedOrigins"] = new[] { "*" } },
-                        ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" }
+                        ["Rest"] = new Dictionary<string, object> { ["Hostname"] = "0.0.0.0", ["Port"] = 9000, ["Ssl"] = false },
+                        ["Cors"] = new Dictionary<string, object> { ["Enabled"] = true, ["AllowedOrigins"] = new[] { "*" } },
+                        ["WebSocket"] = new Dictionary<string, object> { ["Enabled"] = true, ["Path"] = "/ws/v1/clients" }
                     });
             }
 
@@ -1361,15 +1361,16 @@ namespace Xeno.Server
             return ObjectSchemaMetadata(
                 "Server settings.",
                 Array.Empty<string>(),
-                SchemaProperty("rest", OpenApiSchemaMetadata.Create("object", "REST settings.")),
-                SchemaProperty("cors", OpenApiSchemaMetadata.Create("object", "CORS settings.")),
-                SchemaProperty("logging", OpenApiSchemaMetadata.Create("object", "Logging settings.")),
-                SchemaProperty("webSocket", OpenApiSchemaMetadata.Create("object", "WebSocket settings.")),
-                SchemaProperty("database", OpenApiSchemaMetadata.Create("object", "Database settings.")),
-                SchemaProperty("auth", OpenApiSchemaMetadata.Create("object", "Authentication settings.")),
-                SchemaProperty("requestHistory", OpenApiSchemaMetadata.Create("object", "Request history settings.")),
-                SchemaProperty("routing", OpenApiSchemaMetadata.Create("object", "Routing settings.")),
-                SchemaProperty("email", OpenApiSchemaMetadata.Create("object", "Email notification settings.")));
+                SchemaProperty("Rest", OpenApiSchemaMetadata.Create("object", "REST settings.")),
+                SchemaProperty("Cors", OpenApiSchemaMetadata.Create("object", "CORS settings.")),
+                SchemaProperty("Logging", OpenApiSchemaMetadata.Create("object", "Logging settings.")),
+                SchemaProperty("WebSocket", OpenApiSchemaMetadata.Create("object", "WebSocket settings.")),
+                SchemaProperty("Database", OpenApiSchemaMetadata.Create("object", "Database settings.")),
+                SchemaProperty("Auth", OpenApiSchemaMetadata.Create("object", "Authentication settings.")),
+                SchemaProperty("RequestHistory", OpenApiSchemaMetadata.Create("object", "Request history settings.")),
+                SchemaProperty("Routing", OpenApiSchemaMetadata.Create("object", "Routing settings.")),
+                SchemaProperty("TelemetryCollection", OpenApiSchemaMetadata.Create("object", "Server telemetry collection settings.")),
+                SchemaProperty("Email", OpenApiSchemaMetadata.Create("object", "Email notification settings.")));
         }
 
         private async Task PreflightRouteAsync(HttpContextBase context)
@@ -2164,7 +2165,7 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
             {
                 EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                await SendJsonAsync(context, new { settings = _Settings, settingsFile = _SettingsFile }).ConfigureAwait(false);
+                await SendJsonAsync(context, _Settings).ConfigureAwait(false);
                 return;
             }
 
@@ -2175,7 +2176,7 @@ namespace Xeno.Server
                 if (incoming == null) throw new ArgumentException("Settings payload is invalid.");
                 ApplySettings(incoming);
                 await SaveSettingsAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { settings = _Settings, settingsFile = _SettingsFile, restartRequired = true }).ConfigureAwait(false);
+                await SendJsonAsync(context, _Settings).ConfigureAwait(false);
                 return;
             }
 
@@ -6428,7 +6429,7 @@ namespace Xeno.Server
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
                     ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
                     ["/v1.0/api/analytics/overview"] = Path(Operation("get", "analyticsOverview", "Analytics", "Analytics overview", "Returns tenant analytics.", "GenericObject", true)),
-                    ["/v1.0/api/settings"] = Path(Operation("get", "getSettings", "Settings", "Get server settings", "Returns running server settings and config file path.", "SettingsResponse", true), Operation("post", "updateSettings", "Settings", "Update server settings", "Persists server settings to the JSON config file.", "SettingsResponse", true)),
+                    ["/v1.0/api/settings"] = Path(Operation("get", "getSettings", "Settings", "Get server settings", "Returns running server settings as a JSON settings object.", "XenoSettings", true), Operation("post", "updateSettings", "Settings", "Update server settings", "Persists a JSON settings object to the server config file and returns the saved settings object.", "XenoSettings", true)),
                     ["/v1.0/api/email/test"] = Path(Operation("post", "sendTestEmail", "Email", "Send test email", "Renders the supplied body with the standard Xeno email layout and sends it through the configured provider. Requires global/system administrator.", "EmailTestResponse", true)),
                     ["/v1.0/api/backup"] = Path(Operation("get", "backup", "Backup", "Backup", "Returns platform state backup.", "GenericObject", true)),
                     ["/v1.0/api/restore"] = Path(Operation("post", "restore", "Backup", "Restore", "Restores platform state backup.", "GenericObject", true)),
@@ -6593,7 +6594,17 @@ namespace Xeno.Server
                         ["OpenAiEmbeddingList"] = ObjectSchema(Property("object", StringSchema()), Property("model", StringSchema())),
                         ["OllamaModelList"] = ObjectSchema(Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ErrorResponse"] = ObjectSchema(Property("error", StringSchema()), Property("message", StringSchema())),
-                        ["SettingsResponse"] = ObjectSchema(Property("settings", ObjectSchema()), Property("settingsFile", StringSchema()), Property("restartRequired", BooleanSchema())),
+                        ["XenoSettings"] = ObjectSchema(
+                            Property("Rest", ObjectSchema()),
+                            Property("Cors", ObjectSchema()),
+                            Property("WebSocket", ObjectSchema()),
+                            Property("Database", ObjectSchema()),
+                            Property("Logging", ObjectSchema()),
+                            Property("Auth", ObjectSchema()),
+                            Property("RequestHistory", ObjectSchema()),
+                            Property("Routing", ObjectSchema()),
+                            Property("TelemetryCollection", ObjectSchema()),
+                            Property("Email", ObjectSchema())),
                         ["EmailTestResponse"] = ObjectSchema(
                             Property("accepted", BooleanSchema()),
                             Property("skipped", BooleanSchema()),
@@ -7360,39 +7371,40 @@ namespace Xeno.Server
                 return JsonRequestBody(
                     "Server settings update request.",
                     ObjectSchema(
-                        Property("rest", ObjectSchema()),
-                        Property("cors", ObjectSchema()),
-                        Property("logging", ObjectSchema()),
-                        Property("webSocket", ObjectSchema()),
-                        Property("database", ObjectSchema()),
-                        Property("auth", ObjectSchema()),
-                        Property("requestHistory", ObjectSchema()),
-                        Property("routing", ObjectSchema()),
-                        Property("email", ObjectSchema())),
+                        Property("Rest", ObjectSchema()),
+                        Property("Cors", ObjectSchema()),
+                        Property("Logging", ObjectSchema()),
+                        Property("WebSocket", ObjectSchema()),
+                        Property("Database", ObjectSchema()),
+                        Property("Auth", ObjectSchema()),
+                        Property("RequestHistory", ObjectSchema()),
+                        Property("Routing", ObjectSchema()),
+                        Property("TelemetryCollection", ObjectSchema()),
+                        Property("Email", ObjectSchema())),
                     new Dictionary<string, object>
                     {
-                        ["rest"] = new Dictionary<string, object> { ["hostname"] = "0.0.0.0", ["port"] = 9000, ["ssl"] = false },
-                        ["cors"] = new Dictionary<string, object> { ["enabled"] = true, ["allowedOrigins"] = new[] { "*" } },
-                        ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" },
-                        ["email"] = new Dictionary<string, object>
+                        ["Rest"] = new Dictionary<string, object> { ["Hostname"] = "0.0.0.0", ["Port"] = 9000, ["Ssl"] = false },
+                        ["Cors"] = new Dictionary<string, object> { ["Enabled"] = true, ["AllowedOrigins"] = new[] { "*" } },
+                        ["WebSocket"] = new Dictionary<string, object> { ["Enabled"] = true, ["Path"] = "/ws/v1/clients" },
+                        ["Email"] = new Dictionary<string, object>
                         {
-                            ["enabled"] = false,
-                            ["provider"] = "Disabled",
-                            ["fromAddress"] = "noreply@xenocloud.ai",
-                            ["fromName"] = "Xeno",
-                            ["replyToAddress"] = "support@xenocloud.ai",
-                            ["supportAddress"] = "support@xenocloud.ai",
-                            ["applicationBaseUrl"] = "https://app.xenocloud.ai",
-                            ["mailgun"] = new Dictionary<string, object> { ["domain"] = "", ["apiKey"] = "", ["region"] = "US" },
-                            ["file"] = new Dictionary<string, object> { ["directory"] = "data/email-outbox" },
-                            ["notifications"] = new Dictionary<string, object>
+                            ["Enabled"] = false,
+                            ["Provider"] = "Disabled",
+                            ["FromAddress"] = "noreply@xenocloud.ai",
+                            ["FromName"] = "Xeno",
+                            ["ReplyToAddress"] = "support@xenocloud.ai",
+                            ["SupportAddress"] = "support@xenocloud.ai",
+                            ["ApplicationBaseUrl"] = "https://app.xenocloud.ai",
+                            ["Mailgun"] = new Dictionary<string, object> { ["Domain"] = "", ["ApiKey"] = "", ["Region"] = "US" },
+                            ["File"] = new Dictionary<string, object> { ["Directory"] = "data/email-outbox" },
+                            ["Notifications"] = new Dictionary<string, object>
                             {
-                                ["notifyPlatformAdministratorsOnTenantCreated"] = true,
-                                ["notifyPlatformAdministratorsOnUserJoined"] = true,
-                                ["notifyTenantAdministratorsOnUserJoined"] = true,
-                                ["notifyNewTenantAdministrator"] = true,
-                                ["notifyNewTenantMember"] = false,
-                                ["platformAdministratorRecipients"] = Array.Empty<object>()
+                                ["NotifyPlatformAdministratorsOnTenantCreated"] = true,
+                                ["NotifyPlatformAdministratorsOnUserJoined"] = true,
+                                ["NotifyTenantAdministratorsOnUserJoined"] = true,
+                                ["NotifyNewTenantAdministrator"] = true,
+                                ["NotifyNewTenantMember"] = false,
+                                ["PlatformAdministratorRecipients"] = Array.Empty<object>()
                             }
                         }
                     });

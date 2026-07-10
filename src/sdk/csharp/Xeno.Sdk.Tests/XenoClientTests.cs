@@ -361,7 +361,7 @@ namespace Xeno.Sdk.Tests
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
             using (CancellationTokenSource source = new CancellationTokenSource())
             {
-                SettingsResponse response = await client.GetSettingsAsync(source.Token);
+                XenoObjectResponse response = await client.GetSettingsAsync(source.Token);
                 Assert.NotNull(response);
 
                 Assert.True(handler.Requests[0].CancellationToken.CanBeCanceled);
@@ -371,11 +371,11 @@ namespace Xeno.Sdk.Tests
         [Fact]
         public async Task UpdateSettingsAsync_PassesThroughEmailSettings()
         {
-            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"Email\":{\"Provider\":\"File\"}}"));
             using (HttpClient httpClient = new HttpClient(handler))
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
             {
-                await client.UpdateSettingsAsync(new
+                XenoObjectResponse response = await client.UpdateSettingsAsync(new
                 {
                     Email = new
                     {
@@ -391,6 +391,9 @@ namespace Xeno.Sdk.Tests
                 RecordedRequest request = Assert.Single(handler.Requests);
                 AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/settings", "\"Provider\":\"File\"");
                 Assert.Contains("\"Email\"", request.Body);
+                Assert.Contains("\"Email\"", response.ToString());
+                Assert.Contains("\"Provider\":\"File\"", response.ToString());
+                Assert.DoesNotContain("\"settings\"", response.ToString());
             }
         }
 
