@@ -978,6 +978,17 @@
         }
 
         /// <summary>
+        /// Sends an administrative test email through the configured server email provider.
+        /// </summary>
+        /// <param name="request">Test email request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Test email response JSON.</returns>
+        public async Task<EmailTestResponse> SendTestEmailAsync(EmailTestRequest request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<EmailTestResponse>("/v1.0/api/email/test", request ?? new EmailTestRequest(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets platform backup.
         /// </summary>
         /// <param name="token">Cancellation token.</param>

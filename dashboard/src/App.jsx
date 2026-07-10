@@ -2980,6 +2980,8 @@ function SettingsView() {
   const [configText, setConfigText] = useState('');
   const [backup, setBackup] = useState('');
   const [status, setStatus] = useState('');
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [testEmailBody, setTestEmailBody] = useState('hello world');
 
   useEffect(() => {
     const normalized = normalizeSettings(unwrapSettings(settings.data));
@@ -3045,6 +3047,19 @@ function SettingsView() {
   async function restoreBackup() {
     await api.post('/api/v1/restore', JSON.parse(backup || '{}'));
     setStatus(t('restoreComplete'));
+  }
+
+  async function sendTestEmail() {
+    const result = await api.post('/api/v1/email/test', {
+      toEmail: testEmailTo,
+      title: 'Xeno Test Email',
+      subject: 'Xeno test email',
+      body: testEmailBody
+    });
+    setStatus(t('testEmailSent', {
+      provider: result.provider || result.Provider || '-',
+      status: result.statusMessage || result.StatusMessage || ''
+    }));
   }
 
   return (
@@ -3281,6 +3296,13 @@ function SettingsView() {
               <input type="password" value={draft.Email.Mailgun.ApiKey} onChange={(event) => updateNestedSetting('Email', 'Mailgun', 'ApiKey', event.target.value)} title={t('tooltipSettingsEmailMailgunApiKey')} />
               <small className="setting-impact restart">{t('restartRequired')}</small>
             </label>
+            <label className="form-field" title={t('tooltipSettingsEmailMailgunRegion')}>
+              <span>{t('mailgunRegion')}</span>
+              <select value={draft.Email.Mailgun.Region} onChange={(event) => updateNestedSetting('Email', 'Mailgun', 'Region', event.target.value)} title={t('tooltipSettingsEmailMailgunRegion')}>
+                {['US', 'EU'].map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
             <label className="form-field" title={t('tooltipSettingsEmailFileDirectory')}>
               <span>{t('emailFileDirectory')}</span>
               <input value={draft.Email.File.Directory} onChange={(event) => updateNestedSetting('Email', 'File', 'Directory', event.target.value)} title={t('tooltipSettingsEmailFileDirectory')} />
@@ -3318,6 +3340,22 @@ function SettingsView() {
               <textarea rows={3} value={recipientListToText(draft.Email.Notifications.PlatformAdministratorRecipients)} onChange={(event) => updateEmailRecipientSetting(event.target.value)} title={t('tooltipSettingsEmailPlatformRecipients')} />
               <small className="setting-impact live">{t('appliesImmediately')}</small>
             </label>
+          </div>
+          <div className="form-stack">
+            <h3 className="subsection-title">{t('testEmail')}</h3>
+            <div className="form-grid two">
+              <label className="form-field" title={t('tooltipSettingsEmailTestRecipient')}>
+                <span>{t('testEmailRecipient')}</span>
+                <input value={testEmailTo} onChange={(event) => setTestEmailTo(event.target.value)} title={t('tooltipSettingsEmailTestRecipient')} type="email" />
+              </label>
+              <label className="form-field full-span" title={t('tooltipSettingsEmailTestBody')}>
+                <span>{t('testEmailBody')}</span>
+                <textarea rows={3} value={testEmailBody} onChange={(event) => setTestEmailBody(event.target.value)} title={t('tooltipSettingsEmailTestBody')} />
+              </label>
+            </div>
+            <div className="button-row">
+              <IconButton onClick={sendTestEmail} label={t('sendTestEmail')} tooltip={t('tooltipSettingsEmailSendTest')} icon={<Upload size={16} />} variant="primary" />
+            </div>
           </div>
         </Panel>
         <Panel actions={<SettingImpactBadge type="restart" />} title={t('loggingSettings')}>

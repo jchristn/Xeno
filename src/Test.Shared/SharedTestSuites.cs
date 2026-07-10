@@ -176,6 +176,24 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "AdministrativeTestEmailTemplateUsesStandardLayout",
+                        displayName: "Administrative test email template uses standard layout",
+                        executeAsync: async delegate
+                        {
+                            AdministrativeTestEmailTemplate template = new AdministrativeTestEmailTemplate(new EmailSettings());
+                            EmailTemplateRenderResult rendered = await template.RenderAsync(new AdministrativeTestEmailTemplateContext
+                            {
+                                Title = "Xeno Test Email",
+                                Subject = "Xeno test email",
+                                Body = "hello world"
+                            }, CancellationToken.None).ConfigureAwait(false);
+                            if (!String.Equals(rendered.TemplateId, "administrative-test", StringComparison.Ordinal)) throw new InvalidOperationException("Test email template ID mismatch.");
+                            if (!rendered.HtmlBody.Contains("hello world", StringComparison.Ordinal)) throw new InvalidOperationException("Test email HTML body did not include the requested body.");
+                            if (!rendered.HtmlBody.Contains("https://xenocloud.ai/assets/logo.png", StringComparison.Ordinal)) throw new InvalidOperationException("Test email did not include the standard logo.");
+                            if (!rendered.HtmlBody.Contains("https://github.com/jchristn/Xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Test email did not include the standard footer links.");
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "DisabledEmailProviderSkipsMessages",
                         displayName: "Disabled email provider skips messages",
                         executeAsync: async delegate
@@ -3038,6 +3056,7 @@ namespace Test.Shared
             int port = GetFreePort();
             string dbFile = Path.Combine(Path.GetTempPath(), "xeno-management-" + Guid.NewGuid().ToString("N") + ".db");
             string settingsFile = Path.Combine(Path.GetTempPath(), "xeno-management-" + Guid.NewGuid().ToString("N") + ".json");
+            string emailDirectory = Path.Combine(Path.GetTempPath(), "xeno-management-email-" + Guid.NewGuid().ToString("N"));
             XenoSettings settings = new XenoSettings
             {
                 Rest = new RestSettings
@@ -3055,7 +3074,7 @@ namespace Test.Shared
                 {
                     Enabled = true,
                     Provider = EmailProviderTypeEnum.File,
-                    File = new EmailFileSettings { Directory = Path.Combine(Path.GetTempPath(), "xeno-management-email-" + Guid.NewGuid().ToString("N")) }
+                    File = new EmailFileSettings { Directory = emailDirectory }
                 }
             };
 
@@ -3080,6 +3099,20 @@ namespace Test.Shared
                             if (!saveSettingsResponse.IsSuccessStatusCode || !File.Exists(settingsFile)) throw new InvalidOperationException("Settings save failed: " + saveSettingsBody);
                             string savedSettingsJson = await File.ReadAllTextAsync(settingsFile).ConfigureAwait(false);
                             if (!savedSettingsJson.Contains("\"Email\"", StringComparison.Ordinal) || !savedSettingsJson.Contains("\"Provider\": \"File\"", StringComparison.Ordinal)) throw new InvalidOperationException("Settings save did not persist Email provider settings.");
+                        }
+
+                        using (HttpResponseMessage testEmailResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/email/test", JsonUtil.Serialize(new EmailTestRequest { ToEmail = "admin@example.com", Body = "hello world" })).ConfigureAwait(false))
+                        {
+                            string testEmailBody = await testEmailResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!testEmailResponse.IsSuccessStatusCode) throw new InvalidOperationException("Test email send failed: " + testEmailBody);
+                            EmailTestResponse testEmail = DeserializeRequired<EmailTestResponse>(testEmailBody);
+                            if (!testEmail.Accepted || testEmail.Skipped) throw new InvalidOperationException("Test email response was not accepted.");
+                            if (!String.Equals(testEmail.Provider, "File", StringComparison.Ordinal)) throw new InvalidOperationException("Test email did not use file provider.");
+                            if (!String.Equals(testEmail.TemplateId, "administrative-test", StringComparison.Ordinal)) throw new InvalidOperationException("Test email template mismatch.");
+                            string[] htmlFiles = Directory.GetFiles(emailDirectory, "*.html");
+                            if (htmlFiles.Length == 0) throw new InvalidOperationException("Test email did not write HTML output.");
+                            string html = await File.ReadAllTextAsync(htmlFiles[0]).ConfigureAwait(false);
+                            if (!html.Contains("hello world", StringComparison.Ordinal)) throw new InvalidOperationException("Test email output did not contain requested body.");
                         }
 
                         string backup = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/backup").ConfigureAwait(false);
@@ -3136,6 +3169,7 @@ namespace Test.Shared
                     server.Dispose();
                     await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
                     await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
+                    if (Directory.Exists(emailDirectory)) Directory.Delete(emailDirectory, true);
                 }
             }
         }
@@ -3826,6 +3860,17 @@ namespace Test.Shared
                                 if (!settingsDeniedJson.Contains("SystemAdminRequired", StringComparison.Ordinal)) throw new InvalidOperationException("Settings denial should require system admin: " + settingsDeniedJson);
                             }
 
+                            using (HttpResponseMessage testEmailDenied = await PostJsonAsync(regularClient, baseUrl + "/v1.0/api/email/test", JsonUtil.Serialize(new EmailTestRequest
+                            {
+                                ToEmail = "admin@example.com",
+                                Body = "hello world"
+                            })).ConfigureAwait(false))
+                            {
+                                string testEmailDeniedJson = await testEmailDenied.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if ((int)testEmailDenied.StatusCode != 403) throw new InvalidOperationException("Existing-tenant member should not send administrative test email: " + testEmailDeniedJson);
+                                if (!testEmailDeniedJson.Contains("SystemAdminRequired", StringComparison.Ordinal)) throw new InvalidOperationException("Test email denial should require system admin: " + testEmailDeniedJson);
+                            }
+
                             using (HttpResponseMessage duplicateEmailUpdate = await PutJsonAsync(regularClient, baseUrl + "/v1.0/api/users/" + Uri.EscapeDataString(regularSignup.User.Id), JsonUtil.Serialize(new
                             {
                                 email = "tenant-admin@signup.test"
@@ -4328,6 +4373,7 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/client-models", Method = "delete" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/request-history/bulk", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/settings", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/email/test", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1/chat/completions", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1/completions", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1/embeddings", Method = "post" },

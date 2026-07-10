@@ -300,3 +300,30 @@ test('updateSettings passes through email settings', async () => {
   assert.match(fetchImpl.calls[0].options.body, /"Email":/);
   assert.match(fetchImpl.calls[0].options.body, /"Provider":"File"/);
 });
+
+test('sendTestEmail uses administrative email route', async () => {
+  const fetchImpl = createFetch(() => jsonResponse({
+    accepted: true,
+    skipped: false,
+    provider: 'Mailgun',
+    providerMessageId: 'msg_1',
+    statusMessage: 'Email accepted by Mailgun.',
+    templateId: 'administrative-test',
+    toEmail: 'joel.christner@gmail.com',
+    subject: 'Xeno test email',
+    sentUtc: '2026-07-10T00:00:00Z'
+  }));
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
+
+  const response = await client.sendTestEmail({
+    toEmail: 'joel.christner@gmail.com',
+    body: 'hello world'
+  });
+
+  assert.equal(response.accepted, true);
+  assert.equal(response.templateId, 'administrative-test');
+  assert.equal(fetchImpl.calls[0].url, 'https://xeno.local/v1.0/api/email/test');
+  assert.equal(fetchImpl.calls[0].options.method, 'POST');
+  assert.match(fetchImpl.calls[0].options.body, /"toEmail":"joel.christner@gmail.com"/);
+  assert.match(fetchImpl.calls[0].options.body, /"body":"hello world"/);
+});

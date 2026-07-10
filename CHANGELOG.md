@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added global-admin administrative test email APIs, dashboard controls, SDK wrappers, Postman coverage, and REST documentation for validating configured email providers with the standard Xeno email layout.
 - Added provider-abstracted server email plumbing, disabled/file/Mailgun providers, onboarding notification templates, email settings, dashboard configuration, metrics, and Touchstone coverage.
 - Hardened RBAC and tenant fencing: system-admin and tenant-admin flags are protected, role/permission grants enforce grantor ceilings, OpenAI-compatible routes require authenticated inference permissions, request history includes caller identity, and SDKs/docs/Postman now describe authenticated OpenAI usage.
 - Added server-requested client telemetry settings, WebSocket frame contracts, SQLite-backed server telemetry persistence, authenticated REST telemetry routes, dashboard `CONTROL > Client Telemetry`, telemetry route wrappers in C#, JavaScript, and Python SDKs, and telemetry routing policy fields.

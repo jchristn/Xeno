@@ -347,6 +347,10 @@ export class XenoClient {
     return this.#request('POST', '/v1.0/api/settings', settings);
   }
 
+  async sendTestEmail(request = {}) {
+    return this.#request('POST', '/v1.0/api/email/test', request || {});
+  }
+
   async getBackup() {
     return this.#request('GET', '/v1.0/api/backup');
   }

@@ -168,6 +168,10 @@ class SettingsResponse(XenoModel):
     pass
 
 
+class EmailTestResponse(XenoModel):
+    pass
+
+
 class Tenant(XenoModel):
     pass
 
@@ -442,6 +446,9 @@ class XenoClient:
 
     def update_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1.0/api/settings", settings)
+
+    def send_test_email(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/email/test", request or {})
 
     def get_backup(self) -> dict[str, Any]:
         return self._request("GET", "/v1.0/api/backup")

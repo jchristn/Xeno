@@ -318,6 +318,41 @@ notifications include bounded request metadata such as source IP, forwarded-for,
 user agent, origin, referer, host, request path, request ID, and correlation ID
 for operator drill-down.
 
+`POST /v1.0/api/email/test`
+
+Sends an administrative test email through the configured server email provider.
+This route is only available to global/system administrators. The supplied body
+is rendered through the same standard Xeno email layout used by notification
+templates, including the header logo/title and footer links.
+
+Request:
+
+```json
+{
+  "toEmail": "joel.christner@gmail.com",
+  "toName": "Joel Christner",
+  "title": "Xeno Test Email",
+  "subject": "Xeno test email",
+  "body": "hello world"
+}
+```
+
+Response:
+
+```json
+{
+  "accepted": true,
+  "skipped": false,
+  "provider": "Mailgun",
+  "providerMessageId": "provider-message-id",
+  "statusMessage": "Email accepted by Mailgun.",
+  "templateId": "administrative-test",
+  "toEmail": "joel.christner@gmail.com",
+  "subject": "Xeno test email",
+  "sentUtc": "2026-07-10T00:00:00Z"
+}
+```
+
 `GET /v1.0/api/backup`
 
 `POST /v1.0/api/restore`

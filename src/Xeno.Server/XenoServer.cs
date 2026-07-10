@@ -30,6 +30,7 @@ namespace Xeno.Server
     using Xeno.Core.Settings;
     using Xeno.Email;
     using Xeno.Email.Providers;
+    using Xeno.Email.Templates;
     using Xeno.Email.Workflows;
     using Xeno.Server.Services;
 
@@ -198,6 +199,7 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Model Leaderboard", Description = "Public model token usage leaderboards" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Email", Description = "Administrative email delivery tests" });
                 AddXenoOpenApiSecuritySchemes(openApi.SecuritySchemes);
             });
 
@@ -377,6 +379,8 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/settings", "Get server settings", "Settings");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/settings", "Update server settings", "Settings");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/settings", "Update server settings", "Settings");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/email/test", "Send test email", "Email");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/email/test", "Send test email", "Email");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/backup", "Backup platform state", "Backup");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/backup", "Backup platform state", "Backup");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/restore", "Restore platform state", "Backup");
@@ -981,6 +985,27 @@ namespace Xeno.Server
                         ["rest"] = new Dictionary<string, object> { ["hostname"] = "0.0.0.0", ["port"] = 9000, ["ssl"] = false },
                         ["cors"] = new Dictionary<string, object> { ["enabled"] = true, ["allowedOrigins"] = new[] { "*" } },
                         ["webSocket"] = new Dictionary<string, object> { ["enabled"] = true, ["path"] = "/ws/v1/clients" }
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/email/test", "/v1.0/api/email/test"))
+            {
+                return JsonBody(
+                    "Administrative test email request.",
+                    ObjectSchemaMetadata(
+                        "Administrative test email request.",
+                        new[] { "toEmail", "body" },
+                        SchemaProperty("toEmail", OpenApiSchemaMetadata.String("Recipient email address.")),
+                        SchemaProperty("toName", OpenApiSchemaMetadata.String("Optional recipient display name.")),
+                        SchemaProperty("title", OpenApiSchemaMetadata.String("Email title. Defaults to Xeno Test Email.")),
+                        SchemaProperty("subject", OpenApiSchemaMetadata.String("Email subject. Defaults to Xeno test email.")),
+                        SchemaProperty("body", OpenApiSchemaMetadata.String("Plain text body rendered inside the standard Xeno email layout."))),
+                    new Dictionary<string, object>
+                    {
+                        ["toEmail"] = "joel.christner@gmail.com",
+                        ["title"] = "Xeno Test Email",
+                        ["subject"] = "Xeno test email",
+                        ["body"] = "hello world"
                     });
             }
 
@@ -2151,6 +2176,15 @@ namespace Xeno.Server
                 ApplySettings(incoming);
                 await SaveSettingsAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { settings = _Settings, settingsFile = _SettingsFile, restartRequired = true }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/email/test", "/v1.0/api/email/test"))
+            {
+                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
+                EmailTestRequest body = ReadJsonBody<EmailTestRequest>(context);
+                EmailTestResponse response = await SendAdministrativeTestEmailAsync(body, requestContext, token).ConfigureAwait(false);
+                await SendJsonAsync(context, response).ConfigureAwait(false);
                 return;
             }
 
@@ -4587,6 +4621,80 @@ namespace Xeno.Server
             }
         }
 
+        private async Task<EmailTestResponse> SendAdministrativeTestEmailAsync(EmailTestRequest request, RequestContext auditContext, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
+            string toEmail = FirstNonEmpty(request.ToEmail).Trim();
+            string toName = FirstNonEmpty(request.ToName).Trim();
+            string title = FirstNonEmpty(request.Title, "Xeno Test Email").Trim();
+            string subject = FirstNonEmpty(request.Subject, "Xeno test email").Trim();
+            string body = FirstNonEmpty(request.Body).Trim();
+            if (String.IsNullOrWhiteSpace(toEmail)) throw new ArgumentException("Recipient email address is required.");
+            if (!IsValidEmailAddress(toEmail)) throw new ArgumentException("Recipient email address is invalid.");
+            if (String.IsNullOrWhiteSpace(body)) throw new ArgumentException("Email body is required.");
+
+            AdministrativeTestEmailTemplate template = new AdministrativeTestEmailTemplate(_Settings.Email);
+            EmailTemplateRenderResult rendered = await _Email.RenderTemplateAsync(
+                template,
+                new AdministrativeTestEmailTemplateContext
+                {
+                    Title = title,
+                    Subject = subject,
+                    Body = body
+                },
+                token).ConfigureAwait(false);
+            EmailMessage message = new EmailMessage
+            {
+                From = EmailAddress.Create(_Settings.Email.FromAddress, _Settings.Email.FromName),
+                ReplyTo = String.IsNullOrWhiteSpace(_Settings.Email.ReplyToAddress) ? null : EmailAddress.Create(_Settings.Email.ReplyToAddress),
+                Subject = rendered.Subject,
+                HtmlBody = rendered.HtmlBody,
+                TextBody = rendered.TextBody,
+                TemplateId = rendered.TemplateId,
+                CorrelationId = auditContext.CorrelationId
+            };
+            message.To.Add(EmailAddress.Create(toEmail, toName));
+            message.Tags["workflow"] = "administrative-test";
+
+            try
+            {
+                EmailSendResult result = await _Email.SendAsync(message, token).ConfigureAwait(false);
+                RecordEmailResult(result);
+                string reasonCode = result.Skipped ? "TestEmailSkipped" : "TestEmailAccepted";
+                int statusCode = result.Skipped ? 202 : 200;
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, statusCode, auditContext.TenantId, auditContext.UserId);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                return new EmailTestResponse
+                {
+                    Accepted = result.Accepted,
+                    Skipped = result.Skipped,
+                    Provider = result.Provider,
+                    ProviderMessageId = result.ProviderMessageId,
+                    StatusMessage = result.StatusMessage,
+                    TemplateId = result.TemplateId,
+                    ToEmail = toEmail,
+                    Subject = rendered.Subject,
+                    SentUtc = result.SentUtc
+                };
+            }
+            catch (EmailDeliveryException)
+            {
+                RecordEmailFailure(_Settings.Email.Provider.ToString(), template.TemplateId);
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailDeliveryFailed", 502, auditContext.TenantId, auditContext.UserId);
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+                throw new HttpStatusException(502, "EmailDeliveryFailed", "Test email delivery failed.");
+            }
+            catch (InvalidOperationException)
+            {
+                RecordEmailFailure(_Settings.Email.Provider.ToString(), template.TemplateId);
+                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailInvalidOperation", 500, auditContext.TenantId, auditContext.UserId);
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+        }
+
         private async Task RequirePermissionAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token)
         {
             await RequirePermissionAsync(context, context.TenantId, resourceType, operationType, token).ConfigureAwait(false);
@@ -6321,6 +6429,7 @@ namespace Xeno.Server
                     ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
                     ["/v1.0/api/analytics/overview"] = Path(Operation("get", "analyticsOverview", "Analytics", "Analytics overview", "Returns tenant analytics.", "GenericObject", true)),
                     ["/v1.0/api/settings"] = Path(Operation("get", "getSettings", "Settings", "Get server settings", "Returns running server settings and config file path.", "SettingsResponse", true), Operation("post", "updateSettings", "Settings", "Update server settings", "Persists server settings to the JSON config file.", "SettingsResponse", true)),
+                    ["/v1.0/api/email/test"] = Path(Operation("post", "sendTestEmail", "Email", "Send test email", "Renders the supplied body with the standard Xeno email layout and sends it through the configured provider. Requires global/system administrator.", "EmailTestResponse", true)),
                     ["/v1.0/api/backup"] = Path(Operation("get", "backup", "Backup", "Backup", "Returns platform state backup.", "GenericObject", true)),
                     ["/v1.0/api/restore"] = Path(Operation("post", "restore", "Backup", "Restore", "Restores platform state backup.", "GenericObject", true)),
                     ["/v1/models"] = Path(Operation("get", "listOpenAiModels", "OpenAI", "List models", "OpenAI-compatible model list. Requires Inference.Read in the selected tenant.", "OpenAiModelList", true)),
@@ -6485,6 +6594,16 @@ namespace Xeno.Server
                         ["OllamaModelList"] = ObjectSchema(Property("models", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["ErrorResponse"] = ObjectSchema(Property("error", StringSchema()), Property("message", StringSchema())),
                         ["SettingsResponse"] = ObjectSchema(Property("settings", ObjectSchema()), Property("settingsFile", StringSchema()), Property("restartRequired", BooleanSchema())),
+                        ["EmailTestResponse"] = ObjectSchema(
+                            Property("accepted", BooleanSchema()),
+                            Property("skipped", BooleanSchema()),
+                            Property("provider", StringSchema()),
+                            Property("providerMessageId", StringSchema()),
+                            Property("statusMessage", StringSchema()),
+                            Property("templateId", StringSchema()),
+                            Property("toEmail", StringSchema()),
+                            Property("subject", StringSchema()),
+                            Property("sentUtc", StringSchema("date-time"))),
                         ["GenericObject"] = ObjectSchema(),
                         ["Tenant"] = ObjectSchema(Property("id", StringSchema()), Property("name", StringSchema())),
                         ["User"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("email", StringSchema())),
@@ -7276,6 +7395,25 @@ namespace Xeno.Server
                                 ["platformAdministratorRecipients"] = Array.Empty<object>()
                             }
                         }
+                    });
+            }
+
+            if (String.Equals(operationId, "sendTestEmail", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Administrative test email request.",
+                    ObjectSchema(
+                        Property("toEmail", StringSchema()),
+                        Property("toName", StringSchema()),
+                        Property("title", StringSchema()),
+                        Property("subject", StringSchema()),
+                        Property("body", StringSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["toEmail"] = "joel.christner@gmail.com",
+                        ["title"] = "Xeno Test Email",
+                        ["subject"] = "Xeno test email",
+                        ["body"] = "hello world"
                     });
             }
 

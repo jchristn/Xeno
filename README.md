@@ -25,7 +25,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
 - Collects local CPU, memory, disk, and GPU telemetry on the client at a configurable interval, persists it in SQLite, and exposes live and historical telemetry dashboard pages.
 - Can collect fleet-level client telemetry from the server. When `TelemetryCollection.Enabled` is true, the server requests host and provider telemetry over the authenticated client WebSocket, persists server-collected samples, and shows them under `CONTROL > Client Telemetry`.
-- Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, and audit-friendly telemetry.
+- Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, provider-backed email notifications, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
 - Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
 - Ships with a web dashboard, REST API, OpenAPI/Swagger documentation, Postman collection, Docker deployment assets, and C#, JavaScript, and Python SDKs.
@@ -389,7 +389,7 @@ The dashboard is the primary administration surface for Xeno. It includes:
 - Routing policy management for model/client matching and load-balancing behavior.
 - Request history with telemetry, headers, bodies, streaming details, and routing decisions.
 - Tenant, user, credential, role, and permission create/edit/delete workflows.
-- Settings management for server configuration.
+- Settings management for server configuration, including email provider setup and global-admin test email sends.
 - Analytics by time window, path, model, and request behavior.
 - Integrated API Explorer with editable JSON request bodies, response headers, streaming previews, and copy-to-clipboard controls.
 
@@ -432,7 +432,7 @@ The selected database engine stores server platform state and server-collected c
 
 The default Docker compose stack uses PostgreSQL. Optional MySQL and SQL Server services are present in [docker/compose.yaml](docker/compose.yaml) for alternate deployments.
 
-Server email notifications are disabled by default. Set `Email.Enabled` to `true`, choose `Email.Provider`, and configure the provider-specific section such as `Email.Mailgun` to send onboarding and administrative notifications. Xeno never includes passwords, bearer tokens, access keys, or secret keys in notification email. Onboarding administrator notifications include non-secret request metadata such as source IP, forwarded-for, user agent, request ID, and correlation ID for operational drill-down.
+Server email notifications are disabled by default. Set `Email.Enabled` to `true`, choose `Email.Provider`, and configure the provider-specific section such as `Email.Mailgun` to send onboarding and administrative notifications. Global administrators can use the dashboard settings page or `POST /v1.0/api/email/test` to send a test email through the configured provider using the standard Xeno email layout. Xeno never includes passwords, bearer tokens, access keys, or secret keys in notification email. Onboarding administrator notifications include non-secret request metadata such as source IP, forwarded-for, user agent, request ID, and correlation ID for operational drill-down.
 
 ## SDKs
 

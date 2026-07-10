@@ -395,6 +395,31 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
+        public async Task SendTestEmailAsync_UsesAdministrativeEmailRoute()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"accepted\":true,\"skipped\":false,\"provider\":\"Mailgun\",\"providerMessageId\":\"msg_1\",\"statusMessage\":\"Email accepted by Mailgun.\",\"templateId\":\"administrative-test\",\"toEmail\":\"joel.christner@gmail.com\",\"subject\":\"Xeno test email\",\"sentUtc\":\"2026-07-10T00:00:00Z\"}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                EmailTestResponse response = await client.SendTestEmailAsync(new EmailTestRequest
+                {
+                    ToEmail = "joel.christner@gmail.com",
+                    Body = "hello world"
+                });
+
+                Assert.True(response.Accepted);
+                Assert.False(response.Skipped);
+                Assert.Equal("Mailgun", response.Provider);
+                Assert.Equal("administrative-test", response.TemplateId);
+                Assert.Equal("joel.christner@gmail.com", response.ToEmail);
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/email/test", "\"toEmail\":\"joel.christner@gmail.com\"");
+                Assert.Contains("\"body\":\"hello world\"", request.Body);
+            }
+        }
+
+        [Fact]
         public async Task TypedResponses_AreMaterialized()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.1.0\"}"));

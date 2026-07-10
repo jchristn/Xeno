@@ -71,6 +71,17 @@ The SDK defaults to bearer token `default`, which works against the default loca
 const client = new XenoClient({ baseUrl, bearerToken: token });
 ```
 
+Global administrators can send a provider-backed test email through the same standard Xeno HTML layout used by notification templates:
+
+```javascript
+const response = await client.sendTestEmail({
+  toEmail: 'joel.christner@gmail.com',
+  title: 'Xeno Test Email',
+  subject: 'Xeno test email',
+  body: 'hello world'
+});
+```
+
 Legacy integrations can still send tenant-bound access credentials through `x-access-key`, but new REST integrations should prefer bearer authentication:
 
 ```javascript
@@ -97,7 +108,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

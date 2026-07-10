@@ -4144,6 +4144,39 @@
                   }
                 }
               }
+            },
+            {
+              "name": "Send Test Email",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/email/test",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "email",
+                    "test"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"toEmail\": \"joel.christner@gmail.com\",\n  \"title\": \"Xeno Test Email\",\n  \"subject\": \"Xeno test email\",\n  \"body\": \"hello world\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
             }
           ]
         },

@@ -79,6 +79,18 @@ using (XenoClient client = new XenoClient("http://localhost:9000", bearerToken: 
 }
 ```
 
+Global administrators can send a provider-backed test email through the same standard Xeno HTML layout used by notification templates:
+
+```csharp
+EmailTestResponse response = await client.SendTestEmailAsync(new EmailTestRequest
+{
+    ToEmail = "joel.christner@gmail.com",
+    Title = "Xeno Test Email",
+    Subject = "Xeno test email",
+    Body = "hello world"
+});
+```
+
 Legacy integrations can still send tenant-bound access credentials through `x-access-key`, but new REST integrations should prefer bearer authentication:
 
 ```csharp
@@ -121,7 +133,7 @@ The SDK includes methods for:
   history search, rollups, detail reads, deletes, provider telemetry, and the
   telemetry metric catalog;
 - request history, public model token leaderboard, analytics, settings including
-  email provider configuration, backup,
+  email provider configuration and administrative test email sends, backup,
   restore, health, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
