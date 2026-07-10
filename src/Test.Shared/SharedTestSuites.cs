@@ -3,6 +3,7 @@ namespace Test.Shared
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Net.Http;
@@ -10,6 +11,7 @@ namespace Test.Shared
     using System.Net.WebSockets;
     using System.Reflection;
     using System.Text;
+    using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Data.Sqlite;
@@ -99,6 +101,15 @@ namespace Test.Shared
                             if (!settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-access-key", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers do not allow x-access-key.");
                             if (!settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-token", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers do not allow x-token.");
                             if (settings.Cors.AllowedHeaders.Any(item => String.Equals(item, "x-secret-key", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Default CORS headers still allow x-secret-key.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "CSharpStyleRejectsImplicitLocalsAndTuples",
+                        displayName: "C# style rejects implicit locals and tuples",
+                        executeAsync: delegate
+                        {
+                            AssertNoImplicitLocalsOrTuples();
                             return Task.CompletedTask;
                         }),
                     new TestCaseDescriptor(
@@ -5906,6 +5917,59 @@ namespace Test.Shared
             TestOpenApiDocument document = DeserializeRequired<TestOpenApiDocument>(json);
             if (!document.Paths.TryGetValue(path, out Dictionary<string, TestOpenApiOperation>? pathItem)) return false;
             return pathItem.ContainsKey(method);
+        }
+
+        private static void AssertNoImplicitLocalsOrTuples()
+        {
+            string root = FindRepositoryRoot();
+            string sourceRoot = Path.Combine(root, "src");
+            string implicitLocalPattern = "\\b" + "v" + "ar" + "\\s+[A-Za-z_][A-Za-z0-9_]*\\s*(=|;|in\\b)";
+            string implicitUsingPattern = "\\busing\\s+" + "v" + "ar" + "\\b";
+            string implicitForeachPattern = "\\bforeach\\s*\\(\\s*" + "v" + "ar" + "\\b";
+            string tupleTypePattern = "\\b(Value" + "Tuple|Tuple)\\s*<|\\b(Task|ValueTask|IEnumerable|IReadOnlyList|List|Dictionary)\\s*<\\s*\\(|^\\s*(public|private|protected|internal|static|async|sealed|override|virtual|partial|readonly|extern|new|unsafe|ref|abstract|\\s)+\\s*\\([^\\n]*,[^\\n]*\\)\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\(";
+            string tupleLocalPattern = "^\\s*\\([^\\n;=]*\\b[A-Za-z_][A-Za-z0-9_<>?\\[\\]]+\\s+[A-Za-z_][A-Za-z0-9_]*\\s*,[^\\n;=]*\\)\\s+[A-Za-z_][A-Za-z0-9_]*\\s*(=|;)";
+            Regex implicitLocal = new Regex(implicitLocalPattern, RegexOptions.Compiled);
+            Regex implicitUsing = new Regex(implicitUsingPattern, RegexOptions.Compiled);
+            Regex implicitForeach = new Regex(implicitForeachPattern, RegexOptions.Compiled);
+            Regex tupleType = new Regex(tupleTypePattern, RegexOptions.Compiled);
+            Regex tupleLocal = new Regex(tupleLocalPattern, RegexOptions.Compiled);
+            List<string> violations = new List<string>();
+
+            foreach (string file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
+            {
+                string normalizedPath = file.Replace(Path.DirectorySeparatorChar, '/');
+                if (normalizedPath.Contains("/bin/", StringComparison.OrdinalIgnoreCase) || normalizedPath.Contains("/obj/", StringComparison.OrdinalIgnoreCase)) continue;
+                string[] lines = File.ReadAllLines(file);
+                for (int index = 0; index < lines.Length; index++)
+                {
+                    string line = lines[index];
+                    if (implicitLocal.IsMatch(line) || implicitUsing.IsMatch(line) || implicitForeach.IsMatch(line) || tupleType.IsMatch(line) || tupleLocal.IsMatch(line))
+                    {
+                        violations.Add(Path.GetRelativePath(root, file) + ":" + (index + 1).ToString(CultureInfo.InvariantCulture) + ": " + line.Trim());
+                    }
+                }
+            }
+
+            if (violations.Count > 0)
+            {
+                throw new InvalidOperationException("C# style violations found:" + Environment.NewLine + String.Join(Environment.NewLine, violations.Take(20)));
+            }
+        }
+
+        private static string FindRepositoryRoot()
+        {
+            List<string> candidates = new List<string> { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+            foreach (string candidate in candidates)
+            {
+                DirectoryInfo? directory = new DirectoryInfo(candidate);
+                while (directory != null)
+                {
+                    if (File.Exists(Path.Combine(directory.FullName, "src", "Xeno.sln"))) return directory.FullName;
+                    directory = directory.Parent;
+                }
+            }
+
+            throw new DirectoryNotFoundException("Unable to locate repository root containing src/Xeno.sln.");
         }
 
         private static bool OpenApiHasSecurityScheme(string json, string schemeName, string headerName)
