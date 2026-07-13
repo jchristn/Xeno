@@ -1,6 +1,7 @@
 namespace Xeno.Email.Templates
 {
     using System;
+    using System.Collections.Generic;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -171,28 +172,54 @@ namespace Xeno.Email.Templates
         /// <returns>HTML table.</returns>
         protected static string RenderKeyValueTable(params EmailTemplateField[] items)
         {
-            StringBuilder builder = new StringBuilder();
-            builder.Append("<table style=\"border-collapse:collapse;margin:16px 0;width:100%;\">");
-            builder.Append("<thead><tr>");
-            builder.Append("<th align=\"left\" style=\"text-align:left;\">Field</th>");
-            builder.Append("<th align=\"left\" style=\"text-align:left;\">Value</th>");
-            builder.Append("</tr></thead>");
-            builder.Append("<tbody>");
+            HtmlBody body = new HtmlBody();
+            string headerRow = body.ElementHtml(
+                "tr",
+                RenderTableHeaderCell(body, "Field") + RenderTableHeaderCell(body, "Value"),
+                attributes: TableRowAttributes());
+
+            List<string> rows = new List<string>();
             foreach (EmailTemplateField item in items)
             {
-                builder.Append("<tr>");
-                builder.Append("<td align=\"left\" style=\"text-align:left;\">");
-                builder.Append(EmailHtmlEncoder.Encode(item.Label));
-                builder.Append("</td>");
-                builder.Append("<td align=\"left\" style=\"text-align:left;\">");
-                builder.Append(EmailHtmlEncoder.Encode(item.Value));
-                builder.Append("</td>");
-                builder.Append("</tr>");
+                rows.Add(body.ElementHtml(
+                    "tr",
+                    RenderTableCell(body, item.Label) + RenderTableCell(body, item.Value),
+                    attributes: TableRowAttributes()));
             }
 
-            builder.Append("</tbody>");
-            builder.Append("</table>");
-            return builder.ToString();
+            string tableContent =
+                body.ElementHtml("thead", headerRow) +
+                body.ElementHtml("tbody", String.Join(String.Empty, rows));
+            return body.ElementHtml("table", tableContent, attributes: TableAttributes());
+        }
+
+        private static string RenderTableHeaderCell(HtmlBody body, string text)
+        {
+            return body.ElementText("th", text, attributes: TableCellAttributes());
+        }
+
+        private static string RenderTableCell(HtmlBody body, string text)
+        {
+            return body.ElementText("td", text ?? String.Empty, attributes: TableCellAttributes());
+        }
+
+        private static HtmlAttributes TableAttributes()
+        {
+            return new HtmlAttributes()
+                .Style("border-collapse:collapse;margin:16px 0;width:100%;");
+        }
+
+        private static HtmlAttributes TableRowAttributes()
+        {
+            return new HtmlAttributes()
+                .Style("text-align:left;");
+        }
+
+        private static HtmlAttributes TableCellAttributes()
+        {
+            return new HtmlAttributes()
+                .Set("align", "left")
+                .Style("text-align:left;");
         }
 
         /// <summary>
