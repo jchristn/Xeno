@@ -66,6 +66,8 @@ namespace Xeno.Server
         private RoutingService? _Routing;
         private CancellationTokenSource? _TelemetryCollectionCancellation;
         private Task? _TelemetryCollectionTask;
+        private CancellationTokenSource? _WebSocketMaintenanceCancellation;
+        private Task? _WebSocketMaintenanceTask;
         private DateTime? _TelemetryLastCycleUtc;
         private DateTime? _TelemetryNextCycleUtc;
         private DateTime? _TelemetryNextPruneUtc;
@@ -119,6 +121,7 @@ namespace Xeno.Server
 
             _Webserver.Start();
             StartTelemetryCollectionLoop();
+            StartWebSocketMaintenanceLoop();
 
             try
             {
@@ -142,6 +145,7 @@ namespace Xeno.Server
         public void Stop()
         {
             _TelemetryCollectionCancellation?.Cancel();
+            _WebSocketMaintenanceCancellation?.Cancel();
             try
             {
                 _Webserver.Stop();
@@ -2691,6 +2695,93 @@ namespace Xeno.Server
             _TelemetryCollectionTask = Task.Run(async () => await TelemetryCollectionLoopAsync(_TelemetryCollectionCancellation.Token).ConfigureAwait(false));
         }
 
+        private void StartWebSocketMaintenanceLoop()
+        {
+            if (!_Settings.WebSocket.Enabled) return;
+            _WebSocketMaintenanceCancellation = new CancellationTokenSource();
+            _WebSocketMaintenanceTask = Task.Run(async () => await WebSocketMaintenanceLoopAsync(_WebSocketMaintenanceCancellation.Token).ConfigureAwait(false));
+        }
+
+        private async Task WebSocketMaintenanceLoopAsync(CancellationToken token)
+        {
+            try
+            {
+                TimeSpan interval = TimeSpan.FromMilliseconds(_Settings.WebSocket.StaleConnectionScanIntervalMs);
+                using (PeriodicTimer timer = new PeriodicTimer(interval))
+                {
+                    while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+                    {
+                        await EvictStaleClientConnectionsAsync(DateTime.UtcNow, token).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+        }
+
+        private async Task EvictStaleClientConnectionsAsync(DateTime utcNow, CancellationToken token)
+        {
+            List<ClientConnection> staleConnections = new List<ClientConnection>();
+            lock (_ClientConnectionsLock)
+            {
+                foreach (ClientConnection connection in _ClientConnections.Values.ToList())
+                {
+                    if (!IsClientConnectionStale(connection.ClientId, connection.TenantId, utcNow)) continue;
+                    _ClientConnections.Remove(connection.ClientId);
+                    staleConnections.Add(connection);
+                }
+            }
+
+            if (staleConnections.Count == 0) return;
+            XenoPlatform platform = RequirePlatform();
+            foreach (ClientConnection connection in staleConnections)
+            {
+                XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == connection.ClientId && item.TenantId == connection.TenantId);
+                if (client != null)
+                {
+                    client.Connected = false;
+                    client.InFlightRequests = 0;
+                    client.ServiceState = ClientServiceStateEnum.Quarantined;
+                }
+
+                await CloseStaleSessionAsync(connection, token).ConfigureAwait(false);
+            }
+
+            await SavePlatformAsync(token).ConfigureAwait(false);
+        }
+
+        private bool IsClientConnectionStale(string clientId, string tenantId, DateTime utcNow)
+        {
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == tenantId);
+            if (client == null) return true;
+            TimeSpan age = utcNow - client.LastHeartbeatUtc;
+            return age > TimeSpan.FromMilliseconds(_Settings.WebSocket.ClientStaleTimeoutMs);
+        }
+
+        private static async Task CloseStaleSessionAsync(ClientConnection connection, CancellationToken token)
+        {
+            try
+            {
+                if (connection.Session.IsConnected)
+                {
+                    await connection.Session.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "stale client connection", token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+            catch (WebSocketException)
+            {
+            }
+        }
+
         private async Task TelemetryCollectionLoopAsync(CancellationToken token)
         {
             TimeSpan interval = TimeSpan.FromSeconds(_Settings.TelemetryCollection.CollectionIntervalSeconds);
@@ -3276,7 +3367,7 @@ namespace Xeno.Server
             if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
             {
                 ClientHeartbeatMessage? message = JsonUtil.Deserialize<ClientHeartbeatMessage>(json);
-                UpdateClientHeartbeat(message?.ClientId, requestContext);
+                UpdateClientHeartbeat(message?.ClientId, session, requestContext);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 return "server.heartbeat";
             }
@@ -3452,15 +3543,24 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Client ID belongs to a different tenant.");
             }
 
+            ClientConnection? staleConnection = null;
             lock (_ClientConnectionsLock)
             {
                 if (_ClientConnections.TryGetValue(clientId, out ClientConnection? existingConnection) &&
                     existingConnection.Session.IsConnected &&
                     !String.Equals(existingConnection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new UnauthorizedAccessException("Client ID is already connected.");
+                    if (!IsClientConnectionStale(clientId, tenantId, DateTime.UtcNow))
+                    {
+                        throw new UnauthorizedAccessException("Client ID is already connected.");
+                    }
+
+                    _ClientConnections.Remove(clientId);
+                    staleConnection = existingConnection;
                 }
             }
+
+            if (staleConnection != null) _ = CloseStaleSessionAsync(staleConnection, CancellationToken.None);
 
             if (client == null)
             {
@@ -3579,9 +3679,13 @@ namespace Xeno.Server
             }
         }
 
-        private void UpdateClientHeartbeat(string? clientId, RequestContext requestContext)
+        private void UpdateClientHeartbeat(string? clientId, WebSocketSession session, RequestContext requestContext)
         {
             if (String.IsNullOrWhiteSpace(clientId)) return;
+            ClientConnection? connection = GetClientConnection(clientId);
+            if (connection == null) throw new UnauthorizedAccessException("Client heartbeat arrived before registration.");
+            if (!String.Equals(connection.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Client heartbeat tenant is invalid.");
+            if (!String.Equals(connection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Client heartbeat arrived on the wrong session.");
             XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
             if (client == null) return;
             BindClientOwner(client, requestContext);

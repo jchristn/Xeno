@@ -545,6 +545,20 @@ namespace Xeno.Client
             return File.Exists(StopFile);
         }
 
+        /// <summary>
+        /// Determine whether the recorded connection has recent server or heartbeat activity.
+        /// </summary>
+        /// <param name="utcNow">Current UTC timestamp.</param>
+        /// <param name="livenessTimeoutMs">Maximum activity age in milliseconds.</param>
+        /// <returns>True if the latest activity is within the timeout window.</returns>
+        public bool HasFreshActivity(DateTime utcNow, int livenessTimeoutMs)
+        {
+            DateTime? lastActivityUtc = LastServerMessageUtc ?? LastHeartbeatUtc ?? RegisteredUtc ?? ConnectedUtc ?? WebSocketConnectedUtc;
+            if (lastActivityUtc == null) return false;
+            TimeSpan age = utcNow - lastActivityUtc.Value;
+            return age <= TimeSpan.FromMilliseconds(Math.Max(5000, livenessTimeoutMs));
+        }
+
         private static void ApplyLocalDashboardSettings(ClientConnectionState state, ClientSettings settings)
         {
             state.LocalDashboardHost = settings.LocalDashboard.Host;

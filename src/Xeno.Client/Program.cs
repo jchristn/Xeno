@@ -27,7 +27,6 @@ namespace Xeno.Client
     public static class Program
     {
         private const string ClientVersion = "0.1.0";
-        private const int DefaultHeartbeatIntervalMs = 15000;
         private const int DefaultConnectTimeoutMs = 30000;
         private const int DefaultStopTimeoutMs = 10000;
         private static bool _UseColors = true;
@@ -1371,7 +1370,10 @@ namespace Xeno.Client
             }
 
             ClientConnectionState existing = ClientConnectionState.Load();
-            if (existing.IsConnected && existing.IsRegistered && existing.IsRecordedProcessRunning())
+            if (existing.IsConnected
+                && existing.IsRegistered
+                && existing.IsRecordedProcessRunning()
+                && existing.HasFreshActivity(DateTime.UtcNow, settings.Server.LivenessTimeoutMs))
             {
                 if (_UseJson)
                 {
@@ -1494,6 +1496,7 @@ namespace Xeno.Client
             }
 
             WriteConnectionAttempt(settings);
+            int reconnectDelayMs = settings.Server.ReconnectInitialDelayMs;
             while (!token.IsCancellationRequested)
             {
                 try
@@ -1504,8 +1507,8 @@ namespace Xeno.Client
                         await socket.ConnectAsync(new Uri(settings.Server.Url), token).ConfigureAwait(false);
                         ClientConnectionState.MarkWebSocketConnected(settings);
                         await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventoryMessage() }, token).ConfigureAwait(false);
-                        await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
-                        ClientConnectionState.MarkDisconnected(settings, "WebSocket closed.");
+                        string? disconnectReason = await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
+                        ClientConnectionState.MarkDisconnected(settings, disconnectReason ?? "WebSocket closed.");
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -1525,45 +1528,68 @@ namespace Xeno.Client
                     return;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
+                await DelayBeforeReconnectAsync(reconnectDelayMs, settings, token).ConfigureAwait(false);
+                reconnectDelayMs = NextReconnectDelayMs(reconnectDelayMs, settings);
             }
         }
 
-        private static async Task ReceiveLoopAsync(ClientWebSocket socket, ClientSettings settings, CancellationToken token)
+        private static async Task<string?> ReceiveLoopAsync(ClientWebSocket socket, ClientSettings settings, CancellationToken token)
         {
             byte[] buffer = new byte[65536];
-            using (CancellationTokenSource heartbeatTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token))
+            ClientConnectionActivity activity = new ClientConnectionActivity(DateTime.UtcNow);
+            using (CancellationTokenSource connectionTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                Task heartbeatTask = SendHeartbeatLoopAsync(socket, settings, heartbeatTokenSource.Token);
+                Task heartbeatTask = SendHeartbeatLoopAsync(socket, settings, activity, connectionTokenSource, connectionTokenSource.Token);
+                Task livenessTask = WatchConnectionLivenessAsync(socket, settings, activity, connectionTokenSource, connectionTokenSource.Token);
                 try
                 {
-                    while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+                    while (!connectionTokenSource.Token.IsCancellationRequested && socket.State == WebSocketState.Open)
                     {
-                        WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), token).ConfigureAwait(false);
-                        if (result.MessageType == WebSocketMessageType.Close) return;
+                        WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), connectionTokenSource.Token).ConfigureAwait(false);
+                        if (result.MessageType == WebSocketMessageType.Close) return activity.FailureReason;
 
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        activity.MarkServerMessage(DateTime.UtcNow);
                         ClientConnectionState.MarkServerMessage(settings);
                         PrintServerMessage(message);
-                        await HandleServerMessageAsync(socket, settings, message, token).ConfigureAwait(false);
+                        await HandleServerMessageAsync(socket, settings, message, connectionTokenSource.Token).ConfigureAwait(false);
                     }
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && !String.IsNullOrWhiteSpace(activity.FailureReason))
+                {
+                    return activity.FailureReason;
+                }
+                catch (WebSocketException) when (!String.IsNullOrWhiteSpace(activity.FailureReason))
+                {
+                    return activity.FailureReason;
+                }
+                catch (InvalidOperationException) when (!String.IsNullOrWhiteSpace(activity.FailureReason))
+                {
+                    return activity.FailureReason;
+                }
+                catch (IOException) when (!String.IsNullOrWhiteSpace(activity.FailureReason))
+                {
+                    return activity.FailureReason;
                 }
                 finally
                 {
                     CancelActiveRequests();
-                    heartbeatTokenSource.Cancel();
-                    await heartbeatTask.ConfigureAwait(false);
+                    connectionTokenSource.Cancel();
+                    await ObserveConnectionTaskAsync(heartbeatTask).ConfigureAwait(false);
+                    await ObserveConnectionTaskAsync(livenessTask).ConfigureAwait(false);
                 }
+
+                return activity.FailureReason;
             }
         }
 
-        private static async Task SendHeartbeatLoopAsync(ClientWebSocket socket, ClientSettings settings, CancellationToken token)
+        private static async Task SendHeartbeatLoopAsync(ClientWebSocket socket, ClientSettings settings, ClientConnectionActivity activity, CancellationTokenSource connectionTokenSource, CancellationToken token)
         {
             while (!token.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(DefaultHeartbeatIntervalMs), token).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(settings.Server.HeartbeatIntervalMs), token).ConfigureAwait(false);
                     if (token.IsCancellationRequested || socket.State != WebSocketState.Open) return;
 
                     await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow }, token).ConfigureAwait(false);
@@ -1587,15 +1613,94 @@ namespace Xeno.Client
                 {
                     return;
                 }
-                catch (InvalidOperationException)
+                catch (InvalidOperationException ex)
                 {
+                    FailConnection(socket, activity, connectionTokenSource, "Heartbeat failed: " + ex.Message);
                     return;
                 }
-                catch (WebSocketException)
+                catch (WebSocketException ex)
+                {
+                    FailConnection(socket, activity, connectionTokenSource, "Heartbeat failed: " + ex.Message);
+                    return;
+                }
+                catch (IOException ex)
+                {
+                    FailConnection(socket, activity, connectionTokenSource, "Heartbeat failed: " + ex.Message);
+                    return;
+                }
+            }
+        }
+
+        private static async Task WatchConnectionLivenessAsync(ClientWebSocket socket, ClientSettings settings, ClientConnectionActivity activity, CancellationTokenSource connectionTokenSource, CancellationToken token)
+        {
+            int pollIntervalMs = Math.Clamp(settings.Server.HeartbeatIntervalMs / 2, 1000, 5000);
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(pollIntervalMs), token).ConfigureAwait(false);
+                    if (token.IsCancellationRequested || socket.State != WebSocketState.Open) return;
+                    if (!activity.IsStale(DateTime.UtcNow, settings.Server.LivenessTimeoutMs)) continue;
+
+                    FailConnection(socket, activity, connectionTokenSource, "No server WebSocket message received within " + settings.Server.LivenessTimeoutMs.ToString(CultureInfo.InvariantCulture) + "ms.");
+                    return;
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     return;
                 }
             }
+        }
+
+        private static void FailConnection(ClientWebSocket socket, ClientConnectionActivity activity, CancellationTokenSource connectionTokenSource, string reason)
+        {
+            if (!activity.TryFail(reason)) return;
+            try
+            {
+                socket.Abort();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            connectionTokenSource.Cancel();
+        }
+
+        private static async Task ObserveConnectionTaskAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (WebSocketException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+        }
+
+        private static async Task DelayBeforeReconnectAsync(int reconnectDelayMs, ClientSettings settings, CancellationToken token)
+        {
+            int jitterMs = settings.Server.ReconnectJitterMs <= 0 ? 0 : Random.Shared.Next(0, settings.Server.ReconnectJitterMs + 1);
+            int delayMs = Math.Max(0, reconnectDelayMs) + jitterMs;
+            if (delayMs <= 0) return;
+            await Task.Delay(TimeSpan.FromMilliseconds(delayMs), token).ConfigureAwait(false);
+        }
+
+        private static int NextReconnectDelayMs(int currentDelayMs, ClientSettings settings)
+        {
+            int maximumDelayMs = Math.Max(settings.Server.ReconnectInitialDelayMs, settings.Server.ReconnectMaxDelayMs);
+            if (currentDelayMs <= 0) return Math.Min(1000, maximumDelayMs);
+            long nextDelayMs = (long)currentDelayMs * 2;
+            if (nextDelayMs > maximumDelayMs) return maximumDelayMs;
+            return (int)nextDelayMs;
         }
 
         private static async Task HandleServerMessageAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)

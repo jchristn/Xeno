@@ -93,6 +93,52 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "ConnectionLivenessSettingsClampAndStateFreshnessWorks",
+                        displayName: "Connection liveness settings clamp and state freshness works",
+                        executeAsync: delegate
+                        {
+                            ClientServerSettings clientServer = new ClientServerSettings
+                            {
+                                HeartbeatIntervalMs = -1,
+                                LivenessTimeoutMs = -1,
+                                ReconnectInitialDelayMs = -1,
+                                ReconnectMaxDelayMs = -1,
+                                ReconnectJitterMs = -1
+                            };
+                            if (clientServer.HeartbeatIntervalMs != 1000) throw new InvalidOperationException("Client heartbeat interval was not clamped.");
+                            if (clientServer.LivenessTimeoutMs != 5000) throw new InvalidOperationException("Client liveness timeout was not clamped.");
+                            if (clientServer.ReconnectInitialDelayMs != 0) throw new InvalidOperationException("Client initial reconnect delay was not clamped.");
+                            if (clientServer.ReconnectMaxDelayMs != 1000) throw new InvalidOperationException("Client maximum reconnect delay was not clamped.");
+                            if (clientServer.ReconnectJitterMs != 0) throw new InvalidOperationException("Client reconnect jitter was not clamped.");
+
+                            WebSocketSettings webSocket = new WebSocketSettings
+                            {
+                                ClientStaleTimeoutMs = -1,
+                                StaleConnectionScanIntervalMs = -1
+                            };
+                            if (webSocket.ClientStaleTimeoutMs != 5000) throw new InvalidOperationException("Server stale timeout was not clamped.");
+                            if (webSocket.StaleConnectionScanIntervalMs != 1000) throw new InvalidOperationException("Server stale scan interval was not clamped.");
+
+                            DateTime now = DateTime.UtcNow;
+                            ClientConnectionState fresh = new ClientConnectionState
+                            {
+                                IsConnected = true,
+                                IsRegistered = true,
+                                LastServerMessageUtc = now.AddMilliseconds(-1000)
+                            };
+                            if (!fresh.HasFreshActivity(now, 5000)) throw new InvalidOperationException("Fresh connection activity was considered stale.");
+
+                            ClientConnectionState stale = new ClientConnectionState
+                            {
+                                IsConnected = true,
+                                IsRegistered = true,
+                                LastServerMessageUtc = now.AddMilliseconds(-10000)
+                            };
+                            if (stale.HasFreshActivity(now, 5000)) throw new InvalidOperationException("Stale connection activity was considered fresh.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "DefaultCorsHeadersExcludeLegacySecretKey",
                         displayName: "Default CORS headers exclude legacy secret-key authentication",
                         executeAsync: delegate
@@ -2977,6 +3023,11 @@ namespace Test.Shared
                         executeAsync: delegate { return RunWebSocketGateSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "Relay",
+                        "StaleWebSocketSessionCanBeReplaced",
+                        "Stale WebSocket session can be replaced by reconnecting with the same client ID",
+                        executeAsync: delegate { return RunStaleWebSocketReconnectSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
                         "LoginCredentialConnects",
                         "Password login issues a client credential that can connect to WebSocket",
                         executeAsync: delegate { return RunLoginCredentialConnectSmokeAsync(); })
@@ -5317,6 +5368,72 @@ namespace Test.Shared
                         if (String.IsNullOrWhiteSpace(secondRegistered) || !secondRegistered.Contains("server.unauthorized", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Duplicate active client registration was not rejected: " + secondRegistered);
                     }
 
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunStaleWebSocketReconnectSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-stale-reconnect-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                },
+                WebSocket = new WebSocketSettings
+                {
+                    ClientStaleTimeoutMs = 5000,
+                    StaleConnectionScanIntervalMs = 1000
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+                    using (ClientWebSocket firstSocket = new ClientWebSocket())
+                    using (ClientWebSocket secondSocket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(firstSocket);
+                        ApplySeedCredentialHeaders(secondSocket);
+
+                        await firstSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? firstConnected = await ReceiveWebSocketTextAsync(firstSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(firstConnected) || !firstConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("First stale-reconnect socket did not connect: " + firstConnected);
+                        await SendWebSocketJsonAsync(firstSocket, new { type = "client.register", clientId = "xcl_stale_reconnect", tenantId = Constants.DefaultTenantId, name = "stale-reconnect-one", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? firstRegistered = await ReceiveWebSocketTextAsync(firstSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(firstRegistered) || !firstRegistered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("First stale-reconnect socket did not register: " + firstRegistered);
+
+                        await Task.Delay(TimeSpan.FromMilliseconds(settings.WebSocket.ClientStaleTimeoutMs + 750), clientTokenSource.Token).ConfigureAwait(false);
+
+                        await secondSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? secondConnected = await ReceiveWebSocketTextAsync(secondSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(secondConnected) || !secondConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Second stale-reconnect socket did not connect: " + secondConnected);
+                        await SendWebSocketJsonAsync(secondSocket, new { type = "client.register", clientId = "xcl_stale_reconnect", tenantId = Constants.DefaultTenantId, name = "stale-reconnect-two", inventory = new { runners = Array.Empty<object>() } }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? secondRegistered = await ReceiveWebSocketTextAsync(secondSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(secondRegistered) || !secondRegistered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Stale client session was not replaced by the reconnect: " + secondRegistered);
+
+                        await SendWebSocketJsonAsync(secondSocket, new { type = "client.heartbeat", clientId = "xcl_stale_reconnect", tenantId = Constants.DefaultTenantId, sentUtc = DateTime.UtcNow }, clientTokenSource.Token).ConfigureAwait(false);
+                        string? heartbeat = await ReceiveWebSocketTextAsync(secondSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(heartbeat) || !heartbeat.Contains("server.heartbeat", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Replacement client did not receive heartbeat acknowledgement: " + heartbeat);
+                    }
                 }
                 finally
                 {

@@ -157,7 +157,7 @@ The statistics window uses the normal Windows title bar close button. If you reb
 
 ## Better Path: Start on Boot
 
-Use a scheduled task to start the client when you log in.
+Use a scheduled task to run the foreground worker when you log in. This lets Task Scheduler supervise the long-running client process directly instead of supervising a short `xeno start` command that exits after spawning a child process.
 
 1. Confirm `xeno` works from a new PowerShell window.
 
@@ -169,7 +169,7 @@ xeno status
 
 ```powershell
 $xenoPath = (Get-Command xeno).Source
-$action = New-ScheduledTaskAction -Execute $xenoPath -Argument "start"
+$action = New-ScheduledTaskAction -Execute $xenoPath -Argument "start --foreground --worker"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "Xeno Client" -Action $action -Trigger $trigger -Settings $settings -Description "Start Xeno Client at user logon"
