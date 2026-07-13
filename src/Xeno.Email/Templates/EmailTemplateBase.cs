@@ -1,7 +1,6 @@
 namespace Xeno.Email.Templates
 {
     using System;
-    using System.Data;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -172,16 +171,28 @@ namespace Xeno.Email.Templates
         /// <returns>HTML table.</returns>
         protected static string RenderKeyValueTable(params EmailTemplateField[] items)
         {
-            using DataTable table = new DataTable("EmailTemplateFields");
-            table.Columns.Add("Field", typeof(string));
-            table.Columns.Add("Value", typeof(string));
+            StringBuilder builder = new StringBuilder();
+            builder.Append("<table style=\"border-collapse:collapse;margin:16px 0;width:100%;\">");
+            builder.Append("<thead><tr>");
+            builder.Append("<th align=\"left\" style=\"text-align:left;\">Field</th>");
+            builder.Append("<th align=\"left\" style=\"text-align:left;\">Value</th>");
+            builder.Append("</tr></thead>");
+            builder.Append("<tbody>");
             foreach (EmailTemplateField item in items)
             {
-                table.Rows.Add(EmailHtmlEncoder.Encode(item.Label), EmailHtmlEncoder.Encode(item.Value));
+                builder.Append("<tr>");
+                builder.Append("<td align=\"left\" style=\"text-align:left;\">");
+                builder.Append(EmailHtmlEncoder.Encode(item.Label));
+                builder.Append("</td>");
+                builder.Append("<td align=\"left\" style=\"text-align:left;\">");
+                builder.Append(EmailHtmlEncoder.Encode(item.Value));
+                builder.Append("</td>");
+                builder.Append("</tr>");
             }
 
-            HtmlBody body = new HtmlBody();
-            return body.Table(table, null, null, "border-collapse:collapse;margin:16px 0;width:100%;");
+            builder.Append("</tbody>");
+            builder.Append("</table>");
+            return builder.ToString();
         }
 
         /// <summary>

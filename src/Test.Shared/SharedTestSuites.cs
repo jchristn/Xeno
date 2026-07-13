@@ -216,6 +216,16 @@ namespace Test.Shared
                             if (!rendered.TextBody.Contains("GitHub: https://github.com/jchristn/Xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Template text body did not include the footer links.");
                             if (!rendered.TextBody.Contains("Touchstone/EmailMetadata", StringComparison.Ordinal)) throw new InvalidOperationException("Template text body did not include onboarding user agent metadata.");
                             if (!rendered.HtmlBody.Contains("corr_email_metadata", StringComparison.Ordinal)) throw new InvalidOperationException("Template HTML body did not include onboarding correlation metadata.");
+                            AssertEmailTableHeadersLeftAligned(rendered);
+                            AssertEmailTableHeadersLeftAligned(await new TenantCreatedWelcomeEmailTemplate(emailSettings).RenderAsync(context, CancellationToken.None).ConfigureAwait(false));
+                            AssertEmailTableHeadersLeftAligned(await new TenantUserJoinedEmailTemplate(emailSettings).RenderAsync(context, CancellationToken.None).ConfigureAwait(false));
+                            AssertEmailTableHeadersLeftAligned(await new TokenBalanceFloorApproachingEmailTemplate(emailSettings).RenderAsync(new TokenBalanceFloorApproachingEmailTemplateContext
+                            {
+                                TenantId = context.TenantId,
+                                TenantName = context.TenantName,
+                                CurrentBalance = 42,
+                                Floor = 100
+                            }, CancellationToken.None).ConfigureAwait(false));
                             string redacted = EmailRedactionHelpers.RedactSensitiveJson("{\"password\":\"secret\",\"token\":\"abc\",\"tenant\":\"ok\"}");
                             if (redacted.Contains("secret", StringComparison.Ordinal) || redacted.Contains("abc", StringComparison.Ordinal)) throw new InvalidOperationException("Sensitive JSON was not redacted.");
                             if (!redacted.Contains("ok", StringComparison.Ordinal)) throw new InvalidOperationException("Non-sensitive JSON was unexpectedly removed.");
@@ -6360,6 +6370,14 @@ namespace Test.Shared
         {
             if (id.Length != IdGenerator.MaxIdLength) throw new InvalidOperationException("ID length mismatch: " + id);
             if (!id.StartsWith(prefix, StringComparison.Ordinal)) throw new InvalidOperationException("ID prefix mismatch: " + id);
+        }
+
+        private static void AssertEmailTableHeadersLeftAligned(EmailTemplateRenderResult rendered)
+        {
+            if (rendered == null) throw new ArgumentNullException(nameof(rendered));
+            if (!rendered.HtmlBody.Contains("<th align=\"left\" style=\"text-align:left;\">Field</th>", StringComparison.Ordinal)) throw new InvalidOperationException("Email template " + rendered.TemplateId + " does not left-align the Field table header.");
+            if (!rendered.HtmlBody.Contains("<th align=\"left\" style=\"text-align:left;\">Value</th>", StringComparison.Ordinal)) throw new InvalidOperationException("Email template " + rendered.TemplateId + " does not left-align the Value table header.");
+            if (!rendered.HtmlBody.Contains("<td align=\"left\" style=\"text-align:left;\">", StringComparison.Ordinal)) throw new InvalidOperationException("Email template " + rendered.TemplateId + " does not left-align table values.");
         }
 
         private static async Task<string?> ReceiveWebSocketTextAsync(ClientWebSocket socket, CancellationToken token)
