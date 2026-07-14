@@ -114,6 +114,7 @@ xeno start
 
 ```powershell
 xeno status
+xeno ping
 ```
 
 11. Open the local Xeno Client dashboard.

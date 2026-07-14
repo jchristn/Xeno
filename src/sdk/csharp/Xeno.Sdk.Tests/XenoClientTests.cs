@@ -425,7 +425,13 @@ namespace Xeno.Sdk.Tests
         [Fact]
         public async Task TypedResponses_AreMaterialized()
         {
-            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.1.0\"}"));
+            int callCount = 0;
+            RecordingHandler handler = new RecordingHandler(_ =>
+            {
+                callCount++;
+                if (callCount == 1) return JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.1.0\"}");
+                return JsonResponse("{\"status\":\"healthy\",\"product\":\"Xeno\",\"version\":\"0.1.0\",\"sequence\":7,\"clientSentUtc\":\"2026-07-14T12:00:00Z\",\"serverUtc\":\"2026-07-14T12:00:01Z\"}");
+            });
             using (HttpClient httpClient = new HttpClient(handler))
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
             {
@@ -433,6 +439,13 @@ namespace Xeno.Sdk.Tests
 
                 Assert.Equal("ok", response.Status);
                 Assert.Equal("Xeno", response.Product);
+
+                PingResponse ping = await client.PingAsync(7, new DateTime(2026, 7, 14, 12, 0, 0, DateTimeKind.Utc));
+
+                Assert.Equal("healthy", ping.Status);
+                Assert.Equal(7, ping.Sequence);
+                Assert.Equal(new DateTime(2026, 7, 14, 12, 0, 1, DateTimeKind.Utc), ping.ServerUtc);
+                AssertRequest(handler.Requests[1], HttpMethod.Get, "https://xeno.local/v1.0/api/ping?sequence=7&clientSentUtc=2026-07-14T12%3A00%3A00.0000000Z");
             }
         }
 

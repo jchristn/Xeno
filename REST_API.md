@@ -12,11 +12,15 @@ The REST API is the operator and application surface for a federated accelerator
 
 `GET /v1.0/api/health`
 
+`GET /v1.0/api/ping`
+
 `GET /openapi.json`
 
 `GET /swagger`
 
 `GET /metrics`
+
+`GET /v1.0/api/ping` is an unauthenticated real-time heartbeat endpoint for CLI and operational checks. Optional `sequence` and `clientSentUtc` query values are echoed in the JSON response alongside `status`, `product`, `version`, and `serverUtc`.
 
 ## SDKs
 

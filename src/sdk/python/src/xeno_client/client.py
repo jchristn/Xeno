@@ -68,6 +68,10 @@ class HealthResponse(XenoModel):
     pass
 
 
+class PingResponse(XenoModel):
+    pass
+
+
 class ModelConfiguration(XenoModel):
     pass
 
@@ -208,6 +212,12 @@ class XenoClient:
 
     def get_health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
+
+    def ping(self, sequence: int = 0, client_sent_utc: str | None = None) -> dict[str, Any]:
+        query: dict[str, Any] = {"sequence": sequence}
+        if client_sent_utc:
+            query["clientSentUtc"] = client_sent_utc
+        return self._request("GET", f"/v1.0/api/ping?{urlencode(query)}")
 
     def get_openapi(self) -> dict[str, Any]:
         return self._request("GET", "/openapi.json")

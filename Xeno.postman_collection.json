@@ -1758,6 +1758,34 @@
               }
             },
             {
+              "name": "Ping",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ping?sequence=1&clientSentUtc={{$isoTimestamp}}",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ping"
+                  ],
+                  "query": [
+                    {
+                      "key": "sequence",
+                      "value": "1"
+                    },
+                    {
+                      "key": "clientSentUtc",
+                      "value": "{{$isoTimestamp}}"
+                    }
+                  ]
+                }
+              }
+            },
+            {
               "name": "Metrics",
               "request": {
                 "method": "GET",

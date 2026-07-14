@@ -94,6 +94,7 @@ Default local endpoints:
 - Dashboard: `http://localhost:9100`
 - Server REST API: `http://localhost:9000`
 - Health check: `http://localhost:9000/health`
+- Ping heartbeat: `http://localhost:9000/v1.0/api/ping`
 - OpenAPI JSON: `http://localhost:9000/openapi.json`
 - Swagger UI: `http://localhost:9000/swagger`
 - Client WebSocket: `ws://localhost:9000/ws/v1/clients`
@@ -184,6 +185,8 @@ Useful client commands:
 ```powershell
 xeno config show
 xeno status
+xeno ping
+xeno ping -n 10
 xeno logs -f
 xeno dashboard
 xeno dashboard open

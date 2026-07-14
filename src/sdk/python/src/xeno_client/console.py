@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from getpass import getpass
 
 from .client import XenoApiError, XenoClient
@@ -44,6 +45,8 @@ def main() -> int:
 def run_command(command: str, client: XenoClient, tenant_id: str) -> None:
     if command == "health":
         print_json(client.get_health())
+    elif command == "ping":
+        print_json(client.ping(1, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")))
     elif command == "models":
         print_json(client.list_openai_models())
     elif command == "clients":
@@ -98,6 +101,7 @@ def print_help(base_url: str, tenant_id: str, bearer_token: str | None) -> None:
     print("")
     print("Read commands")
     print("  health          server health")
+    print("  ping            server heartbeat")
     print("  models          OpenAI-compatible model list")
     print("  clients         connected/registered clients")
     print("  tenants         tenants")

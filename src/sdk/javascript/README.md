@@ -20,6 +20,7 @@ const client = new XenoClient({
 });
 
 const health = await client.getHealth();
+const ping = await client.ping({ sequence: 1, clientSentUtc: new Date() });
 const models = await client.listOpenAiModels();
 const policies = await client.listRoutingPolicies();
 const leaderboard = await client.getModelTokenLeaderboard({ limit: 10, offset: 0 });
@@ -110,7 +111,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, ping, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

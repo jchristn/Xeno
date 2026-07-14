@@ -20,6 +20,7 @@ function printHelp() {
   console.log('');
   console.log('Read commands');
   console.log('  health          server health');
+  console.log('  ping            server heartbeat');
   console.log('  models          OpenAI-compatible model list');
   console.log('  clients         connected/registered clients');
   console.log('  tenants         tenants');
@@ -55,6 +56,7 @@ async function printJson(value) {
 async function runCommand(command) {
   const sdk = client();
   if (command === 'health') return printJson(await sdk.getHealth());
+  if (command === 'ping') return printJson(await sdk.ping({ sequence: 1, clientSentUtc: new Date() }));
   if (command === 'models') return printJson(await sdk.listOpenAiModels());
   if (command === 'clients') return printJson(await sdk.listClients());
   if (command === 'tenants') return printJson(await sdk.listTenants());

@@ -13,12 +13,14 @@ dotnet add <your-project>.csproj reference .\src\sdk\csharp\Xeno.Sdk\Xeno.Sdk.cs
 ## Quick Start
 
 ```csharp
+using System;
 using System.Collections.Generic;
 using Xeno.Sdk;
 
 using (XenoClient client = new XenoClient("http://localhost:9000"))
 {
     HealthResponse health = await client.GetHealthAsync();
+    PingResponse ping = await client.PingAsync(sequence: 1, clientSentUtc: DateTime.UtcNow);
     OpenAiModelList models = await client.ListOpenAiModelsAsync();
     List<RoutingPolicy> policies = await client.ListRoutingPoliciesAsync();
     ModelTokenLeaderboardResponse leaderboard = await client.GetModelTokenLeaderboardAsync(
@@ -137,7 +139,7 @@ The SDK includes methods for:
   telemetry metric catalog;
 - request history, public model token leaderboard, analytics, settings including
   email provider configuration and administrative test email sends, backup,
-  restore, health, metrics, and OpenAPI.
+  restore, health, ping, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

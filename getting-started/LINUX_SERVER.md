@@ -7,6 +7,7 @@ This guide deploys the Xeno server and web dashboard with Docker on Linux.
 - Dashboard: `http://localhost:9100`
 - Server REST API: `http://localhost:9000`
 - Health check: `http://localhost:9000/health`
+- Ping heartbeat: `http://localhost:9000/v1.0/api/ping`
 - Swagger UI: `http://localhost:9000/swagger`
 - Client WebSocket: `ws://localhost:9000/ws/v1/clients`
 - Dashboard user: `admin@xeno`

@@ -607,6 +607,8 @@ namespace Test.Shared
                                 if (providerAdd.ExitCode != 0) throw new InvalidOperationException("Provider add with API type failed: " + providerAdd.StandardError + providerAdd.StandardOutput);
                                 ClientCommandResult startHelp = await RunXenoClientAsync(new[] { "start", "--help" }, clientHome).ConfigureAwait(false);
                                 if (startHelp.ExitCode != 0 || !startHelp.StandardOutput.Contains("xeno start", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Start alias help failed: " + startHelp.StandardError + startHelp.StandardOutput);
+                                ClientCommandResult pingHelp = await RunXenoClientAsync(new[] { "ping", "--help" }, clientHome).ConfigureAwait(false);
+                                if (pingHelp.ExitCode != 0 || !pingHelp.StandardOutput.Contains("xeno ping", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Ping help failed: " + pingHelp.StandardError + pingHelp.StandardOutput);
                                 ClientCommandResult disconnect = await RunXenoClientAsync(new[] { "disconnect" }, clientHome).ConfigureAwait(false);
                                 if (disconnect.ExitCode != 0 || !disconnect.StandardOutput.Contains("not running", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Disconnect alias failed: " + disconnect.StandardError + disconnect.StandardOutput);
 
@@ -4399,6 +4401,10 @@ namespace Test.Shared
                     using (HttpClient httpClient = new HttpClient())
                     {
                         string baseUrl = "http://127.0.0.1:" + port;
+                        string pingJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/ping?sequence=3&clientSentUtc=2026-07-14T12%3A00%3A00Z").ConfigureAwait(false);
+                        if (!pingJson.Contains("\"status\": \"healthy\"", StringComparison.OrdinalIgnoreCase) && !pingJson.Contains("\"status\":\"healthy\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Ping route did not return healthy status: " + pingJson);
+                        if (!pingJson.Contains("\"sequence\": 3", StringComparison.OrdinalIgnoreCase) && !pingJson.Contains("\"sequence\":3", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Ping route did not echo sequence: " + pingJson);
+                        if (!pingJson.Contains("serverUtc", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Ping route did not include server timestamp: " + pingJson);
                         await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         string openApi = await httpClient.GetStringAsync(baseUrl + "/openapi.json").ConfigureAwait(false);
                         if (!openApi.Contains("client-model", StringComparison.OrdinalIgnoreCase) && !openApi.Contains("clientmodels", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("OpenAPI missing client model delete route.");
@@ -4416,6 +4422,7 @@ namespace Test.Shared
 
                         foreach (OpenApiRouteExpectation route in new List<OpenApiRouteExpectation>
                         {
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/ping", Method = "get" },
                             new OpenApiRouteExpectation { Route = "/metrics", Method = "get" },
                             new OpenApiRouteExpectation { Route = "/openapi.json", Method = "get" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/token/details", Method = "get" },
@@ -4431,6 +4438,8 @@ namespace Test.Shared
 
                         foreach (OpenApiParameterExpectation parameter in new List<OpenApiParameterExpectation>
                         {
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/ping", Method = "get", Name = "sequence", Location = "query" },
+                            new OpenApiParameterExpectation { Route = "/v1.0/api/ping", Method = "get", Name = "clientSentUtc", Location = "query" },
                             new OpenApiParameterExpectation { Route = "/v1.0/api/users/{id}", Method = "put", Name = "id", Location = "path" },
                             new OpenApiParameterExpectation { Route = "/v1.0/api/request-history", Method = "get", Name = "page", Location = "query" },
                             new OpenApiParameterExpectation { Route = "/v1.0/api/request-history", Method = "get", Name = "pageSize", Location = "query" },

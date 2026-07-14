@@ -54,6 +54,7 @@ namespace Xeno.Sdk.Console
             using (XenoClient client = new XenoClient(_BaseUrl, _BearerToken, _TenantId))
             {
                 if (command.Equals("health", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.GetHealthAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+                else if (command.Equals("ping", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.PingAsync(1, DateTime.UtcNow, token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("models", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListOpenAiModelsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("clients", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListClientsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
                 else if (command.Equals("tenants", StringComparison.OrdinalIgnoreCase)) await PrintJsonAsync(await client.ListTenantsAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
@@ -118,6 +119,7 @@ namespace Xeno.Sdk.Console
             System.Console.WriteLine("");
             System.Console.WriteLine("Read commands");
             System.Console.WriteLine("  health          server health");
+            System.Console.WriteLine("  ping            server heartbeat");
             System.Console.WriteLine("  models          OpenAI-compatible model list");
             System.Console.WriteLine("  clients         connected/registered clients");
             System.Console.WriteLine("  tenants         tenants");

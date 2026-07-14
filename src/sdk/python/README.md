@@ -17,6 +17,7 @@ from xeno_client import XenoClient
 
 client = XenoClient("http://localhost:9000")
 health = client.get_health()
+ping = client.ping(sequence=1)
 models = client.list_openai_models()
 policies = client.list_routing_policies()
 leaderboard = client.get_model_token_leaderboard({"limit": 10, "offset": 0})
@@ -107,7 +108,7 @@ Type `?` for commands. The console can inspect health, clients, tenants, users, 
 
 ## Coverage
 
-The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, metrics, and OpenAPI.
+The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, ping, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

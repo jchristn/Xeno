@@ -83,6 +83,24 @@
         }
 
         /// <summary>
+        /// Sends a ping heartbeat to the server.
+        /// </summary>
+        /// <param name="sequence">Optional sequence number to echo. Default value is 0.</param>
+        /// <param name="clientSentUtc">Optional client sent timestamp to echo. Default value is <c>null</c>.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ping response JSON.</returns>
+        public async Task<PingResponse> PingAsync(int sequence = 0, DateTime? clientSentUtc = null, CancellationToken token = default)
+        {
+            string path = "/v1.0/api/ping?sequence=" + sequence.ToString(CultureInfo.InvariantCulture);
+            if (clientSentUtc != null)
+            {
+                path += "&clientSentUtc=" + Uri.EscapeDataString(clientSentUtc.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            }
+
+            return await GetJsonAsync<PingResponse>(path, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets the OpenAPI document.
         /// </summary>
         /// <param name="token">Cancellation token.</param>

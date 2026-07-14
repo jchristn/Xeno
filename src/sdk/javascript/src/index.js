@@ -35,6 +35,15 @@ export class XenoClient {
     return this.#request('GET', '/health');
   }
 
+  async ping({ sequence = 0, clientSentUtc = null } = {}) {
+    const query = new URLSearchParams({ sequence: String(sequence) });
+    if (clientSentUtc) {
+      query.set('clientSentUtc', clientSentUtc instanceof Date ? clientSentUtc.toISOString() : String(clientSentUtc));
+    }
+
+    return this.#request('GET', `/v1.0/api/ping?${query.toString()}`);
+  }
+
   async getOpenApi() {
     return this.#request('GET', '/openapi.json');
   }

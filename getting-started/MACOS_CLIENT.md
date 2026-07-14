@@ -179,6 +179,7 @@ launchctl start ai.xenocloud.client
 
 ```bash
 $HOME/.xeno/bin/xeno status
+$HOME/.xeno/bin/xeno ping
 $HOME/.xeno/bin/xeno logs --tail 100
 tail -f "$HOME/.xeno/logs/launchd.out.log"
 ```

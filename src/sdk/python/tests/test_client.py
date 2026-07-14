@@ -58,6 +58,19 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer default")
         self.assertNotIn("X-tenant-guid", request.headers)
 
+    def test_ping_sends_heartbeat_query_parameters(self):
+        opener = FakeOpener(lambda request: FakeResponse('{"status":"healthy","sequence":3,"serverUtc":"2026-07-14T12:00:01Z"}'))
+        client = XenoClient("https://xeno.local", bearer_token=None, opener=opener)
+
+        response = client.ping(3, "2026-07-14T12:00:00Z")
+
+        self.assertEqual(response["status"], "healthy")
+        self.assertEqual(response["sequence"], 3)
+        request = opener.calls[0]["request"]
+        self.assertEqual(request.full_url, "https://xeno.local/v1.0/api/ping?sequence=3&clientSentUtc=2026-07-14T12%3A00%3A00Z")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertNotIn("Authorization", request.headers)
+
     def test_onboard_uses_public_signup_route_and_surfaces_conflict(self):
         call_count = 0
 

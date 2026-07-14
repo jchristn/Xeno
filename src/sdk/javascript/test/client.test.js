@@ -55,6 +55,19 @@ test('default options send seeded bearer without tenant header', async () => {
   assert.equal(fetchImpl.calls[0].options.headers['x-tenant-guid'], undefined);
 });
 
+test('ping sends heartbeat query parameters', async () => {
+  const fetchImpl = createFetch(() => jsonResponse({ status: 'healthy', sequence: 3, serverUtc: '2026-07-14T12:00:01Z' }));
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', bearerToken: null, fetchImpl });
+
+  const response = await client.ping({ sequence: 3, clientSentUtc: '2026-07-14T12:00:00Z' });
+
+  assert.equal(response.status, 'healthy');
+  assert.equal(response.sequence, 3);
+  assert.equal(fetchImpl.calls[0].url, 'https://xeno.local/v1.0/api/ping?sequence=3&clientSentUtc=2026-07-14T12%3A00%3A00Z');
+  assert.equal(fetchImpl.calls[0].options.method, 'GET');
+  assert.equal(fetchImpl.calls[0].options.headers.Authorization, undefined);
+});
+
 test('onboard uses public signup route and surfaces conflict', async () => {
   let callCount = 0;
   const fetchImpl = createFetch(() => {

@@ -187,6 +187,7 @@ Use these commands during normal operations:
 
 ```bash
 $XENO status
+$XENO ping
 $XENO config show
 $XENO provider list
 $XENO provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000

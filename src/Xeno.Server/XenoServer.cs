@@ -272,8 +272,11 @@ namespace Xeno.Server
         {
             RegisterStaticRoute(HttpMethod.GET, "/", "Health check", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/health", "Health check", "Health");
+            RegisterStaticRoute(HttpMethod.GET, "/ping", "Ping heartbeat", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/metrics", "Prometheus-style metrics", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/health", "Health check", "Health");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/ping", "Ping heartbeat", "Health");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ping", "Ping heartbeat", "Health");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
             RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
@@ -464,6 +467,13 @@ namespace Xeno.Server
                 metadata = metadata.WithParameter(OpenApiParameterMetadata.Query("tenantId", "Optional tenant identifier. Defaults to ten_default.", false, OpenApiSchemaMetadata.String("Tenant identifier.")));
             }
 
+            if (IsPath(path, "/ping", "/api/v1/ping", "/v1.0/api/ping"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("sequence", "Optional client sequence number echoed by the server.", false, IntegerSchemaMetadata("Sequence number.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("clientSentUtc", "Optional UTC timestamp echoed by the server.", false, DateTimeSchema("Client sent timestamp.")));
+            }
+
             if (IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
             {
                 metadata = metadata
@@ -539,7 +549,7 @@ namespace Xeno.Server
 
         private static bool SupportsTenantQuery(string path)
         {
-            return !IsPath(path, "/", "/health", "/metrics", "/openapi.json", "/swagger", "/v1.0/api/health", "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard");
+            return !IsPath(path, "/", "/health", "/ping", "/metrics", "/openapi.json", "/swagger", "/v1.0/api/health", "/api/v1/ping", "/v1.0/api/ping", "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard");
         }
 
         private static OpenApiRequestBodyMetadata? BuildRequestBodyMetadata(HttpMethod method, string path)
@@ -1472,6 +1482,25 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/", "/health", "/v1.0/api/health"))
             {
                 await SendJsonAsync(context, new { status = "healthy", product = Constants.ProductName, version = Constants.Version }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/ping", "/api/v1/ping", "/v1.0/api/ping"))
+            {
+                string sequenceValue = DecodeQueryValue(context.Request.Query.Elements.Get("sequence"));
+                string clientSentUtc = DecodeQueryValue(context.Request.Query.Elements.Get("clientSentUtc"));
+                string? echoedClientSentUtc = String.IsNullOrWhiteSpace(clientSentUtc) ? null : clientSentUtc;
+                int sequence = 0;
+                Int32.TryParse(sequenceValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out sequence);
+                await SendJsonAsync(context, new
+                {
+                    status = "healthy",
+                    product = Constants.ProductName,
+                    version = Constants.Version,
+                    sequence,
+                    clientSentUtc = echoedClientSentUtc,
+                    serverUtc = DateTime.UtcNow
+                }).ConfigureAwait(false);
                 return;
             }
 
@@ -6476,6 +6505,7 @@ namespace Xeno.Server
                     ["/"] = Path(Operation("get", "rootHealth", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
                     ["/health"] = Path(Operation("get", "health", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
                     ["/v1.0/api/health"] = Path(Operation("get", "apiHealth", "Health", "Health check", "Returns current server health.", "HealthResponse", false)),
+                    ["/v1.0/api/ping"] = Path(Operation("get", "ping", "Health", "Ping heartbeat", "Returns a timestamped server heartbeat and echoes the optional sequence and client timestamp query values.", "PingResponse", false)),
                     ["/metrics"] = Path(Operation("get", "metrics", "Health", "Prometheus metrics", "Returns Prometheus-style metrics.", "GenericObject", false)),
                     ["/openapi.json"] = Path(Operation("get", "openApi", "Health", "OpenAPI document", "Returns the OpenAPI document.", "GenericObject", false)),
                     ["/v1.0/api/auth/tenants"] = Path(Operation("get", "lookupLoginTenants", "Authentication", "Lookup login tenants", "Returns active tenants for a login email query string.", "GenericObject", false), Operation("post", "lookupLoginTenantsByBody", "Authentication", "Lookup login tenants", "Returns active tenants for a login email request body.", "GenericObject", false)),
@@ -6560,6 +6590,7 @@ namespace Xeno.Server
                     schemas = new Dictionary<string, object>
                     {
                         ["HealthResponse"] = ObjectSchema(Property("status", StringSchema()), Property("product", StringSchema()), Property("version", StringSchema())),
+                        ["PingResponse"] = ObjectSchema(Property("status", StringSchema()), Property("product", StringSchema()), Property("version", StringSchema()), Property("sequence", IntegerSchema()), Property("clientSentUtc", StringSchema("date-time")), Property("serverUtc", StringSchema("date-time"))),
                         ["CredentialLoginResponse"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("userId", StringSchema()), Property("accessKey", StringSchema()), Property("authScheme", StringSchema())),
                         ["TokenResponse"] = ObjectSchema(Property("token", StringSchema()), Property("tokenType", StringSchema()), Property("tenantId", StringSchema()), Property("expiresUtc", StringSchema("date-time"))),
                         ["AuthOnboardingResponse"] = ObjectSchema(

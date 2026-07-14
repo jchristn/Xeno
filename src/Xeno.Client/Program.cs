@@ -6,6 +6,7 @@ namespace Xeno.Client
     using System.Diagnostics;
     using System.Globalization;
     using System.IO;
+    using System.Linq;
     using System.Net.Http;
     using System.Net.WebSockets;
     using System.Text;
@@ -29,6 +30,9 @@ namespace Xeno.Client
         private const string ClientVersion = "0.1.0";
         private const int DefaultConnectTimeoutMs = 30000;
         private const int DefaultStopTimeoutMs = 10000;
+        private const int DefaultPingCount = 5;
+        private const int DefaultPingTimeoutMs = 5000;
+        private const int DefaultPingDelayMs = 1000;
         private static bool _UseColors = true;
         private static bool _UseJson = false;
         private static bool _WorkerMode = false;
@@ -71,6 +75,8 @@ namespace Xeno.Client
                             if (_UseJson) WriteJson(new { version = ClientVersion });
                             else WriteInfo("xeno " + ClientVersion);
                             return 0;
+                        case "ping":
+                            return await HandlePingAsync(args, settings).ConfigureAwait(false);
                         case "init":
                             settings.Save();
                             WriteSuccess("Created " + ClientSettings.SettingsFile);
@@ -263,6 +269,198 @@ namespace Xeno.Client
             await PrintLogTailAsync(logFile, tailLines, token).ConfigureAwait(false);
             if (follow) await FollowLogAsync(logFile, token).ConfigureAwait(false);
             return 0;
+        }
+
+        private static async Task<int> HandlePingAsync(string[] args, ClientSettings settings)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintPingHelp();
+                return 0;
+            }
+
+            int count = DefaultPingCount;
+            int timeoutMs = DefaultPingTimeoutMs;
+            string? serverUrl = null;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (String.Equals(args[i], "-n", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(args[i], "--count", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length || !Int32.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out count) || count < 1 || count > 1000)
+                    {
+                        WriteError("-n/--count requires a value from 1 through 1000.");
+                        return 1;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "-w", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(args[i], "--timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length || !Int32.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out timeoutMs) || timeoutMs < 100 || timeoutMs > 600000)
+                    {
+                        WriteError("-w/--timeout requires a value from 100 through 600000 milliseconds.");
+                        return 1;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "--server", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length || String.IsNullOrWhiteSpace(args[i + 1]))
+                    {
+                        WriteError("--server requires a REST server URL.");
+                        return 1;
+                    }
+
+                    serverUrl = args[++i];
+                    continue;
+                }
+
+                WriteError("Unknown ping option: " + args[i]);
+                PrintPingHelp();
+                return 1;
+            }
+
+            ClientSettings pingSettings = settings;
+            if (!String.IsNullOrWhiteSpace(serverUrl))
+            {
+                pingSettings.Server.RestUrl = serverUrl;
+            }
+
+            Uri endpoint = BuildRestUri(pingSettings, "/v1.0/api/ping");
+            string target = endpoint.Host;
+            List<long> responseTimes = new List<long>();
+            List<object> attempts = new List<object>();
+            int received = 0;
+
+            if (!_UseJson)
+            {
+                Console.WriteLine("Pinging " + target + " [" + endpoint.GetLeftPart(UriPartial.Authority) + "] with HTTP heartbeat:");
+                Console.WriteLine();
+            }
+
+            using (HttpClient httpClient = new HttpClient())
+            {
+                for (int sequence = 1; sequence <= count; sequence++)
+                {
+                    DateTime clientSentUtc = DateTime.UtcNow;
+                    Uri requestUri = BuildPingUri(endpoint, sequence, clientSentUtc);
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+                    try
+                    {
+                        using (CancellationTokenSource timeout = new CancellationTokenSource(timeoutMs))
+                        using (HttpResponseMessage response = await httpClient.GetAsync(requestUri, timeout.Token).ConfigureAwait(false))
+                        {
+                            string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            stopwatch.Stop();
+                            long elapsedMs = stopwatch.ElapsedMilliseconds;
+                            int bytes = Encoding.UTF8.GetByteCount(responseBody);
+                            string status = TryReadJsonProperty(responseBody, "status");
+                            string serverUtc = TryReadJsonProperty(responseBody, "serverUtc");
+                            bool success = response.IsSuccessStatusCode;
+                            if (success)
+                            {
+                                received++;
+                                responseTimes.Add(elapsedMs);
+                                if (!_UseJson)
+                                {
+                                    Console.WriteLine("Reply from " + target + ": bytes=" + bytes.ToString(CultureInfo.InvariantCulture) + " time=" + FormatPingTime(elapsedMs) + " seq=" + sequence.ToString(CultureInfo.InvariantCulture) + " status=" + DisplayValue(status, "ok") + " serverUtc=" + DisplayValue(serverUtc, "unknown"));
+                                }
+                            }
+                            else if (!_UseJson)
+                            {
+                                Console.WriteLine("Reply from " + target + ": HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + " " + response.ReasonPhrase + " time=" + FormatPingTime(elapsedMs));
+                            }
+
+                            attempts.Add(new
+                            {
+                                sequence,
+                                success,
+                                statusCode = (int)response.StatusCode,
+                                bytes,
+                                elapsedMs,
+                                status,
+                                serverUtc
+                            });
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        stopwatch.Stop();
+                        if (!_UseJson) Console.WriteLine("Request timed out.");
+                        attempts.Add(new
+                        {
+                            sequence,
+                            success = false,
+                            statusCode = 0,
+                            bytes = 0,
+                            elapsedMs = timeoutMs,
+                            status = String.Empty,
+                            serverUtc = String.Empty,
+                            error = "Timeout"
+                        });
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        stopwatch.Stop();
+                        if (!_UseJson) Console.WriteLine("Request failed: " + ex.Message);
+                        attempts.Add(new
+                        {
+                            sequence,
+                            success = false,
+                            statusCode = 0,
+                            bytes = 0,
+                            elapsedMs = stopwatch.ElapsedMilliseconds,
+                            status = String.Empty,
+                            serverUtc = String.Empty,
+                            error = ex.Message
+                        });
+                    }
+
+                    if (sequence < count) await Task.Delay(DefaultPingDelayMs).ConfigureAwait(false);
+                }
+            }
+
+            int lost = count - received;
+            int lossPercent = (int)Math.Round((double)lost * 100.0 / count);
+            long minimum = responseTimes.Count == 0 ? 0 : responseTimes.Min();
+            long maximum = responseTimes.Count == 0 ? 0 : responseTimes.Max();
+            long average = responseTimes.Count == 0 ? 0 : (long)Math.Round(responseTimes.Average());
+
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    target,
+                    endpoint = endpoint.ToString(),
+                    sent = count,
+                    received,
+                    lost,
+                    lossPercent,
+                    minimumMs = minimum,
+                    maximumMs = maximum,
+                    averageMs = average,
+                    attempts
+                });
+                return received > 0 ? 0 : 1;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Ping statistics for " + target + ":");
+            Console.WriteLine("    Packets: Sent = " + count.ToString(CultureInfo.InvariantCulture) + ", Received = " + received.ToString(CultureInfo.InvariantCulture) + ", Lost = " + lost.ToString(CultureInfo.InvariantCulture) + " (" + lossPercent.ToString(CultureInfo.InvariantCulture) + "% loss),");
+            if (responseTimes.Count > 0)
+            {
+                Console.WriteLine("Approximate round trip times in milli-seconds:");
+                Console.WriteLine("    Minimum = " + minimum.ToString(CultureInfo.InvariantCulture) + "ms, Maximum = " + maximum.ToString(CultureInfo.InvariantCulture) + "ms, Average = " + average.ToString(CultureInfo.InvariantCulture) + "ms");
+            }
+
+            return received > 0 ? 0 : 1;
         }
 
         private static async Task<int> HandleStopAsync(string[] args)
@@ -2287,6 +2485,15 @@ namespace Xeno.Client
             return builder.Uri;
         }
 
+        private static Uri BuildPingUri(Uri endpoint, int sequence, DateTime clientSentUtc)
+        {
+            UriBuilder builder = new UriBuilder(endpoint);
+            string sequenceValue = sequence.ToString(CultureInfo.InvariantCulture);
+            string sentValue = Uri.EscapeDataString(clientSentUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            builder.Query = "sequence=" + sequenceValue + "&clientSentUtc=" + sentValue;
+            return builder.Uri;
+        }
+
         private static string BuildRestBaseUrl(ClientSettings settings)
         {
             string source = String.IsNullOrWhiteSpace(settings.Server.RestUrl) ? settings.Server.Url : settings.Server.RestUrl;
@@ -2296,6 +2503,23 @@ namespace Xeno.Client
             builder.Path = String.Empty;
             builder.Query = String.Empty;
             return builder.Uri.ToString().TrimEnd('/');
+        }
+
+        private static string TryReadJsonProperty(string json, string propertyName)
+        {
+            if (String.IsNullOrWhiteSpace(json)) return String.Empty;
+            if (!JsonUtil.TryDeserialize<ClientPingResponse>(json, out ClientPingResponse? response) || response == null) return String.Empty;
+            if (String.Equals(propertyName, "status", StringComparison.OrdinalIgnoreCase))
+            {
+                return response.Status;
+            }
+
+            if (String.Equals(propertyName, "serverUtc", StringComparison.OrdinalIgnoreCase))
+            {
+                return response.ServerUtc;
+            }
+
+            return String.Empty;
         }
 
         private static string ReadSecret(string prompt)
@@ -3302,6 +3526,11 @@ namespace Xeno.Client
             return value == null ? String.Empty : value.Value.ToUniversalTime().ToString("O");
         }
 
+        private static string FormatPingTime(long elapsedMs)
+        {
+            return elapsedMs <= 0 ? "<1ms" : elapsedMs.ToString(CultureInfo.InvariantCulture) + "ms";
+        }
+
         private static string FormatBytes(long bytes)
         {
             if (bytes <= 0) return "unknown";
@@ -3495,6 +3724,21 @@ namespace Xeno.Client
             Console.WriteLine("      Read the error log instead of the standard client log.");
         }
 
+        private static void PrintPingHelp()
+        {
+            WriteInfoHeading("Ping command");
+            Console.WriteLine("  xeno ping");
+            Console.WriteLine("      Send 5 real-time HTTP heartbeat probes to the configured Xeno server.");
+            Console.WriteLine("  xeno ping -n <count>");
+            Console.WriteLine("  xeno ping --count <count>");
+            Console.WriteLine("      Send a specific number of probes. Valid range: 1 through 1000.");
+            Console.WriteLine("  xeno ping -w <milliseconds>");
+            Console.WriteLine("  xeno ping --timeout <milliseconds>");
+            Console.WriteLine("      Set the per-probe timeout. Valid range: 100 through 600000.");
+            Console.WriteLine("  xeno ping --server <rest-url>");
+            Console.WriteLine("      Probe a REST server URL without saving it to client settings.");
+        }
+
         private static void PrintDashboardHelp()
         {
             WriteInfoHeading("Dashboard commands");
@@ -3604,6 +3848,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno init");
             Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno status");
+            Console.WriteLine("  xeno ping");
             Console.WriteLine("  xeno inventory");
             Console.WriteLine("  xeno reload");
             Console.WriteLine("  xeno connect");
@@ -3643,6 +3888,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno start");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs [--tail <lines>] [-f]");
+            Console.WriteLine("  xeno ping [-n <count>] [-w <milliseconds>] [--server <rest-url>]");
             Console.WriteLine("  xeno dashboard [open]");
             Console.WriteLine("  xeno stop [--force]");
             Console.WriteLine("  xeno disconnect");
