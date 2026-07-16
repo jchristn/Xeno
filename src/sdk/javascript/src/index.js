@@ -47,6 +47,9 @@ export class XenoApiError extends Error {
  * @property {string=} ledgerEventId
  * @property {string} xenoTenantId
  * @property {string} userId
+ * @property {string=} requestUserId
+ * @property {string=} servingUserId
+ * @property {string=} counterpartyUserId
  * @property {string} direction
  * @property {number} amount
  * @property {string=} requestHistoryId

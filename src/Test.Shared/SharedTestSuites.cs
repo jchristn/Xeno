@@ -11,6 +11,7 @@ namespace Test.Shared
     using System.Net.WebSockets;
     using System.Reflection;
     using System.Text;
+    using System.Text.Json.Serialization;
     using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
@@ -1937,6 +1938,56 @@ namespace Test.Shared
                             if (!String.Equals(tags["ledgerEventId"], ledgerEvent.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Ledger event tag mismatch.");
                             if (!String.Equals(tags["direction"], "debit", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger direction tag mismatch.");
                             if (!LedgerMetadataBuilder.BuildEntryLabels(LedgerEntryDirection.Credit).Contains("xeno-credit", StringComparer.Ordinal)) throw new InvalidOperationException("Ledger credit label missing.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerResponseDtosUseDashboardJsonContract",
+                        "Ledger response DTOs serialize using documented dashboard field names",
+                        executeAsync: delegate
+                        {
+                            LedgerEntryRecord entry = new LedgerEntryRecord
+                            {
+                                LedgerEventId = "ledevt_contract",
+                                XenoTenantId = "ten_contract",
+                                XenoUserId = "usr_serving",
+                                RequestUserId = "usr_request",
+                                ServingUserId = "usr_serving",
+                                CounterpartyUserId = "usr_request",
+                                RequestHistoryId = "req_contract",
+                                SelectedClientId = "xcl_contract",
+                                Direction = LedgerEntryDirection.Credit,
+                                Amount = 12m,
+                                IsCommitted = true
+                            };
+                            string entryJson = JsonUtil.Serialize(entry);
+                            LedgerEntryJsonContractProbe entryContract = DeserializeRequired<LedgerEntryJsonContractProbe>(entryJson);
+                            if (!String.Equals(entryContract.UserId, "usr_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger entry userId JSON field missing.");
+                            if (!String.Equals(entryContract.RequestUserId, "usr_request", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger entry requestUserId JSON field missing.");
+                            if (!String.Equals(entryContract.ServingUserId, "usr_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger entry servingUserId JSON field missing.");
+                            if (!String.Equals(entryContract.CounterpartyUserId, "usr_request", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger entry counterpartyUserId JSON field missing.");
+                            if (!entryContract.Committed) throw new InvalidOperationException("Ledger entry committed JSON field missing.");
+                            if (!String.IsNullOrWhiteSpace(entryContract.ClrXenoUserId) || entryContract.ClrIsCommitted.HasValue) throw new InvalidOperationException("Ledger entry leaked CLR property names.");
+
+                            LedgerEntryRecord? roundTripEntry = JsonUtil.Deserialize<LedgerEntryRecord>(entryJson);
+                            if (roundTripEntry == null) throw new InvalidOperationException("Ledger entry did not deserialize.");
+                            if (!String.Equals(roundTripEntry.XenoUserId, "usr_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger entry userId roundtrip mismatch.");
+                            if (!String.Equals(roundTripEntry.ServingUserId, "usr_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger entry servingUserId roundtrip mismatch.");
+
+                            LedgerBalanceResponse balance = new LedgerBalanceResponse
+                            {
+                                XenoTenantId = "ten_contract",
+                                XenoUserId = "usr_serving",
+                                Balance = 7m,
+                                DebitTotal = 5,
+                                CreditTotal = 12
+                            };
+                            string balanceJson = JsonUtil.Serialize(balance);
+                            LedgerBalanceJsonContractProbe balanceContract = DeserializeRequired<LedgerBalanceJsonContractProbe>(balanceJson);
+                            if (!String.Equals(balanceContract.TenantId, "ten_contract", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger balance tenantId JSON field missing.");
+                            if (!String.Equals(balanceContract.UserId, "usr_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger balance userId JSON field missing.");
+                            if (balanceContract.TotalDebits != 5) throw new InvalidOperationException("Ledger balance totalDebits JSON field missing.");
+                            if (balanceContract.TotalCredits != 12) throw new InvalidOperationException("Ledger balance totalCredits JSON field missing.");
+                            return Task.CompletedTask;
                         }),
                     new TestCaseDescriptor(
                         "Ledger",
@@ -7420,6 +7471,45 @@ VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider',
         private sealed class DockerNetLedgerBalanceResponse
         {
             public decimal CommittedBalance { get; set; }
+        }
+
+        private sealed class LedgerEntryJsonContractProbe
+        {
+            [JsonPropertyName("userId")]
+            public string? UserId { get; set; }
+
+            [JsonPropertyName("requestUserId")]
+            public string? RequestUserId { get; set; }
+
+            [JsonPropertyName("servingUserId")]
+            public string? ServingUserId { get; set; }
+
+            [JsonPropertyName("counterpartyUserId")]
+            public string? CounterpartyUserId { get; set; }
+
+            [JsonPropertyName("committed")]
+            public bool Committed { get; set; }
+
+            [JsonPropertyName("XenoUserId")]
+            public string? ClrXenoUserId { get; set; }
+
+            [JsonPropertyName("IsCommitted")]
+            public bool? ClrIsCommitted { get; set; }
+        }
+
+        private sealed class LedgerBalanceJsonContractProbe
+        {
+            [JsonPropertyName("tenantId")]
+            public string? TenantId { get; set; }
+
+            [JsonPropertyName("userId")]
+            public string? UserId { get; set; }
+
+            [JsonPropertyName("totalDebits")]
+            public long TotalDebits { get; set; }
+
+            [JsonPropertyName("totalCredits")]
+            public long TotalCredits { get; set; }
         }
 
         private static T DeserializeRequired<T>(string json) where T : class

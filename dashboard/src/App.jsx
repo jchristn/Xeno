@@ -2959,7 +2959,9 @@ function AnalyticsView() {
 
 function LedgerView({ canOperate = false }) {
   const { t } = useTranslation();
-  const [entryFilters, setEntryFilters] = useState({ direction: '', fromUtc: '', toUtc: '' });
+  const tenantOptions = useResource('/api/v1/tenants', []);
+  const userOptions = useResource('/api/v1/users', []);
+  const [entryFilters, setEntryFilters] = useState({ tenantId: '', userId: '', direction: '', fromUtc: '', toUtc: '' });
   const [trendRange, setTrendRange] = useState('lastDay');
   const [trendAnchor, setTrendAnchor] = useState(() => Date.now());
   const [status, setStatus] = useState(null);
@@ -2976,17 +2978,18 @@ function LedgerView({ canOperate = false }) {
   const balanceRows = collectionRows(value(balances, 'items'));
   const entryRows = collectionRows(value(entries, 'items'));
   const trendWindow = useMemo(() => buildAnalyticsWindow(trendRange, trendAnchor), [trendAnchor, trendRange]);
+  const filteredBalanceRows = useMemo(() => filterLedgerBalances(balanceRows, entryFilters), [balanceRows, entryFilters]);
   const filteredEntryRows = useMemo(() => filterLedgerEntries(entryRows, entryFilters), [entryRows, entryFilters]);
   const trendEntryRows = useMemo(() => filterLedgerEntriesByWindow(filteredEntryRows, trendWindow), [filteredEntryRows, trendWindow]);
-  const tenantRows = useMemo(() => buildLedgerTenantRows(balanceRows, filteredEntryRows), [balanceRows, filteredEntryRows]);
+  const tenantRows = useMemo(() => buildLedgerTenantRows(filteredBalanceRows, filteredEntryRows), [filteredBalanceRows, filteredEntryRows]);
   const topDebitRows = useMemo(() => topLedgerRows(buildLedgerUserDirectionRows(filteredEntryRows, 'debit'), 'totalDebits'), [filteredEntryRows]);
   const topCreditRows = useMemo(() => topLedgerRows(buildLedgerUserDirectionRows(filteredEntryRows, 'credit'), 'totalCredits'), [filteredEntryRows]);
   const clientCreditRows = useMemo(() => topLedgerRows(buildLedgerClientCreditRows(filteredEntryRows), 'totalCredits'), [filteredEntryRows]);
   const trendSummary = useMemo(() => buildLedgerTrendSummary(trendEntryRows, trendWindow), [trendEntryRows, trendWindow]);
-  const tenantCount = new Set(balanceRows.map((row) => value(row, 'xenoTenantId') || value(row, 'tenantId')).filter(Boolean)).size;
-  const totalBalance = balanceRows.reduce((sum, row) => sum + Number(value(row, 'balance') || 0), 0);
-  const totalDebits = balanceRows.reduce((sum, row) => sum + Number(value(row, 'totalDebits') || 0), 0);
-  const totalCredits = balanceRows.reduce((sum, row) => sum + Number(value(row, 'totalCredits') || 0), 0);
+  const tenantCount = new Set(filteredBalanceRows.map((row) => ledgerTenantId(row)).filter(Boolean)).size;
+  const totalBalance = filteredBalanceRows.reduce((sum, row) => sum + Number(value(row, 'balance') || 0), 0);
+  const totalDebits = filteredBalanceRows.reduce((sum, row) => sum + Number(value(row, 'totalDebits') || 0), 0);
+  const totalCredits = filteredBalanceRows.reduce((sum, row) => sum + Number(value(row, 'totalCredits') || 0), 0);
   const netLedgerUiUrl = defaultNetLedgerUiUrl();
 
   const refreshLedger = useCallback(async () => {
@@ -3087,23 +3090,43 @@ function LedgerView({ canOperate = false }) {
             <h2>{t('ledgerFilters')}</h2>
           </div>
         </div>
-        <div className="form-grid">
-          <label>
-            <span>{t('direction')}</span>
-            <select onChange={(event) => setEntryFilters((current) => ({ ...current, direction: event.target.value }))} title={t('tooltipLedgerDirectionFilter')} value={entryFilters.direction}>
-              <option value="">{t('all')}</option>
-              <option value="debit">{t('debit')}</option>
-              <option value="credit">{t('credit')}</option>
-            </select>
-          </label>
-          <label>
-            <span>{t('fromUtc')}</span>
-            <input onChange={(event) => setEntryFilters((current) => ({ ...current, fromUtc: event.target.value }))} title={t('tooltipLedgerFromFilter')} type="datetime-local" value={entryFilters.fromUtc} />
-          </label>
-          <label>
-            <span>{t('toUtc')}</span>
-            <input onChange={(event) => setEntryFilters((current) => ({ ...current, toUtc: event.target.value }))} title={t('tooltipLedgerToFilter')} type="datetime-local" value={entryFilters.toUtc} />
-          </label>
+        <div className="workspace-card-body">
+          <div className="form-grid five">
+            <label className="form-field">
+              <span>{t('tenantId')}</span>
+              <select onChange={(event) => setEntryFilters((current) => ({ ...current, tenantId: event.target.value }))} title={t('tooltipLedgerTenantFilter')} value={entryFilters.tenantId}>
+                <option value="">{t('all')}</option>
+                {collectionRows(tenantOptions.data).map((tenant) => (
+                  <option key={recordId(tenant) || value(tenant, 'id')} value={recordId(tenant) || value(tenant, 'id')}>{ledgerTenantOptionLabel(tenant)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>{t('userId')}</span>
+              <select onChange={(event) => setEntryFilters((current) => ({ ...current, userId: event.target.value }))} title={t('tooltipLedgerUserFilter')} value={entryFilters.userId}>
+                <option value="">{t('all')}</option>
+                {collectionRows(userOptions.data).map((user) => (
+                  <option key={recordId(user) || value(user, 'id')} value={recordId(user) || value(user, 'id')}>{ledgerUserOptionLabel(user)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>{t('direction')}</span>
+              <select onChange={(event) => setEntryFilters((current) => ({ ...current, direction: event.target.value }))} title={t('tooltipLedgerDirectionFilter')} value={entryFilters.direction}>
+                <option value="">{t('all')}</option>
+                <option value="debit">{t('debit')}</option>
+                <option value="credit">{t('credit')}</option>
+              </select>
+            </label>
+            <label className="form-field">
+              <span>{t('fromUtc')}</span>
+              <input onChange={(event) => setEntryFilters((current) => ({ ...current, fromUtc: event.target.value }))} title={t('tooltipLedgerFromFilter')} type="datetime-local" value={entryFilters.fromUtc} />
+            </label>
+            <label className="form-field">
+              <span>{t('toUtc')}</span>
+              <input onChange={(event) => setEntryFilters((current) => ({ ...current, toUtc: event.target.value }))} title={t('tooltipLedgerToFilter')} type="datetime-local" value={entryFilters.toUtc} />
+            </label>
+          </div>
         </div>
       </section>
       <section className="workspace-card data-panel">
@@ -3181,8 +3204,8 @@ function LedgerView({ canOperate = false }) {
       />
       <DataTable
         columns={[
-          { key: 'xenoTenantId', label: 'tenantId' },
-          { key: 'userId', label: 'userId' },
+          { key: 'xenoTenantId', label: 'tenantId', render: (row) => ledgerTenantId(row) || '-', searchValue: (row) => ledgerTenantId(row) },
+          { key: 'userId', label: 'userId', render: (row) => ledgerBalanceUserId(row) || '-' },
           { key: 'balance', label: 'currentBalance', render: (row) => formatNumber(value(row, 'balance') || 0), sortValue: (row) => Number(value(row, 'balance') || 0) },
           { key: 'totalDebits', label: 'totalDebits', render: (row) => formatNumber(value(row, 'totalDebits') || 0), sortValue: (row) => Number(value(row, 'totalDebits') || 0) },
           { key: 'totalCredits', label: 'totalCredits', render: (row) => formatNumber(value(row, 'totalCredits') || 0), sortValue: (row) => Number(value(row, 'totalCredits') || 0) },
@@ -3198,8 +3221,8 @@ function LedgerView({ canOperate = false }) {
         columns={[
           { key: 'direction', label: 'direction', render: (row) => <StatusChip tone={String(value(row, 'direction')).toLowerCase().includes('credit') ? 'success' : 'warning'} value={String(value(row, 'direction') ?? '-')} /> },
           { key: 'amount', label: 'amount', render: (row) => formatNumber(value(row, 'amount') || 0), sortValue: (row) => Number(value(row, 'amount') || 0) },
-          { key: 'userId', label: 'userId' },
-          { key: 'counterpartyUserId', label: 'counterpartyUserId' },
+          { key: 'userId', label: 'userId', render: (row) => ledgerDisplayUserId(row) || '-', searchValue: (row) => ledgerDisplayUserId(row) },
+          { key: 'counterpartyUserId', label: 'counterpartyUserId', render: (row) => ledgerCounterpartyUserId(row) || '-', searchValue: (row) => ledgerCounterpartyUserId(row) },
           { key: 'selectedClientId', label: 'selectedClientId' },
           { key: 'requestHistoryId', label: 'requestHistoryId', render: (row) => <LedgerRequestHistoryLink onOpen={openRequestDetails} requestHistoryId={value(row, 'requestHistoryId')} /> },
           { key: 'occurredUtc', label: 'occurredUtc', render: (row) => formatDateTime(value(row, 'occurredUtc')) }
@@ -3216,16 +3239,30 @@ function LedgerView({ canOperate = false }) {
 }
 
 function filterLedgerEntries(entries, filters) {
+  const tenantId = String(filters.tenantId || '');
+  const userId = String(filters.userId || '');
   const direction = String(filters.direction || '').toLowerCase();
   const fromMs = filters.fromUtc ? Date.parse(filters.fromUtc) : null;
   const toMs = filters.toUtc ? Date.parse(filters.toUtc) : null;
   return entries.filter((entry) => {
+    if (tenantId && ledgerTenantId(entry) !== tenantId) return false;
+    if (userId && !ledgerEntryIncludesUser(entry, userId)) return false;
     const entryDirection = String(value(entry, 'direction') || '').toLowerCase();
     if (direction && entryDirection !== direction) return false;
     const occurredUtc = value(entry, 'occurredUtc');
     const occurredMs = occurredUtc ? Date.parse(occurredUtc) : null;
     if (fromMs && occurredMs && occurredMs < fromMs) return false;
     if (toMs && occurredMs && occurredMs > toMs) return false;
+    return true;
+  });
+}
+
+function filterLedgerBalances(rows, filters) {
+  const tenantId = String(filters.tenantId || '');
+  const userId = String(filters.userId || '');
+  return rows.filter((row) => {
+    if (tenantId && ledgerTenantId(row) !== tenantId) return false;
+    if (userId && ledgerBalanceUserId(row) !== userId) return false;
     return true;
   });
 }
@@ -3259,12 +3296,73 @@ function buildLedgerTenantRows(balanceRows, entryRows) {
   return [...rows.values()];
 }
 
+function ledgerTag(entry, key) {
+  const tags = value(entry, 'tags');
+  if (!tags || typeof tags !== 'object') return undefined;
+  const pascal = key.charAt(0).toUpperCase() + key.slice(1);
+  return tags[key] ?? tags[pascal];
+}
+
+function ledgerBalanceUserId(row) {
+  return value(row, 'userId') || value(row, 'xenoUserId');
+}
+
+function ledgerTenantId(row) {
+  return value(row, 'xenoTenantId') || value(row, 'tenantId');
+}
+
+function ledgerEntryUserId(entry) {
+  return value(entry, 'userId') || value(entry, 'xenoUserId') || ledgerTag(entry, 'xenoUserId');
+}
+
+function ledgerRequestUserId(entry) {
+  return value(entry, 'requestUserId') || ledgerTag(entry, 'requestUserId') || ledgerEntryUserId(entry);
+}
+
+function ledgerServingUserId(entry) {
+  return value(entry, 'servingUserId') || ledgerTag(entry, 'servingUserId') || ledgerEntryUserId(entry);
+}
+
+function ledgerCounterpartyUserId(entry) {
+  return value(entry, 'counterpartyUserId') || ledgerTag(entry, 'counterpartyUserId');
+}
+
+function ledgerEntryUserIdForDirection(entry, targetDirection) {
+  return targetDirection === 'credit' ? ledgerServingUserId(entry) : ledgerRequestUserId(entry);
+}
+
+function ledgerDisplayUserId(entry) {
+  const direction = String(value(entry, 'direction') || '').toLowerCase();
+  return ledgerEntryUserId(entry) || ledgerEntryUserIdForDirection(entry, direction);
+}
+
+function ledgerEntryIncludesUser(entry, userId) {
+  return [
+    ledgerEntryUserId(entry),
+    ledgerRequestUserId(entry),
+    ledgerServingUserId(entry),
+    ledgerCounterpartyUserId(entry)
+  ].some((candidate) => String(candidate || '') === userId);
+}
+
+function ledgerTenantOptionLabel(tenant) {
+  const id = recordId(tenant) || value(tenant, 'id') || '';
+  const name = value(tenant, 'name');
+  return name && name !== id ? `${name} (${id})` : id;
+}
+
+function ledgerUserOptionLabel(user) {
+  const id = recordId(user) || value(user, 'id') || '';
+  const display = value(user, 'email') || value(user, 'username') || value(user, 'name');
+  return display && display !== id ? `${display} (${id})` : id;
+}
+
 function buildLedgerUserDirectionRows(entries, targetDirection) {
   const rows = new Map();
   entries
     .filter((entry) => String(value(entry, 'direction') || '').toLowerCase() === targetDirection)
     .forEach((entry) => {
-      const userId = value(entry, 'userId') || value(entry, targetDirection === 'debit' ? 'requestUserId' : 'servingUserId') || 'unknown';
+      const userId = ledgerEntryUserIdForDirection(entry, targetDirection) || 'unknown';
       const row = rows.get(userId) || { userId, totalDebits: 0, totalCredits: 0, lastActivityUtc: null };
       if (targetDirection === 'debit') row.totalDebits += Number(value(entry, 'amount') || 0);
       else row.totalCredits += Number(value(entry, 'amount') || 0);
@@ -3280,7 +3378,7 @@ function buildLedgerClientCreditRows(entries) {
     .filter((entry) => String(value(entry, 'direction') || '').toLowerCase() === 'credit')
     .forEach((entry) => {
       const selectedClientId = value(entry, 'selectedClientId') || 'unknown';
-      const servingUserId = value(entry, 'servingUserId') || value(entry, 'userId') || 'unknown';
+      const servingUserId = ledgerServingUserId(entry) || 'unknown';
       const key = `${selectedClientId}:${servingUserId}`;
       const row = rows.get(key) || { selectedClientId, servingUserId, totalCredits: 0, lastActivityUtc: null };
       row.totalCredits += Number(value(entry, 'amount') || 0);
@@ -3805,7 +3903,7 @@ function SettingsView() {
               <input checked={draft.Email.Notifications.NotifyNewTenantMember} onChange={(event) => updateNestedSetting('Email', 'Notifications', 'NotifyNewTenantMember', event.target.checked)} title={t('tooltipSettingsEmailNotifyNewTenantMember')} type="checkbox" />
               <span>{t('notifyNewTenantMember')}</span>
             </label>
-            <label className="form-field" title={t('tooltipSettingsEmailPlatformRecipients')}>
+            <label className="form-field full-span" title={t('tooltipSettingsEmailPlatformRecipients')}>
               <span>{t('platformAdminRecipients')}</span>
               <textarea rows={3} value={recipientListToText(draft.Email.Notifications.PlatformAdministratorRecipients)} onChange={(event) => updateEmailRecipientSetting(event.target.value)} title={t('tooltipSettingsEmailPlatformRecipients')} />
               <small className="setting-impact live">{t('appliesImmediately')}</small>

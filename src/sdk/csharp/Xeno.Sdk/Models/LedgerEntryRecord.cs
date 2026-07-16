@@ -34,6 +34,18 @@ namespace Xeno.Sdk
         public string UserId { get; set; } = string.Empty;
 
         /// <summary>
+        /// Gets or sets requesting user identifier.
+        /// </summary>
+        [JsonPropertyName("requestUserId")]
+        public string RequestUserId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets serving user identifier.
+        /// </summary>
+        [JsonPropertyName("servingUserId")]
+        public string ServingUserId { get; set; } = string.Empty;
+
+        /// <summary>
         /// Gets or sets counterparty user identifier.
         /// </summary>
         [JsonPropertyName("counterpartyUserId")]

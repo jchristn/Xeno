@@ -161,12 +161,12 @@ async function openLedger(page, user, ledgerFixtures = {}) {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (url.pathname === '/api/v1/users' && method === 'GET') {
-      await route.fulfill({ json: [user] });
+      await route.fulfill({ json: ledgerFixtures.users || [user] });
       return;
     }
 
     if (url.pathname === '/api/v1/tenants' && method === 'GET') {
-      await route.fulfill({ json: [{ id: user.tenantId || 'ten_default', name: 'Default', active: true }] });
+      await route.fulfill({ json: ledgerFixtures.tenants || [{ id: user.tenantId || 'ten_default', name: 'Default', active: true }] });
       return;
     }
 
@@ -574,7 +574,24 @@ test('audit logs are a top-level admin page outside security', async ({ page }) 
 });
 
 test('ledger page renders system admin controls and summaries', async ({ page }) => {
-  await openLedger(page, { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false, active: true });
+  await openLedger(page, { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false, active: true }, {
+    tenants: [
+      { id: 'ten_default', name: 'Default', active: true },
+      { id: 'ten_other', name: 'Other', active: true }
+    ],
+    users: [
+      { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false, active: true },
+      { id: 'usr_other', tenantId: 'ten_other', email: 'other@xeno.test', active: true }
+    ],
+    entries: {
+      items: [
+        { ledgerEventId: 'ledevt_1', tenantId: 'ten_default', direction: 'Debit', amount: 30, counterpartyUserId: 'usr_peer', selectedClientId: 'xcl_peer', requestHistoryId: 'req_ledger_1', occurredUtc: '2026-07-16T12:00:00Z', tags: { requestUserId: 'usr_admin', servingUserId: 'usr_peer' } },
+        { ledgerEventId: 'ledevt_2', tenantId: 'ten_default', direction: 'Credit', amount: 100, selectedClientId: 'xcl_user', requestHistoryId: 'req_ledger_2', occurredUtc: '2026-07-16T12:10:00Z', tags: { requestUserId: 'usr_peer', servingUserId: 'usr_admin', counterpartyUserId: 'usr_peer' } },
+        { ledgerEventId: 'ledevt_3', tenantId: 'ten_other', direction: 'Credit', amount: 60, selectedClientId: 'xcl_other', requestHistoryId: 'req_ledger_3', occurredUtc: '2026-07-16T12:20:00Z', tags: { requestUserId: 'usr_admin', servingUserId: 'usr_other', counterpartyUserId: 'usr_admin' } }
+      ],
+      total: 3
+    }
+  });
 
   await expect(page.getByRole('link', { name: 'NetLedger UI' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Drain' })).toBeVisible();
@@ -582,6 +599,20 @@ test('ledger page renders system admin controls and summaries', async ({ page })
   await expect(page.getByRole('heading', { name: 'Tenant Ledger Summary' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Top Requesting Users' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Serving Client Credits' })).toBeVisible();
+  const ledgerFilters = page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Ledger Filters' }) });
+  const tenantFilter = ledgerFilters.getByLabel('Tenant ID');
+  const userFilter = ledgerFilters.getByLabel('User ID');
+  await expect(tenantFilter.locator('option').first()).toHaveText('All');
+  await expect(userFilter.locator('option').first()).toHaveText('All');
+  await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Top Serving Users' }) }).getByText('usr_admin')).toBeVisible();
+  await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_admin')).toBeVisible();
+  await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Top Serving Users' }) }).getByText('unknown')).toHaveCount(0);
+  await userFilter.selectOption('usr_other');
+  await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_other')).toBeVisible();
+  await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_admin')).toHaveCount(0);
+  await userFilter.selectOption('');
+  await tenantFilter.selectOption('ten_default');
+  await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_other')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'req_ledger_1' })).toBeVisible();
   await expect(page.getByText('Token Amount')).toBeVisible();
   await page.getByRole('link', { name: 'req_ledger_1' }).click();
