@@ -599,21 +599,27 @@ function ClientTelemetryView({ canCollect = false }) {
       </div>
 
       <div className="client-telemetry-toolbar">
-        <label className="form-field inline compact-field table-inline-filter">
-          <span>{t('clientFilter')}</span>
-          <select value={selectedClientId} onChange={(event) => updateSelectedClient(event.target.value)} title={t('filterClientTelemetry', 'Filter client telemetry by client')}>
-            <option value="all">{t('allClients')}</option>
-            {!selectedClientExists ? <option value={selectedClientId}>{selectedClientName}</option> : null}
-            {clients.data.map((client) => {
-              const clientId = String(value(client, 'id') || '');
-              return (
-                <option key={clientId || value(client, 'name')} value={clientId}>
-                  {value(client, 'name') || clientId}
-                </option>
-              );
-            })}
-          </select>
-        </label>
+        <div className="filter-control-pair">
+          <label className="form-field inline compact-field table-inline-filter">
+            <span>{t('clientFilter')}</span>
+            <select value={selectedClientId} onChange={(event) => updateSelectedClient(event.target.value)} title={t('filterClientTelemetry', 'Filter client telemetry by client')}>
+              <option value="all">{t('allClients')}</option>
+              {!selectedClientExists ? <option value={selectedClientId}>{selectedClientName}</option> : null}
+              {clients.data.map((client) => {
+                const clientId = String(value(client, 'id') || '');
+                return (
+                  <option key={clientId || value(client, 'name')} value={clientId}>
+                    {value(client, 'name') || clientId}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <label className="form-field inline compact-field table-inline-filter">
+            <span>{t('clientId')}</span>
+            <input onChange={(event) => updateSelectedClient(event.target.value.trim() || 'all')} placeholder={t('all')} title={t('filterClientTelemetry', 'Filter client telemetry by client')} value={selectedClientId === 'all' ? '' : selectedClientId} />
+          </label>
+        </div>
       </div>
 
       <div className="metric-grid telemetry-kpi-grid">
@@ -2458,17 +2464,14 @@ function AdvertisedModelsView() {
   const [selectedClientId, setSelectedClientId] = useState('all');
   const [selectedModel, setSelectedModel] = useState(null);
   const clientModels = flattenClientModels(clients.data);
+  const selectedClient = clients.data.find((client) => String(value(client, 'id') || '') === selectedClientId);
+  const selectedClientName = value(selectedClient, 'name') || selectedClientId;
+  const selectedClientExists = selectedClientId === 'all' || Boolean(selectedClient);
   const filteredModels = selectedClientId === 'all'
     ? clientModels
     : clientModels.filter((model) => String(value(model, 'clientId') || '') === selectedClientId);
   const completionModelCount = filteredModels.filter((model) => value(model, 'supportsCompletions') === true).length;
   const embeddingModelCount = filteredModels.filter((model) => value(model, 'supportsEmbeddings') === true).length;
-
-  useEffect(() => {
-    if (selectedClientId === 'all') return;
-    const exists = clients.data.some((client) => String(value(client, 'id') || '') === selectedClientId);
-    if (!exists) setSelectedClientId('all');
-  }, [clients.data, selectedClientId]);
 
   return (
     <div className="view-stack">
@@ -2479,20 +2482,27 @@ function AdvertisedModelsView() {
       </div>
       <DataTable
         actions={(
-          <label className="form-field inline compact-field table-inline-filter">
-            <span>{t('clientFilter')}</span>
-            <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} title={t('tooltipNavAdvertisedModels')}>
-              <option value="all">{t('allClients')}</option>
-              {clients.data.map((client) => {
-                const clientId = String(value(client, 'id') || '');
-                return (
-                  <option key={clientId || value(client, 'name')} value={clientId}>
-                    {value(client, 'name') || clientId}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
+          <div className="filter-control-pair">
+            <label className="form-field inline compact-field table-inline-filter">
+              <span>{t('clientFilter')}</span>
+              <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} title={t('tooltipNavAdvertisedModels')}>
+                <option value="all">{t('allClients')}</option>
+                {!selectedClientExists ? <option value={selectedClientId}>{selectedClientName}</option> : null}
+                {clients.data.map((client) => {
+                  const clientId = String(value(client, 'id') || '');
+                  return (
+                    <option key={clientId || value(client, 'name')} value={clientId}>
+                      {value(client, 'name') || clientId}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="form-field inline compact-field table-inline-filter">
+              <span>{t('clientId')}</span>
+              <input onChange={(event) => setSelectedClientId(event.target.value.trim() || 'all')} placeholder={t('all')} title={t('tooltipNavAdvertisedModels')} value={selectedClientId === 'all' ? '' : selectedClientId} />
+            </label>
+          </div>
         )}
         columns={['clientName', 'clientId', 'name', 'apiType', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
         onDelete={(row) => {
@@ -2524,7 +2534,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [tenantOptions, setTenantOptions] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
-  const [selectedTenantId, setSelectedTenantId] = useState(session?.tenantId || '');
+  const [selectedTenantId, setSelectedTenantId] = useState('');
   const isSystemAdmin = value(currentUser, 'isAdmin') === true;
   const effectiveTenantId = publicMode ? '' : (isSystemAdmin ? selectedTenantId : (session?.tenantId || ''));
   const rows = modelLeaderboardRows(response, query.offset);
@@ -2541,9 +2551,10 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
     ? tenantOptions
     : (session?.tenantId ? [{ id: session.tenantId, name: session.tenantName || session.tenantId }] : []);
   const selectedTenant = knownTenants.find((tenant) => String(value(tenant, 'id') || '') === effectiveTenantId);
+  const selectedTenantExists = !selectedTenantId || knownTenants.some((tenant) => String(value(tenant, 'id') || '') === selectedTenantId);
   const scopeLabel = publicMode
     ? t('globalScope', 'Global')
-    : (value(selectedTenant, 'name') || session?.tenantName || effectiveTenantId || t('tenantScope', 'Tenant'));
+    : (!effectiveTenantId && isSystemAdmin ? t('globalScope', 'Global') : (value(selectedTenant, 'name') || session?.tenantName || effectiveTenantId || t('tenantScope', 'Tenant')));
 
   useEffect(() => {
     setDraftStartUtc(query.startUtc);
@@ -2582,9 +2593,9 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
 
   useEffect(() => {
     if (publicMode) return;
+    if (currentUser == null) return;
     if (!isSystemAdmin) setSelectedTenantId(session?.tenantId || '');
-    else if (!selectedTenantId && session?.tenantId) setSelectedTenantId(session.tenantId);
-  }, [isSystemAdmin, publicMode, selectedTenantId, session?.tenantId]);
+  }, [currentUser, isSystemAdmin, publicMode, session?.tenantId]);
 
   useEffect(() => {
     if (!publicMode && !effectiveTenantId) {
@@ -2698,19 +2709,27 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
             </select>
           </label>
           {!publicMode && isSystemAdmin ? (
-            <label className="form-field compact-field tenant-filter-field">
-              <span>{t('tenantFilter', 'Tenant Filter')}</span>
-              <select onChange={(event) => updateTenantFilter(event.target.value)} value={selectedTenantId}>
-                {knownTenants.map((tenant) => {
-                  const tenantId = String(value(tenant, 'id') || '');
-                  return (
-                    <option key={tenantId || value(tenant, 'name')} value={tenantId}>
-                      {value(tenant, 'name') || tenantId}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
+            <>
+              <label className="form-field compact-field tenant-filter-field">
+                <span>{t('tenantFilter', 'Tenant Filter')}</span>
+                <select onChange={(event) => updateTenantFilter(event.target.value)} value={selectedTenantId}>
+                  <option value="">{t('all')}</option>
+                  {!selectedTenantExists ? <option value={selectedTenantId}>{selectedTenantId}</option> : null}
+                  {knownTenants.map((tenant) => {
+                    const tenantId = String(value(tenant, 'id') || '');
+                    return (
+                      <option key={tenantId || value(tenant, 'name')} value={tenantId}>
+                        {value(tenant, 'name') || tenantId}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label className="form-field compact-field tenant-filter-field">
+                <span>{t('tenantId')}</span>
+                <input onChange={(event) => updateTenantFilter(event.target.value.trim())} placeholder={t('all')} value={selectedTenantId} />
+              </label>
+            </>
           ) : null}
           <div className="leaderboard-filter-actions">
             <IconButton icon={<Search size={16} />} label={t('applyFilters', 'Apply Filters')} onClick={applyFilters} tooltip={t('applyFilters', 'Apply Filters')} variant="primary" />
@@ -2975,6 +2994,10 @@ function LedgerView({ canOperate = false }) {
   const [operationStatus, setOperationStatus] = useState('');
 
   const queue = value(status, 'queue') || {};
+  const ledgerTenantOptions = collectionRows(tenantOptions.data);
+  const ledgerUserOptions = collectionRows(userOptions.data);
+  const selectedLedgerTenantExists = !entryFilters.tenantId || ledgerTenantOptions.some((tenant) => String(recordId(tenant) || value(tenant, 'id') || '') === entryFilters.tenantId);
+  const selectedLedgerUserExists = !entryFilters.userId || ledgerUserOptions.some((user) => String(recordId(user) || value(user, 'id') || '') === entryFilters.userId);
   const balanceRows = collectionRows(value(balances, 'items'));
   const entryRows = collectionRows(value(entries, 'items'));
   const trendWindow = useMemo(() => buildAnalyticsWindow(trendRange, trendAnchor), [trendAnchor, trendRange]);
@@ -3093,22 +3116,32 @@ function LedgerView({ canOperate = false }) {
         <div className="workspace-card-body">
           <div className="form-grid five">
             <label className="form-field">
-              <span>{t('tenantId')}</span>
+              <span>{t('tenant')}</span>
               <select onChange={(event) => setEntryFilters((current) => ({ ...current, tenantId: event.target.value }))} title={t('tooltipLedgerTenantFilter')} value={entryFilters.tenantId}>
                 <option value="">{t('all')}</option>
-                {collectionRows(tenantOptions.data).map((tenant) => (
+                {!selectedLedgerTenantExists ? <option value={entryFilters.tenantId}>{entryFilters.tenantId}</option> : null}
+                {ledgerTenantOptions.map((tenant) => (
                   <option key={recordId(tenant) || value(tenant, 'id')} value={recordId(tenant) || value(tenant, 'id')}>{ledgerTenantOptionLabel(tenant)}</option>
                 ))}
               </select>
             </label>
             <label className="form-field">
-              <span>{t('userId')}</span>
+              <span>{t('tenantId')}</span>
+              <input onChange={(event) => setEntryFilters((current) => ({ ...current, tenantId: event.target.value.trim() }))} placeholder={t('all')} title={t('tooltipLedgerTenantFilter')} value={entryFilters.tenantId} />
+            </label>
+            <label className="form-field">
+              <span>{t('user')}</span>
               <select onChange={(event) => setEntryFilters((current) => ({ ...current, userId: event.target.value }))} title={t('tooltipLedgerUserFilter')} value={entryFilters.userId}>
                 <option value="">{t('all')}</option>
-                {collectionRows(userOptions.data).map((user) => (
+                {!selectedLedgerUserExists ? <option value={entryFilters.userId}>{entryFilters.userId}</option> : null}
+                {ledgerUserOptions.map((user) => (
                   <option key={recordId(user) || value(user, 'id')} value={recordId(user) || value(user, 'id')}>{ledgerUserOptionLabel(user)}</option>
                 ))}
               </select>
+            </label>
+            <label className="form-field">
+              <span>{t('userId')}</span>
+              <input onChange={(event) => setEntryFilters((current) => ({ ...current, userId: event.target.value.trim() }))} placeholder={t('all')} title={t('tooltipLedgerUserFilter')} value={entryFilters.userId} />
             </label>
             <label className="form-field">
               <span>{t('direction')}</span>

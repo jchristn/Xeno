@@ -600,18 +600,20 @@ test('ledger page renders system admin controls and summaries', async ({ page })
   await expect(page.getByRole('heading', { name: 'Top Requesting Users' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Serving Client Credits' })).toBeVisible();
   const ledgerFilters = page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Ledger Filters' }) });
-  const tenantFilter = ledgerFilters.getByLabel('Tenant ID');
-  const userFilter = ledgerFilters.getByLabel('User ID');
+  const tenantFilter = ledgerFilters.getByRole('combobox', { name: 'Tenant', exact: true });
+  const tenantIdFilter = ledgerFilters.getByLabel('Tenant ID');
+  const userFilter = ledgerFilters.getByRole('combobox', { name: 'User', exact: true });
+  const userIdFilter = ledgerFilters.getByLabel('User ID');
   await expect(tenantFilter.locator('option').first()).toHaveText('All');
   await expect(userFilter.locator('option').first()).toHaveText('All');
   await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Top Serving Users' }) }).getByText('usr_admin')).toBeVisible();
   await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_admin')).toBeVisible();
   await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Top Serving Users' }) }).getByText('unknown')).toHaveCount(0);
-  await userFilter.selectOption('usr_other');
+  await userIdFilter.fill('usr_other');
   await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_other')).toBeVisible();
   await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_admin')).toHaveCount(0);
   await userFilter.selectOption('');
-  await tenantFilter.selectOption('ten_default');
+  await tenantIdFilter.fill('ten_default');
   await expect(page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Serving Client Credits' }) }).getByText('usr_other')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'req_ledger_1' })).toBeVisible();
   await expect(page.getByText('Token Amount')).toBeVisible();
@@ -823,7 +825,12 @@ test('regular tenant members see member dashboard surfaces without admin routes'
     }
 
     if (url.pathname === '/api/v1/clients' && method === 'GET') {
-      await route.fulfill({ json: [{ id: 'client_regular', name: 'member-client', connected: true, models: [] }] });
+      await route.fulfill({
+        json: [
+          { id: 'client_regular', name: 'member-client', connected: true, models: [{ name: 'member-model', apiType: 'chat', supportsCompletions: true, supportsEmbeddings: false }] },
+          { id: 'client_other', name: 'other-client', connected: true, models: [{ name: 'other-model', apiType: 'embedding', supportsCompletions: false, supportsEmbeddings: true }] }
+        ]
+      });
       return;
     }
 
@@ -875,6 +882,12 @@ test('regular tenant members see member dashboard surfaces without admin routes'
 
   await page.getByRole('link', { name: 'Clients', exact: true }).click();
   await expect(page.getByText('member-client')).toBeVisible();
+  await page.goto('/dashboard/clients/advertised-models');
+  await expect(page.getByText('member-model')).toBeVisible();
+  await expect(page.getByText('other-model')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Client ID', exact: true }).fill('client_other');
+  await expect(page.getByText('other-model')).toBeVisible();
+  await expect(page.getByText('member-model')).toHaveCount(0);
   await page.getByRole('link', { name: 'Client Telemetry' }).click();
   await expect(page.getByRole('button', { name: 'Collect Now' })).toHaveCount(0);
 });
@@ -912,8 +925,11 @@ test('system admin model leaderboard can filter to a selected tenant', async ({ 
 
   await page.goto('/dashboard/clients/advertised-models/leaderboard?limit=10&offset=0');
   await expect(page.locator('h1', { hasText: 'Model Leaderboard' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Tenant Filter' }).locator('option').first()).toHaveText('All');
   await page.getByRole('combobox', { name: 'Tenant Filter' }).selectOption('ten_ops');
   await expect.poll(() => leaderboardRequests.some((request) => new URL(request.url()).searchParams.get('tenantId') === 'ten_ops')).toBe(true);
+  await page.getByRole('textbox', { name: 'Tenant ID', exact: true }).fill('ten_manual');
+  await expect.poll(() => leaderboardRequests.some((request) => new URL(request.url()).searchParams.get('tenantId') === 'ten_manual')).toBe(true);
 });
 
 test('tenant row actions expose Nuke Tenant only for global admins and show modal results', async ({ page }) => {

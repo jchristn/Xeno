@@ -1451,6 +1451,20 @@ html[data-theme='dark'] .primitive-list-item {
   padding-bottom: 5px;
 }
 
+.table-inline-filter input {
+  min-height: 34px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.filter-control-pair {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .client-telemetry-view {
   gap: 18px;
 }
