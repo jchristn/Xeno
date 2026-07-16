@@ -28,6 +28,27 @@ C#, JavaScript, and Python SDKs are checked in under `src/sdk/`. Each SDK includ
 
 The live OpenAPI document remains available at `GET /openapi.json` and should be treated as the contract source of truth when validating or regenerating SDK coverage.
 
+## Ledger
+
+Ledger routes are authenticated and tenant-fenced. They require NetLedger v3.0.0 or later when ledgering is enabled because Xeno stores tenant-scoped account and entry correlation through NetLedger labels and tags.
+
+- `GET /v1.0/api/ledger/status`
+- `GET /v1.0/api/ledger/balance/me`
+- `GET /v1.0/api/ledger/balances`
+- `GET /v1.0/api/ledger/balances/users/{userId}`
+- `GET /v1.0/api/ledger/entries/me`
+- `POST /v1.0/api/ledger/entries/search`
+- `POST /v1.0/api/ledger/drain`
+- `POST /v1.0/api/ledger/reconcile`
+
+Ledgering records successful completion and embedding requests with known `total_tokens`. Xeno debits the requesting user's account and credits the owner of the selected serving client by the same raw token amount. No enforcement, pricing, reservations, or quotas are active in this release.
+
+System administrators can read global balances and entries. Tenant administrators can read tenant-scoped balances and entries. Regular users can read only their own balance and entries. Admin drain and reconcile calls append audit records.
+
+Tenant creation and onboarding can include `deferSubordinateProvisioning: true` to report NetLedger provisioning status instead of failing when NetLedger is unavailable. Without that flag, new tenant provisioning fails if the required NetLedger tenant/account setup cannot complete. Tenant update, suspension, reactivation, and deletion paths update subordinate service status on the tenant response; hard delete removes the NetLedger tenant before clearing Xeno ledger links.
+
+Entry search accepts filters such as `tenantId`, `userId`, `direction`, `selectedClientId`, `requestCredentialId`, `requestHistoryId`, `fromUtc`, `toUtc`, `continuationToken`, and `pageSize`.
+
 ## Client Telemetry
 
 All client telemetry routes are tenant-scoped and require authentication. Canonical routes use `/v1.0/api/...`.

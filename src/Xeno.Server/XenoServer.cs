@@ -64,6 +64,9 @@ namespace Xeno.Server
         private readonly IXenoEmailService _Email;
         private DatabaseDriverBase? _Database;
         private RoutingService? _Routing;
+        private LedgerService? _Ledger;
+        private TenantLifecycleService? _TenantLifecycle;
+        private NetLedgerTenantSubordinateService? _NetLedgerTenantSubordinate;
         private CancellationTokenSource? _TelemetryCollectionCancellation;
         private Task? _TelemetryCollectionTask;
         private CancellationTokenSource? _WebSocketMaintenanceCancellation;
@@ -95,6 +98,7 @@ namespace Xeno.Server
             _SettingsFile = String.IsNullOrWhiteSpace(settingsFile)
                 ? Environment.GetEnvironmentVariable("XENO_SETTINGS_FILE") ?? "xeno.json"
                 : settingsFile;
+            ApplyEnvironmentSettings(_Settings);
 
             WatsonWebserver.Core.WebserverSettings webserverSettings = new WatsonWebserver.Core.WebserverSettings(
                 _Settings.Rest.Hostname,
@@ -118,8 +122,12 @@ namespace Xeno.Server
             _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, token).ConfigureAwait(false);
             MarkClientsDisconnected();
             _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
+            _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, SavePlatformAsync);
+            _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger);
+            _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate });
 
             _Webserver.Start();
+            _Ledger.Start();
             StartTelemetryCollectionLoop();
             StartWebSocketMaintenanceLoop();
 
@@ -146,6 +154,8 @@ namespace Xeno.Server
         {
             _TelemetryCollectionCancellation?.Cancel();
             _WebSocketMaintenanceCancellation?.Cancel();
+            _Ledger?.Stop();
+            _NetLedgerTenantSubordinate?.Dispose();
             try
             {
                 _Webserver.Stop();
@@ -164,6 +174,7 @@ namespace Xeno.Server
             Stop();
             IDisposable? disposable = _Webserver as IDisposable;
             disposable?.Dispose();
+            _Ledger?.Dispose();
             _Database?.Dispose();
             _TelemetryLatestCache.Dispose();
             _Disposed = true;
@@ -201,6 +212,7 @@ namespace Xeno.Server
                 openApi.Tags.Add(new OpenApiTag { Name = "OpenAI", Description = "OpenAI-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Ollama", Description = "Ollama-compatible inference API" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Request History", Description = "Captured request history and summaries" });
+                openApi.Tags.Add(new OpenApiTag { Name = "Ledger", Description = "Token ledger status, balances, entries, and operations" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Model Leaderboard", Description = "Public model token usage leaderboards" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Settings", Description = "Server settings and JSON config persistence" });
                 openApi.Tags.Add(new OpenApiTag { Name = "Email", Description = "Administrative email delivery tests" });
@@ -346,6 +358,13 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/delete", "Bulk delete provider telemetry", "Client Telemetry");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/collection-attempts", "List client telemetry collection attempts", "Client Telemetry");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/metrics", "Client telemetry metric catalog", "Client Telemetry");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/status", "Ledger status", "Ledger");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/balance/me", "My ledger balance", "Ledger");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/balances", "Ledger balances", "Ledger");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/entries/me", "My ledger entries", "Ledger");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/ledger/entries/search", "Search ledger entries", "Ledger");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/ledger/drain", "Drain ledger queue", "Ledger");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/ledger/reconcile", "Reconcile ledger links", "Ledger");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modeldefinitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
             RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
@@ -422,6 +441,7 @@ namespace Xeno.Server
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/history/{id}", "Delete client telemetry detail", "Client Telemetry");
             RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/providers/history/{id}", "Get provider telemetry detail", "Client Telemetry");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/providers/history/{id}", "Delete provider telemetry detail", "Client Telemetry");
+            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/ledger/balances/users/{userId}", "Ledger user balance", "Ledger");
             RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/routingpolicies/{id}", "Update routing policy", "Routing");
             RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/routing-policies/{id}", "Update routing policy", "Routing");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/routingpolicies/{id}", "Delete routing policy", "Routing");
@@ -506,6 +526,14 @@ namespace Xeno.Server
                 metadata = metadata
                     .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
                     .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")));
+            }
+
+            if (IsPath(path, "/v1.0/api/ledger/balances"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("userId", "Optional Xeno user identifier.", false, OpenApiSchemaMetadata.String("User identifier.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("page", "One-based page number. Defaults to 1.", false, IntegerSchemaMetadata("Page number.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("pageSize", "Number of balances per page. Defaults to 100 and is capped at 1000.", false, IntegerSchemaMetadata("Page size.")));
             }
 
             if (IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
@@ -969,6 +997,30 @@ namespace Xeno.Server
                     });
             }
 
+            if (method == HttpMethod.POST && IsPath(path, "/v1.0/api/ledger/entries/search"))
+            {
+                return JsonBody(
+                    "Ledger entry search request.",
+                    ObjectSchemaMetadata(
+                        "Ledger entry search request.",
+                        Array.Empty<string>(),
+                        SchemaProperty("tenantId", OpenApiSchemaMetadata.String("Optional tenant identifier. Defaults to the caller tenant.")),
+                        SchemaProperty("userId", OpenApiSchemaMetadata.String("Optional Xeno user identifier.")),
+                        SchemaProperty("direction", StringEnumSchemaMetadata("Optional entry direction.", "Debit", "Credit")),
+                        SchemaProperty("fromUtc", DateTimeSchema("Inclusive UTC start time.")),
+                        SchemaProperty("toUtc", DateTimeSchema("Exclusive UTC end time.")),
+                        SchemaProperty("requestHistoryId", OpenApiSchemaMetadata.String("Optional request history identifier.")),
+                        SchemaProperty("selectedClientId", OpenApiSchemaMetadata.String("Optional serving client identifier.")),
+                        SchemaProperty("continuationToken", OpenApiSchemaMetadata.String("Optional numeric continuation token.")),
+                        SchemaProperty("pageSize", IntegerSchemaMetadata("Page size. Defaults to 100 and is capped at 1000."))),
+                    new Dictionary<string, object>
+                    {
+                        ["userId"] = "usr_example",
+                        ["direction"] = "Debit",
+                        ["pageSize"] = 100
+                    });
+            }
+
             if (method == HttpMethod.POST && IsPath(path, "/api/v1/requesthistory/bulk", "/v1.0/api/request-history/bulk"))
             {
                 return JsonBody(
@@ -1384,6 +1436,7 @@ namespace Xeno.Server
                 SchemaProperty("RequestHistory", OpenApiSchemaMetadata.Create("object", "Request history settings.")),
                 SchemaProperty("Routing", OpenApiSchemaMetadata.Create("object", "Routing settings.")),
                 SchemaProperty("TelemetryCollection", OpenApiSchemaMetadata.Create("object", "Server telemetry collection settings.")),
+                SchemaProperty("Ledger", OpenApiSchemaMetadata.Create("object", "Ledger integration settings.")),
                 SchemaProperty("Email", OpenApiSchemaMetadata.Create("object", "Email notification settings.")));
         }
 
@@ -1642,9 +1695,12 @@ namespace Xeno.Server
             if (method == "POST" && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Tenant tenant = CreateTenant(context);
+                TenantSaveRequest tenantBody = ReadJsonBody<TenantSaveRequest>(context);
+                Tenant tenant = CreateTenant(tenantBody);
                 RequirePlatform().Tenants.Add(tenant);
                 RequirePlatform().EnsureTenantDefaults(tenant.Id);
+                bool allowDeferred = tenantBody.DeferSubordinateProvisioning == true;
+                await RequireTenantLifecycle().CreateAsync(tenant, ListSeedUsers(tenant.Id), allowDeferred, requestContext, token).ConfigureAwait(false);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, tenant).ConfigureAwait(false);
                 return;
@@ -1653,7 +1709,23 @@ namespace Xeno.Server
             if (method == "PUT" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string updateTenantId)
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Tenant tenant = UpdateTenant(updateTenantId, context);
+                Tenant? originalTenant = RequirePlatform().Tenants.FirstOrDefault(item => item.Id == updateTenantId);
+                bool wasActive = originalTenant?.Active ?? false;
+                TenantSaveRequest tenantBody = ReadJsonBody<TenantSaveRequest>(context);
+                Tenant tenant = UpdateTenant(updateTenantId, tenantBody);
+                if (wasActive && !tenant.Active)
+                {
+                    await RequireTenantLifecycle().SuspendAsync(tenant, requestContext, token).ConfigureAwait(false);
+                }
+                else if (!wasActive && tenant.Active)
+                {
+                    await RequireTenantLifecycle().ReactivateAsync(tenant, requestContext, token).ConfigureAwait(false);
+                    await RequireTenantLifecycle().ReconcileAsync(tenant, requestContext, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await RequireTenantLifecycle().UpdateAsync(tenant, requestContext, token).ConfigureAwait(false);
+                }
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, tenant).ConfigureAwait(false);
                 return;
@@ -1662,7 +1734,7 @@ namespace Xeno.Server
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string deleteTenantId)
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                await DeleteTenantAsync(deleteTenantId, token).ConfigureAwait(false);
+                await DeleteTenantAsync(deleteTenantId, requestContext, token).ConfigureAwait(false);
                 await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
@@ -1679,6 +1751,7 @@ namespace Xeno.Server
                 await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Write, token).ConfigureAwait(false);
                 User user = CreateUser(requestContext, context);
                 RequirePlatform().Users.Add(user);
+                await ProvisionLedgerAccountForUserAsync(user, requestContext, token).ConfigureAwait(false);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
                 return;
@@ -1688,6 +1761,7 @@ namespace Xeno.Server
             {
                 await RequireUserUpdatePermissionAsync(requestContext, updateUserId, token).ConfigureAwait(false);
                 User user = UpdateUser(requestContext, updateUserId, context);
+                await ProvisionLedgerAccountForUserAsync(user, requestContext, token).ConfigureAwait(false);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
                 return;
@@ -2164,6 +2238,74 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/status"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                LedgerStatusResponse response = _Ledger == null ? new LedgerStatusResponse() : await _Ledger.GetStatusAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, response).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/balance/me"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string userId = ResolveContextUserId(requestContext);
+                await SendJsonAsync(context, BuildLedgerBalance(requestContext.TenantId, userId)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/balances"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                LedgerBalanceSearchRequest search = BuildLedgerBalanceSearchRequest(requestContext, context);
+                await SendJsonAsync(context, SearchLedgerBalances(requestContext, search)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && TryGetPathId(path, "/v1.0/api/ledger/balances/users/") is string ledgerUserId)
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                EnsureCanReadLedgerUser(requestContext, requestContext.TenantId, ledgerUserId);
+                await SendJsonAsync(context, BuildLedgerBalance(requestContext.TenantId, ledgerUserId)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/entries/me"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string userId = ResolveContextUserId(requestContext);
+                LedgerEntrySearchRequest search = new LedgerEntrySearchRequest { TenantId = requestContext.TenantId, UserId = userId };
+                await SendJsonAsync(context, SearchLedgerEntries(requestContext, search)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/ledger/entries/search"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                LedgerEntrySearchRequest search = ReadJsonBody<LedgerEntrySearchRequest>(context);
+                await SendJsonAsync(context, SearchLedgerEntries(requestContext, search)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/ledger/drain"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+                LedgerDrainResponse response = _Ledger == null ? new LedgerDrainResponse() : await _Ledger.DrainOnceAsync(token).ConfigureAwait(false);
+                _Authentication.AppendAudit(RequirePlatform(), requestContext, "Ledger.Drain", OperationTypeEnum.Admin, true, "LedgerDrainTriggered", 200, requestContext.TenantId, null);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, response).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/v1.0/api/ledger/reconcile"))
+            {
+                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                _Authentication.AppendAudit(RequirePlatform(), requestContext, "Ledger.Reconcile", OperationTypeEnum.Admin, true, "LedgerReconcileTriggered", 200, requestContext.TenantId, null);
+                await SavePlatformAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, BuildLedgerReconcileResponse(requestContext)).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory", "/v1.0/api/request-history"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
@@ -2598,6 +2740,7 @@ namespace Xeno.Server
                     Dictionary<string, string> finalResponseHeaders = ExtractHeaders(finalMessage);
                     if (finalResponseHeaders.Count > 0) responseHeaders = finalResponseHeaders;
                     PopulateRequestHistory(history, requestContext, requestBodyJson, requestHeaders, body, responseHeaders, finalMessage, decision);
+                    TryEnqueueLedgerEvent(history);
                 }
             }
 
@@ -3840,6 +3983,7 @@ namespace Xeno.Server
         {
             RequestHistoryEntry entry = RequireRouting().RecordHistory(requestContext, path, method, decision);
             configure?.Invoke(entry);
+            TryEnqueueLedgerEvent(entry);
             await SavePlatformAsync(token).ConfigureAwait(false);
             return entry;
         }
@@ -3847,6 +3991,21 @@ namespace Xeno.Server
         private static bool IsClientResponseStart(ClientResponseMessage message)
         {
             return String.Equals(message.Type, "client.response.start", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void TryEnqueueLedgerEvent(RequestHistoryEntry entry)
+        {
+            if (_Ledger == null) return;
+            try
+            {
+                _Ledger.TryEnqueueFromHistory(entry, out string? _);
+            }
+            catch (ArgumentException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }
 
         private static void PopulateRequestHistory(
@@ -4247,7 +4406,18 @@ namespace Xeno.Server
             _Settings.RequestHistory = incoming.RequestHistory ?? new RequestHistorySettings();
             _Settings.Routing = incoming.Routing ?? new RoutingSettings();
             _Settings.Email = incoming.Email ?? new EmailSettings();
-            if (_Database != null) _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
+            _Settings.Ledger = incoming.Ledger ?? new LedgerSettings();
+            ApplyEnvironmentSettings(_Settings);
+            if (_Database != null)
+            {
+                _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
+                _Ledger?.Dispose();
+                _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, SavePlatformAsync);
+                _Ledger.Start();
+                _NetLedgerTenantSubordinate?.Dispose();
+                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger);
+                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate });
+            }
         }
 
         private static string NormalizeOpenAiPath(string path)
@@ -4583,6 +4753,15 @@ namespace Xeno.Server
             ApplyRequestMetadata(context, signupContext);
             signupContext.CorrelationId = FirstNonEmpty(signupContext.CorrelationId, signupContext.RequestId);
             DateTime eventUtc = DateTime.UtcNow;
+            if (creatingTenant)
+            {
+                await RequireTenantLifecycle().CreateAsync(tenant, new List<User> { user }, body.DeferSubordinateProvisioning == true, signupContext, token).ConfigureAwait(false);
+            }
+            else
+            {
+                await ProvisionLedgerAccountForUserAsync(user, signupContext, token).ConfigureAwait(false);
+            }
+
             AuthTokenResult tokenResult = _Authentication.IssueToken(platform, _Settings.Auth, tenant.Id, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Bearer);
             _Authentication.AppendAudit(platform, signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
@@ -4959,10 +5138,9 @@ namespace Xeno.Server
             return true;
         }
 
-        private Tenant CreateTenant(HttpContextBase context)
+        private Tenant CreateTenant(TenantSaveRequest body)
         {
             XenoPlatform platform = RequirePlatform();
-            TenantSaveRequest body = ReadJsonBody<TenantSaveRequest>(context);
             string id = FirstNonEmpty(body.Id, IdGenerator.NewId("ten_"));
             string name = FirstNonEmpty(body.Name);
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Tenant name is required.");
@@ -5396,9 +5574,13 @@ namespace Xeno.Server
             }
         }
 
-        private async Task<int> DeleteTenantAsync(string tenantId, CancellationToken token)
+        private async Task<int> DeleteTenantAsync(string tenantId, RequestContext requestContext, CancellationToken token)
         {
             XenoPlatform platform = RequirePlatform();
+            Tenant? tenant = platform.Tenants.FirstOrDefault(item => item.Id == tenantId);
+            if (tenant == null) return 0;
+            await RequireTenantLifecycle().DeleteAsync(tenant, true, requestContext, token).ConfigureAwait(false);
+
             List<string> clientIds = platform.Clients.Where(item => item.TenantId == tenantId).Select(item => item.Id).ToList();
             int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
             if (removed > 0)
@@ -5438,12 +5620,11 @@ namespace Xeno.Server
             return timeout;
         }
 
-        private Tenant UpdateTenant(string tenantId, HttpContextBase context)
+        private Tenant UpdateTenant(string tenantId, TenantSaveRequest body)
         {
             Tenant? tenant = RequirePlatform().Tenants.FirstOrDefault(item => item.Id == tenantId);
             if (tenant == null) throw new KeyNotFoundException("Tenant not found.");
 
-            TenantSaveRequest body = ReadJsonBody<TenantSaveRequest>(context);
             string? name = body.Name;
             if (name != null)
             {
@@ -5472,6 +5653,7 @@ namespace Xeno.Server
             removed += platform.AuthSessions.RemoveAll(item => item.TenantId == user.TenantId && (item.UserId == userId || (item.CredentialId != null && credentialIds.Contains(item.CredentialId))));
             removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == userId);
             removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId));
+            platform.LedgerAccountLinks.RemoveAll(item => item.XenoTenantId == user.TenantId && item.XenoUserId == userId);
             return removed;
         }
 
@@ -5824,6 +6006,273 @@ namespace Xeno.Server
             return client.Models.RemoveAll(item =>
                 String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase)
                 && (String.IsNullOrWhiteSpace(source) || String.Equals(item.Source, source, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private LedgerBalanceSearchRequest BuildLedgerBalanceSearchRequest(RequestContext requestContext, HttpContextBase context)
+        {
+            LedgerBalanceSearchRequest request = new LedgerBalanceSearchRequest
+            {
+                TenantId = DecodeQueryValue(context.Request.Query.Elements.Get("tenantId")),
+                UserId = DecodeQueryValue(context.Request.Query.Elements.Get("userId")),
+                Search = DecodeQueryValue(context.Request.Query.Elements.Get("search")),
+                Page = ParsePositiveIntQuery(context, "page", 1, 100000),
+                PageSize = ParsePositiveIntQuery(context, "pageSize", 100, 1000)
+            };
+            if (String.IsNullOrWhiteSpace(request.TenantId)) request.TenantId = requestContext.TenantId;
+            return request;
+        }
+
+        private LedgerBalanceSearchResult SearchLedgerBalances(RequestContext requestContext, LedgerBalanceSearchRequest request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? requestContext.TenantId : request.TenantId;
+            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+
+            int page = Math.Max(1, request.Page);
+            int pageSize = Math.Clamp(request.PageSize, 1, 1000);
+            IEnumerable<User> users = RequirePlatform().Users.Where(item => item.TenantId == tenantId && item.Active);
+            if (!CanManageTenant(requestContext, tenantId))
+            {
+                string currentUserId = ResolveContextUserId(requestContext);
+                users = users.Where(item => item.Id == currentUserId);
+            }
+
+            if (!String.IsNullOrWhiteSpace(request.UserId))
+            {
+                users = users.Where(item => item.Id == request.UserId);
+            }
+
+            if (!String.IsNullOrWhiteSpace(request.Search))
+            {
+                string search = request.Search;
+                users = users.Where(item =>
+                    item.Id.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || item.Username.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || item.Email.Contains(search, StringComparison.OrdinalIgnoreCase));
+            }
+
+            List<LedgerBalanceResponse> balances = users
+                .OrderBy(item => item.Email, StringComparer.OrdinalIgnoreCase)
+                .Select(item => BuildLedgerBalance(tenantId, item.Id))
+                .ToList();
+
+            return new LedgerBalanceSearchResult
+            {
+                Total = balances.Count,
+                Page = page,
+                PageSize = pageSize,
+                Items = balances.Skip((page - 1) * pageSize).Take(pageSize).ToList()
+            };
+        }
+
+        private LedgerBalanceResponse BuildLedgerBalance(string tenantId, string userId)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
+            if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.", nameof(userId));
+
+            LedgerAccountLink? accountLink = RequirePlatform().LedgerAccountLinks.FirstOrDefault(item => item.XenoTenantId == tenantId && item.XenoUserId == userId);
+            LedgerTenantLink? tenantLink = RequirePlatform().LedgerTenantLinks.FirstOrDefault(item => item.XenoTenantId == tenantId);
+            LedgerBalanceResponse response = new LedgerBalanceResponse
+            {
+                XenoTenantId = tenantId,
+                XenoUserId = userId,
+                NetLedgerTenantId = tenantLink?.NetLedgerTenantId,
+                NetLedgerAccountId = accountLink?.NetLedgerAccountId
+            };
+
+            foreach (RequestHistoryEntry entry in LedgerEligibleHistory(tenantId))
+            {
+                int totalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);
+                if (totalTokens <= 0) continue;
+                string? requestUserId = ResolveRequestUserId(entry);
+                if (String.Equals(requestUserId, userId, StringComparison.OrdinalIgnoreCase))
+                {
+                    response.DebitTotal += totalTokens;
+                }
+
+                string? servingUserId = ResolveServingUserId(entry);
+                if (String.Equals(servingUserId, userId, StringComparison.OrdinalIgnoreCase))
+                {
+                    response.CreditTotal += totalTokens;
+                }
+            }
+
+            response.Balance = response.CreditTotal - response.DebitTotal;
+            return response;
+        }
+
+        private LedgerEntrySearchResult SearchLedgerEntries(RequestContext requestContext, LedgerEntrySearchRequest request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? requestContext.TenantId : request.TenantId;
+            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            if (!String.IsNullOrWhiteSpace(request.UserId)) EnsureCanReadLedgerUser(requestContext, tenantId, request.UserId);
+
+            List<LedgerEntryRecord> records = new List<LedgerEntryRecord>();
+            foreach (RequestHistoryEntry entry in LedgerEligibleHistory(tenantId))
+            {
+                if (request.FromUtc.HasValue && (entry.CompletedUtc ?? entry.CreatedUtc) < request.FromUtc.Value.ToUniversalTime()) continue;
+                if (request.ToUtc.HasValue && (entry.CompletedUtc ?? entry.CreatedUtc) > request.ToUtc.Value.ToUniversalTime()) continue;
+                if (!String.IsNullOrWhiteSpace(request.RequestHistoryId) && entry.Id != request.RequestHistoryId) continue;
+                if (!String.IsNullOrWhiteSpace(request.SelectedClientId) && entry.SelectedClientId != request.SelectedClientId) continue;
+                if (!String.IsNullOrWhiteSpace(request.RequestCredentialId) && entry.CredentialId != request.RequestCredentialId) continue;
+
+                LedgerEntryRecord? debit = BuildLedgerEntryRecord(entry, LedgerEntryDirection.Debit);
+                LedgerEntryRecord? credit = BuildLedgerEntryRecord(entry, LedgerEntryDirection.Credit);
+                AddLedgerEntryIfMatched(records, debit, request);
+                AddLedgerEntryIfMatched(records, credit, request);
+            }
+
+            records = records
+                .OrderByDescending(item => item.OccurredUtc ?? item.CreatedUtc ?? DateTime.MinValue)
+                .ToList();
+            int skip = ParseContinuationToken(request.ContinuationToken);
+            int pageSize = Math.Clamp(request.PageSize, 1, 1000);
+            List<LedgerEntryRecord> page = records.Skip(skip).Take(pageSize).ToList();
+            int next = skip + page.Count;
+            return new LedgerEntrySearchResult
+            {
+                Items = page,
+                EndOfResults = next >= records.Count,
+                ContinuationToken = next >= records.Count ? null : next.ToString(CultureInfo.InvariantCulture)
+            };
+        }
+
+        private void AddLedgerEntryIfMatched(List<LedgerEntryRecord> records, LedgerEntryRecord? record, LedgerEntrySearchRequest request)
+        {
+            if (record == null) return;
+            if (request.Direction.HasValue && record.Direction != request.Direction.Value) return;
+            if (!String.IsNullOrWhiteSpace(request.UserId) && record.XenoUserId != request.UserId) return;
+            records.Add(record);
+        }
+
+        private LedgerEntryRecord? BuildLedgerEntryRecord(RequestHistoryEntry entry, LedgerEntryDirection direction)
+        {
+            int totalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);
+            if (totalTokens <= 0) return null;
+            string? requestUserId = ResolveRequestUserId(entry);
+            string? servingUserId = ResolveServingUserId(entry);
+            string? userId = direction == LedgerEntryDirection.Debit ? requestUserId : servingUserId;
+            if (String.IsNullOrWhiteSpace(userId)) return null;
+
+            LedgerEvent ledgerEvent = new LedgerEvent
+            {
+                XenoTenantId = entry.TenantId,
+                RequestHistoryId = entry.Id,
+                RequestCredentialId = entry.CredentialId,
+                RequestUserId = requestUserId ?? String.Empty,
+                SelectedClientId = entry.SelectedClientId ?? String.Empty,
+                ServingUserId = servingUserId ?? String.Empty,
+                RequestKind = entry.Path.Contains("embed", StringComparison.OrdinalIgnoreCase) ? LedgerRequestKind.Embedding : LedgerRequestKind.Completion,
+                TotalTokens = totalTokens,
+                OccurredUtc = (entry.CompletedUtc ?? entry.CreatedUtc).ToUniversalTime()
+            };
+
+            return new LedgerEntryRecord
+            {
+                LedgerEventId = ledgerEvent.Id,
+                XenoTenantId = entry.TenantId,
+                XenoUserId = userId,
+                RequestHistoryId = entry.Id,
+                SelectedClientId = entry.SelectedClientId,
+                Direction = direction,
+                Amount = totalTokens,
+                IsCommitted = true,
+                Labels = LedgerMetadataBuilder.BuildEntryLabels(direction),
+                Tags = LedgerMetadataBuilder.BuildEntryTags(ledgerEvent, direction),
+                OccurredUtc = ledgerEvent.OccurredUtc,
+                CreatedUtc = entry.CreatedUtc
+            };
+        }
+
+        private LedgerReconcileResponse BuildLedgerReconcileResponse(RequestContext requestContext)
+        {
+            LedgerReconcileResponse response = new LedgerReconcileResponse();
+            IEnumerable<Tenant> tenants = CanManageTenant(requestContext, requestContext.TenantId)
+                ? RequirePlatform().Tenants.Where(item => item.Active)
+                : RequirePlatform().Tenants.Where(item => item.Id == requestContext.TenantId && item.Active);
+
+            foreach (Tenant tenant in tenants)
+            {
+                if (!RequirePlatform().LedgerTenantLinks.Any(item => item.XenoTenantId == tenant.Id))
+                {
+                    response.MissingTenantLinks.Add(tenant.Id);
+                }
+
+                foreach (User user in RequirePlatform().Users.Where(item => item.TenantId == tenant.Id && item.Active))
+                {
+                    if (!RequirePlatform().LedgerAccountLinks.Any(item => item.XenoTenantId == tenant.Id && item.XenoUserId == user.Id))
+                    {
+                        response.MissingAccountLinks.Add(tenant.Id + ":" + user.Id);
+                    }
+                }
+            }
+
+            return response;
+        }
+
+        private IEnumerable<RequestHistoryEntry> LedgerEligibleHistory(string tenantId)
+        {
+            return RequirePlatform().RequestHistory.Where(item =>
+                item.TenantId == tenantId
+                && item.StatusCode >= 200
+                && item.StatusCode < 300
+                && Math.Max(0, item.Telemetry?.TotalTokens ?? 0) > 0);
+        }
+
+        private string ResolveContextUserId(RequestContext requestContext)
+        {
+            if (!String.IsNullOrWhiteSpace(requestContext.UserId)) return requestContext.UserId;
+            if (!String.IsNullOrWhiteSpace(requestContext.CredentialId))
+            {
+                Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == requestContext.CredentialId && item.TenantId == requestContext.TenantId);
+                if (!String.IsNullOrWhiteSpace(credential?.UserId)) return credential.UserId;
+            }
+
+            if (requestContext.PrincipalType == PrincipalTypeEnum.User && !String.IsNullOrWhiteSpace(requestContext.PrincipalId)) return requestContext.PrincipalId;
+            throw new AuthorizationDeniedException(403, "LedgerUserNotResolved", "Authenticated ledger user could not be resolved.");
+        }
+
+        private string? ResolveRequestUserId(RequestHistoryEntry entry)
+        {
+            if (!String.IsNullOrWhiteSpace(entry.CredentialId))
+            {
+                Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == entry.CredentialId && item.TenantId == entry.RequestorTenantId);
+                if (!String.IsNullOrWhiteSpace(credential?.UserId)) return credential.UserId;
+            }
+
+            if (!String.IsNullOrWhiteSpace(entry.UserId)) return entry.UserId;
+            if (entry.RequestorPrincipalType == PrincipalTypeEnum.User && !String.IsNullOrWhiteSpace(entry.RequestorPrincipalId)) return entry.RequestorPrincipalId;
+            return null;
+        }
+
+        private string? ResolveServingUserId(RequestHistoryEntry entry)
+        {
+            if (String.IsNullOrWhiteSpace(entry.SelectedClientId)) return null;
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == entry.SelectedClientId && item.TenantId == entry.TenantId);
+            return client?.OwnerUserId;
+        }
+
+        private void EnsureCanReadLedgerUser(RequestContext requestContext, string tenantId, string userId)
+        {
+            if (CanManageTenant(requestContext, tenantId)) return;
+            string currentUserId = ResolveContextUserId(requestContext);
+            if (String.Equals(currentUserId, userId, StringComparison.OrdinalIgnoreCase)) return;
+            throw new AuthorizationDeniedException(403, "LedgerUserDenied", "Authenticated user cannot read another user's ledger.");
+        }
+
+        private static int ParseContinuationToken(string? continuationToken)
+        {
+            if (String.IsNullOrWhiteSpace(continuationToken)) return 0;
+            if (!Int32.TryParse(continuationToken, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)) return 0;
+            return Math.Max(0, parsed);
+        }
+
+        private static int ParsePositiveIntQuery(HttpContextBase context, string name, int defaultValue, int maximum)
+        {
+            string value = DecodeQueryValue(context.Request.Query.Elements.Get(name));
+            if (!Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)) return defaultValue;
+            return Math.Clamp(parsed, 1, maximum);
         }
 
         private int DeleteRequestHistory(RequestContext requestContext, RequestHistoryDeleteRequest body)
@@ -6441,6 +6890,27 @@ namespace Xeno.Server
             return _Routing;
         }
 
+        private TenantLifecycleService RequireTenantLifecycle()
+        {
+            if (_TenantLifecycle == null) throw new InvalidOperationException("Tenant lifecycle has not been initialized.");
+            return _TenantLifecycle;
+        }
+
+        private List<User> ListSeedUsers(string tenantId)
+        {
+            return RequirePlatform().Users
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        private async Task ProvisionLedgerAccountForUserAsync(User user, RequestContext requestContext, CancellationToken token)
+        {
+            if (user == null) throw new ArgumentNullException(nameof(user));
+            Tenant? tenant = RequirePlatform().Tenants.FirstOrDefault(item => String.Equals(item.Id, user.TenantId, StringComparison.OrdinalIgnoreCase));
+            if (tenant == null) return;
+            await RequireTenantLifecycle().CreateAsync(tenant, new List<User> { user }, true, requestContext, token).ConfigureAwait(false);
+        }
+
         private static bool IsPath(string path, params string[] candidates)
         {
             return candidates.Any(candidate => path.Equals(candidate, StringComparison.OrdinalIgnoreCase));
@@ -6473,6 +6943,14 @@ namespace Xeno.Server
             }
 
             return String.Empty;
+        }
+
+        private static void ApplyEnvironmentSettings(XenoSettings settings)
+        {
+            string ledgerApiKey = FirstNonEmpty(Environment.GetEnvironmentVariable("XENO_LEDGER_API_KEY"), Environment.GetEnvironmentVariable("NETLEDGER_ACCESS_KEY"), Environment.GetEnvironmentVariable("NETLEDGER_ADMIN_KEY"));
+            if (!String.IsNullOrWhiteSpace(ledgerApiKey)) settings.Ledger.ApiKey = ledgerApiKey;
+            string ledgerSecretKey = FirstNonEmpty(Environment.GetEnvironmentVariable("XENO_LEDGER_SECRET_KEY"), Environment.GetEnvironmentVariable("NETLEDGER_SECRET_KEY"));
+            if (!String.IsNullOrWhiteSpace(ledgerSecretKey)) settings.Ledger.SecretKey = ledgerSecretKey;
         }
 
         private static bool IsValidEmailAddress(string email)
@@ -6563,6 +7041,14 @@ namespace Xeno.Server
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
                     ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
                     ["/v1.0/api/analytics/overview"] = Path(Operation("get", "analyticsOverview", "Analytics", "Analytics overview", "Returns tenant analytics.", "GenericObject", true)),
+                    ["/v1.0/api/ledger/status"] = Path(Operation("get", "getLedgerStatus", "Ledger", "Ledger status", "Returns in-memory ledger queue status and NetLedger health.", "LedgerStatusResponse", true)),
+                    ["/v1.0/api/ledger/balance/me"] = Path(Operation("get", "getMyLedgerBalance", "Ledger", "My ledger balance", "Returns the authenticated user's token ledger balance derived from accounted request history.", "LedgerBalanceResponse", true)),
+                    ["/v1.0/api/ledger/balances"] = Path(Operation("get", "searchLedgerBalances", "Ledger", "Ledger balances", "Lists ledger balances visible to the caller.", "LedgerBalanceSearchResult", true)),
+                    ["/v1.0/api/ledger/balances/users/{userId}"] = Path(Operation("get", "getLedgerUserBalance", "Ledger", "User ledger balance", "Returns one user's ledger balance when the caller is authorized for that user.", "LedgerBalanceResponse", true)),
+                    ["/v1.0/api/ledger/entries/me"] = Path(Operation("get", "getMyLedgerEntries", "Ledger", "My ledger entries", "Returns the authenticated user's ledger activity.", "LedgerEntrySearchResult", true)),
+                    ["/v1.0/api/ledger/entries/search"] = Path(Operation("post", "searchLedgerEntries", "Ledger", "Search ledger entries", "Searches ledger activity visible to the caller.", "LedgerEntrySearchResult", true)),
+                    ["/v1.0/api/ledger/drain"] = Path(Operation("post", "drainLedgerQueue", "Ledger", "Drain ledger queue", "Runs one ledger drain cycle. Requires Ledger.Admin.", "LedgerDrainResponse", true)),
+                    ["/v1.0/api/ledger/reconcile"] = Path(Operation("post", "reconcileLedger", "Ledger", "Reconcile ledger links", "Reports missing tenant and account ledger links visible to the caller.", "LedgerReconcileResponse", true)),
                     ["/v1.0/api/settings"] = Path(Operation("get", "getSettings", "Settings", "Get server settings", "Returns running server settings as a JSON settings object.", "XenoSettings", true), Operation("post", "updateSettings", "Settings", "Update server settings", "Persists a JSON settings object to the server config file and returns the saved settings object.", "XenoSettings", true)),
                     ["/v1.0/api/email/test"] = Path(Operation("post", "sendTestEmail", "Email", "Send test email", "Renders the supplied body with the standard Xeno email layout and sends it through the configured provider. Requires global/system administrator.", "EmailTestResponse", true)),
                     ["/v1.0/api/backup"] = Path(Operation("get", "backup", "Backup", "Backup", "Returns platform state backup.", "GenericObject", true)),
@@ -6722,6 +7208,61 @@ namespace Xeno.Server
                             Property("total", IntegerSchema()),
                             Property("limit", IntegerSchema()),
                             Property("offset", IntegerSchema())),
+                        ["LedgerQueueStatus"] = ObjectSchema(
+                            Property("enabled", BooleanSchema()),
+                            Property("queueDepth", IntegerSchema()),
+                            Property("oldestEventAgeMs", IntegerSchema()),
+                            Property("lastSuccessfulDrainUtc", StringSchema("date-time")),
+                            Property("lastFailureUtc", StringSchema("date-time")),
+                            Property("lastFailure", StringSchema()),
+                            Property("retryCount", IntegerSchema()),
+                            Property("terminalFailureCount", IntegerSchema()),
+                            Property("processedCount", IntegerSchema())),
+                        ["LedgerStatusResponse"] = ObjectSchema(
+                            Property("queue", SchemaRef("LedgerQueueStatus")),
+                            Property("netLedgerHealthy", BooleanSchema()),
+                            Property("netLedgerMessage", StringSchema())),
+                        ["LedgerBalanceResponse"] = ObjectSchema(
+                            Property("tenantId", StringSchema()),
+                            Property("userId", StringSchema()),
+                            Property("netLedgerTenantId", StringSchema()),
+                            Property("netLedgerAccountId", StringSchema()),
+                            Property("balance", IntegerSchema()),
+                            Property("totalDebits", IntegerSchema()),
+                            Property("totalCredits", IntegerSchema()),
+                            Property("lastActivityUtc", StringSchema("date-time"))),
+                        ["LedgerBalanceSearchResult"] = ObjectSchema(
+                            Property("items", ArraySchema("LedgerBalanceResponse")),
+                            Property("total", IntegerSchema()),
+                            Property("page", IntegerSchema()),
+                            Property("pageSize", IntegerSchema())),
+                        ["LedgerEntryRecord"] = ObjectSchema(
+                            Property("netLedgerEntryId", StringSchema()),
+                            Property("ledgerEventId", StringSchema()),
+                            Property("tenantId", StringSchema()),
+                            Property("userId", StringSchema()),
+                            Property("counterpartyUserId", StringSchema()),
+                            Property("requestHistoryId", StringSchema()),
+                            Property("selectedClientId", StringSchema()),
+                            Property("direction", StringSchema()),
+                            Property("amount", IntegerSchema()),
+                            Property("committed", BooleanSchema()),
+                            Property("labels", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() }),
+                            Property("tags", ObjectSchema()),
+                            Property("occurredUtc", StringSchema("date-time")),
+                            Property("createdUtc", StringSchema("date-time"))),
+                        ["LedgerEntrySearchResult"] = ObjectSchema(
+                            Property("items", ArraySchema("LedgerEntryRecord")),
+                            Property("continuationToken", StringSchema()),
+                            Property("total", IntegerSchema())),
+                        ["LedgerDrainResponse"] = ObjectSchema(
+                            Property("processed", IntegerSchema()),
+                            Property("retried", IntegerSchema()),
+                            Property("terminalFailures", IntegerSchema())),
+                        ["LedgerReconcileResponse"] = ObjectSchema(
+                            Property("missingTenantLinks", IntegerSchema()),
+                            Property("missingAccountLinks", IntegerSchema()),
+                            Property("messages", new Dictionary<string, object> { ["type"] = "array", ["items"] = StringSchema() })),
                         ["RequestHistorySummary"] = ObjectSchema(Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["RoutingDecision"] = ObjectSchema(Property("success", BooleanSchema()), Property("outcomeCode", StringSchema()), Property("message", StringSchema())),
                         ["OpenAiModelList"] = ObjectSchema(Property("object", StringSchema()), Property("data", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
@@ -6739,6 +7280,7 @@ namespace Xeno.Server
                             Property("RequestHistory", ObjectSchema()),
                             Property("Routing", ObjectSchema()),
                             Property("TelemetryCollection", ObjectSchema()),
+                            Property("Ledger", ObjectSchema()),
                             Property("Email", ObjectSchema())),
                         ["EmailTestResponse"] = ObjectSchema(
                             Property("accepted", BooleanSchema()),
@@ -7183,6 +7725,18 @@ namespace Xeno.Server
                 parameters.Add(Parameter("email", "query", true, "Email address used to discover tenant login options.", StringSchema()));
             }
 
+            if (String.Equals(operationId, "searchLedgerBalances", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("userId", "query", false, "Optional Xeno user identifier.", StringSchema()));
+                parameters.Add(Parameter("page", "query", false, "One-based page number. Defaults to 1.", IntegerSchema()));
+                parameters.Add(Parameter("pageSize", "query", false, "Number of balances per page. Defaults to 100 and is capped at 1000.", IntegerSchema()));
+            }
+
+            if (String.Equals(operationId, "getLedgerUserBalance", StringComparison.Ordinal))
+            {
+                parameters.Add(Parameter("userId", "path", true, "Xeno user identifier.", StringSchema()));
+            }
+
             return parameters;
         }
 
@@ -7501,6 +8055,23 @@ namespace Xeno.Server
                     });
             }
 
+            if (String.Equals(operationId, "searchLedgerEntries", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Ledger entry search request.",
+                    ObjectSchema(
+                        Property("tenantId", StringSchema()),
+                        Property("userId", StringSchema()),
+                        Property("direction", StringEnumSchema("Debit", "Credit")),
+                        Property("fromUtc", StringSchema("date-time")),
+                        Property("toUtc", StringSchema("date-time")),
+                        Property("requestHistoryId", StringSchema()),
+                        Property("selectedClientId", StringSchema()),
+                        Property("continuationToken", StringSchema()),
+                        Property("pageSize", IntegerSchema())),
+                    new Dictionary<string, object> { ["userId"] = "usr_example", ["direction"] = "Debit", ["pageSize"] = 100 });
+            }
+
             if (String.Equals(operationId, "updateSettings", StringComparison.Ordinal))
             {
                 return JsonRequestBody(
@@ -7515,6 +8086,7 @@ namespace Xeno.Server
                         Property("RequestHistory", ObjectSchema()),
                         Property("Routing", ObjectSchema()),
                         Property("TelemetryCollection", ObjectSchema()),
+                        Property("Ledger", ObjectSchema()),
                         Property("Email", ObjectSchema())),
                     new Dictionary<string, object>
                     {

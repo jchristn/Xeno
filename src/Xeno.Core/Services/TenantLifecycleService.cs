@@ -1,0 +1,176 @@
+namespace Xeno.Core.Services
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using Xeno.Core.Enums;
+    using Xeno.Core.Models;
+
+    /// <summary>
+    /// Coordinates tenant lifecycle calls across subordinate services.
+    /// </summary>
+    public class TenantLifecycleService
+    {
+        private readonly XenoPlatform _Platform;
+        private readonly List<ITenantSubordinateService> _SubordinateServices;
+
+        /// <summary>
+        /// Instantiate the service.
+        /// </summary>
+        /// <param name="platform">Platform state.</param>
+        /// <param name="subordinateServices">Subordinate services.</param>
+        public TenantLifecycleService(XenoPlatform platform, IEnumerable<ITenantSubordinateService> subordinateServices)
+        {
+            _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _SubordinateServices = subordinateServices == null ? new List<ITenantSubordinateService>() : subordinateServices.ToList();
+        }
+
+        /// <summary>
+        /// Create subordinate tenant state.
+        /// </summary>
+        /// <param name="tenant">Tenant.</param>
+        /// <param name="seedUsers">Seed users.</param>
+        /// <param name="allowDeferredProvisioning">Whether provisioning failures can be reported instead of thrown.</param>
+        /// <param name="context">Optional request context for audit records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Result.</returns>
+        public async Task<TenantLifecycleResult> CreateAsync(Tenant tenant, IReadOnlyList<User> seedUsers, bool allowDeferredProvisioning, RequestContext? context = null, CancellationToken token = default)
+        {
+            return await RunAsync("create", tenant, context, service => service.CreateAsync(tenant, seedUsers, allowDeferredProvisioning, token), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Update subordinate tenant state.
+        /// </summary>
+        /// <param name="tenant">Tenant.</param>
+        /// <param name="context">Optional request context for audit records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Result.</returns>
+        public async Task<TenantLifecycleResult> UpdateAsync(Tenant tenant, RequestContext? context = null, CancellationToken token = default)
+        {
+            return await RunAsync("update", tenant, context, service => service.UpdateAsync(tenant, token), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Suspend subordinate tenant state.
+        /// </summary>
+        /// <param name="tenant">Tenant.</param>
+        /// <param name="context">Optional request context for audit records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Result.</returns>
+        public async Task<TenantLifecycleResult> SuspendAsync(Tenant tenant, RequestContext? context = null, CancellationToken token = default)
+        {
+            return await RunAsync("suspend", tenant, context, service => service.SuspendAsync(tenant, token), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reactivate subordinate tenant state.
+        /// </summary>
+        /// <param name="tenant">Tenant.</param>
+        /// <param name="context">Optional request context for audit records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Result.</returns>
+        public async Task<TenantLifecycleResult> ReactivateAsync(Tenant tenant, RequestContext? context = null, CancellationToken token = default)
+        {
+            return await RunAsync("reactivate", tenant, context, service => service.ReactivateAsync(tenant, token), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Delete subordinate tenant state.
+        /// </summary>
+        /// <param name="tenant">Tenant.</param>
+        /// <param name="hardDelete">Whether data must be permanently removed.</param>
+        /// <param name="context">Optional request context for audit records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Result.</returns>
+        public async Task<TenantLifecycleResult> DeleteAsync(Tenant tenant, bool hardDelete, RequestContext? context = null, CancellationToken token = default)
+        {
+            return await RunAsync("delete", tenant, context, service => service.DeleteAsync(tenant, hardDelete, token), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reconcile subordinate tenant state.
+        /// </summary>
+        /// <param name="tenant">Tenant.</param>
+        /// <param name="context">Optional request context for audit records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Result.</returns>
+        public async Task<TenantLifecycleResult> ReconcileAsync(Tenant tenant, RequestContext? context = null, CancellationToken token = default)
+        {
+            return await RunAsync("reconcile", tenant, context, service => service.ReconcileAsync(tenant, token), token).ConfigureAwait(false);
+        }
+
+        private async Task<TenantLifecycleResult> RunAsync(string operation, Tenant tenant, RequestContext? context, Func<ITenantSubordinateService, Task<TenantSubordinateServiceStatus>> execute, CancellationToken token)
+        {
+            if (tenant == null) throw new ArgumentNullException(nameof(tenant));
+            TenantLifecycleResult result = new TenantLifecycleResult();
+            foreach (ITenantSubordinateService service in _SubordinateServices)
+            {
+                token.ThrowIfCancellationRequested();
+                TenantSubordinateServiceStatus status = await execute(service).ConfigureAwait(false);
+                UpsertStatus(tenant, status);
+                result.SubordinateServices.Add(status);
+                if (IsFailure(status)) result.Success = false;
+                AppendAudit(context, service.ServiceName, operation, tenant.Id, status);
+            }
+
+            return result;
+        }
+
+        private static bool IsFailure(TenantSubordinateServiceStatus status)
+        {
+            return !String.Equals(status.Status, "Provisioned", StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(status.Status, "Deleted", StringComparison.OrdinalIgnoreCase)
+                && !String.Equals(status.Status, "Skipped", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void UpsertStatus(Tenant tenant, TenantSubordinateServiceStatus status)
+        {
+            TenantSubordinateServiceStatus? existing = tenant.SubordinateServices.FirstOrDefault(item => String.Equals(item.ServiceName, status.ServiceName, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
+            {
+                tenant.SubordinateServices.Add(status);
+                return;
+            }
+
+            existing.Operation = status.Operation;
+            existing.XenoTenantId = status.XenoTenantId;
+            existing.ExternalTenantId = status.ExternalTenantId;
+            existing.Status = status.Status;
+            existing.ErrorMessage = status.ErrorMessage;
+            existing.UpdatedUtc = status.UpdatedUtc;
+        }
+
+        private void AppendAudit(RequestContext? context, string serviceName, string operation, string tenantId, TenantSubordinateServiceStatus status)
+        {
+            if (context == null) return;
+            _Platform.AuditRecords.Add(new AuditRecord
+            {
+                TenantId = context.TenantId,
+                TargetTenantId = tenantId,
+                TargetResourceId = status.ExternalTenantId,
+                RequestId = context.RequestId,
+                PrincipalType = context.PrincipalType,
+                PrincipalId = context.PrincipalId,
+                AuthScheme = context.AuthScheme,
+                ResourceType = "TenantLifecycle." + serviceName,
+                OperationType = OperationTypeEnum.Admin,
+                Allowed = !IsFailure(status),
+                ReasonCode = operation + ":" + status.Status,
+                SourceIp = context.SourceIp,
+                ForwardedFor = context.ForwardedFor,
+                UserAgent = context.UserAgent,
+                Origin = context.Origin,
+                Referer = context.Referer,
+                Host = context.Host,
+                RequestMethod = context.RequestMethod,
+                RequestPath = context.RequestPath,
+                CorrelationId = context.CorrelationId,
+                StatusCode = IsFailure(status) ? 500 : 200,
+                CreatedUtc = status.UpdatedUtc
+            });
+        }
+    }
+}

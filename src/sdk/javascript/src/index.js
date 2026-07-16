@@ -8,6 +8,56 @@ export class XenoApiError extends Error {
   }
 }
 
+/**
+ * @typedef {Object} LedgerQueueStatus
+ * @property {boolean} enabled
+ * @property {number} queueDepth
+ * @property {number} processedCount
+ * @property {number} retryCount
+ * @property {number} terminalFailureCount
+ */
+
+/**
+ * @typedef {Object} LedgerStatusResponse
+ * @property {LedgerQueueStatus} queue
+ * @property {boolean} netLedgerHealthy
+ * @property {string=} netLedgerMessage
+ */
+
+/**
+ * @typedef {Object} LedgerBalanceResponse
+ * @property {string} xenoTenantId
+ * @property {string} userId
+ * @property {number} balance
+ * @property {number} totalDebits
+ * @property {number} totalCredits
+ */
+
+/**
+ * @typedef {Object} LedgerEntrySearchRequest
+ * @property {string=} tenantId
+ * @property {string=} userId
+ * @property {string=} direction
+ * @property {string=} requestHistoryId
+ * @property {number=} pageSize
+ */
+
+/**
+ * @typedef {Object} LedgerEntryRecord
+ * @property {string=} ledgerEventId
+ * @property {string} xenoTenantId
+ * @property {string} userId
+ * @property {string} direction
+ * @property {number} amount
+ * @property {string=} requestHistoryId
+ */
+
+/**
+ * @typedef {Object} LedgerEntrySearchResult
+ * @property {LedgerEntryRecord[]} items
+ * @property {number} total
+ */
+
 export class XenoClient {
   constructor({
     baseUrl = 'http://localhost:9000',
@@ -342,6 +392,38 @@ export class XenoClient {
 
   async bulkDeleteRequestHistory(filter = {}) {
     return this.#request('POST', '/v1.0/api/request-history/bulk', filter);
+  }
+
+  async getLedgerStatus() {
+    return this.#request('GET', '/v1.0/api/ledger/status');
+  }
+
+  async getMyLedgerBalance() {
+    return this.#request('GET', '/v1.0/api/ledger/balance/me');
+  }
+
+  async searchLedgerBalances(filters = {}) {
+    return this.#request('GET', `/v1.0/api/ledger/balances${this.#queryString(filters)}`);
+  }
+
+  async getLedgerUserBalance(userId) {
+    return this.#request('GET', `/v1.0/api/ledger/balances/users/${encodeURIComponent(userId)}`);
+  }
+
+  async getMyLedgerEntries() {
+    return this.#request('GET', '/v1.0/api/ledger/entries/me');
+  }
+
+  async searchLedgerEntries(request = {}) {
+    return this.#request('POST', '/v1.0/api/ledger/entries/search', request ?? {});
+  }
+
+  async drainLedgerQueue() {
+    return this.#request('POST', '/v1.0/api/ledger/drain', {});
+  }
+
+  async reconcileLedger() {
+    return this.#request('POST', '/v1.0/api/ledger/reconcile', {});
   }
 
   async getAnalyticsOverview() {

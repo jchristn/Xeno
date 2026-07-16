@@ -205,6 +205,43 @@ test('OpenAI and request history methods use expected routes', async () => {
   assert.equal(fetchImpl.calls[12].options.body, '{}');
 });
 
+test('ledger methods use expected routes and bodies', async () => {
+  const fetchImpl = createFetch((url) => {
+    if (url.endsWith('/v1.0/api/ledger/status')) return jsonResponse({ queue: { enabled: true, queueDepth: 1 }, netLedgerHealthy: true });
+    if (url.endsWith('/v1.0/api/ledger/balance/me')) return jsonResponse({ tenantId: 'ten_default', userId: 'usr_1', balance: 5 });
+    if (url.includes('/v1.0/api/ledger/balances?')) return jsonResponse({ items: [], total: 0, page: 1, pageSize: 100 });
+    if (url.endsWith('/v1.0/api/ledger/balances/users/usr_1')) return jsonResponse({ tenantId: 'ten_default', userId: 'usr_1', balance: 5 });
+    if (url.endsWith('/v1.0/api/ledger/entries/search')) return jsonResponse({ items: [{ direction: 'Credit', amount: 7 }], total: 1 });
+    return jsonResponse({});
+  });
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
+
+  const status = await client.getLedgerStatus();
+  assert.equal(status.queue.queueDepth, 1);
+  const balance = await client.getMyLedgerBalance();
+  assert.equal(balance.balance, 5);
+  await client.searchLedgerBalances({ userId: 'usr_1', page: 1, empty: '' });
+  await client.getLedgerUserBalance('usr_1');
+  await client.getMyLedgerEntries();
+  const entries = await client.searchLedgerEntries({ userId: 'usr_1', direction: 'Credit', pageSize: 25 });
+  assert.equal(entries.items[0].amount, 7);
+  await client.drainLedgerQueue();
+  await client.reconcileLedger();
+
+  assert.deepEqual(fetchImpl.calls.map((call) => [call.options.method, call.url]), [
+    ['GET', 'https://xeno.local/v1.0/api/ledger/status'],
+    ['GET', 'https://xeno.local/v1.0/api/ledger/balance/me'],
+    ['GET', 'https://xeno.local/v1.0/api/ledger/balances?userId=usr_1&page=1'],
+    ['GET', 'https://xeno.local/v1.0/api/ledger/balances/users/usr_1'],
+    ['GET', 'https://xeno.local/v1.0/api/ledger/entries/me'],
+    ['POST', 'https://xeno.local/v1.0/api/ledger/entries/search'],
+    ['POST', 'https://xeno.local/v1.0/api/ledger/drain'],
+    ['POST', 'https://xeno.local/v1.0/api/ledger/reconcile']
+  ]);
+  assert.match(fetchImpl.calls[5].options.body, /"direction":"Credit"/);
+  assert.equal(fetchImpl.calls[6].options.body, '{}');
+});
+
 test('credential options send tenant and access key headers', async () => {
   const fetchImpl = createFetch();
   const client = new XenoClient({

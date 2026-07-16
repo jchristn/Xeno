@@ -61,5 +61,10 @@ namespace Xeno.Core.Settings
         /// Email notification settings.
         /// </summary>
         public EmailSettings Email { get; set; } = new EmailSettings();
+
+        /// <summary>
+        /// Ledger integration settings.
+        /// </summary>
+        public LedgerSettings Ledger { get; set; } = new LedgerSettings();
     }
 }

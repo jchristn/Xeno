@@ -10,7 +10,19 @@ const ranges = [
   { key: 'lastMonth', buckets: 90 }
 ];
 
-export default function ActivityChart({ loading = false, onRangeChange, onRefresh, range, showControls = true, summary }) {
+export default function ActivityChart({
+  ariaLabel,
+  failedLabel,
+  loading = false,
+  onRangeChange,
+  onRefresh,
+  range,
+  showControls = true,
+  successLabel,
+  summary,
+  xAxisLabel,
+  yAxisLabel
+}) {
   const { t } = useTranslation();
   const canvasRef = useRef(null);
   const refreshRef = useRef(onRefresh);
@@ -70,6 +82,8 @@ export default function ActivityChart({ loading = false, onRangeChange, onRefres
   const barWidth = Math.max(2, Math.min(14, barSlot - 2));
   const yTicks = buildYAxisTicks(axisMax);
   const xTicks = buildXAxisTicks(buckets, chart.left, chart.plotWidth);
+  const successText = successLabel || t('success');
+  const failedText = failedLabel || t('failed');
 
   return (
     <div className="activity-chart-panel">
@@ -97,7 +111,7 @@ export default function ActivityChart({ loading = false, onRangeChange, onRefres
         </div>
       ) : null}
       <div className="chart-canvas" ref={canvasRef}>
-        <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={t('requests')}>
+        <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={ariaLabel || t('requests')}>
           <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.baseY} stroke="var(--color-border)" />
           <line x1={chart.left} y1={chart.baseY} x2={chart.left + chart.plotWidth} y2={chart.baseY} stroke="var(--color-border)" />
           {yTicks.map((tick) => {
@@ -109,8 +123,8 @@ export default function ActivityChart({ loading = false, onRangeChange, onRefres
               </g>
             );
           })}
-          <text className="axis-title" transform={`translate(16 ${chart.top + chart.plotHeight / 2}) rotate(-90)`}>{t('requestCount')}</text>
-          <text className="axis-title" x={chart.left + chart.plotWidth / 2} y={chart.height - 12} textAnchor="middle">{t('time')}</text>
+          <text className="axis-title" transform={`translate(16 ${chart.top + chart.plotHeight / 2}) rotate(-90)`}>{yAxisLabel || t('requestCount')}</text>
+          <text className="axis-title" x={chart.left + chart.plotWidth / 2} y={chart.height - 12} textAnchor="middle">{xAxisLabel || t('time')}</text>
           {buckets.map((bucket, index) => {
             const x = chart.left + index * barSlot + (barSlot - barWidth) / 2;
             const successHeight = (bucket.success / axisMax) * chart.plotHeight;
@@ -127,7 +141,7 @@ export default function ActivityChart({ loading = false, onRangeChange, onRefres
                 onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}
                 tabIndex={0}
               >
-                <title>{`${bucket.label}: ${t('success')} ${bucket.success}, ${t('failed')} ${bucket.failed}. ${t('tooltipChartRange')}`}</title>
+                <title>{`${bucket.label}: ${successText} ${bucket.success}, ${failedText} ${bucket.failed}. ${t('tooltipChartRange')}`}</title>
                 <rect x={x} y={failedY} width={barWidth} height={failedHeight} rx="3" fill="var(--color-danger)" />
                 <rect x={x} y={successY} width={barWidth} height={successHeight} rx="3" fill="var(--color-success)" />
               </g>
@@ -140,16 +154,16 @@ export default function ActivityChart({ loading = false, onRangeChange, onRefres
         {hovered ? (
           <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
             <strong>{hovered.bucket.label}</strong>
-            <span>{t('success')}: {hovered.bucket.success}</span>
-            <span>{t('failed')}: {hovered.bucket.failed}</span>
+            <span>{successText}: {hovered.bucket.success}</span>
+            <span>{failedText}: {hovered.bucket.failed}</span>
             <span>{t('total')}: {hovered.bucket.success + hovered.bucket.failed}</span>
           </div>
         ) : null}
         {loading ? <ChartLoadingOverlay label={t('loading')} /> : null}
       </div>
       <div className="chart-legend">
-        <span><i className="success-swatch" />{t('success')}</span>
-        <span><i className="failed-swatch" />{t('failed')}</span>
+        <span><i className="success-swatch" />{successText}</span>
+        <span><i className="failed-swatch" />{failedText}</span>
       </div>
     </div>
   );

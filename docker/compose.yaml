@@ -28,8 +28,48 @@ services:
       - ./postgres/init.sql:/init.sql:ro
     command: >
       sh -c "psql -h xeno-postgres -U postgres -d postgres -v ON_ERROR_STOP=1 -f /init.sql
-      && PGPASSWORD=xeno psql -h xeno-postgres -U xeno -d xeno -v ON_ERROR_STOP=1 -c 'SELECT 1;'"
+      && PGPASSWORD=xeno psql -h xeno-postgres -U xeno -d xeno -v ON_ERROR_STOP=1 -c 'SELECT 1;'
+      && PGPASSWORD=netledger psql -h xeno-postgres -U netledger -d netledger -v ON_ERROR_STOP=1 -c 'SELECT 1;'"
     restart: "no"
+
+  netledger-server:
+    image: ${NETLEDGER_SERVER_IMAGE:-jchristn77/netledger:v3.0.0}
+    container_name: netledger-server
+    ports:
+      - "${NETLEDGER_SERVER_PORT:-8080}:8080"
+    volumes:
+      - ./netledger:/app/data
+    command: ["-f", "/app/data/netledger.json"]
+    environment:
+      - DOTNET_RUNNING_IN_CONTAINER=true
+    depends_on:
+      xeno-postgres:
+        condition: service_healthy
+      xeno-postgres-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  netledger-ui:
+    image: ${NETLEDGER_UI_IMAGE:-jchristn77/netledger-ui:v3.0.0}
+    container_name: netledger-ui
+    ports:
+      - "${NETLEDGER_UI_PORT:-9200}:80"
+    environment:
+      NETLEDGER_SERVER_URL: http://localhost:${NETLEDGER_SERVER_PORT:-8080}
+    depends_on:
+      netledger-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
   xeno-server:
     image: jchristn77/xeno-server:v0.1.0
@@ -42,6 +82,9 @@ services:
     volumes:
       - ./xeno.json:/app/xeno.json:ro
       - ./logs:/app/logs
+    environment:
+      - XENO_LEDGER_API_KEY=${NETLEDGER_ACCESS_KEY:-default}
+      - XENO_LEDGER_SECRET_KEY=${NETLEDGER_SECRET_KEY:-default}
     depends_on:
       xeno-postgres:
         condition: service_healthy

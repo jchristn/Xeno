@@ -80,6 +80,16 @@ namespace Xeno.Core.Services
         public List<RequestHistoryEntry> RequestHistory { get; } = new List<RequestHistoryEntry>();
 
         /// <summary>
+        /// Ledger tenant links.
+        /// </summary>
+        public List<LedgerTenantLink> LedgerTenantLinks { get; } = new List<LedgerTenantLink>();
+
+        /// <summary>
+        /// Ledger account links.
+        /// </summary>
+        public List<LedgerAccountLink> LedgerAccountLinks { get; } = new List<LedgerAccountLink>();
+
+        /// <summary>
         /// Initialize seeded state.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
@@ -382,6 +392,9 @@ namespace Xeno.Core.Services
                 RoutingPolicies = RoutingPolicies.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
             };
 
+            LedgerTenantLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            LedgerAccountLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+
             if (includeAuditRecords)
             {
                 counts.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
@@ -467,6 +480,7 @@ namespace Xeno.Core.Services
                     RoleAssignments = RoleAssignments.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && ((item.PrincipalType == PrincipalTypeEnum.User && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase)) || (item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId))))
                 }
             };
+            LedgerAccountLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.XenoUserId, userId, StringComparison.OrdinalIgnoreCase));
 
             if (includeAuditRecords)
             {
@@ -509,6 +523,8 @@ namespace Xeno.Core.Services
             count += ModelConfigurations.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             count += RoutingPolicies.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             count += RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += LedgerTenantLinks.Count(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            count += LedgerAccountLinks.Count(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             return count;
         }
 
@@ -528,6 +544,7 @@ namespace Xeno.Core.Services
             count += AuthSessions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase));
             count += RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase));
             count += RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)));
+            count += LedgerAccountLinks.Count(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.XenoUserId, userId, StringComparison.OrdinalIgnoreCase));
             return count;
         }
 
@@ -551,7 +568,9 @@ namespace Xeno.Core.Services
                 ModelDefinitions = ModelDefinitions,
                 ModelConfigurations = ModelConfigurations,
                 RoutingPolicies = RoutingPolicies,
-                RequestHistory = RequestHistory
+                RequestHistory = RequestHistory,
+                LedgerTenantLinks = LedgerTenantLinks,
+                LedgerAccountLinks = LedgerAccountLinks
             };
         }
 
@@ -601,6 +620,12 @@ namespace Xeno.Core.Services
 
             RequestHistory.Clear();
             RequestHistory.AddRange(state.RequestHistory);
+
+            LedgerTenantLinks.Clear();
+            LedgerTenantLinks.AddRange(state.LedgerTenantLinks);
+
+            LedgerAccountLinks.Clear();
+            LedgerAccountLinks.AddRange(state.LedgerAccountLinks);
 
             EnsureTenantDefaults();
         }
@@ -675,8 +700,10 @@ namespace Xeno.Core.Services
             Permission clientTelemetryReadPermission = EnsurePermission(tenantId, "ClientTelemetry", OperationTypeEnum.Read);
             Permission inferenceReadPermission = EnsurePermission(tenantId, "Inference", OperationTypeEnum.Read);
             Permission inferenceExecutePermission = EnsurePermission(tenantId, "Inference", OperationTypeEnum.Execute);
+            Permission ledgerReadPermission = EnsurePermission(tenantId, "Ledger", OperationTypeEnum.Read);
+            Permission ledgerAdminPermission = EnsurePermission(tenantId, "Ledger", OperationTypeEnum.Admin);
             Permission adminPermission = EnsurePermission(tenantId, "Admin", OperationTypeEnum.Admin);
-            Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, adminPermission.Id });
+            Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, ledgerReadPermission.Id, ledgerAdminPermission.Id, adminPermission.Id });
             EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
             Role tenantMember = EnsureRole(tenantId, "TenantMember", new List<string>
             {
@@ -689,7 +716,8 @@ namespace Xeno.Core.Services
                 permissionsReadPermission.Id,
                 clientsReadPermission.Id,
                 clientTelemetryReadPermission.Id,
-                inferenceReadPermission.Id
+                inferenceReadPermission.Id,
+                ledgerReadPermission.Id
             });
             EnsureTenantMemberBackfill(tenantId, tenantMember);
 

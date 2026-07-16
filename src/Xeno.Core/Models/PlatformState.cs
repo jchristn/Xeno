@@ -71,5 +71,15 @@ namespace Xeno.Core.Models
         /// Request history entries.
         /// </summary>
         public List<RequestHistoryEntry> RequestHistory { get; set; } = new List<RequestHistoryEntry>();
+
+        /// <summary>
+        /// Ledger tenant links.
+        /// </summary>
+        public List<LedgerTenantLink> LedgerTenantLinks { get; set; } = new List<LedgerTenantLink>();
+
+        /// <summary>
+        /// Ledger account links.
+        /// </summary>
+        public List<LedgerAccountLink> LedgerAccountLinks { get; set; } = new List<LedgerAccountLink>();
     }
 }

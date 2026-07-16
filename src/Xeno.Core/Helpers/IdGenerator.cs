@@ -96,6 +96,33 @@ namespace Xeno.Core.Helpers
             return NewId("telreq_");
         }
 
+        /// <summary>
+        /// Generate a ledger tenant link identifier.
+        /// </summary>
+        /// <returns>Ledger tenant link identifier.</returns>
+        public static string NewLedgerTenantLinkId()
+        {
+            return NewId("ledten_");
+        }
+
+        /// <summary>
+        /// Generate a ledger account link identifier.
+        /// </summary>
+        /// <returns>Ledger account link identifier.</returns>
+        public static string NewLedgerAccountLinkId()
+        {
+            return NewId("ledacct_");
+        }
+
+        /// <summary>
+        /// Generate a ledger event identifier.
+        /// </summary>
+        /// <returns>Ledger event identifier.</returns>
+        public static string NewLedgerEventId()
+        {
+            return NewId("ledevt_");
+        }
+
         private static string NormalizePrefix(string prefix)
         {
             if (String.IsNullOrWhiteSpace(prefix)) return String.Empty;

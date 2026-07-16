@@ -31,12 +31,18 @@ function printHelp() {
   console.log('  routing-policies routing policies');
   console.log('  history         request history');
   console.log('  leaderboard     public model token leaderboard');
+  console.log('  ledger-status   ledger queue and NetLedger health');
+  console.log('  ledger-balance  own ledger balance; append user ID for a specific user');
+  console.log('  ledger-balances visible ledger balances');
+  console.log('  ledger-entries  own ledger entries');
   console.log('  settings        server settings');
   console.log('  metrics         Prometheus metrics');
   console.log('');
   console.log('Actions');
   console.log('  login           exchange username/password for a client credential');
   console.log('  chat            send a chat completion request');
+  console.log('  ledger-drain    drain queued ledger events');
+  console.log('  ledger-reconcile report missing ledger links');
   console.log('');
   console.log('Other');
   console.log('  cls             clear screen');
@@ -67,6 +73,13 @@ async function runCommand(command) {
   if (command === 'routing-policies') return printJson(await sdk.listRoutingPolicies());
   if (command === 'history') return printJson(await sdk.listRequestHistory());
   if (command === 'leaderboard') return printJson(await sdk.getModelTokenLeaderboard());
+  if (command === 'ledger-status') return printJson(await sdk.getLedgerStatus());
+  if (command === 'ledger-balance') return printJson(await sdk.getMyLedgerBalance());
+  if (command.startsWith('ledger-balance ')) return printJson(await sdk.getLedgerUserBalance(command.slice(15).trim()));
+  if (command === 'ledger-balances') return printJson(await sdk.searchLedgerBalances());
+  if (command === 'ledger-entries') return printJson(await sdk.getMyLedgerEntries());
+  if (command === 'ledger-drain') return printJson(await sdk.drainLedgerQueue());
+  if (command === 'ledger-reconcile') return printJson(await sdk.reconcileLedger());
   if (command === 'settings') return printJson(await sdk.getSettings());
   if (command === 'metrics') return console.log(await sdk.getMetrics());
   if (command === 'login') {

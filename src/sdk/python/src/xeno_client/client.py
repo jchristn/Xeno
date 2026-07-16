@@ -68,6 +68,42 @@ class HealthResponse(XenoModel):
     pass
 
 
+class LedgerBalanceResponse(XenoModel):
+    pass
+
+
+class LedgerBalanceSearchResult(XenoModel):
+    pass
+
+
+class LedgerDrainResponse(XenoModel):
+    pass
+
+
+class LedgerEntryRecord(XenoModel):
+    pass
+
+
+class LedgerEntrySearchRequest(XenoModel):
+    pass
+
+
+class LedgerEntrySearchResult(XenoModel):
+    pass
+
+
+class LedgerQueueStatus(XenoModel):
+    pass
+
+
+class LedgerReconcileResponse(XenoModel):
+    pass
+
+
+class LedgerStatusResponse(XenoModel):
+    pass
+
+
 class PingResponse(XenoModel):
     pass
 
@@ -443,6 +479,30 @@ class XenoClient:
 
     def bulk_delete_request_history(self, filter_payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1.0/api/request-history/bulk", filter_payload)
+
+    def get_ledger_status(self) -> dict[str, Any]:
+        return self._request("GET", "/v1.0/api/ledger/status")
+
+    def get_my_ledger_balance(self) -> dict[str, Any]:
+        return self._request("GET", "/v1.0/api/ledger/balance/me")
+
+    def search_ledger_balances(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("GET", f"/v1.0/api/ledger/balances{self._query_string(filters)}")
+
+    def get_ledger_user_balance(self, user_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/v1.0/api/ledger/balances/users/{user_id}")
+
+    def get_my_ledger_entries(self) -> dict[str, Any]:
+        return self._request("GET", "/v1.0/api/ledger/entries/me")
+
+    def search_ledger_entries(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/ledger/entries/search", request or {})
+
+    def drain_ledger_queue(self) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/ledger/drain", {})
+
+    def reconcile_ledger(self) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/ledger/reconcile", {})
 
     def get_analytics_overview(self) -> dict[str, Any]:
         return self._request("GET", "/v1.0/api/analytics/overview")

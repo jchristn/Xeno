@@ -24,5 +24,11 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("active")]
         public bool? Active { get; set; } = null;
+
+        /// <summary>
+        /// Whether subordinate service provisioning can be deferred when a service is unavailable.
+        /// </summary>
+        [JsonPropertyName("deferSubordinateProvisioning")]
+        public bool? DeferSubordinateProvisioning { get; set; } = null;
     }
 }

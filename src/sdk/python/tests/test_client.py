@@ -214,6 +214,51 @@ class XenoClientTests(unittest.TestCase):
         self.assertEqual(opener.calls[11]["body"], "{}")
         self.assertEqual(opener.calls[12]["body"], "{}")
 
+    def test_ledger_methods_use_expected_routes_and_bodies(self):
+        def response_factory(request):
+            if request.full_url.endswith("/v1.0/api/ledger/status"):
+                return FakeResponse('{"queue":{"enabled":true,"queueDepth":1},"netLedgerHealthy":true}')
+            if request.full_url.endswith("/v1.0/api/ledger/balance/me"):
+                return FakeResponse('{"tenantId":"ten_default","userId":"usr_1","balance":5}')
+            if "/v1.0/api/ledger/balances?" in request.full_url:
+                return FakeResponse('{"items":[],"total":0,"page":1,"pageSize":100}')
+            if request.full_url.endswith("/v1.0/api/ledger/balances/users/usr_1"):
+                return FakeResponse('{"tenantId":"ten_default","userId":"usr_1","balance":5}')
+            if request.full_url.endswith("/v1.0/api/ledger/entries/search"):
+                return FakeResponse('{"items":[{"direction":"Credit","amount":7}],"total":1}')
+            return FakeResponse("{}")
+
+        opener = FakeOpener(response_factory)
+        client = XenoClient("https://xeno.local", opener=opener)
+
+        status = client.get_ledger_status()
+        self.assertEqual(status["queue"]["queueDepth"], 1)
+        balance = client.get_my_ledger_balance()
+        self.assertEqual(balance["balance"], 5)
+        client.search_ledger_balances({"userId": "usr_1", "page": 1, "empty": ""})
+        client.get_ledger_user_balance("usr_1")
+        client.get_my_ledger_entries()
+        entries = client.search_ledger_entries({"userId": "usr_1", "direction": "Credit", "pageSize": 25})
+        self.assertEqual(entries["items"][0]["amount"], 7)
+        client.drain_ledger_queue()
+        client.reconcile_ledger()
+
+        self.assertEqual(
+            [(call["request"].get_method(), call["request"].full_url) for call in opener.calls],
+            [
+                ("GET", "https://xeno.local/v1.0/api/ledger/status"),
+                ("GET", "https://xeno.local/v1.0/api/ledger/balance/me"),
+                ("GET", "https://xeno.local/v1.0/api/ledger/balances?userId=usr_1&page=1"),
+                ("GET", "https://xeno.local/v1.0/api/ledger/balances/users/usr_1"),
+                ("GET", "https://xeno.local/v1.0/api/ledger/entries/me"),
+                ("POST", "https://xeno.local/v1.0/api/ledger/entries/search"),
+                ("POST", "https://xeno.local/v1.0/api/ledger/drain"),
+                ("POST", "https://xeno.local/v1.0/api/ledger/reconcile"),
+            ],
+        )
+        self.assertIn('"direction": "Credit"', opener.calls[5]["body"])
+        self.assertEqual(opener.calls[6]["body"], "{}")
+
     def test_credential_options_send_tenant_and_access_key_headers(self):
         opener = FakeOpener()
         client = XenoClient("https://xeno.local", bearer_token=None, access_key="xeno_access", tenant_id="ten_123", opener=opener)

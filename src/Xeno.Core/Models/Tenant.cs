@@ -2,8 +2,6 @@ namespace Xeno.Core.Models
 {
     using System;
     using System.Collections.Generic;
-    using Xeno.Core.Enums;
-    using Xeno.Core.Helpers;
 
     /// <summary>
     /// Tenant record.
@@ -34,5 +32,10 @@ namespace Xeno.Core.Models
         /// Updated timestamp.
         /// </summary>
         public DateTime LastUpdateUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Latest subordinate service lifecycle statuses.
+        /// </summary>
+        public List<TenantSubordinateServiceStatus> SubordinateServices { get; set; } = new List<TenantSubordinateServiceStatus>();
     }
 }

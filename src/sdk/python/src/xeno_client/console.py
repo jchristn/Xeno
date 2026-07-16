@@ -67,6 +67,20 @@ def run_command(command: str, client: XenoClient, tenant_id: str) -> None:
         print_json(client.list_request_history())
     elif command == "leaderboard":
         print_json(client.get_model_token_leaderboard())
+    elif command == "ledger-status":
+        print_json(client.get_ledger_status())
+    elif command == "ledger-balance":
+        print_json(client.get_my_ledger_balance())
+    elif command.startswith("ledger-balance "):
+        print_json(client.get_ledger_user_balance(command[15:].strip()))
+    elif command == "ledger-balances":
+        print_json(client.search_ledger_balances())
+    elif command == "ledger-entries":
+        print_json(client.get_my_ledger_entries())
+    elif command == "ledger-drain":
+        print_json(client.drain_ledger_queue())
+    elif command == "ledger-reconcile":
+        print_json(client.reconcile_ledger())
     elif command == "settings":
         print_json(client.get_settings())
     elif command == "metrics":
@@ -112,12 +126,18 @@ def print_help(base_url: str, tenant_id: str, bearer_token: str | None) -> None:
     print("  routing-policies routing policies")
     print("  history         request history")
     print("  leaderboard     public model token leaderboard")
+    print("  ledger-status   ledger queue and NetLedger health")
+    print("  ledger-balance  own ledger balance; append user ID for a specific user")
+    print("  ledger-balances visible ledger balances")
+    print("  ledger-entries  own ledger entries")
     print("  settings        server settings")
     print("  metrics         Prometheus metrics")
     print("")
     print("Actions")
     print("  login           exchange username/password for a client credential")
     print("  chat            send a chat completion request")
+    print("  ledger-drain    drain queued ledger events")
+    print("  ledger-reconcile report missing ledger links")
     print("")
     print("Other")
     print("  cls             clear screen")

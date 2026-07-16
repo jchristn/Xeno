@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 
 echo "This will reset the Xeno Docker deployment to factory defaults."
 echo "Docker containers, volumes, local runtime data, and logs for this compose project will be removed."
-echo "The docker/xeno.json settings file will be overwritten from factory defaults."
+echo "The docker/xeno.json and docker/netledger/netledger.json settings files will be overwritten from factory defaults."
 printf "Type RESET to continue: "
 IFS= read -r CONFIRM
 if [ "$CONFIRM" != "RESET" ]; then
@@ -13,7 +13,9 @@ if [ "$CONFIRM" != "RESET" ]; then
 fi
 
 docker compose -f compose.yaml down --volumes --remove-orphans
-rm -rf data logs
+rm -rf data logs netledger
 mkdir -p logs
+mkdir -p netledger
 cp factory/xeno.json xeno.json
+cp factory/netledger.json netledger/netledger.json
 docker compose -f compose.yaml up -d --build

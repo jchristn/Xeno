@@ -43,6 +43,9 @@ namespace Test.Shared
     /// </summary>
     public static class SharedTestSuites
     {
+        private const string _DockerUnavailableSkipReason = "Docker is not available on this machine.";
+        private static readonly Lazy<bool> _DockerAvailable = new Lazy<bool>(CheckDockerAvailable);
+
         /// <summary>
         /// All shared suites.
         /// </summary>
@@ -56,6 +59,7 @@ namespace Test.Shared
                     DatabaseProviderSuite(),
                     AuthenticationSuite(),
                     TelemetrySuite(),
+                    LedgerSuite(),
                     RoutingSuite(),
                     TenantIsolationSuite(),
                     ClientCliSuite(),
@@ -474,6 +478,324 @@ namespace Test.Shared
                             IReadOnlyList<ClientProviderTelemetryRollupBucket> buckets = await history.RollupAsync(rollupRequest, CancellationToken.None).ConfigureAwait(false);
                             if (!buckets.Any(item => item.Count > 0 && item.Average == 2)) throw new InvalidOperationException("Provider telemetry rollup did not include persisted value.");
                             Directory.Delete(directory, true);
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "NetLedgerClientAuthenticatesWithSecretAndBearerModes",
+                        "NetLedger client supports v3 access-key/secret auth and bearer fallback",
+                        executeAsync: async delegate
+                        {
+                            using (FakeNetLedgerServer secretServer = new FakeNetLedgerServer())
+                            {
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    BaseUrl = secretServer.BaseUrl,
+                                    ApiKey = secretServer.RequiredAccessKey,
+                                    SecretKey = secretServer.RequiredSecretKey
+                                };
+                                using (NetLedgerClient client = new NetLedgerClient(settings))
+                                {
+                                    NetLedgerTenant tenant = await client.CreateTenantAsync(new NetLedgerTenant { Id = "ten_secret_auth", Name = "Secret Auth", Active = true }).ConfigureAwait(false);
+                                    if (!String.Equals(tenant.Id, "ten_secret_auth", StringComparison.Ordinal)) throw new InvalidOperationException("Secret-auth tenant create returned the wrong tenant.");
+                                    if (!secretServer.SawAccessKeySecretAuth) throw new InvalidOperationException("NetLedger client did not send access-key/secret headers.");
+                                }
+                            }
+
+                            using (FakeNetLedgerServer bearerServer = new FakeNetLedgerServer())
+                            {
+                                bearerServer.RequireSecretKeyAuth = false;
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    BaseUrl = bearerServer.BaseUrl,
+                                    ApiKey = bearerServer.RequiredBearer
+                                };
+                                using (NetLedgerClient client = new NetLedgerClient(settings))
+                                {
+                                    NetLedgerTenant tenant = await client.CreateTenantAsync(new NetLedgerTenant { Id = "ten_bearer_auth", Name = "Bearer Auth", Active = true }).ConfigureAwait(false);
+                                    if (!String.Equals(tenant.Id, "ten_bearer_auth", StringComparison.Ordinal)) throw new InvalidOperationException("Bearer-auth tenant create returned the wrong tenant.");
+                                    if (!bearerServer.SawBearerAuth) throw new InvalidOperationException("NetLedger client did not send a bearer authorization header.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerDrainEndToEndCreatesTenantAccountsEntriesAndMetadata",
+                        "Ledger drain writes tenant, user accounts, debit, credit, and searchable metadata through NetLedger REST",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User requestUser = new User { Id = "usr_ledger_e2e_requestor", TenantId = Constants.DefaultTenantId, Email = "ledger-e2e-requestor@test", Username = "ledger-e2e-requestor@test", Active = true };
+                            User servingUser = new User { Id = "usr_ledger_e2e_serving", TenantId = Constants.DefaultTenantId, Email = "ledger-e2e-serving@test", Username = "ledger-e2e-serving@test", Active = true };
+                            platform.Users.Add(requestUser);
+                            platform.Users.Add(servingUser);
+                            Credential credential = new Credential { Id = "cred_ledger_e2e", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "ledger-e2e", SecretKey = "secret", Active = true };
+                            platform.Credentials.Add(credential);
+                            XenoClientRecord clientRecord = new XenoClientRecord { Id = "xcl_ledger_e2e", TenantId = Constants.DefaultTenantId, Name = "ledger-e2e", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
+                            platform.Clients.Add(clientRecord);
+
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    Enabled = true,
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey,
+                                    CommitEntriesImmediately = true
+                                };
+                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                {
+                                    if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 123, "/v1/chat/completions"), out string? reason))
+                                    {
+                                        throw new InvalidOperationException("Ledger enqueue failed: " + reason);
+                                    }
+
+                                    LedgerDrainResponse response = await ledger.DrainOnceAsync(CancellationToken.None).ConfigureAwait(false);
+                                    if (response.Processed != 1 || response.Retried != 0 || response.TerminalFailures != 0) throw new InvalidOperationException("Unexpected drain response for e2e ledger event.");
+                                    if (netLedger.TenantCreateCount != 1) throw new InvalidOperationException("Drain did not create one NetLedger tenant.");
+                                    if (netLedger.AccountCreateCount != 2) throw new InvalidOperationException("Drain did not create requester and serving accounts.");
+                                    if (netLedger.EntryCreateCount != 2) throw new InvalidOperationException("Drain did not create debit and credit entries.");
+                                    if (platform.LedgerTenantLinks.Count != 1) throw new InvalidOperationException("Tenant link was not persisted.");
+                                    if (platform.LedgerAccountLinks.Count(item => item.XenoUserId == requestUser.Id || item.XenoUserId == servingUser.Id) != 2) throw new InvalidOperationException("Account links were not persisted.");
+
+                                    List<NetLedgerEntry> entries = netLedger.Entries;
+                                    NetLedgerEntry? debit = entries.FirstOrDefault(item => String.Equals(item.Type, "Debit", StringComparison.OrdinalIgnoreCase));
+                                    NetLedgerEntry? credit = entries.FirstOrDefault(item => String.Equals(item.Type, "Credit", StringComparison.OrdinalIgnoreCase));
+                                    if (debit == null || credit == null) throw new InvalidOperationException("Debit and credit entries were not both created.");
+                                    if (debit.Amount != 123m || credit.Amount != 123m) throw new InvalidOperationException("Ledger entry amount mismatch.");
+                                    if (!debit.IsCommitted || !credit.IsCommitted) throw new InvalidOperationException("Ledger entries were not committed.");
+                                    if (!debit.Labels.Contains("xeno-debit", StringComparer.Ordinal) || !credit.Labels.Contains("xeno-credit", StringComparer.Ordinal)) throw new InvalidOperationException("Direction labels were not written.");
+                                    if (!String.Equals(debit.Tags["requestUserId"], requestUser.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Debit request user tag mismatch.");
+                                    if (!String.Equals(credit.Tags["servingUserId"], servingUser.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Credit serving user tag mismatch.");
+                                    if (!String.Equals(debit.Tags["requestCredentialId"], credential.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Request credential tag mismatch.");
+                                    if (!String.Equals(credit.Tags["selectedClientId"], clientRecord.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Selected client tag mismatch.");
+                                    if (String.Equals(debit.Tags["direction"], credit.Tags["direction"], StringComparison.Ordinal)) throw new InvalidOperationException("Debit and credit direction tags were not distinct.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerResolverUsesMetadataSearchBeforeCreatingAccounts",
+                        "Ledger account resolver reuses tenant-scoped accounts found by Xeno metadata tags",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User requestUser = new User { Id = "usr_ledger_metadata_requestor", TenantId = Constants.DefaultTenantId, Email = "ledger-metadata-requestor@test", Username = "ledger-metadata-requestor@test", Active = true };
+                            User servingUser = new User { Id = "usr_ledger_metadata_serving", TenantId = Constants.DefaultTenantId, Email = "ledger-metadata-serving@test", Username = "ledger-metadata-serving@test", Active = true };
+                            platform.Users.Add(requestUser);
+                            platform.Users.Add(servingUser);
+                            Credential credential = new Credential { Id = "cred_ledger_metadata", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "ledger-metadata", SecretKey = "secret", Active = true };
+                            platform.Credentials.Add(credential);
+                            XenoClientRecord clientRecord = new XenoClientRecord { Id = "xcl_ledger_metadata", TenantId = Constants.DefaultTenantId, Name = "ledger-metadata", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
+                            platform.Clients.Add(clientRecord);
+
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                string netLedgerTenantId = "ten_existing_metadata";
+                                netLedger.AddTenant(netLedgerTenantId, "Existing Metadata");
+                                platform.LedgerTenantLinks.Add(new LedgerTenantLink { XenoTenantId = Constants.DefaultTenantId, NetLedgerTenantId = netLedgerTenantId, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow });
+                                netLedger.AddAccount("acct_existing_requestor", netLedgerTenantId, "xeno:user:" + requestUser.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(Constants.DefaultTenantId, requestUser));
+                                netLedger.AddAccount("acct_existing_serving", netLedgerTenantId, "xeno:user:" + servingUser.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(Constants.DefaultTenantId, servingUser));
+
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    Enabled = true,
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey
+                                };
+                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                {
+                                    if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 22, "/v1/embeddings"), out string? reason))
+                                    {
+                                        throw new InvalidOperationException("Ledger enqueue failed: " + reason);
+                                    }
+
+                                    LedgerDrainResponse response = await ledger.DrainOnceAsync(CancellationToken.None).ConfigureAwait(false);
+                                    if (response.Processed != 1) throw new InvalidOperationException("Metadata resolver drain did not process one event.");
+                                    if (netLedger.AccountCreateCount != 0) throw new InvalidOperationException("Resolver created accounts instead of reusing metadata matches.");
+                                    LedgerAccountLink? requestLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == requestUser.Id);
+                                    LedgerAccountLink? servingLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == servingUser.Id);
+                                    if (requestLink == null || !String.Equals(requestLink.NetLedgerAccountId, "acct_existing_requestor", StringComparison.Ordinal)) throw new InvalidOperationException("Requester account link did not use metadata match.");
+                                    if (servingLink == null || !String.Equals(servingLink.NetLedgerAccountId, "acct_existing_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Serving account link did not use metadata match.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerDrainDuplicateDetectionPreventsDoubleCounting",
+                        "Ledger drain treats existing entries with matching source, ledgerEventId, and direction tags as success",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+                            XenoClientRecord clientRecord = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    Enabled = true,
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey
+                                };
+                                using (NetLedgerClient client = new NetLedgerClient(settings))
+                                {
+                                    LedgerAccountResolver resolver = new LedgerAccountResolver(platform, settings, client);
+                                    LedgerDrainService drain = new LedgerDrainService(settings, client, resolver);
+                                    LedgerEvent ledgerEvent = new LedgerEvent
+                                    {
+                                        Id = "ledevt_duplicate_detection",
+                                        XenoTenantId = Constants.DefaultTenantId,
+                                        RequestHistoryId = "reqhist_duplicate_detection",
+                                        RequestCredentialId = "cred_duplicate_detection",
+                                        RequestUserId = admin.Id,
+                                        SelectedClientId = clientRecord.Id,
+                                        ServingUserId = admin.Id,
+                                        RequestKind = LedgerRequestKind.Completion,
+                                        TotalTokens = 44,
+                                        OccurredUtc = DateTime.UtcNow
+                                    };
+
+                                    await drain.ProcessAsync(ledgerEvent, CancellationToken.None).ConfigureAwait(false);
+                                    await drain.ProcessAsync(ledgerEvent, CancellationToken.None).ConfigureAwait(false);
+                                    if (netLedger.EntryCreateCount != 2) throw new InvalidOperationException("Duplicate drain created more than one debit and one credit entry.");
+                                    if (netLedger.Entries.Count != 2) throw new InvalidOperationException("Duplicate drain should leave exactly two entries.");
+                                    if (netLedger.EntryEnumerationCount < 4) throw new InvalidOperationException("Duplicate detection did not search before writes.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerDrainRetriesTransientNetLedgerFailures",
+                        "Ledger drain requeues transient NetLedger failures and records retry status without throwing to capture",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
+                            XenoClientRecord clientRecord = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                netLedger.FailNextEntryCreates = 1;
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    Enabled = true,
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey
+                                };
+                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                {
+                                    if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, clientRecord.Id, 55, "/v1/chat/completions"), out string? reason))
+                                    {
+                                        throw new InvalidOperationException("Ledger enqueue failed before retry test: " + reason);
+                                    }
+
+                                    LedgerDrainResponse response = await ledger.DrainOnceAsync(CancellationToken.None).ConfigureAwait(false);
+                                    if (response.Retried != 1 || response.Processed != 0) throw new InvalidOperationException("Transient NetLedger failure was not requeued for retry.");
+                                    LedgerStatusResponse status = await ledger.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+                                    if (status.Queue.QueueDepth != 1) throw new InvalidOperationException("Retry event was not left queued.");
+                                    if (status.Queue.RetryCount != 1) throw new InvalidOperationException("Retry count was not recorded.");
+                                    if (String.IsNullOrWhiteSpace(status.Queue.LastFailure)) throw new InvalidOperationException("Retry failure message was not recorded.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerStatusReportsNetLedgerHealthFailure",
+                        "Ledger status reports NetLedger health failures without throwing",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                netLedger.FailHealth = true;
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    Enabled = true,
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey
+                                };
+                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                {
+                                    LedgerStatusResponse status = await ledger.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+                                    if (status.NetLedgerHealthy) throw new InvalidOperationException("Ledger status should report unhealthy NetLedger.");
+                                    if (String.IsNullOrWhiteSpace(status.NetLedgerMessage)) throw new InvalidOperationException("Ledger health failure did not include a message.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "NetLedgerTenantHardDeleteDeletesAccountsBeforeTenant",
+                        "NetLedger tenant subordinate hard delete removes linked and tagged accounts before deleting the tenant",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            Tenant tenant = platform.GetDefaultTenant();
+                            User admin = platform.Users.First(item => item.TenantId == tenant.Id && item.IsAdmin);
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                string netLedgerTenantId = "ten_delete_accounts";
+                                netLedger.AddTenant(netLedgerTenantId, "Delete Accounts");
+                                netLedger.AddAccount("acct_delete_linked", netLedgerTenantId, "xeno:user:" + admin.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(tenant.Id, admin));
+                                User taggedOnlyUser = new User { Id = "usr_tagged_only_delete", TenantId = tenant.Id, Email = "tagged-only-delete@test", Username = "tagged-only-delete@test", Active = true };
+                                netLedger.AddAccount("acct_delete_tagged_only", netLedgerTenantId, "xeno:user:" + taggedOnlyUser.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(tenant.Id, taggedOnlyUser));
+                                platform.LedgerTenantLinks.Add(new LedgerTenantLink { XenoTenantId = tenant.Id, NetLedgerTenantId = netLedgerTenantId, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow });
+                                platform.LedgerAccountLinks.Add(new LedgerAccountLink { XenoTenantId = tenant.Id, XenoUserId = admin.Id, NetLedgerTenantId = netLedgerTenantId, NetLedgerAccountId = "acct_delete_linked", CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow });
+
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    Enabled = true,
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey
+                                };
+                                using (NetLedgerTenantSubordinateService subordinate = new NetLedgerTenantSubordinateService(platform, settings))
+                                {
+                                    TenantSubordinateServiceStatus status = await subordinate.DeleteAsync(tenant, true, CancellationToken.None).ConfigureAwait(false);
+                                    if (!String.Equals(status.Status, "Deleted", StringComparison.Ordinal)) throw new InvalidOperationException("Subordinate delete status mismatch.");
+                                    if (netLedger.AccountDeleteCount != 2) throw new InvalidOperationException("Hard delete did not delete both linked and tagged NetLedger accounts.");
+                                    if (netLedger.TenantDeleteCount != 1) throw new InvalidOperationException("Hard delete did not delete the NetLedger tenant.");
+                                    if (platform.LedgerTenantLinks.Any(item => item.XenoTenantId == tenant.Id)) throw new InvalidOperationException("Tenant ledger links were not cleared.");
+                                    if (platform.LedgerAccountLinks.Any(item => item.XenoTenantId == tenant.Id)) throw new InvalidOperationException("Account ledger links were not cleared.");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "DockerNetLedgerContainerEndToEnd",
+                        "Docker-backed NetLedger server container processes a real ledger drain and is cleaned up",
+                        skip: !_DockerAvailable.Value,
+                        skipReason: _DockerUnavailableSkipReason,
+                        executeAsync: async delegate
+                        {
+                            if (!_DockerAvailable.Value) return;
+                            await RunDockerNetLedgerContainerEndToEndAsync(CancellationToken.None).ConfigureAwait(false);
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "NetLedgerDeleteOperationsAreIdempotent",
+                        "NetLedger client treats account and tenant 404 deletes as idempotent success",
+                        executeAsync: async delegate
+                        {
+                            using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
+                            {
+                                LedgerSettings settings = new LedgerSettings
+                                {
+                                    BaseUrl = netLedger.BaseUrl,
+                                    ApiKey = netLedger.RequiredAccessKey,
+                                    SecretKey = netLedger.RequiredSecretKey
+                                };
+                                using (NetLedgerClient client = new NetLedgerClient(settings))
+                                {
+                                    await client.DeleteAccountAsync("ten_missing", "acct_missing", CancellationToken.None).ConfigureAwait(false);
+                                    await client.DeleteTenantAsync("ten_missing", CancellationToken.None).ConfigureAwait(false);
+                                    if (netLedger.AccountDeleteCount != 1) throw new InvalidOperationException("Missing account delete was not sent.");
+                                    if (netLedger.TenantDeleteCount != 1) throw new InvalidOperationException("Missing tenant delete was not sent.");
+                                }
+                            }
                         })
                 });
         }
@@ -1373,7 +1695,7 @@ namespace Test.Shared
 
             AuthorizationService authorization = new AuthorizationService();
             RequestContext userContext = new RequestContext { TenantId = tenant.Id, UserId = legacyUser.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
-            foreach (string resourceType in new List<string> { "Authentication", "Tenants", "Users", "Credentials", "Roles", "Permissions", "Clients", "ClientTelemetry", "Inference" })
+            foreach (string resourceType in new List<string> { "Authentication", "Tenants", "Users", "Credentials", "Roles", "Permissions", "Clients", "ClientTelemetry", "Inference", "Ledger" })
             {
                 AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = resourceType, OperationType = OperationTypeEnum.Read }), "TenantMember should read " + resourceType + ".");
             }
@@ -1449,6 +1771,100 @@ namespace Test.Shared
             AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = credentialContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "TenantMismatch");
         }
 
+        private static async Task<XenoPlatform> CreateLedgerTestPlatformAsync()
+        {
+            XenoPlatform platform = new XenoPlatform();
+            await platform.InitializeAsync().ConfigureAwait(false);
+            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+            platform.Clients.Add(new XenoClientRecord
+            {
+                Id = "xcl_ledger_touchstone",
+                TenantId = Constants.DefaultTenantId,
+                Name = "ledger-touchstone",
+                OwnerUserId = admin.Id,
+                OwnerPrincipalType = PrincipalTypeEnum.User,
+                Connected = true,
+                Active = true
+            });
+            return platform;
+        }
+
+        private static RequestHistoryEntry CreateLedgerHistory(string credentialId, string userId, string clientId, int totalTokens, string path)
+        {
+            return new RequestHistoryEntry
+            {
+                TenantId = Constants.DefaultTenantId,
+                RequestorTenantId = Constants.DefaultTenantId,
+                Path = path,
+                Method = "POST",
+                CredentialId = credentialId,
+                UserId = userId,
+                PrincipalType = PrincipalTypeEnum.Credential,
+                RequestorPrincipalType = PrincipalTypeEnum.Credential,
+                RequestorPrincipalId = credentialId,
+                SelectedClientId = clientId,
+                StatusCode = 200,
+                CreatedUtc = DateTime.UtcNow.AddSeconds(-1),
+                CompletedUtc = DateTime.UtcNow,
+                Telemetry = new RequestHistoryTelemetry { TotalTokens = totalTokens }
+            };
+        }
+
+        private sealed class FakeTenantSubordinateService : ITenantSubordinateService
+        {
+            public string ServiceName => "FakeLedger";
+
+            public int CreateCalls { get; private set; }
+
+            public int DeleteCalls { get; private set; }
+
+            public Task<TenantSubordinateServiceStatus> CreateAsync(Tenant tenant, IReadOnlyList<User> seedUsers, bool allowDeferredProvisioning, CancellationToken token = default)
+            {
+                CreateCalls++;
+                return Task.FromResult(Status("create", tenant, seedUsers.Count > 0 ? "Provisioned" : "Partial", seedUsers.Count > 0 ? null : "No seed users."));
+            }
+
+            public Task<TenantSubordinateServiceStatus> UpdateAsync(Tenant tenant, CancellationToken token = default)
+            {
+                return Task.FromResult(Status("update", tenant, "Provisioned", null));
+            }
+
+            public Task<TenantSubordinateServiceStatus> SuspendAsync(Tenant tenant, CancellationToken token = default)
+            {
+                return Task.FromResult(Status("suspend", tenant, "Provisioned", null));
+            }
+
+            public Task<TenantSubordinateServiceStatus> ReactivateAsync(Tenant tenant, CancellationToken token = default)
+            {
+                return Task.FromResult(Status("reactivate", tenant, "Provisioned", null));
+            }
+
+            public Task<TenantSubordinateServiceStatus> DeleteAsync(Tenant tenant, bool hardDelete, CancellationToken token = default)
+            {
+                DeleteCalls++;
+                return Task.FromResult(Status("delete", tenant, "Deleted", null));
+            }
+
+            public Task<TenantSubordinateServiceStatus> ReconcileAsync(Tenant tenant, CancellationToken token = default)
+            {
+                return Task.FromResult(Status("reconcile", tenant, "Provisioned", null));
+            }
+
+            private TenantSubordinateServiceStatus Status(string operation, Tenant tenant, string status, string? error)
+            {
+                return new TenantSubordinateServiceStatus
+                {
+                    ServiceName = ServiceName,
+                    Operation = operation,
+                    XenoTenantId = tenant.Id,
+                    ExternalTenantId = "fake_" + tenant.Id,
+                    Status = status,
+                    ErrorMessage = error,
+                    UpdatedUtc = DateTime.UtcNow
+                };
+            }
+        }
+
         private static void AssertAllowed(AuthorizationDecision decision, string message)
         {
             if (!decision.Allowed) throw new InvalidOperationException(message + " Decision: " + decision.ReasonCode + " " + decision.Message);
@@ -1458,6 +1874,188 @@ namespace Test.Shared
         {
             if (decision.Allowed) throw new InvalidOperationException("Authorization unexpectedly succeeded.");
             if (!String.Equals(decision.ReasonCode, expectedReasonCode, StringComparison.Ordinal)) throw new InvalidOperationException("Expected denial reason " + expectedReasonCode + " but got " + decision.ReasonCode + ".");
+        }
+
+        /// <summary>
+        /// Ledgering test suite.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor LedgerSuite()
+        {
+            return new TestSuiteDescriptor(
+                "Ledger",
+                "Ledger",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerSettingsAndIdPrefixes",
+                        "Ledger settings and ID helpers expose expected defaults",
+                        executeAsync: delegate
+                        {
+                            XenoSettings xenoSettings = new XenoSettings();
+                            if (xenoSettings.Ledger == null) throw new InvalidOperationException("Ledger settings missing.");
+
+                            LedgerSettings settings = new LedgerSettings
+                            {
+                                DrainIntervalMs = 1,
+                                MaxBatchSize = 0,
+                                MaxQueueDepth = 0,
+                                RequestTimeoutMs = 1
+                            };
+                            if (settings.DrainIntervalMs != 100) throw new InvalidOperationException("Ledger drain interval minimum clamp failed.");
+                            if (settings.MaxBatchSize != 1) throw new InvalidOperationException("Ledger batch size minimum clamp failed.");
+                            if (settings.MaxQueueDepth != 1) throw new InvalidOperationException("Ledger queue depth minimum clamp failed.");
+                            if (settings.RequestTimeoutMs != 1000) throw new InvalidOperationException("Ledger request timeout minimum clamp failed.");
+
+                            AssertIdPrefix(IdGenerator.NewLedgerTenantLinkId(), "ledten_");
+                            AssertIdPrefix(IdGenerator.NewLedgerAccountLinkId(), "ledacct_");
+                            AssertIdPrefix(IdGenerator.NewLedgerEventId(), "ledevt_");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerEventFactoryBuildsRequestEvent",
+                        "Ledger event factory maps request history to requester and serving owner",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
+                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            RequestHistoryEntry history = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 42, "/v1/chat/completions");
+
+                            bool created = LedgerEventFactory.TryCreate(platform, history, out LedgerEvent? ledgerEvent, out string? reason);
+                            if (!created || ledgerEvent == null) throw new InvalidOperationException("Ledger event was not created: " + reason);
+                            if (ledgerEvent.TotalTokens != 42) throw new InvalidOperationException("Ledger event token count mismatch.");
+                            if (!String.Equals(ledgerEvent.RequestUserId, admin.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Ledger request user mismatch.");
+                            if (!String.Equals(ledgerEvent.ServingUserId, admin.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Ledger serving user mismatch.");
+                            if (ledgerEvent.RequestKind != LedgerRequestKind.Completion) throw new InvalidOperationException("Ledger request kind mismatch.");
+
+                            Dictionary<string, string> tags = LedgerMetadataBuilder.BuildEntryTags(ledgerEvent, LedgerEntryDirection.Debit);
+                            if (!String.Equals(tags["source"], "xeno", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger source tag missing.");
+                            if (!String.Equals(tags["ledgerEventId"], ledgerEvent.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Ledger event tag mismatch.");
+                            if (!String.Equals(tags["direction"], "debit", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger direction tag mismatch.");
+                            if (!LedgerMetadataBuilder.BuildEntryLabels(LedgerEntryDirection.Credit).Contains("xeno-credit", StringComparer.Ordinal)) throw new InvalidOperationException("Ledger credit label missing.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerCaptureSkipsDisabledAndTokenlessRequests",
+                        "Ledger capture skips disabled ledgering and histories without usable token counts",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
+                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using (LedgerService service = new LedgerService(platform, new LedgerSettings { Enabled = false }, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                            {
+                                if (service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions"), out string? disabledReason)) throw new InvalidOperationException("Disabled ledgering enqueued an event.");
+                                if (!String.Equals(disabledReason, "Ledgering is disabled.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected disabled reason: " + disabledReason);
+                            }
+
+                            RequestHistoryEntry zeroTokens = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 0, "/v1/chat/completions");
+                            if (LedgerEventFactory.TryCreate(platform, zeroTokens, out LedgerEvent? _, out string? zeroReason)) throw new InvalidOperationException("Zero-token history created a ledger event.");
+                            if (String.IsNullOrWhiteSpace(zeroReason)) throw new InvalidOperationException("Zero-token skip reason was empty.");
+
+                            RequestHistoryEntry missingTokens = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 1, "/v1/chat/completions");
+                            missingTokens.Telemetry.TotalTokens = null;
+                            if (LedgerEventFactory.TryCreate(platform, missingTokens, out LedgerEvent? _, out string? missingReason)) throw new InvalidOperationException("Missing-token history created a ledger event.");
+                            if (String.IsNullOrWhiteSpace(missingReason)) throw new InvalidOperationException("Missing-token skip reason was empty.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerEventFactoryResolvesCredentialAndClientOwners",
+                        "Ledger event factory resolves the requesting credential owner and selected client owner",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User requestUser = new User { Id = "usr_ledger_requestor", TenantId = Constants.DefaultTenantId, Email = "ledger-requestor@test", Username = "ledger-requestor@test", Active = true };
+                            User servingUser = new User { Id = "usr_ledger_serving", TenantId = Constants.DefaultTenantId, Email = "ledger-serving@test", Username = "ledger-serving@test", Active = true };
+                            platform.Users.Add(requestUser);
+                            platform.Users.Add(servingUser);
+                            Credential credential = new Credential { Id = "cred_ledger_requestor", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "ledger-requestor", SecretKey = "secret", Active = true };
+                            platform.Credentials.Add(credential);
+                            XenoClientRecord client = new XenoClientRecord { Id = "xcl_ledger_serving", TenantId = Constants.DefaultTenantId, Name = "ledger-serving", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
+                            platform.Clients.Add(client);
+
+                            RequestHistoryEntry history = CreateLedgerHistory(credential.Id, requestUser.Id, client.Id, 37, "/v1/embeddings");
+                            if (!LedgerEventFactory.TryCreate(platform, history, out LedgerEvent? ledgerEvent, out string? reason) || ledgerEvent == null) throw new InvalidOperationException("Ledger event was not created: " + reason);
+                            if (!String.Equals(ledgerEvent.RequestUserId, requestUser.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Credential owner was not used as request user.");
+                            if (!String.Equals(ledgerEvent.ServingUserId, servingUser.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Selected client owner was not used as serving user.");
+                            if (ledgerEvent.RequestKind != LedgerRequestKind.Embedding) throw new InvalidOperationException("Embedding request kind was not detected.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerSameUserDebitAndCreditIdentitiesRemainDistinct",
+                        "Ledger metadata keeps debit and credit entries distinct when the same user requests and serves",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
+                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            RequestHistoryEntry history = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 42, "/v1/chat/completions");
+                            if (!LedgerEventFactory.TryCreate(platform, history, out LedgerEvent? ledgerEvent, out string? reason) || ledgerEvent == null) throw new InvalidOperationException("Ledger event was not created: " + reason);
+
+                            Dictionary<string, string> debitTags = LedgerMetadataBuilder.BuildEntryTags(ledgerEvent, LedgerEntryDirection.Debit);
+                            Dictionary<string, string> creditTags = LedgerMetadataBuilder.BuildEntryTags(ledgerEvent, LedgerEntryDirection.Credit);
+                            if (!String.Equals(ledgerEvent.RequestUserId, ledgerEvent.ServingUserId, StringComparison.Ordinal)) throw new InvalidOperationException("Fixture did not create same-user event.");
+                            if (!String.Equals(debitTags["ledgerEventId"], creditTags["ledgerEventId"], StringComparison.Ordinal)) throw new InvalidOperationException("Debit and credit event IDs differ.");
+                            if (String.Equals(debitTags["direction"], creditTags["direction"], StringComparison.Ordinal)) throw new InvalidOperationException("Debit and credit directions were not distinct.");
+                            if (!LedgerMetadataBuilder.BuildEntryLabels(LedgerEntryDirection.Debit).Contains("xeno-debit", StringComparer.Ordinal)) throw new InvalidOperationException("Debit label missing.");
+                            if (!LedgerMetadataBuilder.BuildEntryLabels(LedgerEntryDirection.Credit).Contains("xeno-credit", StringComparer.Ordinal)) throw new InvalidOperationException("Credit label missing.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "TenantLifecycleCoordinatorRecordsStatusAndAudit",
+                        "Tenant lifecycle coordinator records subordinate status and audit rows",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            Tenant tenant = platform.GetDefaultTenant();
+                            User admin = platform.Users.First(item => item.TenantId == tenant.Id && item.IsAdmin);
+                            FakeTenantSubordinateService fakeService = new FakeTenantSubordinateService();
+                            TenantLifecycleService lifecycle = new TenantLifecycleService(platform, new ITenantSubordinateService[] { fakeService });
+                            RequestContext context = new RequestContext { TenantId = tenant.Id, UserId = admin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, RequestId = "req_lifecycle_test" };
+
+                            TenantLifecycleResult createResult = await lifecycle.CreateAsync(tenant, new List<User> { admin }, false, context, CancellationToken.None).ConfigureAwait(false);
+                            if (!createResult.Success) throw new InvalidOperationException("Lifecycle create did not succeed.");
+                            if (fakeService.CreateCalls != 1) throw new InvalidOperationException("Subordinate create was not called.");
+                            TenantSubordinateServiceStatus? status = tenant.SubordinateServices.FirstOrDefault(item => item.ServiceName == fakeService.ServiceName);
+                            if (status == null || !String.Equals(status.Status, "Provisioned", StringComparison.Ordinal)) throw new InvalidOperationException("Tenant status was not recorded.");
+                            if (!platform.AuditRecords.Any(item => item.RequestId == "req_lifecycle_test" && item.ResourceType == "TenantLifecycle.FakeLedger" && item.Allowed)) throw new InvalidOperationException("Lifecycle audit was not recorded.");
+
+                            TenantLifecycleResult deleteResult = await lifecycle.DeleteAsync(tenant, true, context, CancellationToken.None).ConfigureAwait(false);
+                            if (!deleteResult.Success) throw new InvalidOperationException("Lifecycle delete did not succeed.");
+                            if (fakeService.DeleteCalls != 1) throw new InvalidOperationException("Subordinate delete was not called.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Ledger",
+                        "LedgerQueueFullRecordsFailure",
+                        "Ledger service records queue-full failures without blocking request capture",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
+                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
+                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            LedgerSettings settings = new LedgerSettings { Enabled = true, MaxQueueDepth = 1, BaseUrl = "http://127.0.0.1:1" };
+                            using (LedgerService service = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                            {
+                                bool first = service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions"), out string? firstReason);
+                                bool second = service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 11, "/v1/embeddings"), out string? secondReason);
+                                if (!first) throw new InvalidOperationException("First ledger enqueue failed: " + firstReason);
+                                if (second) throw new InvalidOperationException("Second ledger enqueue unexpectedly succeeded.");
+                                if (!String.Equals(secondReason, "Ledger queue is full.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected queue-full reason: " + secondReason);
+
+                                settings.Enabled = false;
+                                LedgerStatusResponse status = await service.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+                                if (status.Queue.QueueDepth != 1) throw new InvalidOperationException("Ledger queue depth mismatch.");
+                                if (!String.Equals(status.Queue.LastFailure, "Ledger queue is full.", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger queue failure was not recorded.");
+                            }
+                        })
+                });
         }
 
         /// <summary>
@@ -6381,6 +6979,223 @@ namespace Test.Shared
             if (!id.StartsWith(prefix, StringComparison.Ordinal)) throw new InvalidOperationException("ID prefix mismatch: " + id);
         }
 
+        private static bool CheckDockerAvailable()
+        {
+            try
+            {
+                ProcessCommandResult result = RunProcessAsync("docker", new List<string> { "info", "--format", "{{.ServerVersion}}" }, null, CancellationToken.None).GetAwaiter().GetResult();
+                return result.ExitCode == 0;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private static async Task RunDockerNetLedgerContainerEndToEndAsync(CancellationToken token)
+        {
+            int port = GetFreePort();
+            string containerName = "xeno-netledger-test-" + Guid.NewGuid().ToString("N");
+            string runtimeDirectory = Path.Combine(Path.GetTempPath(), "xeno-netledger-docker-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(runtimeDirectory);
+            string settingsFile = Path.Combine(runtimeDirectory, "netledger.json");
+            File.WriteAllText(settingsFile, BuildDockerNetLedgerSettingsJson(), Encoding.UTF8);
+
+            try
+            {
+                ProcessCommandResult runResult = await RunProcessAsync("docker", new List<string>
+                {
+                    "run",
+                    "-d",
+                    "--rm",
+                    "--name",
+                    containerName,
+                    "-p",
+                    "127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) + ":8080",
+                    "-v",
+                    runtimeDirectory + ":/app/data",
+                    "jchristn77/netledger:v3.0.0",
+                    "-f",
+                    "/app/data/netledger.json"
+                }, null, token).ConfigureAwait(false);
+
+                if (runResult.ExitCode != 0)
+                {
+                    throw new InvalidOperationException("Docker NetLedger container failed to start: " + runResult.StandardError + runResult.StandardOutput);
+                }
+
+                string baseUrl = "http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture);
+                await WaitForHttpOkAsync(baseUrl + "/", token).ConfigureAwait(false);
+                await ExerciseRealNetLedgerContainerAsync(baseUrl, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                await RunProcessAsync("docker", new List<string> { "rm", "-f", containerName }, null, CancellationToken.None).ConfigureAwait(false);
+                if (Directory.Exists(runtimeDirectory))
+                {
+                    Directory.Delete(runtimeDirectory, true);
+                }
+            }
+        }
+
+        private static string BuildDockerNetLedgerSettingsJson()
+        {
+            return JsonUtil.Serialize(new
+            {
+                Webserver = new
+                {
+                    Hostname = "+",
+                    Port = 8080,
+                    Ssl = false
+                },
+                Logging = new
+                {
+                    EnableConsole = true,
+                    LogRequests = false
+                },
+                Authentication = new
+                {
+                    Enabled = true,
+                    DefaultAdminKey = "netledgeradmin"
+                },
+                Database = new
+                {
+                    Type = "Sqlite",
+                    Filename = "/app/data/netledger.db"
+                }
+            }, true);
+        }
+
+        private static async Task ExerciseRealNetLedgerContainerAsync(string baseUrl, CancellationToken token)
+        {
+            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+            User requestUser = new User { Id = "usr_docker_ledger_requestor", TenantId = Constants.DefaultTenantId, Email = "docker-ledger-requestor@test", Username = "docker-ledger-requestor@test", Active = true };
+            User servingUser = new User { Id = "usr_docker_ledger_serving", TenantId = Constants.DefaultTenantId, Email = "docker-ledger-serving@test", Username = "docker-ledger-serving@test", Active = true };
+            platform.Users.Add(requestUser);
+            platform.Users.Add(servingUser);
+            Credential credential = new Credential { Id = "cred_docker_ledger", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "docker-ledger", SecretKey = "secret", Active = true };
+            platform.Credentials.Add(credential);
+            XenoClientRecord clientRecord = new XenoClientRecord { Id = "xcl_docker_ledger", TenantId = Constants.DefaultTenantId, Name = "docker-ledger", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
+            platform.Clients.Add(clientRecord);
+
+            LedgerSettings settings = new LedgerSettings
+            {
+                Enabled = true,
+                BaseUrl = baseUrl,
+                ApiKey = "default",
+                SecretKey = "default",
+                CommitEntriesImmediately = true
+            };
+
+            using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken saveToken) { return Task.CompletedTask; }))
+            {
+                if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 77, "/v1/chat/completions"), out string? reason))
+                {
+                    throw new InvalidOperationException("Docker-backed ledger event was not enqueued: " + reason);
+                }
+
+                LedgerDrainResponse drain = await ledger.DrainOnceAsync(token).ConfigureAwait(false);
+                if (drain.Processed != 1 || drain.Retried != 0 || drain.TerminalFailures != 0)
+                {
+                    throw new InvalidOperationException("Docker-backed drain did not process exactly one event.");
+                }
+            }
+
+            LedgerTenantLink? tenantLink = platform.LedgerTenantLinks.FirstOrDefault(item => item.XenoTenantId == Constants.DefaultTenantId);
+            if (tenantLink == null) throw new InvalidOperationException("Docker-backed drain did not persist a tenant link.");
+            LedgerAccountLink? requestLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == requestUser.Id);
+            LedgerAccountLink? servingLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == servingUser.Id);
+            if (requestLink == null || servingLink == null) throw new InvalidOperationException("Docker-backed drain did not persist both account links.");
+
+            using (NetLedgerClient client = new NetLedgerClient(settings))
+            {
+                Dictionary<string, string> debitTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    { "source", "xeno" },
+                    { "requestUserId", requestUser.Id },
+                    { "direction", "debit" }
+                };
+                Dictionary<string, string> creditTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    { "source", "xeno" },
+                    { "servingUserId", servingUser.Id },
+                    { "direction", "credit" }
+                };
+
+                List<NetLedgerEntry> debitEntries = await client.EnumerateEntriesByTagsAsync(tenantLink.NetLedgerTenantId, requestLink.NetLedgerAccountId, debitTags, token).ConfigureAwait(false);
+                List<NetLedgerEntry> creditEntries = await client.EnumerateEntriesByTagsAsync(tenantLink.NetLedgerTenantId, servingLink.NetLedgerAccountId, creditTags, token).ConfigureAwait(false);
+                if (debitEntries.Count != 1) throw new InvalidOperationException("Docker-backed NetLedger did not return exactly one debit entry.");
+                if (creditEntries.Count != 1) throw new InvalidOperationException("Docker-backed NetLedger did not return exactly one credit entry.");
+                if (!debitEntries[0].IsCommitted || !creditEntries[0].IsCommitted) throw new InvalidOperationException("Docker-backed NetLedger entries were not committed.");
+                if (debitEntries[0].Amount != 77m || creditEntries[0].Amount != 77m) throw new InvalidOperationException("Docker-backed NetLedger entry amounts were not preserved.");
+
+                decimal requestBalance = await ReadDockerNetLedgerCommittedBalanceAsync(baseUrl, tenantLink.NetLedgerTenantId, requestLink.NetLedgerAccountId, token).ConfigureAwait(false);
+                decimal servingBalance = await ReadDockerNetLedgerCommittedBalanceAsync(baseUrl, tenantLink.NetLedgerTenantId, servingLink.NetLedgerAccountId, token).ConfigureAwait(false);
+                if (requestBalance != -77m || servingBalance != 77m)
+                {
+                    throw new InvalidOperationException(
+                        "Docker-backed committed balance mismatch. Requester account "
+                        + requestLink.NetLedgerAccountId
+                        + " balance="
+                        + requestBalance.ToString(CultureInfo.InvariantCulture)
+                        + " debitEntryType="
+                        + debitEntries[0].Type
+                        + "; serving account "
+                        + servingLink.NetLedgerAccountId
+                        + " balance="
+                        + servingBalance.ToString(CultureInfo.InvariantCulture)
+                        + " creditEntryType="
+                        + creditEntries[0].Type
+                        + ".");
+                }
+
+                await client.DeleteAccountAsync(tenantLink.NetLedgerTenantId, requestLink.NetLedgerAccountId, token).ConfigureAwait(false);
+                await client.DeleteAccountAsync(tenantLink.NetLedgerTenantId, servingLink.NetLedgerAccountId, token).ConfigureAwait(false);
+                await client.DeleteTenantAsync(tenantLink.NetLedgerTenantId, token).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task<decimal> ReadDockerNetLedgerCommittedBalanceAsync(string baseUrl, string tenantId, string accountId, CancellationToken token)
+        {
+            using (HttpClient httpClient = new HttpClient())
+            {
+                httpClient.DefaultRequestHeaders.Add("x-access-key", "default");
+                httpClient.DefaultRequestHeaders.Add("x-secret-key", "default");
+                using (HttpResponseMessage response = await httpClient.GetAsync(baseUrl + "/v1/tenants/" + Uri.EscapeDataString(tenantId) + "/accounts/" + Uri.EscapeDataString(accountId) + "/balance", token).ConfigureAwait(false))
+                {
+                    string json = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Docker-backed balance read failed: " + json);
+                    DockerNetLedgerBalanceResponse balance = DeserializeRequired<DockerNetLedgerBalanceResponse>(json);
+                    return balance.CommittedBalance;
+                }
+            }
+        }
+
+        private static async Task WaitForHttpOkAsync(string url, CancellationToken token)
+        {
+            using (HttpClient httpClient = new HttpClient())
+            {
+                for (int i = 0; i < 120; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        using (HttpResponseMessage response = await httpClient.GetAsync(url, token).ConfigureAwait(false))
+                        {
+                            if (response.IsSuccessStatusCode) return;
+                        }
+                    }
+                    catch (HttpRequestException)
+                    {
+                    }
+
+                    await Task.Delay(500, token).ConfigureAwait(false);
+                }
+            }
+
+            throw new InvalidOperationException("HTTP endpoint did not become ready: " + url);
+        }
+
         private static void AssertEmailTableHeadersLeftAligned(EmailTemplateRenderResult rendered)
         {
             if (rendered == null) throw new ArgumentNullException(nameof(rendered));
@@ -6477,6 +7292,50 @@ namespace Test.Shared
             }
         }
 
+        private static async Task<ProcessCommandResult> RunProcessAsync(string fileName, IReadOnlyList<string> args, string? standardInput, CancellationToken token)
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                RedirectStandardError = true,
+                RedirectStandardInput = standardInput != null,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            foreach (string arg in args)
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+
+            using (Process process = new Process { StartInfo = startInfo })
+            {
+                try
+                {
+                    if (!process.Start()) throw new InvalidOperationException("Unable to start process " + fileName + ".");
+                }
+                catch (System.ComponentModel.Win32Exception ex)
+                {
+                    throw new InvalidOperationException("Unable to start process " + fileName + ".", ex);
+                }
+
+                if (standardInput != null)
+                {
+                    await process.StandardInput.WriteAsync(standardInput).ConfigureAwait(false);
+                    process.StandardInput.Close();
+                }
+
+                Task<string> standardOutputTask = process.StandardOutput.ReadToEndAsync();
+                Task<string> standardErrorTask = process.StandardError.ReadToEndAsync();
+                await process.WaitForExitAsync(token).ConfigureAwait(false);
+                return new ProcessCommandResult
+                {
+                    ExitCode = process.ExitCode,
+                    StandardOutput = await standardOutputTask.ConfigureAwait(false),
+                    StandardError = await standardErrorTask.ConfigureAwait(false)
+                };
+            }
+        }
+
         private static int GetFreePort()
         {
             TcpListener listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -6547,6 +7406,20 @@ VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider',
                     return Convert.ToInt32(value);
                 }
             }
+        }
+
+        private sealed class ProcessCommandResult
+        {
+            public int ExitCode { get; set; }
+
+            public string StandardOutput { get; set; } = String.Empty;
+
+            public string StandardError { get; set; } = String.Empty;
+        }
+
+        private sealed class DockerNetLedgerBalanceResponse
+        {
+            public decimal CommittedBalance { get; set; }
         }
 
         private static T DeserializeRequired<T>(string json) where T : class

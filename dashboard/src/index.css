@@ -898,6 +898,11 @@ html[data-theme='dark'] .primitive-list-item {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.ledger-kpi-grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .metric-card {
   min-height: 112px;
   display: flex;
@@ -955,6 +960,31 @@ html[data-theme='dark'] .primitive-list-item {
 .metric-copy small {
   font-weight: 700;
   text-transform: none;
+}
+
+.ledger-kpi-grid .metric-card {
+  min-height: 92px;
+  gap: 10px;
+  padding: 12px;
+}
+
+.ledger-kpi-grid .metric-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.ledger-kpi-grid .metric-copy {
+  gap: 3px;
+}
+
+.ledger-kpi-grid .metric-copy span,
+.ledger-kpi-grid .metric-copy small {
+  font-size: 10px;
+}
+
+.ledger-kpi-grid .metric-copy strong {
+  font-size: 22px;
+  overflow-wrap: anywhere;
 }
 
 .workspace-grid {
@@ -1480,18 +1510,30 @@ html[data-theme='dark'] .primitive-list-item {
 }
 
 @media (max-width: 1280px) {
+  .ledger-kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .telemetry-kpi-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 760px) {
+  .ledger-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .telemetry-kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 520px) {
+  .ledger-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
   .telemetry-kpi-grid {
     grid-template-columns: 1fr;
   }
@@ -1876,6 +1918,37 @@ html[data-theme='dark'] .primitive-list-item {
 .data-table th.column-collectedUtc,
 .data-table td.column-collectedUtc {
   width: 1%;
+  white-space: nowrap;
+}
+
+.ledger-request-history-link {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.ledger-request-history-link a {
+  min-width: 0;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.ledger-request-history-link a:hover {
+  text-decoration: underline;
+}
+
+.ledger-request-history-link code {
+  display: inline-block;
+  max-width: min(300px, 100%);
+  overflow: hidden;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  vertical-align: middle;
   white-space: nowrap;
 }
 

@@ -25,6 +25,19 @@
     "Username": "xeno",
     "Password": "xeno"
   },
+  "Ledger": {
+    "Enabled": true,
+    "BaseUrl": "http://netledger-server:8080",
+    "ApiKey": "default",
+    "SecretKey": "default",
+    "DrainIntervalMs": 1000,
+    "MaxBatchSize": 100,
+    "MaxQueueDepth": 10000,
+    "RequestTimeoutMs": 30000,
+    "CreateTenantsAutomatically": true,
+    "CreateAccountsAutomatically": true,
+    "CommitEntriesImmediately": true
+  },
   "Auth": {
     "Issuer": "xeno",
     "SigningKey": "development-only-change-me",

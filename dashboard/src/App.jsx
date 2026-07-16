@@ -133,7 +133,8 @@ const navGroups = [
       { to: '/dashboard/home', key: 'home', icon: Gauge },
       { to: '/dashboard/requests', key: 'requests', icon: History },
       { to: '/dashboard/explorer', key: 'explorer', icon: Globe2 },
-      { to: '/dashboard/analytics', key: 'analytics', icon: BarChart3 }
+      { to: '/dashboard/analytics', key: 'analytics', icon: BarChart3 },
+      { to: '/dashboard/ledger', key: 'ledger', icon: Activity }
     ]
   },
   {
@@ -174,6 +175,7 @@ const pageMeta = {
   '/dashboard/client-telemetry': { title: 'clientTelemetry', description: 'clientTelemetryDescription' },
   '/dashboard/routing-policies': { title: 'routingPolicies', description: 'routingPoliciesDescription' },
   '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
+  '/dashboard/ledger': { title: 'ledger', description: 'ledgerDescription' },
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
 
@@ -423,6 +425,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="client-telemetry" element={<ClientTelemetryView canCollect={isGlobalAdmin || isTenantAdmin} />} />
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
+            <Route path="ledger" element={<LedgerView canOperate={isGlobalAdmin || isTenantAdmin} />} />
             <Route path="settings" element={isGlobalAdmin ? <SettingsView /> : <NotFoundView />} />
             <Route path="*" element={<NotFoundView />} />
           </Routes>
@@ -2954,6 +2957,413 @@ function AnalyticsView() {
   );
 }
 
+function LedgerView({ canOperate = false }) {
+  const { t } = useTranslation();
+  const [entryFilters, setEntryFilters] = useState({ direction: '', fromUtc: '', toUtc: '' });
+  const [trendRange, setTrendRange] = useState('lastDay');
+  const [trendAnchor, setTrendAnchor] = useState(() => Date.now());
+  const [status, setStatus] = useState(null);
+  const [balance, setBalance] = useState(null);
+  const [balances, setBalances] = useState({ items: [], total: 0, page: 1, pageSize: 100 });
+  const [entries, setEntries] = useState({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [requestDetails, setRequestDetails] = useState(null);
+  const [requestDetailsError, setRequestDetailsError] = useState('');
+  const [operationStatus, setOperationStatus] = useState('');
+
+  const queue = value(status, 'queue') || {};
+  const balanceRows = collectionRows(value(balances, 'items'));
+  const entryRows = collectionRows(value(entries, 'items'));
+  const trendWindow = useMemo(() => buildAnalyticsWindow(trendRange, trendAnchor), [trendAnchor, trendRange]);
+  const filteredEntryRows = useMemo(() => filterLedgerEntries(entryRows, entryFilters), [entryRows, entryFilters]);
+  const trendEntryRows = useMemo(() => filterLedgerEntriesByWindow(filteredEntryRows, trendWindow), [filteredEntryRows, trendWindow]);
+  const tenantRows = useMemo(() => buildLedgerTenantRows(balanceRows, filteredEntryRows), [balanceRows, filteredEntryRows]);
+  const topDebitRows = useMemo(() => topLedgerRows(buildLedgerUserDirectionRows(filteredEntryRows, 'debit'), 'totalDebits'), [filteredEntryRows]);
+  const topCreditRows = useMemo(() => topLedgerRows(buildLedgerUserDirectionRows(filteredEntryRows, 'credit'), 'totalCredits'), [filteredEntryRows]);
+  const clientCreditRows = useMemo(() => topLedgerRows(buildLedgerClientCreditRows(filteredEntryRows), 'totalCredits'), [filteredEntryRows]);
+  const trendSummary = useMemo(() => buildLedgerTrendSummary(trendEntryRows, trendWindow), [trendEntryRows, trendWindow]);
+  const tenantCount = new Set(balanceRows.map((row) => value(row, 'xenoTenantId') || value(row, 'tenantId')).filter(Boolean)).size;
+  const totalBalance = balanceRows.reduce((sum, row) => sum + Number(value(row, 'balance') || 0), 0);
+  const totalDebits = balanceRows.reduce((sum, row) => sum + Number(value(row, 'totalDebits') || 0), 0);
+  const totalCredits = balanceRows.reduce((sum, row) => sum + Number(value(row, 'totalCredits') || 0), 0);
+  const netLedgerUiUrl = defaultNetLedgerUiUrl();
+
+  const refreshLedger = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const results = await Promise.allSettled([
+        api.getLedgerStatus(),
+        api.getMyLedgerBalance(),
+        api.getLedgerBalances({ page: 1, pageSize: 100 }),
+        api.getMyLedgerEntries()
+      ]);
+      setStatus(results[0].status === 'fulfilled' ? results[0].value : null);
+      setBalance(results[1].status === 'fulfilled' ? results[1].value : null);
+      setBalances(results[2].status === 'fulfilled' ? results[2].value : { items: [], total: 0, page: 1, pageSize: 100 });
+      setEntries(results[3].status === 'fulfilled' ? results[3].value : { items: [], total: 0 });
+      const rejected = results.find((item) => item.status === 'rejected');
+      if (rejected) setError(rejected.reason instanceof Error ? rejected.reason.message : t('ledgerLoadFailed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    refreshLedger();
+  }, [refreshLedger]);
+
+  function updateLedgerTrendRange(nextRange) {
+    setTrendRange(nextRange);
+    setTrendAnchor(Date.now());
+  }
+
+  async function runLedgerDrain() {
+    setOperationStatus('');
+    const result = await api.drainLedgerQueue();
+    setOperationStatus(t('ledgerDrainComplete', {
+      processed: formatNumber(value(result, 'processed') || 0),
+      retried: formatNumber(value(result, 'retried') || 0),
+      failures: formatNumber(value(result, 'terminalFailures') || 0)
+    }));
+    await refreshLedger();
+  }
+
+  async function runLedgerReconcile() {
+    setOperationStatus('');
+    const result = await api.reconcileLedger();
+    setOperationStatus(t('ledgerReconcileComplete', {
+      tenants: formatNumber(value(result, 'missingTenantLinks') || 0),
+      accounts: formatNumber(value(result, 'missingAccountLinks') || 0)
+    }));
+    await refreshLedger();
+  }
+
+  async function openRequestDetails(requestHistoryId) {
+    if (!requestHistoryId) return;
+
+    setRequestDetailsError('');
+    try {
+      const result = await api.get(`${requestHistoryEndpoint}/${encodeURIComponent(requestHistoryId)}`);
+      setRequestDetails(result);
+    } catch (exception) {
+      setRequestDetailsError(exception instanceof Error ? exception.message : t('requestDetailsLoadFailed'));
+    }
+  }
+
+  const netLedgerHealthy = Boolean(value(status, 'netLedgerHealthy'));
+  const netLedgerMessage = value(status, 'netLedgerMessage') || value(queue, 'lastFailure') || '';
+  const balanceHeading = canOperate ? t('globalTokenBalance') : t('currentBalance');
+
+  return (
+    <div className="view-stack">
+      <div className="toolbar align-end">
+        <IconButton iconOnly onClick={refreshLedger} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
+        {canOperate ? <IconButton onClick={runLedgerDrain} label={t('drain')} tooltip={t('tooltipLedgerDrain')} icon={<Play size={16} />} variant="secondary" /> : null}
+        {canOperate ? <IconButton onClick={runLedgerReconcile} label={t('reconcile')} tooltip={t('tooltipLedgerReconcile')} icon={<RefreshCw size={16} />} variant="secondary" /> : null}
+        {canOperate ? (
+          <a className="action-button secondary" href={netLedgerUiUrl} rel="noreferrer" target="_blank" title={t('tooltipNetLedgerUi')}>
+            <Globe2 size={16} />
+            <span>{t('netLedgerUi')}</span>
+          </a>
+        ) : null}
+      </div>
+      {error ? <div className="leaderboard-error" role="alert">{error}</div> : null}
+      {requestDetailsError ? <div className="leaderboard-error" role="alert">{requestDetailsError}</div> : null}
+      {operationStatus ? <p className="muted-copy">{operationStatus}</p> : null}
+      <div className="metric-grid compact ledger-kpi-grid">
+        <MetricCard icon={<Gauge size={18} />} label={balanceHeading} value={formatNumber(canOperate ? totalBalance : value(balance, 'balance') || 0)} tone={(canOperate ? totalBalance : value(balance, 'balance') || 0) < 0 ? 'warning' : 'success'} />
+        <MetricCard icon={<ArrowDown size={18} />} label={t('totalDebits')} value={formatNumber(canOperate ? totalDebits : value(balance, 'totalDebits') || 0)} tone="warning" />
+        <MetricCard icon={<ArrowUp size={18} />} label={t('totalCredits')} value={formatNumber(canOperate ? totalCredits : value(balance, 'totalCredits') || 0)} tone="success" />
+        <MetricCard icon={<Building2 size={18} />} label={t('tenants')} value={formatNumber(tenantCount)} />
+        <MetricCard icon={<Activity size={18} />} label={t('queueDepth')} value={formatNumber(value(queue, 'queueDepth') || 0)} />
+        <MetricCard icon={<ShieldCheck size={18} />} label={t('netLedgerHealth')} value={netLedgerHealthy ? t('healthy') : t('unhealthy')} tone={netLedgerHealthy ? 'success' : 'warning'} subtext={netLedgerMessage} />
+        <MetricCard icon={<History size={18} />} label={t('processed')} value={formatNumber(value(queue, 'processedCount') || 0)} />
+      </div>
+      <section className="workspace-card data-panel">
+        <div className="workspace-card-header">
+          <div>
+            <h2>{t('ledgerFilters')}</h2>
+          </div>
+        </div>
+        <div className="form-grid">
+          <label>
+            <span>{t('direction')}</span>
+            <select onChange={(event) => setEntryFilters((current) => ({ ...current, direction: event.target.value }))} title={t('tooltipLedgerDirectionFilter')} value={entryFilters.direction}>
+              <option value="">{t('all')}</option>
+              <option value="debit">{t('debit')}</option>
+              <option value="credit">{t('credit')}</option>
+            </select>
+          </label>
+          <label>
+            <span>{t('fromUtc')}</span>
+            <input onChange={(event) => setEntryFilters((current) => ({ ...current, fromUtc: event.target.value }))} title={t('tooltipLedgerFromFilter')} type="datetime-local" value={entryFilters.fromUtc} />
+          </label>
+          <label>
+            <span>{t('toUtc')}</span>
+            <input onChange={(event) => setEntryFilters((current) => ({ ...current, toUtc: event.target.value }))} title={t('tooltipLedgerToFilter')} type="datetime-local" value={entryFilters.toUtc} />
+          </label>
+        </div>
+      </section>
+      <section className="workspace-card data-panel">
+        <div className="workspace-card-header">
+          <div>
+            <h2>{t('balanceTrend')}</h2>
+            <p>{t('balanceTrendSubtitle')}</p>
+          </div>
+        </div>
+        <ActivityChart
+          ariaLabel={t('balanceTrend')}
+          failedLabel={t('debits')}
+          loading={loading}
+          onRangeChange={updateLedgerTrendRange}
+          onRefresh={refreshLedger}
+          range={trendRange}
+          successLabel={t('credits')}
+          summary={trendSummary}
+          yAxisLabel={t('tokenAmount')}
+        />
+      </section>
+      {canOperate ? (
+        <DataTable
+          columns={[
+            { key: 'tenantId', label: 'tenantId' },
+            { key: 'balance', label: 'currentBalance', render: (row) => formatNumber(value(row, 'balance') || 0), sortValue: (row) => Number(value(row, 'balance') || 0) },
+            { key: 'totalDebits', label: 'totalDebits', render: (row) => formatNumber(value(row, 'totalDebits') || 0), sortValue: (row) => Number(value(row, 'totalDebits') || 0) },
+            { key: 'totalCredits', label: 'totalCredits', render: (row) => formatNumber(value(row, 'totalCredits') || 0), sortValue: (row) => Number(value(row, 'totalCredits') || 0) },
+            { key: 'userCount', label: 'userCount', render: (row) => formatNumber(value(row, 'userCount') || 0), sortValue: (row) => Number(value(row, 'userCount') || 0) },
+            { key: 'lastActivityUtc', label: 'lastActivity', render: (row) => formatDateTime(value(row, 'lastActivityUtc')) }
+          ]}
+          loading={loading}
+          onRefresh={refreshLedger}
+          rows={tenantRows}
+          subtitle={t('ledgerTenantSummarySubtitle')}
+          title={t('ledgerTenantSummary')}
+        />
+      ) : null}
+      <DataTable
+        columns={[
+          { key: 'userId', label: 'userId' },
+          { key: 'totalDebits', label: 'totalDebits', render: (row) => formatNumber(value(row, 'totalDebits') || 0), sortValue: (row) => Number(value(row, 'totalDebits') || 0) },
+          { key: 'lastActivityUtc', label: 'lastActivity', render: (row) => formatDateTime(value(row, 'lastActivityUtc')) }
+        ]}
+        loading={loading}
+        onRefresh={refreshLedger}
+        rows={topDebitRows}
+        subtitle={t('topDebitedUsersSubtitle')}
+        title={t('topDebitedUsers')}
+      />
+      <DataTable
+        columns={[
+          { key: 'userId', label: 'userId' },
+          { key: 'totalCredits', label: 'totalCredits', render: (row) => formatNumber(value(row, 'totalCredits') || 0), sortValue: (row) => Number(value(row, 'totalCredits') || 0) },
+          { key: 'lastActivityUtc', label: 'lastActivity', render: (row) => formatDateTime(value(row, 'lastActivityUtc')) }
+        ]}
+        loading={loading}
+        onRefresh={refreshLedger}
+        rows={topCreditRows}
+        subtitle={t('topCreditedUsersSubtitle')}
+        title={t('topCreditedUsers')}
+      />
+      <DataTable
+        columns={[
+          { key: 'selectedClientId', label: 'selectedClientId' },
+          { key: 'servingUserId', label: 'servingUserId' },
+          { key: 'totalCredits', label: 'totalCredits', render: (row) => formatNumber(value(row, 'totalCredits') || 0), sortValue: (row) => Number(value(row, 'totalCredits') || 0) },
+          { key: 'lastActivityUtc', label: 'lastActivity', render: (row) => formatDateTime(value(row, 'lastActivityUtc')) }
+        ]}
+        loading={loading}
+        onRefresh={refreshLedger}
+        rows={clientCreditRows}
+        subtitle={t('servingClientCreditsSubtitle')}
+        title={t('servingClientCredits')}
+      />
+      <DataTable
+        columns={[
+          { key: 'xenoTenantId', label: 'tenantId' },
+          { key: 'userId', label: 'userId' },
+          { key: 'balance', label: 'currentBalance', render: (row) => formatNumber(value(row, 'balance') || 0), sortValue: (row) => Number(value(row, 'balance') || 0) },
+          { key: 'totalDebits', label: 'totalDebits', render: (row) => formatNumber(value(row, 'totalDebits') || 0), sortValue: (row) => Number(value(row, 'totalDebits') || 0) },
+          { key: 'totalCredits', label: 'totalCredits', render: (row) => formatNumber(value(row, 'totalCredits') || 0), sortValue: (row) => Number(value(row, 'totalCredits') || 0) },
+          { key: 'lastActivityUtc', label: 'lastActivity', render: (row) => formatDateTime(value(row, 'lastActivityUtc')) }
+        ]}
+        loading={loading}
+        onRefresh={refreshLedger}
+        rows={balanceRows}
+        subtitle={t('ledgerBalancesSubtitle')}
+        title={t('ledgerBalances')}
+      />
+      <DataTable
+        columns={[
+          { key: 'direction', label: 'direction', render: (row) => <StatusChip tone={String(value(row, 'direction')).toLowerCase().includes('credit') ? 'success' : 'warning'} value={String(value(row, 'direction') ?? '-')} /> },
+          { key: 'amount', label: 'amount', render: (row) => formatNumber(value(row, 'amount') || 0), sortValue: (row) => Number(value(row, 'amount') || 0) },
+          { key: 'userId', label: 'userId' },
+          { key: 'counterpartyUserId', label: 'counterpartyUserId' },
+          { key: 'selectedClientId', label: 'selectedClientId' },
+          { key: 'requestHistoryId', label: 'requestHistoryId', render: (row) => <LedgerRequestHistoryLink onOpen={openRequestDetails} requestHistoryId={value(row, 'requestHistoryId')} /> },
+          { key: 'occurredUtc', label: 'occurredUtc', render: (row) => formatDateTime(value(row, 'occurredUtc')) }
+        ]}
+        loading={loading}
+        onRefresh={refreshLedger}
+        rows={filteredEntryRows}
+        subtitle={t('ledgerEntriesSubtitle')}
+        title={t('ledgerEntries')}
+      />
+      {requestDetails ? <RequestDetailsModal data={requestDetails} onClose={() => setRequestDetails(null)} /> : null}
+    </div>
+  );
+}
+
+function filterLedgerEntries(entries, filters) {
+  const direction = String(filters.direction || '').toLowerCase();
+  const fromMs = filters.fromUtc ? Date.parse(filters.fromUtc) : null;
+  const toMs = filters.toUtc ? Date.parse(filters.toUtc) : null;
+  return entries.filter((entry) => {
+    const entryDirection = String(value(entry, 'direction') || '').toLowerCase();
+    if (direction && entryDirection !== direction) return false;
+    const occurredUtc = value(entry, 'occurredUtc');
+    const occurredMs = occurredUtc ? Date.parse(occurredUtc) : null;
+    if (fromMs && occurredMs && occurredMs < fromMs) return false;
+    if (toMs && occurredMs && occurredMs > toMs) return false;
+    return true;
+  });
+}
+
+function filterLedgerEntriesByWindow(entries, window) {
+  return entries.filter((entry) => {
+    const occurredUtc = value(entry, 'occurredUtc') || value(entry, 'createdUtc');
+    const occurredMs = Date.parse(String(occurredUtc || ''));
+    return Number.isFinite(occurredMs) && occurredMs >= window.fromMs && occurredMs <= window.toMs;
+  });
+}
+
+function buildLedgerTenantRows(balanceRows, entryRows) {
+  const rows = new Map();
+  balanceRows.forEach((balance) => {
+    const tenantId = value(balance, 'xenoTenantId') || value(balance, 'tenantId') || 'unknown';
+    const row = rows.get(tenantId) || { tenantId, balance: 0, totalDebits: 0, totalCredits: 0, userCount: 0, lastActivityUtc: null };
+    row.balance += Number(value(balance, 'balance') || 0);
+    row.totalDebits += Number(value(balance, 'totalDebits') || 0);
+    row.totalCredits += Number(value(balance, 'totalCredits') || 0);
+    row.userCount += 1;
+    row.lastActivityUtc = latestUtc(row.lastActivityUtc, value(balance, 'lastActivityUtc'));
+    rows.set(tenantId, row);
+  });
+  entryRows.forEach((entry) => {
+    const tenantId = value(entry, 'xenoTenantId') || value(entry, 'tenantId') || 'unknown';
+    const row = rows.get(tenantId) || { tenantId, balance: 0, totalDebits: 0, totalCredits: 0, userCount: 0, lastActivityUtc: null };
+    row.lastActivityUtc = latestUtc(row.lastActivityUtc, value(entry, 'occurredUtc'));
+    rows.set(tenantId, row);
+  });
+  return [...rows.values()];
+}
+
+function buildLedgerUserDirectionRows(entries, targetDirection) {
+  const rows = new Map();
+  entries
+    .filter((entry) => String(value(entry, 'direction') || '').toLowerCase() === targetDirection)
+    .forEach((entry) => {
+      const userId = value(entry, 'userId') || value(entry, targetDirection === 'debit' ? 'requestUserId' : 'servingUserId') || 'unknown';
+      const row = rows.get(userId) || { userId, totalDebits: 0, totalCredits: 0, lastActivityUtc: null };
+      if (targetDirection === 'debit') row.totalDebits += Number(value(entry, 'amount') || 0);
+      else row.totalCredits += Number(value(entry, 'amount') || 0);
+      row.lastActivityUtc = latestUtc(row.lastActivityUtc, value(entry, 'occurredUtc'));
+      rows.set(userId, row);
+    });
+  return [...rows.values()];
+}
+
+function buildLedgerClientCreditRows(entries) {
+  const rows = new Map();
+  entries
+    .filter((entry) => String(value(entry, 'direction') || '').toLowerCase() === 'credit')
+    .forEach((entry) => {
+      const selectedClientId = value(entry, 'selectedClientId') || 'unknown';
+      const servingUserId = value(entry, 'servingUserId') || value(entry, 'userId') || 'unknown';
+      const key = `${selectedClientId}:${servingUserId}`;
+      const row = rows.get(key) || { selectedClientId, servingUserId, totalCredits: 0, lastActivityUtc: null };
+      row.totalCredits += Number(value(entry, 'amount') || 0);
+      row.lastActivityUtc = latestUtc(row.lastActivityUtc, value(entry, 'occurredUtc'));
+      rows.set(key, row);
+    });
+  return [...rows.values()];
+}
+
+function topLedgerRows(rows, amountKey) {
+  return [...rows]
+    .sort((left, right) => Number(value(right, amountKey) || 0) - Number(value(left, amountKey) || 0))
+    .slice(0, 10);
+}
+
+function buildLedgerTrendSummary(entries, window) {
+  const bucketMs = Math.max(1, Number(window.bucketMinutes || 1)) * 60 * 1000;
+  const bucketCount = Math.max(1, Math.ceil((window.toMs - window.fromMs) / bucketMs));
+  const buckets = Array.from({ length: bucketCount }, (_, index) => {
+    const startMs = window.fromMs + index * bucketMs;
+    const startUtc = new Date(startMs).toISOString();
+    return {
+      failed: 0,
+      label: ledgerTrendBucketLabel(startMs, window.key),
+      startUtc,
+      success: 0
+    };
+  });
+
+  entries.forEach((entry) => {
+    const occurred = value(entry, 'occurredUtc') || value(entry, 'createdUtc');
+    const occurredMs = Date.parse(String(occurred || ''));
+    if (!Number.isFinite(occurredMs)) return;
+
+    const index = Math.floor((occurredMs - window.fromMs) / bucketMs);
+    if (index < 0 || index >= buckets.length) return;
+
+    const bucket = buckets[index];
+    const amount = Number(value(entry, 'amount') || 0);
+    if (String(value(entry, 'direction') || '').toLowerCase() === 'credit') bucket.success += amount;
+    else bucket.failed += amount;
+  });
+  return { buckets };
+}
+
+function ledgerTrendBucketLabel(timestamp, rangeKey) {
+  const date = new Date(timestamp);
+  if (rangeKey === 'lastHour' || rangeKey === 'lastDay') {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function latestUtc(left, right) {
+  if (!left) return right || null;
+  if (!right) return left;
+  return Date.parse(right) > Date.parse(left) ? right : left;
+}
+
+function LedgerRequestHistoryLink({ onOpen, requestHistoryId }) {
+  if (!requestHistoryId) return '-';
+  const text = String(requestHistoryId);
+
+  function handleClick(event) {
+    event.preventDefault();
+    onOpen?.(text);
+  }
+
+  return (
+    <span className="ledger-request-history-link">
+      <a href={`/dashboard/requests?query=${encodeURIComponent(text)}`} onClick={handleClick} title="Open request details">
+        <code>{text}</code>
+      </a>
+      <CopyButton label="copyValue" value={text} />
+    </span>
+  );
+}
+
+function defaultNetLedgerUiUrl() {
+  return 'http://localhost:9200';
+}
+
 function TimeRangeSelector({ onChange, range }) {
   const { t } = useTranslation();
   return (
@@ -3537,6 +3947,18 @@ function defaultServerSettings() {
       MaxConcurrentClientRequests: 8
     },
     Database: { Type: 'Sqlite', Filename: 'data/xeno.db', Server: '', Port: 0, DatabaseName: '', Username: '', Password: '', ConnectionString: '' },
+    Ledger: {
+      Enabled: false,
+      BaseUrl: 'http://localhost:8080',
+      ApiKey: '',
+      DrainIntervalMs: 1000,
+      MaxBatchSize: 100,
+      MaxQueueDepth: 10000,
+      RequestTimeoutMs: 30000,
+      CreateTenantsAutomatically: true,
+      CreateAccountsAutomatically: true,
+      CommitEntriesImmediately: true
+    },
     Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' },
     Email: {
       Enabled: false,
@@ -3582,6 +4004,7 @@ function normalizeSettings(input) {
       ...defaults.TelemetryCollection,
       ...(source.TelemetryCollection || source.telemetryCollection || {})
     },
+    Ledger: { ...defaults.Ledger, ...(source.Ledger || source.ledger || {}) },
     Database: { ...defaults.Database, ...(source.Database || source.database || {}) },
     Logging: { ...defaults.Logging, ...(source.Logging || source.logging || {}) },
     Email: {

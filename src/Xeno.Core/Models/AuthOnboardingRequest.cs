@@ -36,5 +36,11 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("password")]
         public string? Password { get; set; } = null;
+
+        /// <summary>
+        /// Whether subordinate service provisioning can be deferred when a new tenant is created.
+        /// </summary>
+        [JsonPropertyName("deferSubordinateProvisioning")]
+        public bool? DeferSubordinateProvisioning { get; set; } = null;
     }
 }

@@ -99,6 +99,34 @@ export default class ApiClient {
     return readJsonResponse(response, options);
   }
 
+  async getLedgerStatus() {
+    return this.get('/v1.0/api/ledger/status');
+  }
+
+  async getMyLedgerBalance() {
+    return this.get('/v1.0/api/ledger/balance/me');
+  }
+
+  async getLedgerBalances(filters = {}) {
+    return this.get(`/v1.0/api/ledger/balances${queryString(filters)}`);
+  }
+
+  async getMyLedgerEntries() {
+    return this.get('/v1.0/api/ledger/entries/me');
+  }
+
+  async searchLedgerEntries(request = {}) {
+    return this.post('/v1.0/api/ledger/entries/search', request);
+  }
+
+  async drainLedgerQueue() {
+    return this.post('/v1.0/api/ledger/drain', {});
+  }
+
+  async reconcileLedger() {
+    return this.post('/v1.0/api/ledger/reconcile', {});
+  }
+
   async request(path, { body, expectStream = false, method = 'GET', onProgress, signal } = {}) {
     const options = {
       method,
@@ -193,6 +221,16 @@ export default class ApiClient {
     }
     return headers;
   }
+}
+
+function queryString(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    params.set(key, String(value));
+  });
+  const text = params.toString();
+  return text ? `?${text}` : '';
 }
 
 async function readJsonResponse(response, options = {}) {

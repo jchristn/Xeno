@@ -3311,6 +3311,244 @@
           ]
         },
         {
+          "name": "Ledger",
+          "item": [
+            {
+              "name": "System Admin - Ledger Status",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/status",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "status"
+                  ]
+                }
+              },
+              "response": [
+                {
+                  "name": "NetLedger Down",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/status"
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"queue\": {\n    \"enabled\": true,\n    \"queueDepth\": 3,\n    \"retryCount\": 2,\n    \"terminalFailureCount\": 0\n  },\n  \"netLedgerHealthy\": false,\n  \"netLedgerMessage\": \"NetLedger request timed out.\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Regular User - My Balance",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/balance/me",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "balance",
+                    "me"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Tenant Admin - User Balance",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/balances/users/{{userId}}",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "balances",
+                    "users",
+                    "{{userId}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "System Admin - Search Balances",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/balances?tenantId={{tenantId}}&page=1&pageSize=100",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "balances"
+                  ],
+                  "query": [
+                    {
+                      "key": "tenantId",
+                      "value": "{{tenantId}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "100"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Regular User - My Entries",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/entries/me",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "entries",
+                    "me"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Tenant Admin - Search Entries",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/entries/search",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "entries",
+                    "search"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenantId\": \"{{tenantId}}\",\n  \"userId\": \"{{userId}}\",\n  \"direction\": \"Credit\",\n  \"requestHistoryId\": \"{{requestHistoryId}}\",\n  \"pageSize\": 25\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "System Admin - Drain Queue",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/drain",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "drain"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "System Admin - Reconcile Links",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/ledger/reconcile",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "ledger",
+                    "reconcile"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "description": "Role-scoped Xeno ledger status, balances, entries, drain, and reconcile APIs."
+        },
+        {
           "name": "Client Telemetry",
           "item": [
             {

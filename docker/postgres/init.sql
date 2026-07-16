@@ -9,8 +9,25 @@ BEGIN
 END
 $do$;
 
+DO
+$do$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'netledger') THEN
+        CREATE ROLE netledger LOGIN PASSWORD 'netledger';
+    ELSE
+        ALTER ROLE netledger WITH LOGIN PASSWORD 'netledger';
+    END IF;
+END
+$do$;
+
 SELECT 'CREATE DATABASE xeno OWNER xeno'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'xeno')\gexec
 
 ALTER DATABASE xeno OWNER TO xeno;
 GRANT ALL PRIVILEGES ON DATABASE xeno TO xeno;
+
+SELECT 'CREATE DATABASE netledger OWNER netledger'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'netledger')\gexec
+
+ALTER DATABASE netledger OWNER TO netledger;
+GRANT CONNECT, TEMPORARY ON DATABASE netledger TO netledger;

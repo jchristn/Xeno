@@ -211,6 +211,59 @@ namespace Xeno.Sdk.Tests
         }
 
         [Fact]
+        public async Task LedgerMethods_UseExpectedRoutesAndBodies()
+        {
+            RecordingHandler handler = new RecordingHandler(request =>
+            {
+                string path = request.RequestUri?.AbsolutePath ?? String.Empty;
+                if (path.Equals("/v1.0/api/ledger/status", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"queue\":{\"enabled\":true,\"queueDepth\":1},\"netLedgerHealthy\":true}");
+                if (path.Equals("/v1.0/api/ledger/balance/me", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"tenantId\":\"ten_default\",\"userId\":\"usr_1\",\"balance\":5}");
+                if (path.Equals("/v1.0/api/ledger/balances", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"items\":[],\"total\":0,\"page\":1,\"pageSize\":100}");
+                if (path.Equals("/v1.0/api/ledger/balances/users/usr_1", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"tenantId\":\"ten_default\",\"userId\":\"usr_1\",\"balance\":5}");
+                if (path.Equals("/v1.0/api/ledger/entries/me", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"items\":[],\"total\":0}");
+                if (path.Equals("/v1.0/api/ledger/entries/search", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"items\":[{\"tenantId\":\"ten_default\",\"userId\":\"usr_1\",\"direction\":1,\"amount\":7}],\"total\":1}");
+                if (path.Equals("/v1.0/api/ledger/drain", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"processed\":1,\"retried\":0,\"terminalFailures\":0}");
+                if (path.Equals("/v1.0/api/ledger/reconcile", StringComparison.OrdinalIgnoreCase)) return JsonResponse("{\"missingTenantLinks\":0,\"missingAccountLinks\":0,\"messages\":[]}");
+                return JsonResponse("{}");
+            });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                LedgerStatusResponse status = await client.GetLedgerStatusAsync();
+                Assert.True(status.NetLedgerHealthy);
+                Assert.Equal(1, status.Queue.QueueDepth);
+
+                LedgerBalanceResponse ownBalance = await client.GetMyLedgerBalanceAsync();
+                Assert.Equal(5, ownBalance.Balance);
+
+                await client.SearchLedgerBalancesAsync(new Dictionary<string, string> { ["userId"] = "usr_1", ["page"] = "1", ["empty"] = "" });
+                await client.GetLedgerUserBalanceAsync("usr_1");
+                await client.GetMyLedgerEntriesAsync();
+
+                LedgerEntrySearchResult entries = await client.SearchLedgerEntriesAsync(new LedgerEntrySearchRequest { UserId = "usr_1", Direction = LedgerEntryDirection.Credit, PageSize = 25 });
+                Assert.Single(entries.Items);
+                Assert.Equal(LedgerEntryDirection.Credit, entries.Items[0].Direction);
+
+                LedgerDrainResponse drain = await client.DrainLedgerQueueAsync();
+                Assert.Equal(1, drain.Processed);
+
+                LedgerReconcileResponse reconcile = await client.ReconcileLedgerAsync();
+                Assert.Equal(0, reconcile.MissingTenantLinks);
+
+                Assert.Collection(
+                    handler.Requests,
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/ledger/status"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/ledger/balance/me"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/ledger/balances?userId=usr_1&page=1"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/ledger/balances/users/usr_1"),
+                    request => AssertRequest(request, HttpMethod.Get, "https://xeno.local/v1.0/api/ledger/entries/me"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/ledger/entries/search", "\"direction\":1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/ledger/drain", "{}"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/ledger/reconcile", "{}"));
+            }
+        }
+
+        [Fact]
         public async Task CredentialOptions_SendTenantAndCredentialHeaders()
         {
             RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));

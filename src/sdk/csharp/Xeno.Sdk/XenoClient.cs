@@ -965,6 +965,89 @@
         }
 
         /// <summary>
+        /// Gets ledger queue and NetLedger health status.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger status response.</returns>
+        public async Task<LedgerStatusResponse> GetLedgerStatusAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync<LedgerStatusResponse>("/v1.0/api/ledger/status", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets the authenticated user's ledger balance.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger balance response.</returns>
+        public async Task<LedgerBalanceResponse> GetMyLedgerBalanceAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync<LedgerBalanceResponse>("/v1.0/api/ledger/balance/me", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Searches visible ledger balances.
+        /// </summary>
+        /// <param name="filters">Optional query-string filters.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger balance search result.</returns>
+        public async Task<LedgerBalanceSearchResult> SearchLedgerBalancesAsync(IDictionary<string, string>? filters = null, CancellationToken token = default)
+        {
+            return await GetJsonAsync<LedgerBalanceSearchResult>("/v1.0/api/ledger/balances" + QueryString(filters), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets a ledger balance for a specific user.
+        /// </summary>
+        /// <param name="userId">Xeno user identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger balance response.</returns>
+        public async Task<LedgerBalanceResponse> GetLedgerUserBalanceAsync(string userId, CancellationToken token = default)
+        {
+            return await GetJsonAsync<LedgerBalanceResponse>("/v1.0/api/ledger/balances/users/" + Escape(userId), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets the authenticated user's ledger entries.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger entry search result.</returns>
+        public async Task<LedgerEntrySearchResult> GetMyLedgerEntriesAsync(CancellationToken token = default)
+        {
+            return await GetJsonAsync<LedgerEntrySearchResult>("/v1.0/api/ledger/entries/me", token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Searches visible ledger entries.
+        /// </summary>
+        /// <param name="request">Search request.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger entry search result.</returns>
+        public async Task<LedgerEntrySearchResult> SearchLedgerEntriesAsync(LedgerEntrySearchRequest request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<LedgerEntrySearchResult>("/v1.0/api/ledger/entries/search", request ?? new LedgerEntrySearchRequest(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Runs one ledger drain cycle.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Drain response.</returns>
+        public async Task<LedgerDrainResponse> DrainLedgerQueueAsync(CancellationToken token = default)
+        {
+            return await PostJsonAsync<LedgerDrainResponse>("/v1.0/api/ledger/drain", new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reconciles ledger tenant and account links.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Reconciliation response.</returns>
+        public async Task<LedgerReconcileResponse> ReconcileLedgerAsync(CancellationToken token = default)
+        {
+            return await PostJsonAsync<LedgerReconcileResponse>("/v1.0/api/ledger/reconcile", new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets analytics overview.
         /// </summary>
         /// <param name="token">Cancellation token.</param>

@@ -93,6 +93,8 @@ Default local endpoints:
 
 - Dashboard: `http://localhost:9100`
 - Server REST API: `http://localhost:9000`
+- NetLedger server: `http://localhost:8080`
+- NetLedger UI: `http://localhost:9200`
 - Health check: `http://localhost:9000/health`
 - Ping heartbeat: `http://localhost:9000/v1.0/api/ping`
 - OpenAPI JSON: `http://localhost:9000/openapi.json`
@@ -104,11 +106,16 @@ Seeded alpha credentials:
 - Dashboard/server user: `admin@xeno`
 - Password: `password`
 - Default client access key: `default`
+- NetLedger development access key and secret: `default` / `default` in the local Docker stack. Override Xeno's NetLedger credential with `NETLEDGER_ACCESS_KEY` and `NETLEDGER_SECRET_KEY`, or `XENO_LEDGER_API_KEY` and `XENO_LEDGER_SECRET_KEY`.
 
 The Docker images are:
 
 - `jchristn77/xeno-server:v0.1.0`
 - `jchristn77/xeno-dashboard:v0.1.0`
+- `jchristn77/netledger:v3.0.0`
+- `jchristn77/netledger-ui:v3.0.0`
+
+The compose stack uses one PostgreSQL container and initializes both the `xeno` and `netledger` databases. Xeno ledger settings in [docker/xeno.json](docker/xeno.json) point at `http://netledger-server:8080`; NetLedger settings live in [docker/netledger/netledger.json](docker/netledger/netledger.json). Xeno reads `XENO_LEDGER_API_KEY`/`XENO_LEDGER_SECRET_KEY` or `NETLEDGER_ACCESS_KEY`/`NETLEDGER_SECRET_KEY` from the environment for NetLedger access-key authentication, with the documented local fallback used only for development. NetLedger image names and host ports can be overridden with `NETLEDGER_SERVER_IMAGE`, `NETLEDGER_UI_IMAGE`, `NETLEDGER_SERVER_PORT`, and `NETLEDGER_UI_PORT`.
 
 To rebuild and push images:
 
@@ -436,6 +443,18 @@ The selected database engine stores server platform state and server-collected c
 The default Docker compose stack uses PostgreSQL. Optional MySQL and SQL Server services are present in [docker/compose.yaml](docker/compose.yaml) for alternate deployments.
 
 Server email notifications are disabled by default. Set `Email.Enabled` to `true`, choose `Email.Provider`, and configure the provider-specific section such as `Email.Mailgun` to send onboarding and administrative notifications. Global administrators can use the dashboard settings page or `POST /v1.0/api/email/test` to send a test email through the configured provider using the standard Xeno email layout. Xeno never includes passwords, bearer tokens, access keys, or secret keys in notification email. Onboarding administrator notifications include non-secret request metadata such as source IP, forwarded-for, user agent, request ID, and correlation ID for operational drill-down.
+
+## Ledgering
+
+Ledgering records successful completion and embedding requests that report `total_tokens`. Xeno debits the requesting user's NetLedger account and credits the owner of the selected serving client by the same raw token amount. NetLedger v3.0.0 or later is required because Xeno relies on tenant-scoped accounts and searchable labels/tags. No pricing, weighting, quotas, reservations, or enforcement are active in this release.
+
+Ledger writes run asynchronously after request history is captured. NetLedger outages do not block serving requests; failed ledger writes stay in an in-memory retry queue for the running process. A process crash can lose queued events that were not drained yet.
+
+Tenant lifecycle changes cascade to NetLedger when ledgering is enabled. Tenant creation provisions the NetLedger tenant and any seed user accounts before the create response is considered fully provisioned unless the request explicitly allows deferred subordinate provisioning. Tenant display-name and active-state changes update the NetLedger tenant where supported; suspension preserves balances and entries while preventing new ledger writes for that tenant. Hard tenant deletion deletes the NetLedger tenant before Xeno clears local ledger links, and subordinate failures are reported instead of silently orphaning ledger data.
+
+The dashboard `Ledger` page shows the current user's balance, visible balances and entries, queue status, and NetLedger health. System administrators can see global ledger data, tenant administrators can see their tenant, and regular users can see only their own balance and entries. Admin drain and reconcile actions are available from the dashboard and REST API.
+
+Factory reset is destructive for ledger data. The Docker reset scripts remove compose volumes and restore both `docker/xeno.json` and `docker/netledger/netledger.json`, which deletes NetLedger balances and entries in the shared Postgres volume.
 
 ## SDKs
 

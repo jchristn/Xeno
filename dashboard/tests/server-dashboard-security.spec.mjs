@@ -153,6 +153,108 @@ async function openSecurity(page, fixtures, onCreateRoleAssignment) {
   await expect(page.locator('h1', { hasText: 'Security' })).toBeVisible();
 }
 
+async function openLedger(page, user, ledgerFixtures = {}) {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session(user.id));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname === '/api/v1/users' && method === 'GET') {
+      await route.fulfill({ json: [user] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/tenants' && method === 'GET') {
+      await route.fulfill({ json: [{ id: user.tenantId || 'ten_default', name: 'Default', active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/ledger/status' && method === 'GET') {
+      if (ledgerFixtures.statusError) {
+        await route.fulfill({ json: { queue: { enabled: true, queueDepth: 1, processedCount: 0 }, netLedgerHealthy: false, netLedgerMessage: 'NetLedger is unavailable.' } });
+        return;
+      }
+
+      await route.fulfill({
+        json: ledgerFixtures.status || {
+          queue: { enabled: true, queueDepth: 0, processedCount: 4, retryCount: 0 },
+          netLedgerHealthy: true,
+          netLedgerMessage: ''
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/ledger/balance/me' && method === 'GET') {
+      await route.fulfill({ json: ledgerFixtures.me || { xenoTenantId: user.tenantId || 'ten_default', userId: user.id, balance: 70, totalDebits: 30, totalCredits: 100 } });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/ledger/balances' && method === 'GET') {
+      await route.fulfill({
+        json: ledgerFixtures.balances || {
+          items: [
+            { xenoTenantId: 'ten_default', userId: user.id, balance: 70, totalDebits: 30, totalCredits: 100, lastActivityUtc: '2026-07-16T12:00:00Z' },
+            { xenoTenantId: 'ten_default', userId: 'usr_peer', balance: -30, totalDebits: 80, totalCredits: 50, lastActivityUtc: '2026-07-16T11:00:00Z' }
+          ],
+          total: 2,
+          page: 1,
+          pageSize: 100
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/ledger/entries/me' && method === 'GET') {
+      await route.fulfill({
+        json: ledgerFixtures.entries || {
+          items: [
+            { ledgerEventId: 'ledevt_1', xenoTenantId: 'ten_default', userId: user.id, direction: 'Debit', amount: 30, counterpartyUserId: 'usr_peer', selectedClientId: 'xcl_peer', requestHistoryId: 'req_ledger_1', occurredUtc: '2026-07-16T12:00:00Z' },
+            { ledgerEventId: 'ledevt_2', xenoTenantId: 'ten_default', userId: user.id, servingUserId: user.id, direction: 'Credit', amount: 100, counterpartyUserId: 'usr_peer', selectedClientId: 'xcl_user', requestHistoryId: 'req_ledger_2', occurredUtc: '2026-07-16T12:10:00Z' }
+          ],
+          total: 2
+        }
+      });
+      return;
+    }
+
+    if (url.pathname.startsWith('/v1.0/api/request-history/') && method === 'GET') {
+      const requestHistoryId = decodeURIComponent(url.pathname.substring('/v1.0/api/request-history/'.length));
+      await route.fulfill({
+        json: ledgerFixtures.requestHistory || {
+          id: requestHistoryId,
+          tenantId: user.tenantId || 'ten_default',
+          method: 'POST',
+          path: '/v1/chat/completions',
+          model: 'ledger-model',
+          statusCode: 200,
+          selectedClientId: 'xcl_peer',
+          createdUtc: '2026-07-16T12:00:00Z',
+          routingDecision: { selectedClientId: 'xcl_peer', outcomeCode: 'Allowed' },
+          telemetry: { promptTokens: 10, outputTokens: 20, totalTokens: 30 },
+          timeline: []
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/ledger/drain' && method === 'POST') {
+      await route.fulfill({ json: { processed: 1, retried: 0, terminalFailures: 0 } });
+      return;
+    }
+
+    if (url.pathname === '/v1.0/api/ledger/reconcile' && method === 'POST') {
+      await route.fulfill({ json: { missingTenantLinks: [], missingAccountLinks: [] } });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+  await page.goto('/dashboard/ledger');
+  await expect(page.locator('h1', { hasText: 'Ledger' })).toBeVisible();
+}
+
 async function openLoginWithTenantLookup(page, tenants) {
   await page.route(`${serverUrl}/api/v1/auth/tenants`, async (route) => {
     await route.fulfill({ json: { tenants } });
@@ -422,6 +524,57 @@ test('audit logs are a top-level admin page outside security', async ({ page }) 
   const createdUtcHeader = page.getByRole('columnheader', { name: 'Created UTC' }).first();
   await expect(createdUtcHeader).toBeVisible();
   await expect(createdUtcHeader).toHaveCSS('white-space', 'nowrap');
+});
+
+test('ledger page renders system admin controls and summaries', async ({ page }) => {
+  await openLedger(page, { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false, active: true });
+
+  await expect(page.getByRole('link', { name: 'NetLedger UI' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Drain' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reconcile' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tenant Ledger Summary' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Top Requesting Users' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Serving Client Credits' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'req_ledger_1' })).toBeVisible();
+  await expect(page.getByText('Token Amount')).toBeVisible();
+  await page.getByRole('link', { name: 'req_ledger_1' }).click();
+  await expect(page).toHaveURL(/\/dashboard\/ledger$/);
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Request Details' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close Dialog' }).click();
+  await page.getByRole('button', { name: 'Drain' }).click();
+  await expect(page.getByText('Drain complete: 1 processed, 0 retried, 0 terminal failures.')).toBeVisible();
+});
+
+test('ledger page renders tenant admin and regular user scopes', async ({ page }) => {
+  await openLedger(page, { id: 'usr_tenant_admin', tenantId: 'ten_default', email: 'tenant-admin@xeno.test', isAdmin: false, isTenantAdmin: true, active: true });
+  await expect(page.getByRole('button', { name: 'Drain' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ledger Balances' })).toBeVisible();
+
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await openLedger(page, { id: 'usr_regular', tenantId: 'ten_default', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false, active: true });
+  await expect(page.getByRole('button', { name: 'Drain' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'NetLedger UI' })).toHaveCount(0);
+  await expect(page.getByText('70').first()).toBeVisible();
+});
+
+test('ledger page renders empty and NetLedger error states', async ({ page }) => {
+  const empty = { items: [], total: 0, page: 1, pageSize: 100 };
+  await openLedger(page, { id: 'usr_regular', tenantId: 'ten_default', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false, active: true }, { balances: empty, entries: { items: [], total: 0 } });
+  await expect(page.getByText('No Data').first()).toBeVisible();
+
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await openLedger(page, { id: 'usr_regular', tenantId: 'ten_default', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false, active: true }, { statusError: true });
+  await expect(page.getByText('NetLedger is unavailable.')).toBeVisible();
+});
+
+test('ledger page remains readable on mobile viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openLedger(page, { id: 'usr_regular', tenantId: 'ten_default', email: 'regular@xeno.test', isAdmin: false, isTenantAdmin: false, active: true });
+  await expect(page.getByRole('heading', { name: 'Ledger', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Balance Trend' })).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(4);
 });
 
 test('public model leaderboard uses the unauthenticated global API', async ({ page }) => {
