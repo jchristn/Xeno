@@ -255,6 +255,53 @@ async function openLedger(page, user, ledgerFixtures = {}) {
   await expect(page.locator('h1', { hasText: 'Ledger' })).toBeVisible();
 }
 
+async function openSettings(page, onSaveSettings) {
+  const user = { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false, active: true };
+  const settings = {
+    Ledger: {
+      Enabled: false,
+      BaseUrl: 'http://localhost:8080',
+      ApiKey: '',
+      SecretKey: '',
+      DrainIntervalMs: 1000,
+      MaxBatchSize: 100,
+      MaxQueueDepth: 10000,
+      RequestTimeoutMs: 30000,
+      CreateTenantsAutomatically: true,
+      CreateAccountsAutomatically: true,
+      CommitEntriesImmediately: true
+    }
+  };
+
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session(user.id));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname === '/api/v1/users' && method === 'GET') {
+      await route.fulfill({ json: [user] });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/settings' && method === 'GET') {
+      await route.fulfill({ json: settings });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/settings' && method === 'POST') {
+      const body = route.request().postDataJSON();
+      onSaveSettings?.(body);
+      await route.fulfill({ json: body });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+  await page.goto('/dashboard/settings');
+  await expect(page.locator('h1', { hasText: 'Settings' })).toBeVisible();
+}
+
 async function openLoginWithTenantLookup(page, tenants) {
   await page.route(`${serverUrl}/api/v1/auth/tenants`, async (route) => {
     await route.fulfill({ json: { tenants } });
@@ -575,6 +622,44 @@ test('ledger page remains readable on mobile viewport', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Balance Trend' })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(4);
+});
+
+test('settings page manages ledgering configuration', async ({ page }) => {
+  let savedSettings = null;
+  await openSettings(page, (body) => {
+    savedSettings = body;
+  });
+
+  const ledgerPanel = page.locator('.workspace-card', { has: page.getByRole('heading', { name: 'Ledger Settings' }) });
+  await expect(ledgerPanel).toBeVisible();
+  await expect(ledgerPanel.getByText('The ledger service and NetLedger client are created from these settings during server startup.')).toBeVisible();
+  await ledgerPanel.getByLabel('Enabled').check();
+  await ledgerPanel.getByLabel('NetLedger Base URL').fill('http://netledger:9200');
+  await ledgerPanel.getByLabel('NetLedger Access Key').fill('nl-access');
+  await ledgerPanel.getByLabel('NetLedger Secret Key').fill('nl-secret');
+  await ledgerPanel.getByLabel('Drain Interval ms').fill('2500');
+  await ledgerPanel.getByLabel('Max Batch Size').fill('25');
+  await ledgerPanel.getByLabel('Max Queue Depth').fill('500');
+  await ledgerPanel.getByLabel('NetLedger Request Timeout ms').fill('15000');
+  await ledgerPanel.getByLabel('Create Tenants Automatically').uncheck();
+  await ledgerPanel.getByLabel('Create Accounts Automatically').uncheck();
+  await ledgerPanel.getByLabel('Commit Entries Immediately').uncheck();
+
+  await page.getByRole('button', { name: 'Save Settings' }).click();
+  await expect(page.getByText('Settings saved. Some changes will not take effect until the server is restarted.')).toBeVisible();
+  expect(savedSettings?.Ledger).toMatchObject({
+    Enabled: true,
+    BaseUrl: 'http://netledger:9200',
+    ApiKey: 'nl-access',
+    SecretKey: 'nl-secret',
+    DrainIntervalMs: 2500,
+    MaxBatchSize: 25,
+    MaxQueueDepth: 500,
+    RequestTimeoutMs: 15000,
+    CreateTenantsAutomatically: false,
+    CreateAccountsAutomatically: false,
+    CommitEntriesImmediately: false
+  });
 });
 
 test('public model leaderboard uses the unauthenticated global API', async ({ page }) => {

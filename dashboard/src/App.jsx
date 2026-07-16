@@ -3651,6 +3651,66 @@ function SettingsView() {
             </label>
           </div>
         </Panel>
+        <Panel actions={<SettingImpactBadge type="restart" />} title={t('ledgerSettings')}>
+          <SettingImpactNote restart={t('ledgerRestartNote')} />
+          <div className="form-grid two">
+            <label className="toggle-field" title={t('tooltipSettingsLedgerEnabled')}>
+              <input checked={draft.Ledger.Enabled} onChange={(event) => updateSetting('Ledger', 'Enabled', event.target.checked)} title={t('tooltipSettingsLedgerEnabled')} type="checkbox" />
+              <span>{t('enabled')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsLedgerCreateTenants')}>
+              <input checked={draft.Ledger.CreateTenantsAutomatically} onChange={(event) => updateSetting('Ledger', 'CreateTenantsAutomatically', event.target.checked)} title={t('tooltipSettingsLedgerCreateTenants')} type="checkbox" />
+              <span>{t('createTenantsAutomatically')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsLedgerCreateAccounts')}>
+              <input checked={draft.Ledger.CreateAccountsAutomatically} onChange={(event) => updateSetting('Ledger', 'CreateAccountsAutomatically', event.target.checked)} title={t('tooltipSettingsLedgerCreateAccounts')} type="checkbox" />
+              <span>{t('createAccountsAutomatically')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
+            </label>
+            <label className="toggle-field" title={t('tooltipSettingsLedgerCommitEntries')}>
+              <input checked={draft.Ledger.CommitEntriesImmediately} onChange={(event) => updateSetting('Ledger', 'CommitEntriesImmediately', event.target.checked)} title={t('tooltipSettingsLedgerCommitEntries')} type="checkbox" />
+              <span>{t('commitEntriesImmediately')}</span>
+              <small className="setting-impact restart inline">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field full-span" title={t('tooltipSettingsLedgerBaseUrl')}>
+              <span>{t('netLedgerBaseUrl')}</span>
+              <input value={draft.Ledger.BaseUrl} onChange={(event) => updateSetting('Ledger', 'BaseUrl', event.target.value)} title={t('tooltipSettingsLedgerBaseUrl')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsLedgerApiKey')}>
+              <span>{t('netLedgerAccessKey')}</span>
+              <input type="password" value={draft.Ledger.ApiKey || ''} onChange={(event) => updateSetting('Ledger', 'ApiKey', event.target.value)} title={t('tooltipSettingsLedgerApiKey')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsLedgerSecretKey')}>
+              <span>{t('netLedgerSecretKey')}</span>
+              <input type="password" value={draft.Ledger.SecretKey || ''} onChange={(event) => updateSetting('Ledger', 'SecretKey', event.target.value)} title={t('tooltipSettingsLedgerSecretKey')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsLedgerDrainInterval')}>
+              <span>{t('drainIntervalMs')}</span>
+              <input min="100" max="600000" type="number" value={draft.Ledger.DrainIntervalMs} onChange={(event) => updateSetting('Ledger', 'DrainIntervalMs', Number(event.target.value))} title={t('tooltipSettingsLedgerDrainInterval')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsLedgerMaxBatchSize')}>
+              <span>{t('maxBatchSize')}</span>
+              <input min="1" max="1000" type="number" value={draft.Ledger.MaxBatchSize} onChange={(event) => updateSetting('Ledger', 'MaxBatchSize', Number(event.target.value))} title={t('tooltipSettingsLedgerMaxBatchSize')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsLedgerMaxQueueDepth')}>
+              <span>{t('maxQueueDepth')}</span>
+              <input min="1" max="100000" type="number" value={draft.Ledger.MaxQueueDepth} onChange={(event) => updateSetting('Ledger', 'MaxQueueDepth', Number(event.target.value))} title={t('tooltipSettingsLedgerMaxQueueDepth')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsLedgerRequestTimeout')}>
+              <span>{t('netLedgerRequestTimeoutMs')}</span>
+              <input min="1000" max="300000" type="number" value={draft.Ledger.RequestTimeoutMs} onChange={(event) => updateSetting('Ledger', 'RequestTimeoutMs', Number(event.target.value))} title={t('tooltipSettingsLedgerRequestTimeout')} />
+              <small className="setting-impact restart">{t('restartRequired')}</small>
+            </label>
+          </div>
+        </Panel>
         <Panel actions={<SettingImpactBadge type="mixed" />} title={t('emailSettings')}>
           <SettingImpactNote live={t('emailLiveNote')} restart={t('emailRestartNote')} />
           <div className="form-grid two">
@@ -3951,6 +4011,7 @@ function defaultServerSettings() {
       Enabled: false,
       BaseUrl: 'http://localhost:8080',
       ApiKey: '',
+      SecretKey: '',
       DrainIntervalMs: 1000,
       MaxBatchSize: 100,
       MaxQueueDepth: 10000,
