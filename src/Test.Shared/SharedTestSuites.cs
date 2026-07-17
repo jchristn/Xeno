@@ -217,6 +217,173 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "LocalInferenceListenerRootProbeReturnsEmptyOk",
+                        displayName: "Local inference listener root probes return empty OK responses",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-root-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (HttpClient client = new HttpClient())
+                                    using (HttpRequestMessage headRequest = new HttpRequestMessage(HttpMethod.Head, service.Url + "/"))
+                                    using (HttpResponseMessage headResponse = await client.SendAsync(headRequest).ConfigureAwait(false))
+                                    using (HttpResponseMessage getResponse = await client.GetAsync(service.Url + "/").ConfigureAwait(false))
+                                    {
+                                        string headBody = await headResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        string getBody = await getResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)headResponse.StatusCode != 200) throw new InvalidOperationException("Local inference HEAD root probe did not return 200.");
+                                        if ((int)getResponse.StatusCode != 200) throw new InvalidOperationException("Local inference GET root probe did not return 200.");
+                                        if (headBody.Length != 0) throw new InvalidOperationException("Local inference HEAD root probe returned a payload.");
+                                        if (getBody.Length != 0) throw new InvalidOperationException("Local inference GET root probe returned a payload.");
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceListenerProviderHeadProbesReturnEmptyOk",
+                        displayName: "Local inference provider HEAD probes return empty OK responses",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-head-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                string[] paths =
+                                {
+                                    "/v1/chat/completions",
+                                    "/v1/completions",
+                                    "/v1/embeddings",
+                                    "/v1/models",
+                                    "/v1/models/example",
+                                    "/api/generate",
+                                    "/api/chat",
+                                    "/api/embeddings",
+                                    "/api/embed",
+                                    "/api/tags",
+                                    "/api/show",
+                                    "/api/ps"
+                                };
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                using (HttpClient client = new HttpClient())
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    foreach (string path in paths)
+                                    {
+                                        using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Head, service.Url + path))
+                                        using (HttpResponseMessage response = await client.SendAsync(request).ConfigureAwait(false))
+                                        {
+                                            string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                            if ((int)response.StatusCode != 200) throw new InvalidOperationException("Local inference HEAD probe did not return 200 for " + path + ".");
+                                            if (body.Length != 0) throw new InvalidOperationException("Local inference HEAD probe returned a payload for " + path + ".");
+                                        }
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceListenerProxiesOpenAiCompletions",
+                        displayName: "Local inference listener proxies OpenAI completions",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-completions-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_completions",
+                                    TenantId = "ten_default",
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                LocalInferenceTunnelBridge.Register(settings, async delegate(object payload, CancellationToken sendToken)
+                                {
+                                    ClientLocalInferenceRequestMessage? request = payload as ClientLocalInferenceRequestMessage;
+                                    if (request == null) throw new InvalidOperationException("OpenAI completion bridge payload was not typed.");
+                                    if (!String.Equals(request.RelativePath, "/v1/completions", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI completion path was not proxied.");
+                                    if (!String.Equals(request.Model, "completion-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI completion model was not proxied.");
+                                    if (request.Stream) throw new InvalidOperationException("OpenAI completion stream flag was incorrect.");
+                                    LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
+                                    {
+                                        Type = "server.localInference.response",
+                                        RequestId = request.RequestId,
+                                        Success = true,
+                                        StatusCode = 200,
+                                        ContentType = "application/json",
+                                        Body = "{\"id\":\"cmpl_local\",\"choices\":[]}"
+                                    });
+                                    await Task.CompletedTask.ConfigureAwait(false);
+                                });
+
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (HttpClient client = new HttpClient())
+                                    using (StringContent content = new StringContent("{\"model\":\"completion-model\",\"prompt\":\"hello\",\"stream\":false}", Encoding.UTF8, "application/json"))
+                                    using (HttpResponseMessage response = await client.PostAsync(service.Url + "/v1/completions", content).ConfigureAwait(false))
+                                    {
+                                        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)response.StatusCode != 200) throw new InvalidOperationException("OpenAI completion proxy status was not 200.");
+                                        if (!body.Contains("cmpl_local", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI completion proxy body was not returned.");
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                LocalInferenceTunnelBridge.Clear();
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "LocalInferenceListenerReturnsProviderShaped502WhenTunnelUnavailable",
                         displayName: "Local inference listener returns provider-shaped 502 when tunnel unavailable",
                         executeAsync: async delegate
@@ -1196,6 +1363,31 @@ namespace Test.Shared
                 {
                     new TestCaseDescriptor(
                         "ClientCli",
+                        "ClientHelpOutputHasSurroundingBlankLines",
+                        "Client help output has leading and trailing blank lines",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-help-spacing-" + Guid.NewGuid().ToString("N"));
+                            try
+                            {
+                                Directory.CreateDirectory(clientHome);
+                                ClientCommandResult authHelp = await RunXenoClientAsync(new[] { "set-auth" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult configHelp = await RunXenoClientAsync(new[] { "config", "--help" }, clientHome).ConfigureAwait(false);
+                                ClientCommandResult mainHelp = await RunXenoClientAsync(new[] { "help" }, clientHome).ConfigureAwait(false);
+                                if (configHelp.ExitCode != 0) throw new InvalidOperationException("Configuration help command failed: " + configHelp.StandardError);
+                                if (mainHelp.ExitCode != 0) throw new InvalidOperationException("Main help command failed: " + mainHelp.StandardError);
+                                string blankLine = Environment.NewLine + Environment.NewLine;
+                                if (!authHelp.StandardOutput.StartsWith(Environment.NewLine, StringComparison.Ordinal) || !authHelp.StandardOutput.EndsWith(blankLine, StringComparison.Ordinal)) throw new InvalidOperationException("Authentication help did not have surrounding blank lines.");
+                                if (!configHelp.StandardOutput.StartsWith(Environment.NewLine, StringComparison.Ordinal) || !configHelp.StandardOutput.EndsWith(blankLine, StringComparison.Ordinal)) throw new InvalidOperationException("Configuration help did not have surrounding blank lines.");
+                                if (!mainHelp.StandardOutput.StartsWith(Environment.NewLine, StringComparison.Ordinal) || !mainHelp.StandardOutput.EndsWith(blankLine, StringComparison.Ordinal)) throw new InvalidOperationException("Main help did not have surrounding blank lines.");
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
                         "ClientProviderUsageTelemetryPreparedAndParsed",
                         "Client provider usage telemetry is requested and parsed",
                         executeAsync: delegate
@@ -1816,6 +2008,11 @@ namespace Test.Shared
                                     if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed despite dashboard startup failure: " + connect.StandardError + connect.StandardOutput);
                                     if (!connect.StandardOutput.Contains("\"connected\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client did not register when local dashboard failed: " + connect.StandardOutput);
                                     if (!connect.StandardOutput.Contains("\"listening\": false", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local dashboard failure was not reported: " + connect.StandardOutput);
+
+                                    ClientCommandResult formattedConnect = await RunXenoClientAsync(new[] { "connect", "--timeout", "5000" }, clientHome).ConfigureAwait(false);
+                                    if (formattedConnect.ExitCode != 0) throw new InvalidOperationException("Existing background connection lookup failed: " + formattedConnect.StandardError + formattedConnect.StandardOutput);
+                                    if (!formattedConnect.StandardOutput.Contains("  Local dashboard : enabled, not listening", StringComparison.Ordinal)) throw new InvalidOperationException("Local dashboard startup field was not aligned: " + formattedConnect.StandardOutput);
+                                    if (!formattedConnect.StandardOutput.Contains("  Dashboard error : ", StringComparison.Ordinal)) throw new InvalidOperationException("Dashboard error startup field was not aligned: " + formattedConnect.StandardOutput);
 
                                     ClientConnectionState state = DeserializeRequired<ClientConnectionState>(File.ReadAllText(Path.Combine(clientHome, "state.json")));
                                     if (!state.IsRegistered) throw new InvalidOperationException("Registered state was not recorded after dashboard failure.");

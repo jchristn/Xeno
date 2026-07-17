@@ -548,7 +548,7 @@ namespace Xeno.Client
             if (!state.LocalDashboardListening || String.IsNullOrWhiteSpace(state.LocalDashboardUrl))
             {
                 WriteInfo("Local dashboard is enabled but not currently listening. Run 'xeno connect' or 'xeno start'.");
-                if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Last error: " + state.LocalDashboardLastError);
+                if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) PrintStartField("Last error", state.LocalDashboardLastError);
                 return 1;
             }
 
@@ -1641,7 +1641,7 @@ namespace Xeno.Client
                     PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
                     PrintLocalInferenceAccess(state, settings);
-                    Console.WriteLine("  Last reason: " + DisplayValue(state.LastDisconnectReason, "(none)"));
+                    PrintStartField("Last reason", DisplayValue(state.LastDisconnectReason, "(none)"));
                 }
 
                 return registered ? 0 : 1;
@@ -3390,14 +3390,14 @@ namespace Xeno.Client
                 PrintStartField("Local dashboard", state.LocalDashboardUrl);
                 if (String.Equals(state.LocalDashboardHost, "0.0.0.0", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine("  Dashboard bind:  0.0.0.0 (may be reachable from other machines depending on firewall and network policy)");
+                    PrintStartField("Dashboard bind", "0.0.0.0 (may be reachable from other machines depending on firewall and network policy)");
                 }
 
                 return;
             }
 
             PrintStartField("Local dashboard", "enabled, not listening");
-            if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Dashboard error: " + state.LocalDashboardLastError);
+            if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) PrintStartField("Dashboard error", state.LocalDashboardLastError);
         }
 
         private static void PrintLocalInferenceAccess(ClientConnectionState state, ClientSettings settings)
@@ -3416,7 +3416,7 @@ namespace Xeno.Client
             }
 
             PrintStartField("Local inference", "enabled, not listening");
-            if (!String.IsNullOrWhiteSpace(state.LocalInferenceServerLastError)) Console.WriteLine("  Inference error: " + state.LocalInferenceServerLastError);
+            if (!String.IsNullOrWhiteSpace(state.LocalInferenceServerLastError)) PrintStartField("Inference error", state.LocalInferenceServerLastError);
         }
 
         private static void PrintServerAccess(ClientSettings settings)
@@ -3746,6 +3746,7 @@ namespace Xeno.Client
             Console.WriteLine("      Enable colored command output.");
             Console.WriteLine("  xeno config colors off");
             Console.WriteLine("      Disable colored command output.");
+            Console.WriteLine();
         }
 
         private static void PrintServerHelp()
@@ -3755,6 +3756,7 @@ namespace Xeno.Client
             Console.WriteLine("      Set the Xeno server WebSocket endpoint.");
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
             Console.WriteLine("      Set the Xeno server REST API endpoint.");
+            Console.WriteLine();
         }
 
         private static void PrintResetHelp()
@@ -3764,6 +3766,7 @@ namespace Xeno.Client
             Console.WriteLine("      Prompt for confirmation, then restore ~/.xeno/client.json to factory defaults and remove runtime state.");
             Console.WriteLine("  xeno reset --force");
             Console.WriteLine("      Restore factory defaults without prompting.");
+            Console.WriteLine();
         }
 
         private static void PrintLoginHelp()
@@ -3773,6 +3776,7 @@ namespace Xeno.Client
             Console.WriteLine("      Prompt for a password and store only the returned client credential.");
             Console.WriteLine("  xeno login -u <username> --tenant <tenant-id> --server <rest-url>");
             Console.WriteLine("      Login against a specific tenant and REST server.");
+            Console.WriteLine();
         }
 
         private static void PrintAuthHelp()
@@ -3784,6 +3788,7 @@ namespace Xeno.Client
             Console.WriteLine("      Store an existing client credential for WebSocket and API use.");
             Console.WriteLine("  xeno set-auth --clear");
             Console.WriteLine("      Remove stored authentication.");
+            Console.WriteLine();
         }
 
         private static void PrintProviderHelp()
@@ -3801,6 +3806,7 @@ namespace Xeno.Client
             Console.WriteLine("      Add an Ollama, OpenAI, Gemini, or compatible endpoint.");
             Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential]");
             Console.WriteLine("      Update a configured provider endpoint and request inventory re-advertisement when connected.");
+            Console.WriteLine();
         }
 
         private static void PrintModelHelp()
@@ -3817,6 +3823,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]");
             Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete a model from one provider, or from all providers when omitted.");
+            Console.WriteLine();
         }
 
         private static void PrintConnectHelp()
@@ -3829,6 +3836,7 @@ namespace Xeno.Client
             Console.WriteLine("      Run the client WebSocket loop in the current terminal. Prints local dashboard and local inference URLs when enabled.");
             Console.WriteLine("  xeno connect --timeout <milliseconds>");
             Console.WriteLine("      Wait this long for background registration before returning an error.");
+            Console.WriteLine();
         }
 
         private static void PrintLogsHelp()
@@ -3842,6 +3850,7 @@ namespace Xeno.Client
             Console.WriteLine("      Control how many previous lines are shown.");
             Console.WriteLine("  xeno logs --errors");
             Console.WriteLine("      Read the error log instead of the standard client log.");
+            Console.WriteLine();
         }
 
         private static void PrintPingHelp()
@@ -3857,6 +3866,7 @@ namespace Xeno.Client
             Console.WriteLine("      Set the per-probe timeout. Valid range: 100 through 600000.");
             Console.WriteLine("  xeno ping --server <rest-url>");
             Console.WriteLine("      Probe a REST server URL without saving it to client settings.");
+            Console.WriteLine();
         }
 
         private static void PrintDashboardHelp()
@@ -3866,6 +3876,7 @@ namespace Xeno.Client
             Console.WriteLine("      Show the local dashboard URL when LocalDashboard.Enabled is true and the worker is listening.");
             Console.WriteLine("  xeno dashboard open");
             Console.WriteLine("      Open the local dashboard in the default browser.");
+            Console.WriteLine();
         }
 
         private static void PrintReloadHelp()
@@ -3873,6 +3884,7 @@ namespace Xeno.Client
             WriteInfoHeading("Reload command");
             Console.WriteLine("  xeno reload");
             Console.WriteLine("      Reload ~/.xeno/client.json from disk and request provider/model inventory re-advertisement when connected.");
+            Console.WriteLine();
         }
 
         private static void PrintStopHelp()
@@ -3883,6 +3895,7 @@ namespace Xeno.Client
             Console.WriteLine("      Request the background Xeno client process to stop.");
             Console.WriteLine("  xeno stop --force");
             Console.WriteLine("      Request stop, then terminate the recorded process if it does not exit.");
+            Console.WriteLine();
         }
 
         private static void WriteSuccess(string message)
@@ -4024,6 +4037,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno reset --force");
             Console.WriteLine();
             Console.WriteLine("Use 'xeno login' when you have a username/password. Use 'xeno set-auth' when you already have an access key.");
+            Console.WriteLine();
         }
     }
 }

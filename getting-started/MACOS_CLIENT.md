@@ -97,6 +97,13 @@ $XENO inventory
 $XENO start
 ```
 
+Restart the background client after configuration or binary changes:
+
+```bash
+$XENO stop
+$XENO start
+```
+
 11. Check status.
 
 ```bash
@@ -209,7 +216,13 @@ $HOME/.xeno/bin/xeno logs --tail 100
 tail -f "$HOME/.xeno/logs/launchd.out.log"
 ```
 
-6. Stop or remove it if needed.
+6. Restart the loaded LaunchAgent after configuration or binary changes.
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/ai.xenocloud.client"
+```
+
+7. Stop or remove it if needed.
 
 ```bash
 launchctl stop ai.xenocloud.client

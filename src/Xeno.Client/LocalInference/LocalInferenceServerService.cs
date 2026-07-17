@@ -122,6 +122,20 @@ namespace Xeno.Client.LocalInference
             try
             {
                 ApplyCorsHeaders(context);
+                if ((method == "HEAD" || method == "GET") && String.Equals(path, "/", StringComparison.Ordinal))
+                {
+                    context.Response.StatusCode = 200;
+                    await context.Response.Send(context.Token).ConfigureAwait(false);
+                    return;
+                }
+
+                if (method == "HEAD" && IsProviderPath(path))
+                {
+                    context.Response.StatusCode = 200;
+                    await context.Response.Send(context.Token).ConfigureAwait(false);
+                    return;
+                }
+
                 if (method == "GET" && String.Equals(path, "/health", StringComparison.OrdinalIgnoreCase))
                 {
                     await SendJsonAsync(context, new LocalInferenceGenericErrorResponse { Error = "Healthy", Message = "Xeno local inference server is healthy." }).ConfigureAwait(false);
@@ -181,6 +195,15 @@ namespace Xeno.Client.LocalInference
                 string body = await ReadBodyAsync(context, token).ConfigureAwait(false);
                 OpenAiChatCompletionRequest request = RequireJson<OpenAiChatCompletionRequest>(body);
                 if (String.IsNullOrWhiteSpace(request.Model)) throw new ArgumentException("OpenAI chat completion request requires model.");
+                await ProxyAsync(context, path, method, "openai", request.Model, false, request.Stream.GetValueOrDefault(), body).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/v1/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                string body = await ReadBodyAsync(context, token).ConfigureAwait(false);
+                OpenAiCompletionRequest request = RequireJson<OpenAiCompletionRequest>(body);
+                if (String.IsNullOrWhiteSpace(request.Model)) throw new ArgumentException("OpenAI completion request requires model.");
                 await ProxyAsync(context, path, method, "openai", request.Model, false, request.Stream.GetValueOrDefault(), body).ConfigureAwait(false);
                 return;
             }
@@ -256,6 +279,22 @@ namespace Xeno.Client.LocalInference
             }
 
             await SendProviderErrorAsync(context, path, 404, "Route not found.", "invalid_request_error", "not_found").ConfigureAwait(false);
+        }
+
+        private static bool IsProviderPath(string path)
+        {
+            return String.Equals(path, "/v1/chat/completions", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/v1/completions", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/v1/embeddings", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/v1/models", StringComparison.OrdinalIgnoreCase) ||
+                   path.StartsWith("/v1/models/", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/generate", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/chat", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/embeddings", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/embed", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/tags", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/show", StringComparison.OrdinalIgnoreCase) ||
+                   String.Equals(path, "/api/ps", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task ProxyAsync(HttpContextBase context, string path, string method, string providerFamily, string? model, bool embeddings, bool stream, string body)
@@ -460,6 +499,7 @@ namespace Xeno.Client.LocalInference
                 paths = new Dictionary<string, object>
                 {
                     ["/v1/chat/completions"] = new { post = new { summary = "OpenAI-compatible chat completions" } },
+                    ["/v1/completions"] = new { post = new { summary = "OpenAI-compatible completions" } },
                     ["/v1/embeddings"] = new { post = new { summary = "OpenAI-compatible embeddings" } },
                     ["/v1/models"] = new { get = new { summary = "OpenAI-compatible model list" } },
                     ["/v1/models/{model}"] = new { get = new { summary = "OpenAI-compatible model details" } },

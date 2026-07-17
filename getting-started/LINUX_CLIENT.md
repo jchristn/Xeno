@@ -97,6 +97,13 @@ $XENO inventory
 $XENO start
 ```
 
+Restart the background client after configuration or binary changes:
+
+```bash
+$XENO stop
+$XENO start
+```
+
 11. Check status.
 
 ```bash
@@ -200,7 +207,13 @@ systemctl --user status xeno-client.service
 journalctl --user -u xeno-client.service -f
 ```
 
-7. Stop or remove it if needed.
+7. Restart the service after configuration or binary changes.
+
+```bash
+systemctl --user restart xeno-client.service
+```
+
+8. Stop or remove it if needed.
 
 ```bash
 systemctl --user disable --now xeno-client.service

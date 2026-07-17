@@ -111,6 +111,13 @@ xeno inventory
 xeno start
 ```
 
+Restart the background client after configuration or binary changes:
+
+```powershell
+xeno stop
+xeno start
+```
+
 10. Check status.
 
 ```powershell
@@ -179,6 +186,8 @@ Start-Process .\src\Xeno.Tray\bin\Debug\net10.0\xeno-tray.exe
 
 3. Use the tray icon menu to start or stop the Xeno client, open the local dashboard, show client statistics, or quit the tray app.
 
+To restart a tray-managed client after configuration changes, select **Stop Client**, then select **Start Client** from the tray icon menu.
+
 The statistics window uses the normal Windows title bar close button. If you rebuild while the tray app or the client it started is still running from `src\Xeno.Tray\bin\Debug\net10.0`, stop both processes first so the build can replace `xeno-tray.exe`, `xeno.exe`, and their referenced assemblies.
 
 ## Better Path: Start on Boot
@@ -214,7 +223,14 @@ xeno status
 xeno logs --tail 50
 ```
 
-5. Remove the task if needed.
+5. Restart the scheduled client after configuration or binary changes.
+
+```powershell
+Stop-ScheduledTask -TaskName "Xeno Client"
+Start-ScheduledTask -TaskName "Xeno Client"
+```
+
+6. Remove the task if needed.
 
 ```powershell
 Unregister-ScheduledTask -TaskName "Xeno Client" -Confirm:$false

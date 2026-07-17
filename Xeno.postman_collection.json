@@ -1724,6 +1724,54 @@
           "description": "Executable requests against the optional Xeno Client localhost OpenAI-compatible inference listener.",
           "item": [
             {
+              "name": "Root Probe (HEAD)",
+              "request": {
+                "method": "HEAD",
+                "header": [],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": []
+                },
+                "description": "Return 200 OK with no payload from the local inference listener."
+              }
+            },
+            {
+              "name": "Root Probe (GET)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": []
+                },
+                "description": "Return 200 OK with no payload from the local inference listener."
+              }
+            },
+            {
+              "name": "OpenAI Endpoint Probe (HEAD)",
+              "request": {
+                "method": "HEAD",
+                "header": [],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/models",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "models"
+                  ]
+                },
+                "description": "Return 200 OK with no payload. HEAD is supported on every local OpenAI-compatible route."
+              }
+            },
+            {
               "name": "List Models",
               "request": {
                 "method": "GET",
@@ -1845,6 +1893,42 @@
               }
             },
             {
+              "name": "Completions",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/completions",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "completions"
+                  ]
+                },
+                "description": "OpenAI-compatible text completion through the local listener.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"prompt\": \"{{prompt}}\",\n  \"stream\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "Embeddings - Single Input",
               "request": {
                 "method": "POST",
@@ -1922,6 +2006,24 @@
           "name": "Local Ollama APIs",
           "description": "Executable requests against the optional Xeno Client localhost Ollama-compatible inference listener.",
           "item": [
+            {
+              "name": "Ollama Endpoint Probe (HEAD)",
+              "request": {
+                "method": "HEAD",
+                "header": [],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/tags",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tags"
+                  ]
+                },
+                "description": "Return 200 OK with no payload. HEAD is supported on every local Ollama-compatible route."
+              }
+            },
             {
               "name": "Tags",
               "request": {
