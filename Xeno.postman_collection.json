@@ -172,6 +172,11 @@
     {
       "key": "tail",
       "value": "200"
+    },
+    {
+      "key": "localInferenceBaseUrl",
+      "value": "http://127.0.0.1:11434",
+      "type": "string"
     }
   ],
   "item": [
@@ -1704,6 +1709,545 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Local OpenAI APIs",
+          "description": "Executable requests against the optional Xeno Client localhost OpenAI-compatible inference listener.",
+          "item": [
+            {
+              "name": "List Models",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/models",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "models"
+                  ]
+                },
+                "description": "Requires LocalInferenceServer.Enabled=true in ~/.xeno/client.json."
+              }
+            },
+            {
+              "name": "Retrieve Model",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/models/{{modelName}}",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "models",
+                    "{{modelName}}"
+                  ]
+                },
+                "description": "Retrieve OpenAI-compatible model metadata from the local listener."
+              }
+            },
+            {
+              "name": "Chat Completions",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/chat/completions",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "chat",
+                    "completions"
+                  ]
+                },
+                "description": "OpenAI-compatible single chat completion.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{prompt}}\"\n    }\n  ],\n  \"stream\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Streaming Chat Completions",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/chat/completions",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "chat",
+                    "completions"
+                  ]
+                },
+                "description": "OpenAI-compatible streaming chat completion.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{prompt}}\"\n    }\n  ],\n  \"stream\": true,\n  \"stream_options\": {\n    \"include_usage\": true\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Embeddings - Single Input",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/embeddings",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "embeddings"
+                  ]
+                },
+                "description": "OpenAI-compatible embeddings with one input.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"input\": \"{{prompt}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Embeddings - Batch Input",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/v1/embeddings",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "embeddings"
+                  ]
+                },
+                "description": "OpenAI-compatible embeddings with multiple inputs.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"input\": [\n    \"local inference\",\n    \"xeno client\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Local Ollama APIs",
+          "description": "Executable requests against the optional Xeno Client localhost Ollama-compatible inference listener.",
+          "item": [
+            {
+              "name": "Tags",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/tags",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tags"
+                  ]
+                },
+                "description": "List models through the local Ollama-compatible listener."
+              }
+            },
+            {
+              "name": "Ps",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/ps",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "ps"
+                  ]
+                },
+                "description": "List active/running models known to the Xeno server."
+              }
+            },
+            {
+              "name": "Show",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/show",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "show"
+                  ]
+                },
+                "description": "Show Ollama-compatible model details.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Generate",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/generate",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "generate"
+                  ]
+                },
+                "description": "Ollama-compatible text generation.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"prompt\": \"{{prompt}}\",\n  \"stream\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Generate Streaming",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/generate",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "generate"
+                  ]
+                },
+                "description": "Ollama-compatible streaming text generation.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"prompt\": \"{{prompt}}\",\n  \"stream\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Chat",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/chat",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "chat"
+                  ]
+                },
+                "description": "Ollama-compatible chat completion.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{prompt}}\"\n    }\n  ],\n  \"stream\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Chat Streaming",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/chat",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "chat"
+                  ]
+                },
+                "description": "Ollama-compatible streaming chat completion.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{prompt}}\"\n    }\n  ],\n  \"stream\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Legacy Embeddings",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/embeddings",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "embeddings"
+                  ]
+                },
+                "description": "Legacy Ollama embeddings endpoint using prompt.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"prompt\": \"{{prompt}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Embed - Single Input",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/embed",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "embed"
+                  ]
+                },
+                "description": "Current Ollama embed endpoint using one input.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"input\": \"{{prompt}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Embed - Batch Input",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localInferenceBaseUrl}}/api/embed",
+                  "host": [
+                    "{{localInferenceBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "embed"
+                  ]
+                },
+                "description": "Current Ollama embed endpoint using multiple inputs.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{embeddingModelName}}\",\n  \"input\": [\n    \"local inference\",\n    \"xeno client\"\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"

@@ -7,6 +7,7 @@ This guide installs and runs the Xeno client on Windows.
 - Client settings: `%USERPROFILE%\.xeno\client.json`
 - Client state: `%USERPROFILE%\.xeno\state.json`
 - Local dashboard: `http://127.0.0.1:9343`
+- Optional local inference listener: `http://127.0.0.1:11434` when `LocalInferenceServer.Enabled` is true
 - Default cloud WebSocket URL: `ws://app.xenocloud.ai:9000/ws/v1/clients`
 - Local Docker server WebSocket URL: `ws://localhost:9000/ws/v1/clients`
 - Local Docker server REST URL: `http://localhost:9000`
@@ -123,14 +124,38 @@ xeno ping
 xeno dashboard open
 ```
 
-12. Watch logs.
+12. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
+
+Edit `%USERPROFILE%\.xeno\client.json` and add:
+
+```json
+"LocalInferenceServer": {
+  "Enabled": true,
+  "Host": "127.0.0.1",
+  "Port": 11434,
+  "EnableCors": true
+}
+```
+
+Restart the client, then test local model listing:
+
+```powershell
+xeno stop
+xeno start
+curl http://127.0.0.1:11434/v1/models
+curl http://127.0.0.1:11434/api/tags
+```
+
+The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses.
+
+13. Watch logs.
 
 ```powershell
 xeno logs --tail 100
 xeno logs -f
 ```
 
-13. Stop the client.
+14. Stop the client.
 
 ```powershell
 xeno stop

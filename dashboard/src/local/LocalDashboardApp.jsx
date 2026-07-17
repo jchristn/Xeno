@@ -40,6 +40,7 @@ const pages = [
   { id: 'providers', descriptionKey: 'localProvidersDescription', icon: Server, labelKey: 'localProviders', tooltipKey: 'tooltipLocalNavProviders' },
   { id: 'models', descriptionKey: 'localModelsDescription', icon: BrainCircuit, labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
   { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
+  { id: 'apiExplorer', descriptionKey: 'localApiExplorerDescription', icon: FileJson, labelKey: 'apiExplorer', tooltipKey: 'tooltipLocalNavApiExplorer' },
   { id: 'logs', descriptionKey: 'localLogsDescription', icon: Terminal, labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
   { id: 'telemetry', descriptionKey: 'localTelemetryDescription', icon: Gauge, labelKey: 'host', tooltipKey: 'tooltipLocalNavTelemetry' },
   { id: 'providerTelemetry', descriptionKey: 'localProviderTelemetryDescription', icon: Server, labelKey: 'provider', tooltipKey: 'tooltipLocalNavProviderTelemetry' },
@@ -47,7 +48,7 @@ const pages = [
 ];
 
 const localNavGroups = [
-  { key: 'observe', pageIds: ['home', 'providers', 'models', 'requests'] },
+  { key: 'observe', pageIds: ['home', 'providers', 'models', 'requests', 'apiExplorer'] },
   { key: 'telemetry', pageIds: ['telemetry', 'providerTelemetry'] },
   { key: 'administration', pageIds: ['logs', 'settings'] }
 ];
@@ -284,6 +285,7 @@ export default function LocalDashboardApp() {
           {page === 'providers' ? <Providers providers={providers} refresh={refresh} setModal={setModal} /> : null}
           {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
           {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
+          {page === 'apiExplorer' ? <LocalApiExplorer state={state} /> : null}
           {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} metric={telemetryMetric} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} setModal={setModal} /> : null}
           {page === 'logs' ? <Logs followLogs={followLogs} logSeverity={logSeverity} logTail={logTail} logs={logs} setFollowLogs={setFollowLogs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
           {page === 'providerTelemetry' ? <ProviderTelemetry latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
@@ -810,6 +812,140 @@ function Logs({ followLogs, logSeverity, logTail, logs, setFollowLogs, setLogSev
   );
 }
 
+function LocalApiExplorer({ state }) {
+  const { t } = useTranslation();
+  const [selectedId, setSelectedId] = useState('openai-models');
+  const [body, setBody] = useState('');
+  const [response, setResponse] = useState('');
+  const [status, setStatus] = useState('');
+  const [running, setRunning] = useState(false);
+  const localInference = state?.connection || {};
+  const settings = state?.settings?.localInferenceServer || {};
+  const baseUrl = localInference.localInferenceServerUrl
+    || (settings.host && settings.port ? `http://${settings.host}:${settings.port}` : 'http://127.0.0.1:11434');
+  const enabled = !!(localInference.localInferenceServerEnabled || settings.enabled);
+  const listening = !!localInference.localInferenceServerListening;
+  const samples = localInferenceSamples(t);
+  const selected = samples.find((sample) => sample.id === selectedId) || samples[0];
+
+  useEffect(() => {
+    setBody(selected.body ? JSON.stringify(selected.body, null, 2) : '');
+    setResponse('');
+    setStatus('');
+  }, [selectedId]);
+
+  async function execute() {
+    setRunning(true);
+    setResponse('');
+    setStatus('');
+    try {
+      const request = {
+        method: selected.method,
+        headers: { Accept: 'application/json' }
+      };
+      if (selected.method !== 'GET') {
+        request.headers['Content-Type'] = 'application/json';
+        request.body = body || '{}';
+      }
+
+      const result = await fetch(baseUrl + selected.path, request);
+      const text = await result.text();
+      setStatus(`${result.status} ${result.statusText}`);
+      try {
+        setResponse(JSON.stringify(JSON.parse(text), null, 2));
+      } catch {
+        setResponse(text);
+      }
+    } catch (err) {
+      setStatus(t('requestFailed'));
+      setResponse(err.message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const curl = buildLocalInferenceCurl(baseUrl, selected, body);
+  return (
+    <div className="local-api-explorer">
+      <Panel title={t('localInferenceStatus')} actions={<CopyButton label={t('copyValue')} value={baseUrl} />}>
+        <RecordTable fields={['enabled', 'listening', 'baseUrl', 'websocketReady', 'lastError']} record={{
+          enabled,
+          listening,
+          baseUrl,
+          websocketReady: !!(state?.connection?.isConnected && state?.connection?.isRegistered),
+          lastError: localInference.localInferenceServerLastError || ''
+        }} />
+      </Panel>
+      <Panel title={t('apiExplorer')}>
+        <div className="explorer-layout">
+          <div className="explorer-list" role="list">
+            {samples.map((sample) => (
+              <button className={`explorer-item ${sample.id === selected.id ? 'active' : ''}`} key={sample.id} onClick={() => setSelectedId(sample.id)} type="button">
+                <span>{sample.group}</span>
+                <strong>{sample.label}</strong>
+                <code>{sample.method} {sample.path}</code>
+              </button>
+            ))}
+          </div>
+          <div className="explorer-detail">
+            <div className="explorer-endpoint">
+              <span className="method-pill">{selected.method}</span>
+              <CopyableValue label={t('copyValue')} value={baseUrl + selected.path} />
+            </div>
+            {selected.method !== 'GET' ? (
+              <label className="field span-full">
+                <span>{t('requestBody')}</span>
+                <textarea onChange={(event) => setBody(event.target.value)} rows={12} value={body} />
+              </label>
+            ) : null}
+            <div className="button-row">
+              <button className="primary-button" disabled={!enabled || !listening || running} onClick={execute} type="button"><Play size={16} />{running ? t('running') : t('sendRequest')}</button>
+              <CopyButton label={t('copyJson')} value={curl} />
+            </div>
+            <details open>
+              <summary>{t('curl')}</summary>
+              <pre className="json-preview"><code>{curl}</code></pre>
+            </details>
+            <details open>
+              <summary>{t('response')} {status ? <span className="status-inline">{status}</span> : null}</summary>
+              <pre className="json-preview"><code>{response || t('noData')}</code></pre>
+            </details>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function localInferenceSamples(t) {
+  return [
+    { id: 'openai-models', group: 'OpenAI', label: t('listModels'), method: 'GET', path: '/v1/models' },
+    { id: 'openai-model', group: 'OpenAI', label: t('retrieveModel'), method: 'GET', path: '/v1/models/llama3.2:latest' },
+    { id: 'openai-chat', group: 'OpenAI', label: t('chatCompletions'), method: 'POST', path: '/v1/chat/completions', body: { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'Say hello from Xeno.' }], stream: false } },
+    { id: 'openai-chat-stream', group: 'OpenAI', label: t('streamingChat'), method: 'POST', path: '/v1/chat/completions', body: { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'Stream a short greeting from Xeno.' }], stream: true, stream_options: { include_usage: true } } },
+    { id: 'openai-embeddings', group: 'OpenAI', label: t('embeddings'), method: 'POST', path: '/v1/embeddings', body: { model: 'nomic-embed-text:latest', input: ['local inference', 'xeno client'] } },
+    { id: 'ollama-tags', group: 'Ollama', label: t('listModels'), method: 'GET', path: '/api/tags' },
+    { id: 'ollama-ps', group: 'Ollama', label: t('runningModels'), method: 'GET', path: '/api/ps' },
+    { id: 'ollama-show', group: 'Ollama', label: t('showModel'), method: 'POST', path: '/api/show', body: { model: 'llama3.2:latest' } },
+    { id: 'ollama-generate', group: 'Ollama', label: t('generate'), method: 'POST', path: '/api/generate', body: { model: 'llama3.2:latest', prompt: 'Say hello from Xeno.', stream: false } },
+    { id: 'ollama-generate-stream', group: 'Ollama', label: t('streamingGenerate'), method: 'POST', path: '/api/generate', body: { model: 'llama3.2:latest', prompt: 'Stream a short greeting from Xeno.', stream: true } },
+    { id: 'ollama-chat', group: 'Ollama', label: t('chat'), method: 'POST', path: '/api/chat', body: { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'Say hello from Xeno.' }], stream: false } },
+    { id: 'ollama-chat-stream', group: 'Ollama', label: t('streamingChat'), method: 'POST', path: '/api/chat', body: { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'Stream a short greeting from Xeno.' }], stream: true } },
+    { id: 'ollama-embeddings', group: 'Ollama', label: t('legacyEmbeddings'), method: 'POST', path: '/api/embeddings', body: { model: 'nomic-embed-text:latest', prompt: 'local inference' } },
+    { id: 'ollama-embed', group: 'Ollama', label: t('embeddings'), method: 'POST', path: '/api/embed', body: { model: 'nomic-embed-text:latest', input: ['local inference', 'xeno client'] } }
+  ];
+}
+
+function buildLocalInferenceCurl(baseUrl, sample, body) {
+  const lines = [`curl -i -X ${sample.method} "${baseUrl}${sample.path}"`];
+  if (sample.method !== 'GET') {
+    lines.push('  -H "Content-Type: application/json"');
+    lines.push(`  -d '${body || '{}'}'`);
+  }
+
+  return lines.join(' \\\n');
+}
+
 function Settings({ database, refresh, state }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState('');
@@ -819,6 +955,7 @@ function Settings({ database, refresh, state }) {
     setStatus('');
     const form = new FormData(event.currentTarget);
     const settings = state?.settings?.localDashboard || {};
+    const localInference = state?.settings?.localInferenceServer || {};
     const telemetry = state?.settings?.telemetry || {};
     const providerTelemetry = telemetry.providerTelemetry || {};
     await localApi('/api/v1/settings', {
@@ -834,6 +971,15 @@ function Settings({ database, refresh, state }) {
           maxEntries: Number(form.get('maxEntries') || settings.historyRetention?.maxEntries || 1000),
           maxBodyBytes: Number(form.get('maxBodyBytes') || settings.historyRetention?.maxBodyBytes || 65536),
           persistBodies: form.has('persistBodies') ? form.get('persistBodies') === 'on' : !!settings.historyRetention?.persistBodies
+        },
+        localInferenceServer: {
+          enabled: form.has('localInferenceEnabled') ? form.get('localInferenceEnabled') === 'on' : !!localInference.enabled,
+          host: form.get('localInferenceHost') || localInference.host || '127.0.0.1',
+          port: Number(form.get('localInferencePort') || localInference.port || 11434),
+          enableCors: form.has('localInferenceEnableCors') ? form.get('localInferenceEnableCors') === 'on' : localInference.enableCors !== false,
+          requestTimeoutMs: Number(form.get('localInferenceRequestTimeoutMs') || localInference.requestTimeoutMs || 120000),
+          maxRequestBodyBytes: Number(form.get('localInferenceMaxRequestBodyBytes') || localInference.maxRequestBodyBytes || 10485760),
+          corsAllowedOrigins: localInference.corsAllowedOrigins || ['http://localhost', 'http://127.0.0.1', 'http://[::1]']
         },
         telemetry: {
           enabled: form.has('telemetryEnabled') ? form.get('telemetryEnabled') === 'on' : !!telemetry.enabled,
@@ -873,6 +1019,7 @@ function Settings({ database, refresh, state }) {
   }
 
   const settings = state?.settings?.localDashboard || {};
+  const localInference = state?.settings?.localInferenceServer || {};
   const telemetry = state?.settings?.telemetry || {};
   const providerTelemetry = telemetry.providerTelemetry || {};
   return (
@@ -904,6 +1051,18 @@ function Settings({ database, refresh, state }) {
       </Panel>
       <Panel title={t('databaseStatus')} actions={<CopyButton label={t('copyJson')} value={JSON.stringify(database || {}, null, 2)} />}>
         <RecordTable fields={['status', 'resolvedFilename', 'sizeBytes', 'requests', 'oldestRequestUtc', 'newestRequestUtc']} record={database || {}} />
+      </Panel>
+      <Panel title={t('localInferenceSettings')}>
+        <div className="empty-state">{t('localSettingsRestartNotice')}</div>
+        <form className="form-grid" onSubmit={save}>
+          <Toggle checked={localInference.enabled} label={t('enabled')} name="localInferenceEnabled" tooltip={t('localInferenceSettings')} />
+          <Field defaultValue={localInference.host || '127.0.0.1'} label={t('host')} name="localInferenceHost" tooltip={t('localInferenceSettings')} />
+          <Field defaultValue={localInference.port || 11434} label={t('port')} name="localInferencePort" tooltip={t('localInferenceSettings')} type="number" />
+          <Toggle checked={localInference.enableCors !== false} label={t('cors')} name="localInferenceEnableCors" tooltip={t('localInferenceSettings')} />
+          <Field defaultValue={localInference.requestTimeoutMs || 120000} label={t('timeoutMs')} name="localInferenceRequestTimeoutMs" tooltip={t('localInferenceSettings')} type="number" />
+          <Field defaultValue={localInference.maxRequestBodyBytes || 10485760} label={t('maxBodyBytes')} name="localInferenceMaxRequestBodyBytes" tooltip={t('localInferenceSettings')} type="number" />
+          <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
+        </form>
       </Panel>
       <Panel title={t('telemetrySettings')}>
         <div className="empty-state">{t('telemetrySettingsRestartNotice')}</div>

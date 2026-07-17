@@ -9,5 +9,10 @@ namespace Xeno.Client.LocalDashboard.Models
         /// Telemetry settings.
         /// </summary>
         public ClientTelemetrySettings Telemetry { get; set; } = new ClientTelemetrySettings();
+
+        /// <summary>
+        /// Local inference server settings.
+        /// </summary>
+        public ClientLocalInferenceServerSettings LocalInferenceServer { get; set; } = new ClientLocalInferenceServerSettings();
     }
 }

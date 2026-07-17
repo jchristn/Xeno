@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added an optional Xeno Client local inference listener with loopback-only OpenAI/Ollama-compatible APIs, websocket proxying, streaming support, dashboard explorer, Postman coverage, documentation, and Touchstone tests.
 - Changed server settings GET/POST responses to return the `XenoSettings` JSON object directly, matching the POST request body shape.
 - Added NetLedger-backed token ledgering with tenant lifecycle cascade, metadata-based duplicate detection, dashboard summaries, SDK/CLI/Postman coverage, Docker wiring, and raw-token balance/entry APIs.
 - Added global-admin administrative test email APIs, dashboard controls, SDK wrappers, Postman coverage, and REST documentation for validating configured email providers with the standard Xeno email layout.

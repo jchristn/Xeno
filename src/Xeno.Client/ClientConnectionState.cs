@@ -206,6 +206,51 @@ namespace Xeno.Client
         public string? LocalDashboardLastError { get; set; } = null;
 
         /// <summary>
+        /// Whether the local inference server is enabled.
+        /// </summary>
+        public bool LocalInferenceServerEnabled { get; set; } = false;
+
+        /// <summary>
+        /// Whether the local inference server is listening.
+        /// </summary>
+        public bool LocalInferenceServerListening { get; set; } = false;
+
+        /// <summary>
+        /// Local inference server URL.
+        /// </summary>
+        public string? LocalInferenceServerUrl { get; set; } = null;
+
+        /// <summary>
+        /// Local inference server host.
+        /// </summary>
+        public string? LocalInferenceServerHost { get; set; } = null;
+
+        /// <summary>
+        /// Local inference server port.
+        /// </summary>
+        public int? LocalInferenceServerPort { get; set; } = null;
+
+        /// <summary>
+        /// Local inference server last started timestamp.
+        /// </summary>
+        public DateTime? LocalInferenceServerStartedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Local inference server last stopped timestamp.
+        /// </summary>
+        public DateTime? LocalInferenceServerStoppedUtc { get; set; } = null;
+
+        /// <summary>
+        /// Local inference server last request timestamp.
+        /// </summary>
+        public DateTime? LocalInferenceServerLastRequestUtc { get; set; } = null;
+
+        /// <summary>
+        /// Local inference server last error.
+        /// </summary>
+        public string? LocalInferenceServerLastError { get; set; } = null;
+
+        /// <summary>
         /// Last inventory update request timestamp.
         /// </summary>
         public DateTime? InventoryUpdateRequestedUtc { get; set; } = null;
@@ -503,6 +548,99 @@ namespace Xeno.Client
         }
 
         /// <summary>
+        /// Mark local inference server disabled.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalInferenceDisabled(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalInferenceSettings(state, settings);
+            state.LocalInferenceServerEnabled = false;
+            state.LocalInferenceServerListening = false;
+            state.LocalInferenceServerUrl = null;
+            state.LocalInferenceServerLastError = null;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local inference server starting.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalInferenceStarting(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalInferenceSettings(state, settings);
+            state.LocalInferenceServerEnabled = true;
+            state.LocalInferenceServerListening = false;
+            state.LocalInferenceServerLastError = null;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local inference server listening.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        /// <param name="url">Listener URL.</param>
+        public static void MarkLocalInferenceListening(ClientSettings settings, string url)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalInferenceSettings(state, settings);
+            state.LocalInferenceServerEnabled = true;
+            state.LocalInferenceServerListening = true;
+            state.LocalInferenceServerUrl = url;
+            state.LocalInferenceServerStartedUtc = DateTime.UtcNow;
+            state.LocalInferenceServerLastError = null;
+            state.LastUpdatedUtc = state.LocalInferenceServerStartedUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local inference server error.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        /// <param name="error">Error.</param>
+        public static void MarkLocalInferenceError(ClientSettings settings, string error)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalInferenceSettings(state, settings);
+            state.LocalInferenceServerEnabled = settings.LocalInferenceServer.Enabled;
+            state.LocalInferenceServerListening = false;
+            state.LocalInferenceServerLastError = error;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local inference server stopped.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalInferenceStopped(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalInferenceSettings(state, settings);
+            state.LocalInferenceServerEnabled = settings.LocalInferenceServer.Enabled;
+            state.LocalInferenceServerListening = false;
+            state.LocalInferenceServerStoppedUtc = DateTime.UtcNow;
+            state.LastUpdatedUtc = state.LocalInferenceServerStoppedUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Mark local inference server request.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        public static void MarkLocalInferenceRequest(ClientSettings settings)
+        {
+            ClientConnectionState state = Load();
+            ApplyLocalInferenceSettings(state, settings);
+            state.LocalInferenceServerLastRequestUtc = DateTime.UtcNow;
+            state.LastUpdatedUtc = state.LocalInferenceServerLastRequestUtc;
+            state.Save();
+        }
+
+        /// <summary>
         /// Mark inventory update requested.
         /// </summary>
         public static void MarkInventoryUpdateRequested()
@@ -563,6 +701,12 @@ namespace Xeno.Client
         {
             state.LocalDashboardHost = settings.LocalDashboard.Host;
             state.LocalDashboardPort = settings.LocalDashboard.Port;
+        }
+
+        private static void ApplyLocalInferenceSettings(ClientConnectionState state, ClientSettings settings)
+        {
+            state.LocalInferenceServerHost = settings.LocalInferenceServer.Host;
+            state.LocalInferenceServerPort = settings.LocalInferenceServer.Port;
         }
 
         /// <summary>

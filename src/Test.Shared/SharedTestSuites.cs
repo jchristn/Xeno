@@ -21,6 +21,8 @@ namespace Test.Shared
     using Xeno.Client.LocalDashboard;
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
+    using Xeno.Client.LocalInference;
+    using Xeno.Client.LocalInference.Models;
     using Xeno.Client.Telemetry.Models;
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core;
@@ -141,6 +143,386 @@ namespace Test.Shared
                             };
                             if (stale.HasFreshActivity(now, 5000)) throw new InvalidOperationException("Stale connection activity was considered fresh.");
                             return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "ClientSettingsBackfillsLocalInferenceDefaults",
+                        displayName: "Client settings backfill local inference defaults",
+                        executeAsync: delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-client-settings-" + Guid.NewGuid().ToString("N"));
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                File.WriteAllText(ClientSettings.SettingsFile, "{\"Name\":\"test-client\",\"Providers\":[]}");
+                                ClientSettings settings = ClientSettings.Load();
+                                if (settings.LocalInferenceServer == null) throw new InvalidOperationException("Local inference settings were not created.");
+                                if (settings.LocalInferenceServer.Enabled) throw new InvalidOperationException("Local inference should be disabled by default.");
+                                if (!String.Equals(settings.LocalInferenceServer.Host, "127.0.0.1", StringComparison.Ordinal)) throw new InvalidOperationException("Local inference default host is incorrect.");
+                                if (settings.LocalInferenceServer.Port != 11434) throw new InvalidOperationException("Local inference default port is incorrect.");
+                                TestClientSettingsPresenceProbe? probe = JsonUtil.Deserialize<TestClientSettingsPresenceProbe>(File.ReadAllText(ClientSettings.SettingsFile));
+                                if (probe == null || probe.LocalInferenceServer == null) throw new InvalidOperationException("Local inference settings were not written back to client.json.");
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceLoopbackHostValidationWorks",
+                        displayName: "Local inference loopback host validation works",
+                        executeAsync: delegate
+                        {
+                            LocalInferenceServerService.ValidateLoopbackHost("localhost");
+                            LocalInferenceServerService.ValidateLoopbackHost("127.0.0.1");
+                            LocalInferenceServerService.ValidateLoopbackHost("::1");
+                            LocalInferenceServerService.ValidateLoopbackHost("[::1]");
+                            ExpectArgumentException(delegate { LocalInferenceServerService.ValidateLoopbackHost("0.0.0.0"); });
+                            ExpectArgumentException(delegate { LocalInferenceServerService.ValidateLoopbackHost("192.168.1.10"); });
+                            ExpectArgumentException(delegate { LocalInferenceServerService.ValidateLoopbackHost("*"); });
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceEmbeddingInputUnionDeserializes",
+                        displayName: "Local inference embedding input union deserializes",
+                        executeAsync: delegate
+                        {
+                            OpenAiEmbeddingRequest? single = JsonUtil.Deserialize<OpenAiEmbeddingRequest>("{\"model\":\"m\",\"input\":\"hello\"}");
+                            if (single == null || single.Input == null || single.Input.Values.Count != 1 || !String.Equals(single.Input.Values[0], "hello", StringComparison.Ordinal)) throw new InvalidOperationException("Single OpenAI embedding input did not deserialize.");
+                            OpenAiEmbeddingRequest? batch = JsonUtil.Deserialize<OpenAiEmbeddingRequest>("{\"model\":\"m\",\"input\":[\"a\",\"b\"]}");
+                            if (batch == null || batch.Input == null || batch.Input.Values.Count != 2 || !batch.Input.IsArray) throw new InvalidOperationException("Batch OpenAI embedding input did not deserialize.");
+                            OllamaEmbedRequest? ollama = JsonUtil.Deserialize<OllamaEmbedRequest>("{\"model\":\"m\",\"input\":[\"a\",\"b\"]}");
+                            if (ollama == null || ollama.Input == null || ollama.Input.Values.Count != 2 || !ollama.Input.IsArray) throw new InvalidOperationException("Ollama embed input did not deserialize.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceProviderErrorsUseExpectedDtos",
+                        displayName: "Local inference provider errors use expected DTOs",
+                        executeAsync: delegate
+                        {
+                            OpenAiErrorResponse openAi = LocalInferenceErrorFactory.OpenAi("websocket unavailable", "server_error", null, "websocket_unavailable");
+                            if (!String.Equals(openAi.Error.Message, "websocket unavailable", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI error message mismatch.");
+                            if (!String.Equals(openAi.Error.Code, "websocket_unavailable", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI error code mismatch.");
+                            OllamaErrorResponse ollama = LocalInferenceErrorFactory.Ollama("websocket unavailable");
+                            if (!String.Equals(ollama.Error, "websocket unavailable", StringComparison.Ordinal)) throw new InvalidOperationException("Ollama error message mismatch.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceListenerReturnsProviderShaped502WhenTunnelUnavailable",
+                        displayName: "Local inference listener returns provider-shaped 502 when tunnel unavailable",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_test",
+                                    TenantId = "ten_default",
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (HttpClient client = new HttpClient())
+                                    using (HttpRequestMessage options = new HttpRequestMessage(HttpMethod.Options, service.Url + "/v1/models"))
+                                    {
+                                        options.Headers.TryAddWithoutValidation("Origin", "http://localhost:3000");
+                                        using (HttpResponseMessage preflight = await client.SendAsync(options).ConfigureAwait(false))
+                                        {
+                                            if ((int)preflight.StatusCode != 204) throw new InvalidOperationException("Preflight did not return 204.");
+                                            if (!preflight.Headers.Contains("Access-Control-Allow-Origin")) throw new InvalidOperationException("Preflight did not include CORS origin.");
+                                        }
+                                    }
+
+                                    using (HttpClient client = new HttpClient())
+                                    using (HttpResponseMessage openAi = await client.GetAsync(service.Url + "/v1/models").ConfigureAwait(false))
+                                    {
+                                        string body = await openAi.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)openAi.StatusCode != 502) throw new InvalidOperationException("OpenAI local inference unavailable status was not 502.");
+                                        OpenAiErrorResponse? error = JsonUtil.Deserialize<OpenAiErrorResponse>(body);
+                                        if (error == null || error.Error == null || !String.Equals(error.Error.Code, "websocket_unavailable", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI unavailable error shape was incorrect.");
+                                    }
+
+                                    using (HttpClient client = new HttpClient())
+                                    using (HttpResponseMessage ollama = await client.GetAsync(service.Url + "/api/tags").ConfigureAwait(false))
+                                    {
+                                        string body = await ollama.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)ollama.StatusCode != 502) throw new InvalidOperationException("Ollama local inference unavailable status was not 502.");
+                                        OllamaErrorResponse? error = JsonUtil.Deserialize<OllamaErrorResponse>(body);
+                                        if (error == null || String.IsNullOrWhiteSpace(error.Error)) throw new InvalidOperationException("Ollama unavailable error shape was incorrect.");
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceListenerProxiesTypedResponsesAndHeaders",
+                        displayName: "Local inference listener proxies typed responses and safe headers",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-proxy-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_proxy",
+                                    TenantId = "ten_default",
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                LocalInferenceTunnelBridge.Register(settings, async delegate(object payload, CancellationToken sendToken)
+                                {
+                                    ClientLocalInferenceRequestMessage? request = payload as ClientLocalInferenceRequestMessage;
+                                    if (request == null) throw new InvalidOperationException("Local inference bridge payload was not typed.");
+                                    if (!String.Equals(request.Method, "GET", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected proxied method.");
+                                    if (!String.Equals(request.RelativePath, "/v1/models", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected proxied path.");
+                                    if (!String.Equals(request.ProviderFamily, "openai", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected provider family.");
+                                    LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
+                                    {
+                                        Type = "server.localInference.response",
+                                        RequestId = request.RequestId,
+                                        Success = true,
+                                        StatusCode = 200,
+                                        ContentType = "application/json",
+                                        Body = "{\"object\":\"list\",\"data\":[]}",
+                                        Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                                        {
+                                            ["x-xeno-request-id"] = "req_local_proxy",
+                                            ["server-timing"] = "xeno;dur=12",
+                                            ["Content-Length"] = "999999",
+                                            ["Connection"] = "close"
+                                        }
+                                    });
+                                    await Task.CompletedTask.ConfigureAwait(false);
+                                });
+
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (HttpClient client = new HttpClient())
+                                    using (HttpResponseMessage response = await client.GetAsync(service.Url + "/v1/models").ConfigureAwait(false))
+                                    {
+                                        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)response.StatusCode != 200) throw new InvalidOperationException("Proxied OpenAI models status was not 200.");
+                                        if (!body.Contains("\"object\":\"list\"", StringComparison.Ordinal)) throw new InvalidOperationException("Proxied OpenAI models body was not returned.");
+                                        if (!response.Headers.TryGetValues("x-xeno-request-id", out IEnumerable<string>? requestIds) || !requestIds.Contains("req_local_proxy")) throw new InvalidOperationException("Safe Xeno response header was not propagated.");
+                                        if (!response.Headers.TryGetValues("server-timing", out IEnumerable<string>? timingValues) || !timingValues.Contains("xeno;dur=12")) throw new InvalidOperationException("Server timing header was not propagated.");
+                                        if (response.Content.Headers.ContentLength == 999999) throw new InvalidOperationException("Listener propagated upstream Content-Length.");
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                LocalInferenceTunnelBridge.Clear();
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceListenerStreamsOpenAiChunks",
+                        displayName: "Local inference listener streams OpenAI chunks",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-stream-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_stream",
+                                    TenantId = "ten_default",
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                LocalInferenceTunnelBridge.Register(settings, async delegate(object payload, CancellationToken sendToken)
+                                {
+                                    ClientLocalInferenceRequestMessage? request = payload as ClientLocalInferenceRequestMessage;
+                                    if (request == null) throw new InvalidOperationException("Local inference bridge payload was not typed.");
+                                    if (!request.Stream) throw new InvalidOperationException("OpenAI stream flag was not proxied.");
+                                    LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
+                                    {
+                                        Type = "server.localInference.response.start",
+                                        RequestId = request.RequestId,
+                                        Success = true,
+                                        StatusCode = 200,
+                                        ContentType = "text/event-stream"
+                                    });
+                                    _ = Task.Run(async delegate
+                                    {
+                                        await Task.Delay(25, sendToken).ConfigureAwait(false);
+                                        LocalInferenceTunnelBridge.AcceptChunk(new ServerLocalInferenceChunkMessage
+                                        {
+                                            Type = "server.localInference.chunk",
+                                            RequestId = request.RequestId,
+                                            Sequence = 1,
+                                            Content = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                                        });
+                                        LocalInferenceTunnelBridge.AcceptChunk(new ServerLocalInferenceChunkMessage
+                                        {
+                                            Type = "server.localInference.chunk",
+                                            RequestId = request.RequestId,
+                                            Sequence = 2,
+                                            Content = "data: [DONE]\n\n"
+                                        });
+                                        LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
+                                        {
+                                            Type = "server.localInference.response",
+                                            RequestId = request.RequestId,
+                                            Success = true,
+                                            StatusCode = 200,
+                                            ContentType = "text/event-stream"
+                                        });
+                                    }, sendToken);
+                                    await Task.CompletedTask.ConfigureAwait(false);
+                                });
+
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (HttpClient client = new HttpClient())
+                                    using (StringContent content = new StringContent("{\"model\":\"m\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}", Encoding.UTF8, "application/json"))
+                                    using (HttpResponseMessage response = await client.PostAsync(service.Url + "/v1/chat/completions", content).ConfigureAwait(false))
+                                    {
+                                        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)response.StatusCode != 200) throw new InvalidOperationException("Streaming OpenAI status was not 200.");
+                                        if (!String.Equals(response.Content.Headers.ContentType?.MediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming OpenAI content type was incorrect.");
+                                        if (!body.Contains("data: ", StringComparison.Ordinal) || !body.Contains("data: [DONE]", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming OpenAI framing was incorrect.");
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                LocalInferenceTunnelBridge.Clear();
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceUnsupportedRoutesUseProviderErrors",
+                        displayName: "Local inference unsupported routes use provider errors",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-routes-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (HttpClient client = new HttpClient())
+                                    using (HttpResponseMessage openAi = await client.GetAsync(service.Url + "/v1/files").ConfigureAwait(false))
+                                    using (HttpResponseMessage ollama = await client.GetAsync(service.Url + "/api/version").ConfigureAwait(false))
+                                    {
+                                        string openAiBody = await openAi.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        string ollamaBody = await ollama.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)openAi.StatusCode != 404) throw new InvalidOperationException("Unsupported OpenAI route did not return 404.");
+                                        if ((int)ollama.StatusCode != 404) throw new InvalidOperationException("Unsupported Ollama route did not return 404.");
+                                        OpenAiErrorResponse? openAiError = JsonUtil.Deserialize<OpenAiErrorResponse>(openAiBody);
+                                        OllamaErrorResponse? ollamaError = JsonUtil.Deserialize<OllamaErrorResponse>(ollamaBody);
+                                        if (openAiError == null || openAiError.Error == null || !String.Equals(openAiError.Error.Code, "not_found", StringComparison.Ordinal)) throw new InvalidOperationException("Unsupported OpenAI route body was not provider-shaped.");
+                                        if (ollamaError == null || String.IsNullOrWhiteSpace(ollamaError.Error)) throw new InvalidOperationException("Unsupported Ollama route body was not provider-shaped.");
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceRuntimeRecordsPortConflicts",
+                        displayName: "Local inference runtime records port conflicts",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-conflict-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_conflict",
+                                    TenantId = "ten_default",
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port
+                                    }
+                                };
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                {
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    await LocalInferenceServerRuntime.StartAsync(settings, CancellationToken.None).ConfigureAwait(false);
+                                    ClientConnectionState state = ClientConnectionState.Load();
+                                    if (state.LocalInferenceServerListening) throw new InvalidOperationException("Port conflict was reported as listening.");
+                                    if (String.IsNullOrWhiteSpace(state.LocalInferenceServerLastError)) throw new InvalidOperationException("Port conflict did not record an error.");
+                                    if (!state.LocalInferenceServerLastError.Contains(port.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)) throw new InvalidOperationException("Port conflict error did not include the configured port.");
+                                }
+                            }
+                            finally
+                            {
+                                LocalInferenceServerRuntime.Stop(new ClientSettings());
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
@@ -7457,6 +7839,20 @@ VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider',
                     return Convert.ToInt32(value);
                 }
             }
+        }
+
+        private static void ExpectArgumentException(Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (ArgumentException)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException("Expected ArgumentException was not thrown.");
         }
 
         private sealed class ProcessCommandResult

@@ -11,4 +11,4 @@ Use the platform-specific guides in [getting-started/](getting-started/) instead
 - [macOS client](getting-started/MACOS_CLIENT.md)
 - [macOS server](getting-started/MACOS_SERVER.md)
 
-The new guides split server and client setup by operating system and include Docker deployment, local dashboard access, client startup, boot-time startup, monitoring, and management steps.
+The new guides split server and client setup by operating system and include Docker deployment, local dashboard access, optional local OpenAI/Ollama-compatible inference listener setup, client startup, boot-time startup, monitoring, and management steps.

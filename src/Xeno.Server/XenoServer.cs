@@ -54,6 +54,7 @@ namespace Xeno.Server
         private readonly Dictionary<string, PendingTelemetryResponse> _PendingTelemetryResponses = new Dictionary<string, PendingTelemetryResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<DateTime>> _AuthRateLimitAttempts = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingCallerDisconnects = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingLocalInferenceRequests = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, byte> _ActiveNukeOperations = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, long> _EmailSentByProviderTemplate = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, long> _EmailSkippedByProviderTemplate = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -3552,6 +3553,20 @@ namespace Xeno.Server
                 return "server.inventory.updated";
             }
 
+            if (String.Equals(type, "client.localInference.request", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientLocalInferenceRequestMessage? message = JsonUtil.Deserialize<ClientLocalInferenceRequestMessage>(json);
+                if (message != null) StartClientLocalInferenceTask(session, message, requestContext, token);
+                return null;
+            }
+
+            if (String.Equals(type, "client.localInference.cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientLocalInferenceCancelMessage? message = JsonUtil.Deserialize<ClientLocalInferenceCancelMessage>(json);
+                if (message != null) CancelClientLocalInferenceRequest(message);
+                return null;
+            }
+
             if (String.Equals(type, "client.telemetry.snapshot", StringComparison.OrdinalIgnoreCase))
             {
                 ClientTelemetrySnapshotMessage? message = JsonUtil.Deserialize<ClientTelemetrySnapshotMessage>(json);
@@ -3597,6 +3612,527 @@ namespace Xeno.Server
             }
 
             return "server.ack";
+        }
+
+        private void StartClientLocalInferenceTask(WebSocketSession session, ClientLocalInferenceRequestMessage message, RequestContext requestContext, CancellationToken token)
+        {
+            if (String.IsNullOrWhiteSpace(message.RequestId)) message.RequestId = IdGenerator.NewRequestHistoryId();
+            CancellationTokenSource requestTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token);
+            _PendingLocalInferenceRequests[message.RequestId] = requestTokenSource;
+            _ = ProcessClientLocalInferenceRequestAsync(session, message, requestContext, requestTokenSource);
+        }
+
+        private void CancelClientLocalInferenceRequest(ClientLocalInferenceCancelMessage message)
+        {
+            if (message == null || String.IsNullOrWhiteSpace(message.RequestId)) return;
+            if (_PendingLocalInferenceRequests.TryGetValue(message.RequestId, out CancellationTokenSource? cancellation))
+            {
+                cancellation.Cancel();
+            }
+        }
+
+        private async Task ProcessClientLocalInferenceRequestAsync(WebSocketSession session, ClientLocalInferenceRequestMessage message, RequestContext websocketContext, CancellationTokenSource requestTokenSource)
+        {
+            try
+            {
+                ValidateLocalInferenceRequest(session, message, websocketContext);
+                RequestContext requestContext = BuildLocalInferenceRequestContext(message, websocketContext);
+                await HandleClientLocalInferenceRequestAsync(session, message, requestContext, requestTokenSource.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                await SendLocalInferenceErrorAsync(session, message, 499, "The local inference caller disconnected before the request completed.", CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException || ex is AuthorizationDeniedException)
+            {
+                await SendLocalInferenceErrorAsync(session, message, 403, ex.Message, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is IOException || ex is WebSocketException)
+            {
+                await SendLocalInferenceErrorAsync(session, message, 502, ex.Message, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                _PendingLocalInferenceRequests.TryRemove(message.RequestId, out CancellationTokenSource? _);
+                requestTokenSource.Dispose();
+            }
+        }
+
+        private async Task HandleClientLocalInferenceRequestAsync(WebSocketSession session, ClientLocalInferenceRequestMessage message, RequestContext requestContext, CancellationToken token)
+        {
+            string method = String.IsNullOrWhiteSpace(message.Method) ? "POST" : message.Method.ToUpperInvariant();
+            string path = String.IsNullOrWhiteSpace(message.RelativePath) ? "/" : message.RelativePath;
+            if (method == "GET" && IsPath(path, "/v1/models"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendLocalInferenceJsonAsync(session, message, 200, BuildOpenAiModelListResponse(requestContext), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && path.StartsWith("/v1/models/", StringComparison.OrdinalIgnoreCase))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                string model = Uri.UnescapeDataString(path.Substring("/v1/models/".Length));
+                object? response = BuildOpenAiModelResponse(requestContext, model);
+                if (response == null)
+                {
+                    await SendLocalInferenceErrorAsync(session, message, 404, "Model not found: " + model, token).ConfigureAwait(false);
+                    return;
+                }
+
+                await SendLocalInferenceJsonAsync(session, message, 200, response, LocalInferenceTraceHeaders(requestContext, model, null), token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/tags"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendLocalInferenceJsonAsync(session, message, 200, BuildOllamaTagsResponse(requestContext), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/ps"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                await SendLocalInferenceJsonAsync(session, message, 200, BuildOllamaPsResponse(requestContext), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/show"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+                object? response = BuildOllamaShowResponse(requestContext, message.Model);
+                if (response == null)
+                {
+                    await SendLocalInferenceErrorAsync(session, message, 404, "model not found", token).ConfigureAwait(false);
+                    return;
+                }
+
+                await SendLocalInferenceJsonAsync(session, message, 200, response, LocalInferenceTraceHeaders(requestContext, message.Model, null), token).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+            await RelayClientLocalInferenceRequestAsync(session, message, requestContext, token).ConfigureAwait(false);
+        }
+
+        private async Task RelayClientLocalInferenceRequestAsync(WebSocketSession originSession, ClientLocalInferenceRequestMessage request, RequestContext requestContext, CancellationToken token)
+        {
+            ApiProviderTypeEnum? provider = String.Equals(request.ProviderFamily, "ollama", StringComparison.OrdinalIgnoreCase) ? ApiProviderTypeEnum.Ollama : null;
+            RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, request.Model, request.Embeddings, provider, token).ConfigureAwait(false);
+            if (!decision.Success)
+            {
+                await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, decision.HttpStatusCode, decision.Message, token).ConfigureAwait(false);
+                return;
+            }
+
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && item.TenantId == requestContext.TenantId);
+            if (client == null)
+            {
+                decision.Success = false;
+                decision.HttpStatusCode = 502;
+                decision.OutcomeCode = "ClientMissing";
+                decision.Message = "The selected client no longer exists.";
+                await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, 502, decision.Message, token).ConfigureAwait(false);
+                return;
+            }
+
+            ClientConnection? connection = GetClientConnection(decision.SelectedClientId);
+            if (connection == null || !connection.Session.IsConnected)
+            {
+                decision.Success = false;
+                decision.HttpStatusCode = 502;
+                decision.OutcomeCode = "ClientNotConnected";
+                decision.Message = "The selected client is not connected.";
+                await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, 502, decision.Message, token).ConfigureAwait(false);
+                return;
+            }
+
+            PendingClientResponse pending = new PendingClientResponse();
+            lock (_PendingResponsesLock)
+            {
+                _PendingClientResponses[request.RequestId] = pending;
+            }
+
+            XenoClientModel? selectedModel = FindSelectedModel(client, decision, request.Embeddings);
+            client.InFlightRequests++;
+            DateTime dispatchUtc = DateTime.UtcNow;
+            try
+            {
+                ServerRequestMessage payload = new ServerRequestMessage
+                {
+                    Type = "server.request",
+                    RequestId = request.RequestId,
+                    TenantId = requestContext.TenantId,
+                    RequestorTenantId = requestContext.TenantId,
+                    RequestorPrincipalType = requestContext.PrincipalType.ToString(),
+                    RequestorPrincipalId = requestContext.PrincipalId,
+                    ClientId = client.Id,
+                    ClientName = client.Name,
+                    ApiType = selectedModel?.Provider.ToString(),
+                    Source = selectedModel?.Source,
+                    Method = request.Method,
+                    RelativePath = request.RelativePath,
+                    Model = decision.EffectiveModel,
+                    Embeddings = request.Embeddings,
+                    Stream = request.Stream,
+                    RequestorIp = request.RequestorIp,
+                    Headers = request.Headers,
+                    Body = request.Body
+                };
+                decision.Timeline.Add("ClientDispatch");
+                await SendToClientAsync(connection, JsonUtil.Serialize(payload), token).ConfigureAwait(false);
+                if (request.Stream)
+                {
+                    ClientResponseMessage first = await WaitForClientFirstResponseAsync(request.RequestId, pending, token).ConfigureAwait(false);
+                    if (IsClientResponseStart(first))
+                    {
+                        await StreamLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, pending, first, dispatchUtc, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
+                        await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, first, token).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    ClientResponseMessage response = await WaitForClientResponseAsync(request.RequestId, pending, token).ConfigureAwait(false);
+                    decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
+                    await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, response, token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    await SendRequestCancellationAsync(connection, request.RequestId, "CallerDisconnected", request.RequestorIp ?? String.Empty, request.Method, request.RelativePath, selectedModel?.Source, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is WebSocketException)
+                {
+                }
+
+                throw;
+            }
+            finally
+            {
+                client.InFlightRequests = Math.Max(0, client.InFlightRequests - 1);
+                lock (_PendingResponsesLock)
+                {
+                    _PendingClientResponses.Remove(request.RequestId);
+                }
+
+                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+
+        private async Task StreamLocalInferenceClientResponseAsync(
+            WebSocketSession originSession,
+            ClientLocalInferenceRequestMessage request,
+            RequestContext requestContext,
+            RoutingDecision decision,
+            XenoClientRecord client,
+            XenoClientModel? selectedModel,
+            PendingClientResponse pending,
+            ClientResponseMessage start,
+            DateTime dispatchUtc,
+            CancellationToken token)
+        {
+            Dictionary<string, string> responseHeaders = ExtractHeaders(start);
+            AddLocalInferenceTraceHeaders(responseHeaders, requestContext, decision, client, selectedModel);
+            await SendLocalInferenceMessageAsync(originSession, request.ClientId, new ServerLocalInferenceResponseMessage
+            {
+                Type = "server.localInference.response.start",
+                RequestId = request.RequestId,
+                Success = start.Success,
+                StatusCode = start.StatusCode,
+                ContentType = start.ContentType,
+                Headers = responseHeaders,
+                Error = start.Error
+            }, token).ConfigureAwait(false);
+
+            while (await pending.Chunks.Reader.WaitToReadAsync(token).ConfigureAwait(false))
+            {
+                while (pending.Chunks.Reader.TryRead(out ClientResponseChunkMessage? chunk))
+                {
+                    if (chunk == null) continue;
+                    await SendLocalInferenceMessageAsync(originSession, request.ClientId, new ServerLocalInferenceChunkMessage
+                    {
+                        Type = "server.localInference.response.chunk",
+                        RequestId = request.RequestId,
+                        Sequence = chunk.Sequence,
+                        Encoding = chunk.Encoding,
+                        ByteCount = chunk.ByteCount,
+                        ContentBase64 = chunk.ContentBase64,
+                        Content = chunk.Content,
+                        SentUtc = DateTime.UtcNow
+                    }, token).ConfigureAwait(false);
+                }
+            }
+
+            ClientResponseMessage final = await pending.Final.Task.ConfigureAwait(false);
+            decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
+            await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, final, token).ConfigureAwait(false);
+        }
+
+        private async Task CompleteLocalInferenceClientResponseAsync(
+            WebSocketSession originSession,
+            ClientLocalInferenceRequestMessage request,
+            RequestContext requestContext,
+            RoutingDecision decision,
+            XenoClientRecord client,
+            XenoClientModel? selectedModel,
+            ClientResponseMessage response,
+            CancellationToken token)
+        {
+            bool success = response.Success;
+            int statusCode = response.StatusCode ?? (success ? 200 : 502);
+            decision.Success = success;
+            decision.HttpStatusCode = statusCode;
+            decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
+            decision.Message = success ? "Client completed the local inference request." : response.Error ?? "Client request failed.";
+            Dictionary<string, string> responseHeaders = ExtractHeaders(response);
+            AddLocalInferenceTraceHeaders(responseHeaders, requestContext, decision, client, selectedModel);
+            await RecordAndSaveHistoryAsync(
+                requestContext,
+                request.Method,
+                request.RelativePath,
+                decision,
+                token,
+                entry => PopulateRequestHistory(entry, requestContext, request.Body, request.Headers, response.Body, responseHeaders, response, decision)).ConfigureAwait(false);
+            await SendLocalInferenceMessageAsync(originSession, request.ClientId, new ServerLocalInferenceResponseMessage
+            {
+                Type = request.Stream ? "server.localInference.response.complete" : "server.localInference.response",
+                RequestId = request.RequestId,
+                Success = success,
+                StatusCode = statusCode,
+                ContentType = response.ContentType,
+                Headers = responseHeaders,
+                Body = response.Body,
+                Error = response.Error
+            }, token).ConfigureAwait(false);
+        }
+
+        private async Task SendLocalInferenceErrorAsync(WebSocketSession session, ClientLocalInferenceRequestMessage request, int statusCode, string message, CancellationToken token)
+        {
+            Dictionary<string, string> headers = LocalInferenceTraceHeaders(null, request.Model, null);
+            string body = BuildLocalInferenceErrorBody(request.RelativePath, message, statusCode);
+            await SendLocalInferenceMessageAsync(session, request.ClientId, new ServerLocalInferenceResponseMessage
+            {
+                Type = "server.localInference.response",
+                RequestId = request.RequestId,
+                Success = false,
+                StatusCode = statusCode,
+                ContentType = "application/json",
+                Headers = headers,
+                Body = body,
+                Error = message
+            }, token).ConfigureAwait(false);
+        }
+
+        private async Task SendLocalInferenceJsonAsync(WebSocketSession session, ClientLocalInferenceRequestMessage request, int statusCode, object value, Dictionary<string, string> headers, CancellationToken token)
+        {
+            await SendLocalInferenceMessageAsync(session, request.ClientId, new ServerLocalInferenceResponseMessage
+            {
+                Type = "server.localInference.response",
+                RequestId = request.RequestId,
+                Success = statusCode >= 200 && statusCode < 300,
+                StatusCode = statusCode,
+                ContentType = "application/json",
+                Headers = headers,
+                Body = JsonUtil.Serialize(value)
+            }, token).ConfigureAwait(false);
+        }
+
+        private async Task SendLocalInferenceMessageAsync(WebSocketSession session, string clientId, object payload, CancellationToken token)
+        {
+            string json = JsonUtil.Serialize(payload);
+            ClientConnection? connection = GetClientConnection(clientId);
+            if (connection != null && connection.Session.Id == session.Id)
+            {
+                await SendToClientAsync(connection, json, token).ConfigureAwait(false);
+                return;
+            }
+
+            await session.SendTextAsync(json, token).ConfigureAwait(false);
+        }
+
+        private void ValidateLocalInferenceRequest(WebSocketSession session, ClientLocalInferenceRequestMessage message, RequestContext requestContext)
+        {
+            if (message == null) throw new ArgumentNullException(nameof(message));
+            if (String.IsNullOrWhiteSpace(message.ClientId)) throw new UnauthorizedAccessException("Local inference request client ID is required.");
+            if (!String.Equals(message.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Local inference request tenant does not match authenticated websocket tenant.");
+            ClientConnection? connection = GetClientConnection(message.ClientId);
+            if (connection == null) throw new UnauthorizedAccessException("Local inference request client is not registered.");
+            if (!String.Equals(connection.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Local inference request client tenant is invalid.");
+            if (connection.Session.Id != session.Id) throw new UnauthorizedAccessException("Local inference request arrived on the wrong websocket session.");
+        }
+
+        private static RequestContext BuildLocalInferenceRequestContext(ClientLocalInferenceRequestMessage message, RequestContext websocketContext)
+        {
+            return new RequestContext
+            {
+                RequestId = message.RequestId,
+                StartedUtc = DateTime.UtcNow,
+                TenantId = websocketContext.TenantId,
+                UserId = websocketContext.UserId,
+                CredentialId = websocketContext.CredentialId,
+                SessionId = websocketContext.SessionId,
+                PrincipalType = websocketContext.PrincipalType,
+                AuthScheme = websocketContext.AuthScheme,
+                SourceIp = message.RequestorIp ?? websocketContext.SourceIp,
+                ForwardedFor = websocketContext.ForwardedFor,
+                UserAgent = websocketContext.UserAgent,
+                Origin = websocketContext.Origin,
+                Referer = websocketContext.Referer,
+                Host = websocketContext.Host,
+                RequestMethod = message.Method,
+                RequestPath = message.RelativePath,
+                CorrelationId = websocketContext.CorrelationId,
+                IsAuthenticated = websocketContext.IsAuthenticated
+            };
+        }
+
+        private object BuildOpenAiModelListResponse(RequestContext requestContext)
+        {
+            List<object> models = RequirePlatform().Clients
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .SelectMany(item => item.Models)
+                .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => (object)new { id = group.Key, @object = "model", created = ToUnixTimeSeconds(group.Max(item => item.LastAdvertisedUtc)), owned_by = "xeno" })
+                .ToList();
+            return new { @object = "list", data = models };
+        }
+
+        private object? BuildOpenAiModelResponse(RequestContext requestContext, string model)
+        {
+            XenoClientModel? record = RequirePlatform().Clients
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .SelectMany(item => item.Models)
+                .Where(item => String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.LastAdvertisedUtc)
+                .FirstOrDefault();
+            if (record == null) return null;
+            return new { id = record.Name, @object = "model", created = ToUnixTimeSeconds(record.LastAdvertisedUtc), owned_by = "xeno" };
+        }
+
+        private object BuildOllamaPsResponse(RequestContext requestContext)
+        {
+            List<object> models = RequirePlatform().Clients
+                .Where(item => item.TenantId == requestContext.TenantId && item.Connected && item.Active)
+                .SelectMany(item => item.Models)
+                .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => (object)new
+                {
+                    name = group.Key,
+                    model = group.Key,
+                    size = 0,
+                    digest = StableDigest(group.Key),
+                    details = new
+                    {
+                        format = String.Empty,
+                        family = FamilyFromModelName(group.Key),
+                        families = new[] { FamilyFromModelName(group.Key) },
+                        parameter_size = String.Empty,
+                        quantization_level = String.Empty
+                    },
+                    expires_at = DateTime.UtcNow.AddMinutes(5).ToString("O", CultureInfo.InvariantCulture),
+                    size_vram = 0
+                })
+                .ToList();
+            return new { models };
+        }
+
+        private object? BuildOllamaShowResponse(RequestContext requestContext, string? model)
+        {
+            if (String.IsNullOrWhiteSpace(model)) return null;
+            XenoClientModel? record = RequirePlatform().Clients
+                .Where(item => item.TenantId == requestContext.TenantId)
+                .SelectMany(item => item.Models)
+                .Where(item => String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.LastAdvertisedUtc)
+                .FirstOrDefault();
+            if (record == null) return null;
+            return new
+            {
+                license = String.Empty,
+                modelfile = String.Empty,
+                parameters = String.Empty,
+                template = String.Empty,
+                details = new
+                {
+                    parent_model = String.Empty,
+                    format = String.Empty,
+                    family = FamilyFromModelName(record.Name),
+                    families = new[] { FamilyFromModelName(record.Name) },
+                    parameter_size = String.Empty,
+                    quantization_level = String.Empty
+                },
+                model_info = new Dictionary<string, string>(),
+                modified_at = record.LastAdvertisedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+            };
+        }
+
+        private static Dictionary<string, string> LocalInferenceTraceHeaders(RequestContext? requestContext, string? model, RoutingDecision? decision)
+        {
+            Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (requestContext != null)
+            {
+                headers["X-Xeno-Request-ID"] = requestContext.RequestId;
+                headers["X-Xeno-Tenant-ID"] = requestContext.TenantId;
+            }
+
+            if (!String.IsNullOrWhiteSpace(model)) headers["X-Xeno-Model"] = model;
+            if (decision != null)
+            {
+                headers["X-Xeno-Routing-Outcome"] = decision.OutcomeCode;
+                headers["X-Xeno-Routing-Message"] = decision.Message;
+            }
+
+            return headers;
+        }
+
+        private static void AddLocalInferenceTraceHeaders(Dictionary<string, string> headers, RequestContext requestContext, RoutingDecision decision, XenoClientRecord client, XenoClientModel? selectedModel)
+        {
+            headers["X-Xeno-Request-ID"] = requestContext.RequestId;
+            headers["X-Xeno-Tenant-ID"] = requestContext.TenantId;
+            headers["X-Xeno-Routing-Outcome"] = decision.OutcomeCode;
+            headers["X-Xeno-Routing-Message"] = decision.Message;
+            if (!String.IsNullOrWhiteSpace(decision.EffectiveModel)) headers["X-Xeno-Model"] = decision.EffectiveModel;
+            headers["X-Xeno-Selected-Client-Name"] = client.Name;
+            if (selectedModel != null)
+            {
+                headers["X-Xeno-Selected-API-Type"] = selectedModel.Provider.ToString();
+                headers["X-Xeno-Selected-Source"] = selectedModel.Source;
+            }
+        }
+
+        private static string BuildLocalInferenceErrorBody(string path, string message, int statusCode)
+        {
+            string safeMessage = String.IsNullOrWhiteSpace(message) ? "Request failed." : message;
+            if (path.StartsWith("/v1/", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonUtil.Serialize(new
+                {
+                    error = new
+                    {
+                        message = safeMessage,
+                        type = statusCode == 404 ? "invalid_request_error" : "server_error",
+                        param = (string?)null,
+                        code = statusCode == 404 ? "not_found" : "upstream_error"
+                    }
+                });
+            }
+
+            if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonUtil.Serialize(new { error = safeMessage });
+            }
+
+            return JsonUtil.Serialize(new { error = "RequestFailed", message = safeMessage });
         }
 
         private async Task AcceptClientTelemetrySnapshotAsync(WebSocketSession session, ClientTelemetrySnapshotMessage message, RequestContext requestContext, CancellationToken token)

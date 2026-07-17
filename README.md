@@ -22,6 +22,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Routes requests to connected clients through tenant-scoped routing policies with model/client match rules and load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, client-side request history, and machine telemetry.
+- Can expose an optional localhost-only OpenAI-compatible and Ollama-compatible inference listener from the client for local apps. It is disabled by default, uses the client's configured Xeno identity, and proxies requests through the authenticated WebSocket tunnel.
 - Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
 - Collects local CPU, memory, disk, and GPU telemetry on the client at a configurable interval, persists it in SQLite, and exposes live and historical telemetry dashboard pages.
 - Can collect fleet-level client telemetry from the server. When `TelemetryCollection.Enabled` is true, the server requests host and provider telemetry over the authenticated client WebSocket, persists server-collected samples, and shows them under `CONTROL > Client Telemetry`.
@@ -68,7 +69,32 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
 8. The server returns the model response to the caller and persists request history for dashboard inspection.
 9. When enabled, the client also writes local request history to SQLite and exposes a local dashboard for inspecting what that specific machine processed.
-10. When server telemetry collection is enabled, the server controls collection cadence and clients answer explicit telemetry request frames. Disabling server collection does not disable the client's local telemetry dashboard.
+10. When enabled, the client can expose `http://127.0.0.1:11434` as a local OpenAI/Ollama-compatible API surface. Requests still go through the Xeno server over the WebSocket tunnel, so server-side tenancy, routing, request history, and ledgering remain in effect.
+11. When server telemetry collection is enabled, the server controls collection cadence and clients answer explicit telemetry request frames. Disabling server collection does not disable the client's local telemetry dashboard.
+
+## Local Client Inference Listener
+
+The Xeno client can expose a convenience API for local applications that expect either OpenAI-compatible or Ollama-compatible endpoints. The listener is disabled by default and is loopback-only; it accepts `localhost`, `127.0.0.1`, `::1`, or `[::1]` and rejects public or wildcard hosts.
+
+Add or edit this section in `~/.xeno/client.json`:
+
+```json
+{
+  "LocalInferenceServer": {
+    "Enabled": true,
+    "Host": "127.0.0.1",
+    "Port": 11434,
+    "EnableCors": true
+  }
+}
+```
+
+After `xeno start`, local apps can use:
+
+- OpenAI base URL: `http://127.0.0.1:11434/v1`
+- Ollama base URL: `http://127.0.0.1:11434/api`
+
+Supported routes are `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`, `/v1/models/{model}`, `/api/generate`, `/api/chat`, `/api/embeddings`, `/api/embed`, `/api/tags`, `/api/show`, and `/api/ps`. Streaming is supported for OpenAI chat completions and Ollama generate/chat. If the Xeno WebSocket is disconnected, severed, or unauthorized, the listener stays up but returns provider-shaped `502` responses.
 
 ## Server Client Telemetry
 

@@ -68,6 +68,11 @@ namespace Xeno.Client
         public ClientLocalDashboardSettings LocalDashboard { get; set; } = new ClientLocalDashboardSettings();
 
         /// <summary>
+        /// Local inference server settings.
+        /// </summary>
+        public ClientLocalInferenceServerSettings LocalInferenceServer { get; set; } = new ClientLocalInferenceServerSettings();
+
+        /// <summary>
         /// Local telemetry settings.
         /// </summary>
         public ClientTelemetrySettings Telemetry { get; set; } = new ClientTelemetrySettings();
@@ -109,12 +114,16 @@ namespace Xeno.Client
 
             string json = File.ReadAllText(SettingsFile);
             ClientSettings settings = JsonUtil.Deserialize<ClientSettings>(json) ?? new ClientSettings();
+            ClientSettingsDefaultProbe probe = JsonUtil.Deserialize<ClientSettingsDefaultProbe>(json) ?? new ClientSettingsDefaultProbe();
+            bool rewritten = settings.ApplyDefaults(probe);
             if (settings.Providers.Count == 0)
             {
                 ClientSettingsLegacyRunners? legacy = JsonUtil.Deserialize<ClientSettingsLegacyRunners>(json);
                 settings.Providers = legacy?.Runners ?? new List<ClientRunnerSettings>();
+                rewritten = true;
             }
 
+            if (rewritten) settings.Save();
             return settings;
         }
 
@@ -185,6 +194,47 @@ namespace Xeno.Client
             }
 
             return inventory;
+        }
+
+        private bool ApplyDefaults(ClientSettingsDefaultProbe probe)
+        {
+            bool rewritten = false;
+            if (Server == null)
+            {
+                Server = new ClientServerSettings();
+                rewritten = true;
+            }
+
+            if (LocalDashboard == null)
+            {
+                LocalDashboard = new ClientLocalDashboardSettings();
+                rewritten = true;
+            }
+
+            if (LocalInferenceServer == null)
+            {
+                LocalInferenceServer = new ClientLocalInferenceServerSettings();
+                rewritten = true;
+            }
+
+            if (Telemetry == null)
+            {
+                Telemetry = new ClientTelemetrySettings();
+                rewritten = true;
+            }
+
+            if (Providers == null)
+            {
+                Providers = new List<ClientRunnerSettings>();
+                rewritten = true;
+            }
+
+            if (probe.Server == null) rewritten = true;
+            if (probe.LocalDashboard == null) rewritten = true;
+            if (probe.LocalInferenceServer == null) rewritten = true;
+            if (probe.Telemetry == null) rewritten = true;
+            if (probe.Providers == null) rewritten = true;
+            return rewritten;
         }
     }
 }

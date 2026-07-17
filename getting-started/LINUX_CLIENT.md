@@ -7,6 +7,7 @@ This guide installs and runs the Xeno client on Linux.
 - Client settings: `~/.xeno/client.json`
 - Client state: `~/.xeno/state.json`
 - Local dashboard: `http://127.0.0.1:9343`
+- Optional local inference listener: `http://127.0.0.1:11434` when `LocalInferenceServer.Enabled` is true
 - Default cloud WebSocket URL: `ws://app.xenocloud.ai:9000/ws/v1/clients`
 - Local Docker server WebSocket URL: `ws://localhost:9000/ws/v1/clients`
 - Local Docker server REST URL: `http://localhost:9000`
@@ -109,14 +110,38 @@ $XENO dashboard
 $XENO dashboard open
 ```
 
-13. Watch logs.
+13. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
+
+Edit `~/.xeno/client.json` and add:
+
+```json
+"LocalInferenceServer": {
+  "Enabled": true,
+  "Host": "127.0.0.1",
+  "Port": 11434,
+  "EnableCors": true
+}
+```
+
+Restart the client, then test local model listing:
+
+```bash
+$XENO stop
+$XENO start
+curl http://127.0.0.1:11434/v1/models
+curl http://127.0.0.1:11434/api/tags
+```
+
+The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses.
+
+14. Watch logs.
 
 ```bash
 $XENO logs --tail 100
 $XENO logs -f
 ```
 
-14. Stop the client.
+15. Stop the client.
 
 ```bash
 $XENO stop

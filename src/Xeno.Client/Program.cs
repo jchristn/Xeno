@@ -14,6 +14,7 @@ namespace Xeno.Client
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Client.LocalDashboard;
+    using Xeno.Client.LocalInference;
     using Xeno.Client.Telemetry.Providers;
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Enums;
@@ -1583,7 +1584,8 @@ namespace Xeno.Client
                         restUrl = BuildRestBaseUrl(settings),
                         processId = existing.ProcessId ?? 0,
                         logFile = existing.LogFilePath ?? ClientConnectionState.LogFile,
-                        localDashboard = BuildLocalDashboardJson(existing)
+                        localDashboard = BuildLocalDashboardJson(existing),
+                        localInferenceServer = BuildLocalInferenceJson(existing, settings)
                     });
                 }
                 else
@@ -1593,6 +1595,7 @@ namespace Xeno.Client
                     PrintStartField("Process ID", existing.ProcessId == null ? "(none)" : existing.ProcessId.Value.ToString(CultureInfo.InvariantCulture));
                     PrintStartField("Log file", DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(existing);
+                    PrintLocalInferenceAccess(existing, settings);
                 }
 
                 return 0;
@@ -1617,7 +1620,8 @@ namespace Xeno.Client
                         logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
                         errorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
                         reason = state.LastDisconnectReason ?? String.Empty,
-                        localDashboard = BuildLocalDashboardJson(state)
+                        localDashboard = BuildLocalDashboardJson(state),
+                        localInferenceServer = BuildLocalInferenceJson(state, settings)
                     });
                 }
                 else if (registered)
@@ -1627,6 +1631,7 @@ namespace Xeno.Client
                     PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
                     PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
+                    PrintLocalInferenceAccess(state, settings);
                 }
                 else
                 {
@@ -1635,6 +1640,7 @@ namespace Xeno.Client
                     PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
                     PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
                     PrintLocalDashboardAccess(state);
+                    PrintLocalInferenceAccess(state, settings);
                     Console.WriteLine("  Last reason: " + DisplayValue(state.LastDisconnectReason, "(none)"));
                 }
 
@@ -1658,10 +1664,12 @@ namespace Xeno.Client
                 {
                     ClientConnectionState.MarkStarted(settings, worker);
                     await LocalDashboardRuntime.StartAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
+                    await LocalInferenceServerRuntime.StartAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
                     await ConnectAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
                 }
                 finally
                 {
+                    LocalInferenceServerRuntime.Stop(settings);
                     LocalDashboardRuntime.Stop();
                     ClientConnectionState.MarkLocalDashboardStopped(settings);
                     runtimeTokenSource.Cancel();
@@ -1772,6 +1780,7 @@ namespace Xeno.Client
                 finally
                 {
                     CancelActiveRequests();
+                    LocalInferenceTunnelBridge.Clear();
                     connectionTokenSource.Cancel();
                     await ObserveConnectionTaskAsync(heartbeatTask).ConfigureAwait(false);
                     await ObserveConnectionTaskAsync(livenessTask).ConfigureAwait(false);
@@ -1905,10 +1914,32 @@ namespace Xeno.Client
         {
             WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
             string type = envelope?.Type ?? string.Empty;
+            if (String.Equals(type, "server.registered", StringComparison.OrdinalIgnoreCase))
+            {
+                LocalInferenceTunnelBridge.Register(settings, async (payload, sendToken) => await SendMessageAsync(socket, payload, sendToken).ConfigureAwait(false));
+                return;
+            }
+
             if (String.Equals(type, "server.telemetry.request", StringComparison.OrdinalIgnoreCase))
             {
                 ClientSettings runtimeSettings = LoadRuntimeSettingsForConnectedSession(settings);
                 await HandleServerTelemetryRequestAsync(socket, runtimeSettings, message, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (String.Equals(type, "server.localInference.response.start", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(type, "server.localInference.response.complete", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(type, "server.localInference.response", StringComparison.OrdinalIgnoreCase))
+            {
+                ServerLocalInferenceResponseMessage? response = JsonUtil.Deserialize<ServerLocalInferenceResponseMessage>(message);
+                if (response != null) LocalInferenceTunnelBridge.AcceptResponse(response);
+                return;
+            }
+
+            if (String.Equals(type, "server.localInference.response.chunk", StringComparison.OrdinalIgnoreCase))
+            {
+                ServerLocalInferenceChunkMessage? chunk = JsonUtil.Deserialize<ServerLocalInferenceChunkMessage>(message);
+                if (chunk != null) LocalInferenceTunnelBridge.AcceptChunk(chunk);
                 return;
             }
 
@@ -2846,15 +2877,19 @@ namespace Xeno.Client
         private static async Task<ClientConnectionState> WaitForLocalDashboardStateAsync(int processId, ClientSettings settings, bool registered, CancellationToken token)
         {
             ClientConnectionState state = ClientConnectionState.Load();
-            if (!settings.LocalDashboard.Enabled || !registered) return state;
+            bool waitForDashboard = settings.LocalDashboard.Enabled && registered;
+            bool waitForInference = settings.LocalInferenceServer.Enabled;
+            if (!waitForDashboard && !waitForInference) return state;
 
             DateTime deadline = DateTime.UtcNow.AddSeconds(5);
             while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
             {
                 state = ClientConnectionState.Load();
-                if (state.ProcessId == processId
-                    && state.LocalDashboardEnabled
-                    && (state.LocalDashboardListening || !String.IsNullOrWhiteSpace(state.LocalDashboardLastError)))
+                bool dashboardReady = !waitForDashboard ||
+                    (state.LocalDashboardEnabled && (state.LocalDashboardListening || !String.IsNullOrWhiteSpace(state.LocalDashboardLastError)));
+                bool inferenceReady = !waitForInference ||
+                    (state.LocalInferenceServerEnabled && (state.LocalInferenceServerListening || !String.IsNullOrWhiteSpace(state.LocalInferenceServerLastError)));
+                if (state.ProcessId == processId && dashboardReady && inferenceReady)
                 {
                     return state;
                 }
@@ -3144,6 +3179,15 @@ namespace Xeno.Client
                     return;
                 }
 
+                if (String.Equals(type, "server.localInference.response.start", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(type, "server.localInference.response.chunk", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(type, "server.localInference.response.complete", StringComparison.OrdinalIgnoreCase) ||
+                    String.Equals(type, "server.localInference.response", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_UseJson) Console.WriteLine(message);
+                    return;
+                }
+
                 if (String.Equals(type, "server.error", StringComparison.OrdinalIgnoreCase) ||
                     String.Equals(type, "server.unauthorized", StringComparison.OrdinalIgnoreCase))
                 {
@@ -3253,6 +3297,19 @@ namespace Xeno.Client
                         startedUtc = FormatJsonUtc(connection.LocalDashboardStartedUtc),
                         stoppedUtc = FormatJsonUtc(connection.LocalDashboardStoppedUtc),
                         error = connection.LocalDashboardLastError ?? String.Empty
+                    },
+                    localInferenceServer = new
+                    {
+                        enabled = connection.LocalInferenceServerEnabled || settings.LocalInferenceServer.Enabled,
+                        listening = connection.LocalInferenceServerListening,
+                        url = connection.LocalInferenceServerUrl ?? String.Empty,
+                        host = connection.LocalInferenceServerHost ?? settings.LocalInferenceServer.Host,
+                        port = connection.LocalInferenceServerPort ?? settings.LocalInferenceServer.Port,
+                        startedUtc = FormatJsonUtc(connection.LocalInferenceServerStartedUtc),
+                        stoppedUtc = FormatJsonUtc(connection.LocalInferenceServerStoppedUtc),
+                        lastRequestUtc = FormatJsonUtc(connection.LocalInferenceServerLastRequestUtc),
+                        error = connection.LocalInferenceServerLastError ?? String.Empty,
+                        websocketAvailable = connection.IsConnected && connection.IsRegistered
                     }
                 });
                 return;
@@ -3285,6 +3342,7 @@ namespace Xeno.Client
             Console.WriteLine("  Error log file:      " + DisplayValue(connection.ErrorLogFilePath, ClientConnectionState.ErrorLogFile));
             Console.WriteLine("  Last reason:         " + DisplayValue(connection.LastDisconnectReason, "(none)"));
             PrintLocalDashboardStatus(connection, settings);
+            PrintLocalInferenceStatus(connection, settings);
         }
 
         private static object BuildLocalDashboardJson(ClientConnectionState state)
@@ -3299,6 +3357,23 @@ namespace Xeno.Client
                 startedUtc = FormatJsonUtc(state.LocalDashboardStartedUtc),
                 stoppedUtc = FormatJsonUtc(state.LocalDashboardStoppedUtc),
                 error = state.LocalDashboardLastError ?? String.Empty
+            };
+        }
+
+        private static object BuildLocalInferenceJson(ClientConnectionState state, ClientSettings settings)
+        {
+            return new
+            {
+                enabled = state.LocalInferenceServerEnabled || settings.LocalInferenceServer.Enabled,
+                listening = state.LocalInferenceServerListening,
+                url = state.LocalInferenceServerUrl ?? String.Empty,
+                host = state.LocalInferenceServerHost ?? settings.LocalInferenceServer.Host,
+                port = state.LocalInferenceServerPort ?? settings.LocalInferenceServer.Port,
+                startedUtc = FormatJsonUtc(state.LocalInferenceServerStartedUtc),
+                stoppedUtc = FormatJsonUtc(state.LocalInferenceServerStoppedUtc),
+                lastRequestUtc = FormatJsonUtc(state.LocalInferenceServerLastRequestUtc),
+                error = state.LocalInferenceServerLastError ?? String.Empty,
+                websocketAvailable = state.IsConnected && state.IsRegistered
             };
         }
 
@@ -3323,6 +3398,25 @@ namespace Xeno.Client
 
             PrintStartField("Local dashboard", "enabled, not listening");
             if (!String.IsNullOrWhiteSpace(state.LocalDashboardLastError)) Console.WriteLine("  Dashboard error: " + state.LocalDashboardLastError);
+        }
+
+        private static void PrintLocalInferenceAccess(ClientConnectionState state, ClientSettings settings)
+        {
+            bool enabled = state.LocalInferenceServerEnabled || settings.LocalInferenceServer.Enabled;
+            if (!enabled)
+            {
+                PrintStartField("Local inference", "disabled");
+                return;
+            }
+
+            if (state.LocalInferenceServerListening && !String.IsNullOrWhiteSpace(state.LocalInferenceServerUrl))
+            {
+                PrintStartField("Local inference", state.LocalInferenceServerUrl);
+                return;
+            }
+
+            PrintStartField("Local inference", "enabled, not listening");
+            if (!String.IsNullOrWhiteSpace(state.LocalInferenceServerLastError)) Console.WriteLine("  Inference error: " + state.LocalInferenceServerLastError);
         }
 
         private static void PrintServerAccess(ClientSettings settings)
@@ -3353,6 +3447,32 @@ namespace Xeno.Client
             Console.WriteLine("  Started UTC:      " + FormatUtc(connection.LocalDashboardStartedUtc));
             Console.WriteLine("  Stopped UTC:      " + FormatUtc(connection.LocalDashboardStoppedUtc));
             Console.WriteLine("  Last error:       " + DisplayValue(connection.LocalDashboardLastError, "(none)"));
+        }
+
+        private static void PrintLocalInferenceStatus(ClientConnectionState connection, ClientSettings settings)
+        {
+            bool enabled = settings.LocalInferenceServer.Enabled || connection.LocalInferenceServerEnabled;
+            if (!enabled)
+            {
+                Console.WriteLine("  Local Inference: disabled");
+                return;
+            }
+
+            WritePlainHeading("Local Inference Server");
+            Console.WriteLine("  Enabled:          " + FormatTrueFalse(enabled));
+            Console.WriteLine("  Listening:        " + FormatTrueFalse(connection.LocalInferenceServerListening));
+            Console.WriteLine("  URL:              " + DisplayValue(connection.LocalInferenceServerUrl, "(not listening)"));
+            Console.WriteLine("  Host:             " + DisplayValue(connection.LocalInferenceServerHost, settings.LocalInferenceServer.Host));
+            Console.WriteLine("  Port:             " + (connection.LocalInferenceServerPort ?? settings.LocalInferenceServer.Port).ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("  Started UTC:      " + FormatUtc(connection.LocalInferenceServerStartedUtc));
+            Console.WriteLine("  Stopped UTC:      " + FormatUtc(connection.LocalInferenceServerStoppedUtc));
+            Console.WriteLine("  Last request UTC: " + FormatUtc(connection.LocalInferenceServerLastRequestUtc));
+            Console.WriteLine("  WebSocket ready:  " + FormatTrueFalse(connection.IsConnected && connection.IsRegistered));
+            Console.WriteLine("  Last error:       " + DisplayValue(connection.LocalInferenceServerLastError, "(none)"));
+            if (!connection.IsConnected || !connection.IsRegistered)
+            {
+                Console.WriteLine("  Failure mode:     localhost inference endpoints return provider-shaped 502 responses until the websocket is registered.");
+            }
         }
 
         private static void PrintProviders(ClientSettings settings)
@@ -3621,7 +3741,7 @@ namespace Xeno.Client
         {
             WriteInfoHeading("Configuration commands");
             Console.WriteLine("  xeno config show");
-            Console.WriteLine("      Show the client configuration, including the local dashboard URL when enabled.");
+            Console.WriteLine("      Show the client configuration, including local dashboard and local inference settings when enabled.");
             Console.WriteLine("  xeno config colors on");
             Console.WriteLine("      Enable colored command output.");
             Console.WriteLine("  xeno config colors off");
@@ -3704,9 +3824,9 @@ namespace Xeno.Client
             WriteInfoHeading("Connect commands");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
-            Console.WriteLine("      Start the client as a background process and return after registration succeeds. Prints the local dashboard URL when enabled.");
+            Console.WriteLine("      Start the client as a background process and return after registration succeeds. Prints local dashboard and local inference URLs when enabled.");
             Console.WriteLine("  xeno connect --foreground");
-            Console.WriteLine("      Run the client WebSocket loop in the current terminal. Prints the local dashboard URL when enabled.");
+            Console.WriteLine("      Run the client WebSocket loop in the current terminal. Prints local dashboard and local inference URLs when enabled.");
             Console.WriteLine("  xeno connect --timeout <milliseconds>");
             Console.WriteLine("      Wait this long for background registration before returning an error.");
         }
@@ -3894,6 +4014,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno disconnect");
             Console.WriteLine();
             Console.WriteLine("When LocalDashboard.Enabled is true, 'xeno connect', 'xeno status', and 'xeno dashboard' show the local dashboard URL.");
+            Console.WriteLine("When LocalInferenceServer.Enabled is true, 'xeno connect' and 'xeno status' show the local OpenAI/Ollama-compatible listener URL.");
             WritePlainHeading("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");

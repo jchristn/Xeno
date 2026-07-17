@@ -14,6 +14,7 @@ namespace Xeno.Client.LocalDashboard
     using WatsonWebserver.Core;
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
+    using Xeno.Client.LocalInference;
     using Xeno.Client.Telemetry.Models;
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Serialization;
@@ -531,6 +532,7 @@ namespace Xeno.Client.LocalDashboard
             {
                 LocalClientSettingsUpdateRequest request = ReadJson<LocalClientSettingsUpdateRequest>(context);
                 ValidateHost(request.Host);
+                LocalInferenceServerService.ValidateLoopbackHost(request.LocalInferenceServer.Host);
                 _Settings.LocalDashboard.Enabled = request.Enabled;
                 _Settings.LocalDashboard.Host = request.Host;
                 _Settings.LocalDashboard.Port = Math.Max(1, request.Port);
@@ -538,6 +540,7 @@ namespace Xeno.Client.LocalDashboard
                 _Settings.LocalDashboard.RequireLocalToken = request.RequireLocalToken;
                 _Settings.LocalDashboard.Database = request.Database ?? new ClientLocalDatabaseSettings();
                 _Settings.LocalDashboard.HistoryRetention = request.HistoryRetention ?? new ClientLocalHistorySettings();
+                _Settings.LocalInferenceServer = request.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
                 _Settings.Telemetry = request.Telemetry ?? new ClientTelemetrySettings();
                 _Settings.Save();
                 await SendJsonAsync(context, new LocalDashboardSettingsResponse { Settings = RedactedSettings(), SettingsFile = ClientSettings.SettingsFile, RestartRequired = true }).ConfigureAwait(false);
@@ -558,6 +561,7 @@ namespace Xeno.Client.LocalDashboard
             _Settings.UseColors = reloaded.UseColors;
             _Settings.Server = reloaded.Server ?? new ClientServerSettings();
             _Settings.LocalDashboard = reloaded.LocalDashboard ?? new ClientLocalDashboardSettings();
+            _Settings.LocalInferenceServer = reloaded.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
             _Settings.Telemetry = reloaded.Telemetry ?? new ClientTelemetrySettings();
             _Settings.Providers = reloaded.Providers ?? new List<ClientRunnerSettings>();
         }
@@ -579,6 +583,7 @@ namespace Xeno.Client.LocalDashboard
                     Token = _Settings.Server.Token
                 },
                 LocalDashboard = _Settings.LocalDashboard,
+                LocalInferenceServer = _Settings.LocalInferenceServer,
                 Telemetry = _Settings.Telemetry,
                 Providers = _Settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList()
             };
