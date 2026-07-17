@@ -23,9 +23,8 @@ namespace Xeno.Client.LocalInference
         /// <summary>
         /// Streaming chunk channel.
         /// </summary>
-        public Channel<ServerLocalInferenceChunkMessage> Chunks { get; } = Channel.CreateBounded<ServerLocalInferenceChunkMessage>(new BoundedChannelOptions(256)
+        public Channel<ServerLocalInferenceChunkMessage> Chunks { get; } = Channel.CreateUnbounded<ServerLocalInferenceChunkMessage>(new UnboundedChannelOptions
         {
-            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false
         });

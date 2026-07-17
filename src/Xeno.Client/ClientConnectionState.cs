@@ -1,6 +1,7 @@
 namespace Xeno.Client
 {
     using System;
+    using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
     using Xeno.Core.Serialization;
@@ -10,6 +11,10 @@ namespace Xeno.Client
     /// </summary>
     public class ClientConnectionState
     {
+        private static readonly TimeSpan _MinimumActivityStateSaveInterval = TimeSpan.FromSeconds(1);
+        private static readonly object _ActivityStateSync = new object();
+        private static readonly Dictionary<string, DateTime> _LastActivityStateSaveUtc = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
         /// Runtime state file path.
         /// </summary>
@@ -409,8 +414,10 @@ namespace Xeno.Client
         /// <param name="settings">Client settings.</param>
         public static void MarkServerMessage(ClientSettings settings)
         {
-            ClientConnectionState state = Load();
             DateTime now = DateTime.UtcNow;
+            if (!ShouldSaveActivityState("server:" + StateFile, now)) return;
+
+            ClientConnectionState state = Load();
             if (state.IsRegistered) state.IsConnected = true;
             state.ProcessId = Environment.ProcessId;
             state.ExecutablePath = Environment.ProcessPath;
@@ -633,9 +640,12 @@ namespace Xeno.Client
         /// <param name="settings">Client settings.</param>
         public static void MarkLocalInferenceRequest(ClientSettings settings)
         {
+            DateTime now = DateTime.UtcNow;
+            if (!ShouldSaveActivityState("local-inference:" + StateFile, now)) return;
+
             ClientConnectionState state = Load();
             ApplyLocalInferenceSettings(state, settings);
-            state.LocalInferenceServerLastRequestUtc = DateTime.UtcNow;
+            state.LocalInferenceServerLastRequestUtc = now;
             state.LastUpdatedUtc = state.LocalInferenceServerLastRequestUtc;
             state.Save();
         }
@@ -707,6 +717,21 @@ namespace Xeno.Client
         {
             state.LocalInferenceServerHost = settings.LocalInferenceServer.Host;
             state.LocalInferenceServerPort = settings.LocalInferenceServer.Port;
+        }
+
+        private static bool ShouldSaveActivityState(string key, DateTime now)
+        {
+            lock (_ActivityStateSync)
+            {
+                if (_LastActivityStateSaveUtc.TryGetValue(key, out DateTime lastSavedUtc) &&
+                    now - lastSavedUtc < _MinimumActivityStateSaveInterval)
+                {
+                    return false;
+                }
+
+                _LastActivityStateSaveUtc[key] = now;
+                return true;
+            }
         }
 
         /// <summary>

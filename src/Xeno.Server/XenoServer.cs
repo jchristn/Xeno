@@ -3766,6 +3766,15 @@ namespace Xeno.Server
             XenoClientModel? selectedModel = FindSelectedModel(client, decision, request.Embeddings);
             client.InFlightRequests++;
             DateTime dispatchUtc = DateTime.UtcNow;
+            bool clientSlotReleased = false;
+
+            void ReleaseClientSlot()
+            {
+                if (clientSlotReleased) return;
+                client.InFlightRequests = Math.Max(0, client.InFlightRequests - 1);
+                clientSlotReleased = true;
+            }
+
             try
             {
                 ServerRequestMessage payload = new ServerRequestMessage
@@ -3796,19 +3805,19 @@ namespace Xeno.Server
                     ClientResponseMessage first = await WaitForClientFirstResponseAsync(request.RequestId, pending, EffectiveRequestTimeoutMs(decision), token).ConfigureAwait(false);
                     if (IsClientResponseStart(first))
                     {
-                        await StreamLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, pending, first, dispatchUtc, token).ConfigureAwait(false);
+                        await StreamLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, pending, first, dispatchUtc, ReleaseClientSlot, token).ConfigureAwait(false);
                     }
                     else
                     {
                         decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
-                        await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, first, token).ConfigureAwait(false);
+                        await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, first, ReleaseClientSlot, token).ConfigureAwait(false);
                     }
                 }
                 else
                 {
                     ClientResponseMessage response = await WaitForClientResponseAsync(request.RequestId, pending, EffectiveRequestTimeoutMs(decision), token).ConfigureAwait(false);
                     decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
-                    await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, response, token).ConfigureAwait(false);
+                    await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, response, ReleaseClientSlot, token).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
@@ -3836,13 +3845,11 @@ namespace Xeno.Server
             }
             finally
             {
-                client.InFlightRequests = Math.Max(0, client.InFlightRequests - 1);
+                ReleaseClientSlot();
                 lock (_PendingResponsesLock)
                 {
                     _PendingClientResponses.Remove(request.RequestId);
                 }
-
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -3856,6 +3863,7 @@ namespace Xeno.Server
             PendingClientResponse pending,
             ClientResponseMessage start,
             DateTime dispatchUtc,
+            Action beforeHistorySave,
             CancellationToken token)
         {
             Dictionary<string, string> responseHeaders = ExtractHeaders(start);
@@ -3892,7 +3900,7 @@ namespace Xeno.Server
 
             ClientResponseMessage final = await pending.Final.Task.ConfigureAwait(false);
             decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
-            await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, final, token).ConfigureAwait(false);
+            await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, final, beforeHistorySave, token).ConfigureAwait(false);
         }
 
         private async Task CompleteLocalInferenceClientResponseAsync(
@@ -3903,6 +3911,7 @@ namespace Xeno.Server
             XenoClientRecord client,
             XenoClientModel? selectedModel,
             ClientResponseMessage response,
+            Action beforeHistorySave,
             CancellationToken token)
         {
             bool success = response.Success;
@@ -3913,13 +3922,6 @@ namespace Xeno.Server
             decision.Message = success ? "Client completed the local inference request." : response.Error ?? "Client request failed.";
             Dictionary<string, string> responseHeaders = ExtractHeaders(response);
             AddLocalInferenceTraceHeaders(responseHeaders, requestContext, decision, client, selectedModel);
-            await RecordAndSaveHistoryAsync(
-                requestContext,
-                request.Method,
-                request.RelativePath,
-                decision,
-                token,
-                entry => PopulateRequestHistory(entry, requestContext, request.Body, request.Headers, response.Body, responseHeaders, response, decision)).ConfigureAwait(false);
             await SendLocalInferenceMessageAsync(originSession, request.ClientId, new ServerLocalInferenceResponseMessage
             {
                 Type = request.Stream ? "server.localInference.response.complete" : "server.localInference.response",
@@ -3931,6 +3933,15 @@ namespace Xeno.Server
                 Body = response.Body,
                 Error = response.Error
             }, token).ConfigureAwait(false);
+
+            beforeHistorySave();
+            await RecordAndSaveHistoryAsync(
+                requestContext,
+                request.Method,
+                request.RelativePath,
+                decision,
+                CancellationToken.None,
+                entry => PopulateRequestHistory(entry, requestContext, request.Body, request.Headers, response.Body, responseHeaders, response, decision)).ConfigureAwait(false);
         }
 
         private async Task SendLocalInferenceErrorAsync(WebSocketSession session, ClientLocalInferenceRequestMessage request, int statusCode, string message, CancellationToken token)

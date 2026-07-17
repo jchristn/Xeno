@@ -660,6 +660,7 @@ namespace Test.Shared
                             string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
                             string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-stream-" + Guid.NewGuid().ToString("N"));
                             int port = GetFreePort();
+                            int chunkCount = 300;
                             try
                             {
                                 Directory.CreateDirectory(tempDirectory);
@@ -688,32 +689,33 @@ namespace Test.Shared
                                         StatusCode = 200,
                                         ContentType = "text/event-stream"
                                     });
-                                    _ = Task.Run(async delegate
+
+                                    for (int index = 1; index <= chunkCount; index++)
                                     {
-                                        await Task.Delay(25, sendToken).ConfigureAwait(false);
                                         LocalInferenceTunnelBridge.AcceptChunk(new ServerLocalInferenceChunkMessage
                                         {
-                                            Type = "server.localInference.chunk",
+                                            Type = "server.localInference.response.chunk",
                                             RequestId = request.RequestId,
-                                            Sequence = 1,
-                                            Content = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                                            Sequence = index,
+                                            Content = "data: {\"choices\":[{\"delta\":{\"content\":\"chunk-" + index.ToString(CultureInfo.InvariantCulture) + "\"}}]}\n\n"
                                         });
-                                        LocalInferenceTunnelBridge.AcceptChunk(new ServerLocalInferenceChunkMessage
-                                        {
-                                            Type = "server.localInference.chunk",
-                                            RequestId = request.RequestId,
-                                            Sequence = 2,
-                                            Content = "data: [DONE]\n\n"
-                                        });
-                                        LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
-                                        {
-                                            Type = "server.localInference.response",
-                                            RequestId = request.RequestId,
-                                            Success = true,
-                                            StatusCode = 200,
-                                            ContentType = "text/event-stream"
-                                        });
-                                    }, sendToken);
+                                    }
+
+                                    LocalInferenceTunnelBridge.AcceptChunk(new ServerLocalInferenceChunkMessage
+                                    {
+                                        Type = "server.localInference.response.chunk",
+                                        RequestId = request.RequestId,
+                                        Sequence = chunkCount + 1,
+                                        Content = "data: [DONE]\n\n"
+                                    });
+                                    LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
+                                    {
+                                        Type = "server.localInference.response",
+                                        RequestId = request.RequestId,
+                                        Success = true,
+                                        StatusCode = 200,
+                                        ContentType = "text/event-stream"
+                                    });
                                     await Task.CompletedTask.ConfigureAwait(false);
                                 });
 
@@ -728,6 +730,7 @@ namespace Test.Shared
                                         if ((int)response.StatusCode != 200) throw new InvalidOperationException("Streaming OpenAI status was not 200.");
                                         if (!String.Equals(response.Content.Headers.ContentType?.MediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming OpenAI content type was incorrect.");
                                         if (!body.Contains("data: ", StringComparison.Ordinal) || !body.Contains("data: [DONE]", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming OpenAI framing was incorrect.");
+                                        if (!body.Contains("chunk-1", StringComparison.Ordinal) || !body.Contains("chunk-" + chunkCount.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)) throw new InvalidOperationException("Streaming OpenAI chunks were dropped.");
                                     }
                                 }
                             }
@@ -1833,6 +1836,58 @@ namespace Test.Shared
                                 ClientConnectionState disconnected = ClientConnectionState.Load();
                                 if (disconnected.IsConnected) throw new InvalidOperationException("Disconnected state should not be connected.");
                                 if (disconnected.IsRegistered) throw new InvalidOperationException("Disconnected state should not be registered.");
+                                return Task.CompletedTask;
+                            }
+                            finally
+                            {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientActivityStateMarkersAreThrottled",
+                        "Client activity state markers are throttled",
+                        executeAsync: delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-activity-state-" + Guid.NewGuid().ToString("N"));
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", clientHome);
+                            Directory.CreateDirectory(clientHome);
+
+                            try
+                            {
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_activity_touchstone",
+                                    TenantId = Constants.DefaultTenantId,
+                                    Name = "activity-touchstone"
+                                };
+                                settings.Server.Url = "ws://127.0.0.1:9000/ws/v1/clients";
+                                settings.Server.AccessKey = "default";
+                                settings.LocalInferenceServer.Enabled = true;
+                                settings.LocalInferenceServer.Host = "127.0.0.1";
+                                settings.LocalInferenceServer.Port = 11434;
+
+                                ClientConnectionState.MarkRegistered(settings);
+                                ClientConnectionState.MarkServerMessage(settings);
+                                ClientConnectionState firstServerMessage = ClientConnectionState.Load();
+                                DateTime? firstServerMessageUtc = firstServerMessage.LastServerMessageUtc;
+                                if (firstServerMessageUtc == null) throw new InvalidOperationException("Server message state was not recorded.");
+
+                                ClientConnectionState.MarkServerMessage(settings);
+                                ClientConnectionState secondServerMessage = ClientConnectionState.Load();
+                                if (secondServerMessage.LastServerMessageUtc != firstServerMessageUtc) throw new InvalidOperationException("Server message state was rewritten inside the throttle window.");
+
+                                ClientConnectionState.MarkLocalInferenceRequest(settings);
+                                ClientConnectionState firstLocalInferenceRequest = ClientConnectionState.Load();
+                                DateTime? firstLocalInferenceRequestUtc = firstLocalInferenceRequest.LocalInferenceServerLastRequestUtc;
+                                if (firstLocalInferenceRequestUtc == null) throw new InvalidOperationException("Local inference request state was not recorded.");
+
+                                ClientConnectionState.MarkLocalInferenceRequest(settings);
+                                ClientConnectionState secondLocalInferenceRequest = ClientConnectionState.Load();
+                                if (secondLocalInferenceRequest.LocalInferenceServerLastRequestUtc != firstLocalInferenceRequestUtc) throw new InvalidOperationException("Local inference request state was rewritten inside the throttle window.");
+
                                 return Task.CompletedTask;
                             }
                             finally
