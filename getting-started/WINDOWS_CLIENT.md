@@ -114,8 +114,7 @@ xeno start
 Restart the background client after configuration or binary changes:
 
 ```powershell
-xeno stop
-xeno start
+xeno restart
 ```
 
 10. Check status.
@@ -148,8 +147,7 @@ Edit `%USERPROFILE%\.xeno\client.json` and add:
 Restart the client, then test local model listing:
 
 ```powershell
-xeno stop
-xeno start
+xeno restart
 curl http://127.0.0.1:11434/v1/models
 curl http://127.0.0.1:11434/api/tags
 ```
@@ -252,6 +250,7 @@ xeno reload
 xeno dashboard
 xeno dashboard open
 xeno logs --tail 100
+xeno restart
 xeno stop
 xeno reset
 ```

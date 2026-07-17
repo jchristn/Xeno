@@ -225,6 +225,7 @@ xeno logs -f
 xeno dashboard
 xeno dashboard open
 xeno reload
+xeno restart
 xeno stop
 xeno disconnect
 xeno provider list
@@ -297,7 +298,7 @@ is listening. `xeno dashboard open` opens it in the default browser. Set
 `0.0.0.0` is supported only when explicitly configured and may expose the local
 dashboard beyond the client machine depending on firewall and network policy.
 Host, port, token, and database filename changes are saved to the settings file
-but take effect after restarting the client.
+but take effect after restarting the client with `xeno restart`.
 
 The local dashboard API is intentionally localhost-oriented and separate from
 the Xeno server management API. It exposes client state, provider and model

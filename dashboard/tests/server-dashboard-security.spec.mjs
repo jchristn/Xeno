@@ -976,6 +976,146 @@ test('regular tenant members see member dashboard surfaces without admin routes'
   await expect(page.getByRole('button', { name: 'Collect Now' })).toHaveCount(0);
 });
 
+test('advertised models model-name filters exclude non-matching model rows', async ({ page }) => {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_tenant_admin'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/v1/users') {
+      await route.fulfill({
+        json: [
+          { id: 'usr_tenant_admin', tenantId: 'ten_default', email: 'tenant-admin@xeno.test', username: 'tenant-admin@xeno.test', isAdmin: false, isTenantAdmin: true, active: true }
+        ]
+      });
+      return;
+    }
+
+    if (url.pathname === '/api/v1/clients') {
+      await route.fulfill({
+        json: [
+          {
+            id: 'xcl_gpt_a',
+            name: 'gpt-host-a',
+            connected: true,
+            lastHeartbeatUtc: '2026-07-17T16:00:00Z',
+            serviceState: 'Normal',
+            models: [
+              { name: 'gpt-oss:20b', provider: 'Ollama', source: 'ollama', supportsCompletions: true, supportsEmbeddings: false, lastAdvertisedUtc: '2026-07-17T16:00:00Z' },
+              { name: 'llama3.2:latest', provider: 'Ollama', source: 'ollama', supportsCompletions: true, supportsEmbeddings: false, lastAdvertisedUtc: '2026-07-17T16:00:00Z' },
+              { name: 'all-minilm:latest', provider: 'Ollama', source: 'ollama', supportsCompletions: false, supportsEmbeddings: true, lastAdvertisedUtc: '2026-07-17T16:00:00Z' }
+            ]
+          },
+          {
+            id: 'xcl_gpt_b',
+            name: 'gpt-host-b',
+            connected: true,
+            lastHeartbeatUtc: '2026-07-17T16:00:00Z',
+            serviceState: 'Normal',
+            models: [
+              { name: 'gpt-oss:120b', provider: 'Ollama', source: 'ollama', supportsCompletions: true, supportsEmbeddings: false, lastAdvertisedUtc: '2026-07-17T16:00:00Z' }
+            ]
+          },
+          {
+            id: 'xcl_openai',
+            name: 'openai-host',
+            connected: true,
+            lastHeartbeatUtc: '2026-07-17T16:00:00Z',
+            serviceState: 'Normal',
+            models: [
+              { name: 'openai-only-model', provider: 'OpenAICompatible', source: 'local-openai', supportsCompletions: true, supportsEmbeddings: false, lastAdvertisedUtc: '2026-07-17T16:00:00Z' }
+            ]
+          },
+          {
+            id: 'xcl_mre39er7_pncsizhl3alh69CTFdK',
+            name: 'astra',
+            connected: false,
+            lastHeartbeatUtc: '2026-07-13T07:19:59.0731306Z',
+            serviceState: 'Quarantined',
+            models: [
+              { name: 'llama3.2:latest', provider: 'Ollama', source: 'local-ollama', supportsCompletions: true, supportsEmbeddings: false, lastAdvertisedUtc: '2026-07-13T07:19:37.5123516Z' }
+            ]
+          }
+        ]
+      });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/clients/advertised-models');
+  await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'Include inactive clients' }).check();
+  await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Include inactive clients' }).uncheck();
+
+  await page.getByRole('textbox', { name: 'Search', exact: true }).fill('gpt-oss');
+  await expect(page.getByText('gpt-oss:20b')).toBeVisible();
+  await expect(page.getByText('gpt-oss:120b')).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Search', exact: true }).fill('');
+
+  await page.getByRole('combobox', { name: 'Client', exact: true }).selectOption('xcl_gpt_a');
+  await expect(page.getByText('gpt-oss:20b')).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByText('gpt-oss:120b')).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Client', exact: true }).selectOption('all');
+
+  await page.getByRole('button', { name: 'gpt-host-b', exact: true }).click();
+  await expect(page.getByText('gpt-oss:120b')).toBeVisible();
+  await expect(page.getByText('gpt-oss:20b')).toHaveCount(0);
+  await expect(page.getByText('llama3.2:latest')).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Client', exact: true }).selectOption('all');
+
+  await page.getByRole('textbox', { name: 'Filter client', exact: true }).fill('gpt-host-b');
+  await expect(page.getByText('gpt-oss:120b')).toBeVisible();
+  await expect(page.getByText('gpt-oss:20b')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter client', exact: true }).fill('');
+
+  await page.getByRole('textbox', { name: 'Filter Client ID', exact: true }).fill('xcl_gpt_a');
+  await expect(page.getByText('gpt-oss:20b')).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  await expect(page.getByText('gpt-oss:120b')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter Client ID', exact: true }).fill('');
+
+  await page.getByRole('textbox', { name: 'Filter API Type', exact: true }).fill('OpenAI');
+  await expect(page.getByText('openai-only-model')).toBeVisible();
+  await expect(page.getByText('gpt-oss:20b')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter API Type', exact: true }).fill('');
+
+  await page.getByRole('textbox', { name: 'Filter Source', exact: true }).fill('local-openai');
+  await expect(page.getByText('openai-only-model')).toBeVisible();
+  await expect(page.getByText('gpt-oss:120b')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter Source', exact: true }).fill('');
+
+  await page.getByRole('textbox', { name: 'Filter Completions', exact: true }).fill('no');
+  await expect(page.getByText('all-minilm:latest')).toBeVisible();
+  await expect(page.getByText('gpt-oss:20b')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter Completions', exact: true }).fill('');
+
+  await page.getByRole('textbox', { name: 'Filter Embeddings', exact: true }).fill('yes');
+  await expect(page.getByText('all-minilm:latest')).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter Embeddings', exact: true }).fill('');
+
+  await page.getByRole('checkbox', { name: 'Include inactive clients' }).check();
+  await page.getByRole('textbox', { name: 'Filter Connected', exact: true }).fill('no');
+  await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toBeVisible();
+  await expect(page.getByText('gpt-oss:20b')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter Connected', exact: true }).fill('');
+  await page.getByRole('checkbox', { name: 'Include inactive clients' }).uncheck();
+
+  await expect(page.getByRole('textbox', { name: 'Model Name', exact: true })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Filter Model Name', exact: true }).fill('gpt');
+  await expect(page.getByText('gpt-oss:20b')).toBeVisible();
+  await expect(page.getByText('gpt-oss:120b')).toBeVisible();
+  await expect(page.getByText('llama3.2:latest')).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toHaveCount(0);
+});
+
 test('system admin model leaderboard can filter to a selected tenant', async ({ page }) => {
   let leaderboardRequests = [];
   await page.addInitScript((storedSession) => {

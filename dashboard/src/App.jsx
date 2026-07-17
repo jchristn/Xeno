@@ -2461,17 +2461,34 @@ function ClientsView() {
 function AdvertisedModelsView() {
   const { t } = useTranslation();
   const clients = useResource('/api/v1/clients', []);
-  const [selectedClientId, setSelectedClientId] = useState('all');
+  const [selectedClientKey, setSelectedClientKey] = useState('all');
+  const [clientIdFilter, setClientIdFilter] = useState('');
+  const [includeInactiveModels, setIncludeInactiveModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState(null);
-  const clientModels = flattenClientModels(clients.data);
-  const selectedClient = clients.data.find((client) => String(value(client, 'id') || '') === selectedClientId);
-  const selectedClientName = value(selectedClient, 'name') || selectedClientId;
-  const selectedClientExists = selectedClientId === 'all' || Boolean(selectedClient);
-  const filteredModels = selectedClientId === 'all'
+  const clientOptions = useMemo(() => buildAdvertisedModelClientOptions(clients.data), [clients.data]);
+  const clientModels = useMemo(() => flattenClientModels(clients.data), [clients.data]);
+  const visibleClientModels = includeInactiveModels
     ? clientModels
-    : clientModels.filter((model) => String(value(model, 'clientId') || '') === selectedClientId);
+    : clientModels.filter((model) => isActiveAdvertisedModelClient(model));
+  const selectedClient = clientOptions.find((client) => client.key === selectedClientKey);
+  const selectedClientName = selectedClient?.label || selectedClientKey;
+  const selectedClientExists = selectedClientKey === 'all' || Boolean(selectedClient);
+  const clientFilteredModels = selectedClientKey === 'all'
+    ? visibleClientModels
+    : visibleClientModels.filter((model) => String(value(model, 'clientKey') || '') === selectedClientKey);
+  const normalizedClientIdFilter = clientIdFilter.trim().toLowerCase();
+  const clientIdFilteredModels = !normalizedClientIdFilter
+    ? clientFilteredModels
+    : clientFilteredModels.filter((model) => String(value(model, 'clientId') || '').toLowerCase().includes(normalizedClientIdFilter));
+  const filteredModels = clientIdFilteredModels;
   const completionModelCount = filteredModels.filter((model) => value(model, 'supportsCompletions') === true).length;
   const embeddingModelCount = filteredModels.filter((model) => value(model, 'supportsEmbeddings') === true).length;
+
+  function selectClientFromModel(row) {
+    const nextClientKey = String(value(row, 'clientKey') || 'all');
+    setSelectedClientKey(nextClientKey || 'all');
+    setClientIdFilter('');
+  }
 
   return (
     <div className="view-stack">
@@ -2482,17 +2499,16 @@ function AdvertisedModelsView() {
       </div>
       <DataTable
         actions={(
-          <div className="filter-control-pair">
+          <div className="filter-control-pair advertised-models-filters">
             <label className="form-field inline compact-field table-inline-filter">
               <span>{t('clientFilter')}</span>
-              <select value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)} title={t('tooltipNavAdvertisedModels')}>
+              <select value={selectedClientKey} onChange={(event) => setSelectedClientKey(event.target.value || 'all')} title={t('tooltipNavAdvertisedModels')}>
                 <option value="all">{t('allClients')}</option>
-                {!selectedClientExists ? <option value={selectedClientId}>{selectedClientName}</option> : null}
-                {clients.data.map((client) => {
-                  const clientId = String(value(client, 'id') || '');
+                {!selectedClientExists ? <option value={selectedClientKey}>{selectedClientName}</option> : null}
+                {clientOptions.map((client) => {
                   return (
-                    <option key={clientId || value(client, 'name')} value={clientId}>
-                      {value(client, 'name') || clientId}
+                    <option key={client.key} value={client.key}>
+                      {client.label}
                     </option>
                   );
                 })}
@@ -2500,11 +2516,36 @@ function AdvertisedModelsView() {
             </label>
             <label className="form-field inline compact-field table-inline-filter">
               <span>{t('clientId')}</span>
-              <input onChange={(event) => setSelectedClientId(event.target.value.trim() || 'all')} placeholder={t('all')} title={t('tooltipNavAdvertisedModels')} value={selectedClientId === 'all' ? '' : selectedClientId} />
+              <input onChange={(event) => setClientIdFilter(event.target.value)} placeholder={t('all')} title={t('tooltipNavAdvertisedModels')} value={clientIdFilter} />
+            </label>
+            <label className="toggle-field compact-toggle" title={t('includeInactiveClients', 'Include inactive clients')}>
+              <input checked={includeInactiveModels} onChange={(event) => setIncludeInactiveModels(event.target.checked)} type="checkbox" />
+              <span>{t('includeInactiveClients', 'Include inactive clients')}</span>
             </label>
           </div>
         )}
-        columns={['clientName', 'clientId', 'name', 'apiType', 'source', 'supportsCompletions', 'supportsEmbeddings', 'lastAdvertisedUtc']}
+        columns={[
+          {
+            key: 'clientName',
+            label: 'client',
+            render: (row) => (
+              <button className="table-link-button" onClick={() => selectClientFromModel(row)} title={t('filterClientTelemetry', 'Filter client telemetry by client')} type="button">
+                {value(row, 'clientName') || value(row, 'clientId') || '-'}
+              </button>
+            ),
+            searchValue: (row) => value(row, 'clientName') || value(row, 'clientId'),
+            searchable: false
+          },
+          { key: 'clientId', searchable: false },
+          { key: 'clientConnected', label: 'connected', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'clientConnected')), searchable: false },
+          { key: 'clientLastHeartbeatUtc', label: 'lastHeartbeatUtc', searchable: false },
+          { key: 'name', label: 'modelName', searchValue: (row) => value(row, 'name'), sortValue: (row) => value(row, 'name') },
+          { key: 'apiType', searchable: false },
+          { key: 'source', searchable: false },
+          { key: 'supportsCompletions', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsCompletions')), searchable: false },
+          { key: 'supportsEmbeddings', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsEmbeddings')), searchable: false },
+          { key: 'lastAdvertisedUtc', searchable: false }
+        ]}
         onDelete={(row) => {
           if (recordId(selectedModel) === recordId(row)) setSelectedModel(null);
           return deleteClientModel(row);
@@ -4300,6 +4341,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
     const normalizedQuery = query.trim().toLowerCase();
     return safeRows.filter((row) => {
       const matchesGlobal = !normalizedQuery || normalizedColumns.some((column) => {
+        if (column.searchable === false) return false;
         const raw = column.searchValue ? column.searchValue(row) : value(row, column.key);
         return String(raw ?? '').toLowerCase().includes(normalizedQuery);
       });
@@ -4364,6 +4406,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
 
   function updateColumnFilterDraft(columnKey, filterValue) {
     setColumnFilterDrafts((current) => ({ ...current, [columnKey]: filterValue }));
+    setColumnFilters((current) => ({ ...current, [columnKey]: filterValue }));
   }
 
   function applyColumnFilter(columnKey, filterValue) {
@@ -4386,6 +4429,11 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
       event.preventDefault();
       event.stopPropagation();
       setColumnFilterDrafts((current) => {
+        const next = { ...current };
+        delete next[columnKey];
+        return next;
+      });
+      setColumnFilters((current) => {
         const next = { ...current };
         delete next[columnKey];
         return next;
@@ -6629,14 +6677,19 @@ function groupByCount(rows, key) {
 }
 
 function flattenClientModels(clients) {
-  return (Array.isArray(clients) ? clients : []).flatMap((client) => {
-    const clientId = value(client, 'id');
+  return (Array.isArray(clients) ? clients : []).flatMap((client, clientIndex) => {
+    const clientId = advertisedModelClientId(client);
     const clientName = value(client, 'name');
+    const clientKey = advertisedModelClientKey(client, clientIndex);
     const models = value(client, 'models');
     return (Array.isArray(models) ? models : []).map((model, index) => ({
       id: `${clientId || clientName || 'client'}:${value(model, 'name') || index}`,
+      clientKey,
       clientId,
       clientName,
+      clientConnected: value(client, 'connected'),
+      clientLastHeartbeatUtc: value(client, 'lastHeartbeatUtc'),
+      clientServiceState: value(client, 'serviceState'),
       name: value(model, 'name'),
       apiType: value(model, 'apiType') || value(model, 'provider'),
       source: value(model, 'source'),
@@ -6645,6 +6698,43 @@ function flattenClientModels(clients) {
       lastAdvertisedUtc: value(model, 'lastAdvertisedUtc')
     }));
   });
+}
+
+function isActiveAdvertisedModelClient(model) {
+  if (value(model, 'clientConnected') === false) return false;
+  const serviceState = String(value(model, 'clientServiceState') || '').trim().toLowerCase();
+  if (serviceState && serviceState !== 'normal') return false;
+  return true;
+}
+
+function advertisedBooleanFilterValue(input) {
+  if (input === true) return 'true yes';
+  if (input === false) return 'false no';
+  return '';
+}
+
+function buildAdvertisedModelClientOptions(clients) {
+  return (Array.isArray(clients) ? clients : []).map((client, index) => {
+    const clientId = advertisedModelClientId(client);
+    const clientName = value(client, 'name');
+    const label = clientName && clientId && clientName !== clientId
+      ? `${clientName} (${clientId})`
+      : (clientName || clientId || `Client ${index + 1}`);
+    return {
+      id: clientId,
+      key: advertisedModelClientKey(client, index),
+      label,
+      name: clientName
+    };
+  });
+}
+
+function advertisedModelClientId(client) {
+  return value(client, 'id') || value(client, 'clientId') || value(client, 'ClientId') || '';
+}
+
+function advertisedModelClientKey(client, index) {
+  return advertisedModelClientId(client) || value(client, 'name') || `client-index-${index}`;
 }
 
 function isScalarValue(input) {

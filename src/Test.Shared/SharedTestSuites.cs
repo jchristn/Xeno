@@ -414,6 +414,9 @@ namespace Test.Shared
                                     if (!String.Equals(request.RelativePath, "/v1/completions", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI completion path was not proxied.");
                                     if (!String.Equals(request.Model, "completion-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI completion model was not proxied.");
                                     if (request.Stream) throw new InvalidOperationException("OpenAI completion stream flag was incorrect.");
+                                    if (request.Headers.ContainsKey("Host")) throw new InvalidOperationException("Local inference proxied request leaked the caller Host header.");
+                                    if (request.Headers.ContainsKey("Content-Length")) throw new InvalidOperationException("Local inference proxied request leaked the caller Content-Length header.");
+                                    if (request.Headers.ContainsKey("Content-Type")) throw new InvalidOperationException("Local inference proxied request leaked the caller Content-Type header.");
                                     LocalInferenceTunnelBridge.AcceptResponse(new ServerLocalInferenceResponseMessage
                                     {
                                         Type = "server.localInference.response",
@@ -1540,6 +1543,7 @@ namespace Test.Shared
                                     new TestCliCommandExpectation(new[] { "model", "--help" }, 0),
                                     new TestCliCommandExpectation(new[] { "connect", "--help" }, 0),
                                     new TestCliCommandExpectation(new[] { "start", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "restart", "--help" }, 0),
                                     new TestCliCommandExpectation(new[] { "logs", "--help" }, 0),
                                     new TestCliCommandExpectation(new[] { "ping", "--help" }, 0),
                                     new TestCliCommandExpectation(new[] { "dashboard", "--help" }, 0),
@@ -4329,6 +4333,88 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Routing",
+                        "LeastRecentlyUsedConcurrentGptOssRequestsSpreadAcrossClients",
+                        "Concurrent least-recently-used gpt-oss requests spread across eligible clients",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            foreach (XenoClientRecord client in platform.Clients)
+                            {
+                                client.Models.Add(new XenoClientModel { Name = "gpt-oss:20b", SupportsCompletions = true });
+                            }
+
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.LeastRecentlyUsed);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
+                            const int requestCount = 64;
+                            List<Task<RoutingDecision>> tasks = new List<Task<RoutingDecision>>();
+                            using (ManualResetEventSlim gate = new ManualResetEventSlim(false))
+                            {
+                                for (int i = 0; i < requestCount; i++)
+                                {
+                                    tasks.Add(Task.Run(delegate
+                                    {
+                                        gate.Wait();
+                                        return routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "gpt-oss:20b", false).GetAwaiter().GetResult();
+                                    }));
+                                }
+
+                                gate.Set();
+                                RoutingDecision[] decisions = await Task.WhenAll(tasks).ConfigureAwait(false);
+                                int failed = decisions.Count(item => !item.Success);
+                                if (failed > 0) throw new InvalidOperationException("Concurrent least-recently-used routing failed for " + failed + " request(s).");
+
+                                int alphaCount = decisions.Count(item => item.SelectedClientName == "alpha-client");
+                                int betaCount = decisions.Count(item => item.SelectedClientName == "beta-client");
+                                if (alphaCount != requestCount / 2 || betaCount != requestCount / 2)
+                                {
+                                    throw new InvalidOperationException("Concurrent least-recently-used routing did not balance gpt-oss requests evenly. alpha-client=" + alphaCount + ", beta-client=" + betaCount + ".");
+                                }
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "LeastRecentlyUsedRotatesAcrossThreeGptOssClients",
+                        "Least-recently-used routing rotates across three eligible gpt-oss clients",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            foreach (XenoClientRecord client in platform.Clients)
+                            {
+                                client.Models.Add(new XenoClientModel { Name = "gpt-oss:20b", Provider = ApiProviderTypeEnum.Ollama, SupportsCompletions = true });
+                            }
+
+                            XenoClientRecord third = new XenoClientRecord
+                            {
+                                TenantId = Constants.DefaultTenantId,
+                                Name = "gamma-client",
+                                Connected = true,
+                                Weight = 1,
+                                MaxParallelRequests = 4,
+                                InFlightRequests = 0
+                            };
+                            third.Models.Add(new XenoClientModel { Name = "gpt-oss:20b", Provider = ApiProviderTypeEnum.Ollama, SupportsCompletions = true });
+                            platform.Clients.Add(third);
+
+                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.LeastRecentlyUsed);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
+                            List<RoutingDecision> decisions = new List<RoutingDecision>();
+                            for (int i = 0; i < 6; i++)
+                            {
+                                decisions.Add(await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "gpt-oss:20b", false, ApiProviderTypeEnum.Ollama).ConfigureAwait(false));
+                            }
+
+                            if (decisions.Any(item => !item.Success)) throw new InvalidOperationException("Least-recently-used gpt-oss routing failed.");
+                            if (decisions.Any(item => item.CandidateCount != 3)) throw new InvalidOperationException("Least-recently-used did not see all three gpt-oss candidates.");
+                            int alphaCount = decisions.Count(item => item.SelectedClientName == "alpha-client");
+                            int betaCount = decisions.Count(item => item.SelectedClientName == "beta-client");
+                            int gammaCount = decisions.Count(item => item.SelectedClientName == "gamma-client");
+                            if (alphaCount != 2 || betaCount != 2 || gammaCount != 2)
+                            {
+                                throw new InvalidOperationException("Least-recently-used did not rotate evenly across three gpt-oss clients. alpha-client=" + alphaCount + ", beta-client=" + betaCount + ", gamma-client=" + gammaCount + ".");
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
                         "RandomSelectsEligibleClientAndRecordsMode",
                         "Random routing selects an eligible client and records mode",
                         executeAsync: async delegate
@@ -4407,6 +4493,20 @@ namespace Test.Shared
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Stale heartbeat client unexpectedly routed.");
                             if (decision.OutcomeCode != "NoEligibleClients") throw new InvalidOperationException("Unexpected stale heartbeat outcome.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "ConfiguredFreshnessAllowsRecentlyStaleHeartbeat",
+                        "Configured client freshness timeout controls routing eligibility",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.Clients[0].LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-2);
+                            RoutingService routing = new RoutingService(platform, new RoutingSettings { ClientFreshnessTimeoutMs = 180000 });
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException("Configured freshness timeout did not allow recently stale heartbeat: " + decision.Message);
                         })
                 });
         }
@@ -6508,10 +6608,25 @@ namespace Test.Shared
                     if (!logs.StandardOutput.Contains("Client registered with Xeno server.", StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include registration output: " + logs.StandardOutput);
                     if (!logs.StandardOutput.Contains("Local dashboard listening at http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)) throw new InvalidOperationException("Logs did not include local dashboard startup output: " + logs.StandardOutput);
 
+                    ClientCommandResult restart = await RunXenoClientAsync(new[] { "restart", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                    if (restart.ExitCode != 0) throw new InvalidOperationException("Restart command failed: " + restart.StandardError + restart.StandardOutput);
+                    if (!restart.StandardOutput.Contains("Stopped Xeno client process", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Restart did not report stopping the previous worker: " + restart.StandardOutput);
+                    if (!restart.StandardOutput.Contains("Xeno client connected in the background", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Restart did not report starting a new worker: " + restart.StandardOutput);
+                    if (state.ProcessId != null && IsProcessRunningForTest(state.ProcessId.Value)) throw new InvalidOperationException("Previous background worker still running after restart.");
+
+                    ClientConnectionState restartedState = DeserializeRequired<ClientConnectionState>(File.ReadAllText(stateFile));
+                    if (!restartedState.IsConnected) throw new InvalidOperationException("Restarted state is not connected.");
+                    if (!restartedState.IsRegistered) throw new InvalidOperationException("Restarted state is not registered.");
+                    if (!restartedState.IsBackground) throw new InvalidOperationException("Restarted state did not record background mode.");
+                    if (restartedState.ProcessId == null || !IsProcessRunningForTest(restartedState.ProcessId.Value)) throw new InvalidOperationException("Restarted worker process is not running.");
+                    if (!restartedState.LocalDashboardListening) throw new InvalidOperationException("Restarted local dashboard was not listening.");
+                    if (!String.Equals(restartedState.LocalDashboardUrl, "http://127.0.0.1:" + dashboardPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Restarted local dashboard URL mismatch.");
+                    await WaitForRegisteredClientAsync(port, "background-touchstone").ConfigureAwait(false);
+
                     ClientCommandResult stop = await RunXenoClientAsync(new[] { "--json", "stop" }, clientHome).ConfigureAwait(false);
                     if (stop.ExitCode != 0) throw new InvalidOperationException("Stop command failed: " + stop.StandardError + stop.StandardOutput);
                     if (!stop.StandardOutput.Contains("\"stopped\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Stop did not report success: " + stop.StandardOutput);
-                    if (state.ProcessId != null && IsProcessRunningForTest(state.ProcessId.Value)) throw new InvalidOperationException("Background worker still running after stop.");
+                    if (restartedState.ProcessId != null && IsProcessRunningForTest(restartedState.ProcessId.Value)) throw new InvalidOperationException("Background worker still running after stop.");
                 }
                 finally
                 {

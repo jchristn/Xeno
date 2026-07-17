@@ -133,6 +133,8 @@ namespace Xeno.Client
                         case "connect":
                         case "start":
                             return await HandleConnectAsync(args, settings).ConfigureAwait(false);
+                        case "restart":
+                            return await HandleRestartAsync(args, settings).ConfigureAwait(false);
                         case "logs":
                             return await HandleLogsAsync(args, CancellationToken.None).ConfigureAwait(false);
                         case "dashboard":
@@ -226,6 +228,59 @@ namespace Xeno.Client
             }
 
             return await StartBackgroundConnectAsync(settings, timeoutMs, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        private static async Task<int> HandleRestartAsync(string[] args, ClientSettings settings)
+        {
+            if (args.Length > 1 && IsHelp(args[1]))
+            {
+                PrintRestartHelp();
+                return 0;
+            }
+
+            bool force = false;
+            int timeoutMs = DefaultConnectTimeoutMs;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (String.Equals(args[i], "--force", StringComparison.OrdinalIgnoreCase))
+                {
+                    force = true;
+                    continue;
+                }
+
+                if (String.Equals(args[i], "--timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length || !Int32.TryParse(args[i + 1], out timeoutMs) || timeoutMs < 1000)
+                    {
+                        WriteError("--timeout requires a value in milliseconds greater than or equal to 1000.");
+                        return 1;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                WriteError("Unknown restart option: " + args[i]);
+                PrintRestartHelp();
+                return 1;
+            }
+
+            if (_UseJson)
+            {
+                WriteJson(new
+                {
+                    restarted = false,
+                    error = "JsonRestartUnsupported",
+                    message = "'xeno restart' does not support --json. Run 'xeno stop' and 'xeno start' separately for machine-readable output."
+                });
+                return 1;
+            }
+
+            string[] stopArgs = force ? new[] { "stop", "--force" } : new[] { "stop" };
+            int stopExitCode = await HandleStopAsync(stopArgs).ConfigureAwait(false);
+            if (stopExitCode != 0) return stopExitCode;
+
+            return await HandleConnectAsync(new[] { "start", "--timeout", timeoutMs.ToString(CultureInfo.InvariantCulture) }, settings).ConfigureAwait(false);
         }
 
         private static async Task<int> HandleLogsAsync(string[] args, CancellationToken token)
@@ -2176,6 +2231,7 @@ namespace Xeno.Client
 
                 foreach (KeyValuePair<string, string> header in forwardedHeaders)
                 {
+                    if (IsBlockedForwardedRequestHeader(header.Key)) continue;
                     if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content != null)
                     {
                         request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
@@ -2342,6 +2398,23 @@ namespace Xeno.Client
             }
 
             return headers;
+        }
+
+        private static bool IsBlockedForwardedRequestHeader(string name)
+        {
+            return name.Equals("Connection", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Keep-Alive", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Proxy-Authenticate", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("TE", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Trailer", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Upgrade", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Expect", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Accept-Encoding", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string PrepareUpstreamRequestBody(string apiType, string relativePath, string body, bool stream)
@@ -4012,10 +4085,24 @@ namespace Xeno.Client
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
             Console.WriteLine("      Start the client as a background process and return after registration succeeds. Prints local dashboard and local inference URLs when enabled.");
+            Console.WriteLine("  xeno restart [--force] [--timeout <milliseconds>]");
+            Console.WriteLine("      Stop the background client process, then start it again.");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("      Run the client WebSocket loop in the current terminal. Prints local dashboard and local inference URLs when enabled.");
             Console.WriteLine("  xeno connect --timeout <milliseconds>");
             Console.WriteLine("      Wait this long for background registration before returning an error.");
+            Console.WriteLine();
+        }
+
+        private static void PrintRestartHelp()
+        {
+            WriteInfoHeading("Restart command");
+            Console.WriteLine("  xeno restart");
+            Console.WriteLine("      Run 'xeno stop' followed by 'xeno start' as one command.");
+            Console.WriteLine("  xeno restart --force");
+            Console.WriteLine("      Request stop, then terminate the recorded process if it does not exit before starting again.");
+            Console.WriteLine("  xeno restart --timeout <milliseconds>");
+            Console.WriteLine("      Wait this long for background registration after restarting before returning an error.");
             Console.WriteLine();
         }
 
@@ -4166,6 +4253,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno reload");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
+            Console.WriteLine("  xeno restart");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs -f");
             Console.WriteLine("  xeno dashboard");
@@ -4199,6 +4287,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno reload");
             Console.WriteLine("  xeno connect");
             Console.WriteLine("  xeno start");
+            Console.WriteLine("  xeno restart");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("  xeno logs [--tail <lines>] [-f]");
             Console.WriteLine("  xeno ping [-n <count>] [-w <milliseconds>] [--server <rest-url>]");

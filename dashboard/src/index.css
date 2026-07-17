@@ -1465,6 +1465,28 @@ html[data-theme='dark'] .primitive-list-item {
   flex-wrap: wrap;
 }
 
+.filter-control-pair.advertised-models-filters .form-field.inline.compact-field.table-inline-filter {
+  flex: 0 0 420px;
+  grid-template-columns: 92px minmax(220px, 1fr);
+  width: 420px;
+}
+
+.table-link-button {
+  background: transparent;
+  border: 0;
+  color: var(--color-accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0;
+  text-align: left;
+}
+
+.table-link-button:hover {
+  color: var(--color-accent-strong);
+  text-decoration: underline;
+}
+
 .client-telemetry-view {
   gap: 18px;
 }

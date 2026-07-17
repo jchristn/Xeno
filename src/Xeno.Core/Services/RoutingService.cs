@@ -81,17 +81,20 @@ namespace Xeno.Core.Services
             }
             decision.EffectiveModel = effectiveModel;
 
-            List<XenoClientRecord> candidates = _Platform.Clients
+            DateTime utcNow = DateTime.UtcNow;
+            DateTime freshnessCutoffUtc = utcNow.AddMilliseconds(-_Settings.ClientFreshnessTimeoutMs);
+            List<XenoClientRecord> tenantClients = _Platform.Clients
                 .Where(item => item.TenantId == context.TenantId)
-                .Where(item => item.Active)
-                .Where(item => item.ServiceState == ClientServiceStateEnum.Normal)
-                .Where(item => item.Connected)
-                .Where(item => item.LastHeartbeatUtc >= DateTime.UtcNow.AddSeconds(-60))
-                .Where(item => item.Models.Any(model => ModelMatches(model, effectiveModel, isEmbedding, provider)))
-                .Where(item => item.MaxParallelRequests == 0 || item.InFlightRequests < item.MaxParallelRequests)
+                .ToList();
+            List<XenoClientRecord> candidates = tenantClients
+                .Where(item => IsEligibleClient(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
                 .OrderBy(item => item.Name)
                 .ThenByDescending(item => item.Weight)
                 .ThenBy(item => item.Id)
+                .ToList();
+            decision.ExcludedClientReasons = tenantClients
+                .Select(item => BuildClientExclusionReason(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
+                .Where(item => !String.IsNullOrWhiteSpace(item))
                 .ToList();
             decision.Timeline.Add("ClientInventory");
 
@@ -100,7 +103,13 @@ namespace Xeno.Core.Services
             decision.Timeline.Add("PolicyResolution");
 
             List<XenoClientRecord> policyCandidates = FilterCandidatesByPolicy(candidates, policy).ToList();
+            decision.ExcludedClientReasons.AddRange(candidates
+                .Where(item => !policyCandidates.Any(candidate => String.Equals(candidate.Id, item.Id, StringComparison.OrdinalIgnoreCase)))
+                .Select(item => ClientLabel(item) + ":RoutingPolicyClientMismatch:" + (String.IsNullOrWhiteSpace(policy.ClientName) ? "*" : policy.ClientName)));
             candidates = policyCandidates;
+            decision.CandidateClientIds = candidates.Select(item => item.Id).ToList();
+            decision.CandidateClientNames = candidates.Select(item => item.Name).ToList();
+            decision.CandidateCount = candidates.Count;
 
             if (candidates.Count < 1)
             {
@@ -112,8 +121,6 @@ namespace Xeno.Core.Services
 
             XenoClientRecord selected = SelectClient(candidates, policy.LoadBalancingMode, BuildRouteScopeKey(context, effectiveModel, isEmbedding, policy), decision, policy.Adaptive);
             XenoClientModel? selectedModel = selected.Models.FirstOrDefault(item => ModelMatches(item, effectiveModel, isEmbedding, provider));
-            decision.CandidateClientIds = candidates.Select(item => item.Id).ToList();
-            decision.CandidateCount = candidates.Count;
             decision.LoadBalancingMode = policy.LoadBalancingMode;
             decision.Success = true;
             decision.HttpStatusCode = 200;
@@ -206,6 +213,64 @@ namespace Xeno.Core.Services
             return isEmbedding ? model.SupportsEmbeddings : model.SupportsCompletions;
         }
 
+        private static bool IsEligibleClient(XenoClientRecord client, string effectiveModel, bool isEmbedding, ApiProviderTypeEnum? provider, DateTime freshnessCutoffUtc)
+        {
+            return String.IsNullOrWhiteSpace(BuildClientExclusionReason(client, effectiveModel, isEmbedding, provider, freshnessCutoffUtc));
+        }
+
+        private static string BuildClientExclusionReason(XenoClientRecord client, string effectiveModel, bool isEmbedding, ApiProviderTypeEnum? provider, DateTime freshnessCutoffUtc)
+        {
+            if (client == null) return "UnknownClient";
+            string label = ClientLabel(client);
+            if (!client.Active) return label + ":Inactive";
+            if (client.ServiceState != ClientServiceStateEnum.Normal) return label + ":ServiceState:" + client.ServiceState;
+            if (!client.Connected) return label + ":Disconnected";
+            if (client.LastHeartbeatUtc < freshnessCutoffUtc) return label + ":StaleHeartbeat:" + client.LastHeartbeatUtc.ToString("O", CultureInfo.InvariantCulture);
+
+            string modelReason = BuildModelExclusionReason(client, effectiveModel, isEmbedding, provider);
+            if (!String.IsNullOrWhiteSpace(modelReason)) return label + ":" + modelReason;
+
+            if (client.MaxParallelRequests > 0 && client.InFlightRequests >= client.MaxParallelRequests)
+            {
+                return label + ":AtCapacity:" + client.InFlightRequests.ToString(CultureInfo.InvariantCulture) + "/" + client.MaxParallelRequests.ToString(CultureInfo.InvariantCulture);
+            }
+
+            return String.Empty;
+        }
+
+        private static string BuildModelExclusionReason(XenoClientRecord client, string effectiveModel, bool isEmbedding, ApiProviderTypeEnum? provider)
+        {
+            List<XenoClientModel> sameName = client.Models
+                .Where(item => String.Equals(item.Name, effectiveModel, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (sameName.Count == 0) return "ModelNotAdvertised:" + effectiveModel;
+
+            List<XenoClientModel> sameProvider = provider.HasValue
+                ? sameName.Where(item => item.Provider == provider.Value).ToList()
+                : sameName;
+            if (sameProvider.Count == 0)
+            {
+                string advertisedProviders = String.Join(",", sameName.Select(item => item.Provider.ToString()).Distinct(StringComparer.OrdinalIgnoreCase));
+                return "ProviderMismatch:required=" + provider?.ToString() + ";advertised=" + advertisedProviders;
+            }
+
+            bool supportsRequestedMode = isEmbedding
+                ? sameProvider.Any(item => item.SupportsEmbeddings)
+                : sameProvider.Any(item => item.SupportsCompletions);
+            if (!supportsRequestedMode) return isEmbedding ? "CapabilityMismatch:Embeddings" : "CapabilityMismatch:Completions";
+
+            return String.Empty;
+        }
+
+        private static string ClientLabel(XenoClientRecord client)
+        {
+            string id = client.Id ?? String.Empty;
+            string name = client.Name ?? String.Empty;
+            if (String.IsNullOrWhiteSpace(name)) return id;
+            if (String.IsNullOrWhiteSpace(id) || String.Equals(id, name, StringComparison.OrdinalIgnoreCase)) return name;
+            return name + "(" + id + ")";
+        }
+
         private XenoClientRecord SelectClient(List<XenoClientRecord> candidates, LoadBalancingModeEnum mode, string routeScopeKey, RoutingDecision decision, AdaptiveLoadBalancingSettings adaptive)
         {
             if (candidates.Count == 1)
@@ -279,42 +344,55 @@ namespace Xeno.Core.Services
 
         private static XenoClientRecord SelectLeastRecentlyUsed(List<XenoClientRecord> candidates, string routeScopeKey)
         {
-            XenoClientRecord selected = candidates[0];
-            long selectedSequence = GetLeastRecentlyUsedSequence(routeScopeKey, selected.Id);
-
-            for (int i = 1; i < candidates.Count; i++)
+            lock (_LeastRecentlyUsedSelections)
             {
-                XenoClientRecord candidate = candidates[i];
-                long candidateSequence = GetLeastRecentlyUsedSequence(routeScopeKey, candidate.Id);
-                if (candidateSequence < selectedSequence)
-                {
-                    selected = candidate;
-                    selectedSequence = candidateSequence;
-                }
-            }
+                XenoClientRecord selected = candidates[0];
+                long selectedSequence = GetLeastRecentlyUsedSequenceUnsafe(routeScopeKey, selected.Id);
 
-            MarkLeastRecentlyUsedSelection(routeScopeKey, selected.Id);
-            return selected;
+                for (int i = 1; i < candidates.Count; i++)
+                {
+                    XenoClientRecord candidate = candidates[i];
+                    long candidateSequence = GetLeastRecentlyUsedSequenceUnsafe(routeScopeKey, candidate.Id);
+                    if (candidateSequence < selectedSequence)
+                    {
+                        selected = candidate;
+                        selectedSequence = candidateSequence;
+                    }
+                }
+
+                MarkLeastRecentlyUsedSelectionUnsafe(routeScopeKey, selected.Id);
+                return selected;
+            }
         }
 
         private static long GetLeastRecentlyUsedSequence(string routeScopeKey, string clientId)
         {
-            string key = BuildLeastRecentlyUsedKey(routeScopeKey, clientId);
             lock (_LeastRecentlyUsedSelections)
             {
-                return _LeastRecentlyUsedSelections.TryGetValue(key, out long sequence) ? sequence : 0;
+                return GetLeastRecentlyUsedSequenceUnsafe(routeScopeKey, clientId);
             }
         }
 
         private static void MarkLeastRecentlyUsedSelection(string routeScopeKey, string clientId)
         {
             if (String.IsNullOrWhiteSpace(clientId)) return;
-            string key = BuildLeastRecentlyUsedKey(routeScopeKey, clientId);
-            long sequence = Interlocked.Increment(ref _LeastRecentlyUsedSequence);
             lock (_LeastRecentlyUsedSelections)
             {
-                _LeastRecentlyUsedSelections[key] = sequence;
+                MarkLeastRecentlyUsedSelectionUnsafe(routeScopeKey, clientId);
             }
+        }
+
+        private static long GetLeastRecentlyUsedSequenceUnsafe(string routeScopeKey, string clientId)
+        {
+            string key = BuildLeastRecentlyUsedKey(routeScopeKey, clientId);
+            return _LeastRecentlyUsedSelections.TryGetValue(key, out long sequence) ? sequence : 0;
+        }
+
+        private static void MarkLeastRecentlyUsedSelectionUnsafe(string routeScopeKey, string clientId)
+        {
+            string key = BuildLeastRecentlyUsedKey(routeScopeKey, clientId);
+            long sequence = Interlocked.Increment(ref _LeastRecentlyUsedSequence);
+            _LeastRecentlyUsedSelections[key] = sequence;
         }
 
         private static string BuildLeastRecentlyUsedKey(string routeScopeKey, string clientId)

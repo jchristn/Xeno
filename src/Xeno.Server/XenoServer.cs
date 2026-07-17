@@ -39,7 +39,7 @@ namespace Xeno.Server
     /// </summary>
     public sealed class XenoServer : IDisposable
     {
-        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Policy-ID, X-Xeno-Routing-Policy-Name, X-Xeno-Routing-Policy-Match, X-Xeno-Routing-Policy-Reason, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-API-Type, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
+        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Policy-ID, X-Xeno-Routing-Policy-Name, X-Xeno-Routing-Policy-Match, X-Xeno-Routing-Policy-Reason, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Routing-Candidate-Names, X-Xeno-Routing-Exclusions, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-API-Type, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
         private const int MaxCapturedBodyChars = 131072;
 
         private readonly XenoSettings _Settings;
@@ -100,6 +100,7 @@ namespace Xeno.Server
                 ? Environment.GetEnvironmentVariable("XENO_SETTINGS_FILE") ?? "xeno.json"
                 : settingsFile;
             ApplyEnvironmentSettings(_Settings);
+            AlignRoutingFreshnessWithWebSocketSettings(_Settings);
 
             WatsonWebserver.Core.WebserverSettings webserverSettings = new WatsonWebserver.Core.WebserverSettings(
                 _Settings.Rest.Hostname,
@@ -2572,7 +2573,7 @@ namespace Xeno.Server
                 requestDispatched = true;
                 if (stream)
                 {
-                    ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, requestWaitSource.Token).ConfigureAwait(false);
+                    ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, EffectiveRequestTimeoutMs(decision), requestWaitSource.Token).ConfigureAwait(false);
                     if (IsClientResponseStart(firstResponse))
                     {
                         await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, requestWaitSource.Token).ConfigureAwait(false);
@@ -2586,7 +2587,7 @@ namespace Xeno.Server
                 }
                 else
                 {
-                    ClientResponseMessage response = await WaitForClientResponseAsync(requestId, pending, requestWaitSource.Token).ConfigureAwait(false);
+                    ClientResponseMessage response = await WaitForClientResponseAsync(requestId, pending, EffectiveRequestTimeoutMs(decision), requestWaitSource.Token).ConfigureAwait(false);
                     decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
                     decision.Timeline.Add("ClientResponse");
                     await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
@@ -3413,11 +3414,11 @@ namespace Xeno.Server
             }
         }
 
-        private async Task<ClientResponseMessage> WaitForClientFirstResponseAsync(string requestId, PendingClientResponse pending, CancellationToken token)
+        private async Task<ClientResponseMessage> WaitForClientFirstResponseAsync(string requestId, PendingClientResponse pending, int requestTimeoutMs, CancellationToken token)
         {
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, _Settings.WebSocket.RequestTimeoutMs)));
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, requestTimeoutMs)));
                 using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
                 {
                     Task<ClientResponseMessage> completed = await Task.WhenAny(pending.Start.Task, pending.Final.Task).ConfigureAwait(false);
@@ -3426,16 +3427,21 @@ namespace Xeno.Server
             }
         }
 
-        private async Task<ClientResponseMessage> WaitForClientResponseAsync(string requestId, PendingClientResponse pending, CancellationToken token)
+        private async Task<ClientResponseMessage> WaitForClientResponseAsync(string requestId, PendingClientResponse pending, int requestTimeoutMs, CancellationToken token)
         {
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, _Settings.WebSocket.RequestTimeoutMs)));
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, requestTimeoutMs)));
                 using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
                 {
                     return await pending.Final.Task.ConfigureAwait(false);
                 }
             }
+        }
+
+        private int EffectiveRequestTimeoutMs(RoutingDecision decision)
+        {
+            return Math.Max(1000, decision.RoutingPolicyRequestTimeoutMs ?? _Settings.Routing.DefaultTimeoutMs);
         }
 
         private async Task WebSocketRouteAsync(HttpContextBase context, WebSocketSession session)
@@ -3723,7 +3729,7 @@ namespace Xeno.Server
             if (!decision.Success)
             {
                 await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
-                await SendLocalInferenceErrorAsync(originSession, request, decision.HttpStatusCode, decision.Message, token).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, decision.HttpStatusCode, decision.Message, requestContext, decision, token).ConfigureAwait(false);
                 return;
             }
 
@@ -3735,7 +3741,7 @@ namespace Xeno.Server
                 decision.OutcomeCode = "ClientMissing";
                 decision.Message = "The selected client no longer exists.";
                 await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
-                await SendLocalInferenceErrorAsync(originSession, request, 502, decision.Message, token).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, 502, decision.Message, requestContext, decision, token).ConfigureAwait(false);
                 return;
             }
 
@@ -3747,7 +3753,7 @@ namespace Xeno.Server
                 decision.OutcomeCode = "ClientNotConnected";
                 decision.Message = "The selected client is not connected.";
                 await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
-                await SendLocalInferenceErrorAsync(originSession, request, 502, decision.Message, token).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, 502, decision.Message, requestContext, decision, token).ConfigureAwait(false);
                 return;
             }
 
@@ -3787,7 +3793,7 @@ namespace Xeno.Server
                 await SendToClientAsync(connection, JsonUtil.Serialize(payload), token).ConfigureAwait(false);
                 if (request.Stream)
                 {
-                    ClientResponseMessage first = await WaitForClientFirstResponseAsync(request.RequestId, pending, token).ConfigureAwait(false);
+                    ClientResponseMessage first = await WaitForClientFirstResponseAsync(request.RequestId, pending, EffectiveRequestTimeoutMs(decision), token).ConfigureAwait(false);
                     if (IsClientResponseStart(first))
                     {
                         await StreamLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, pending, first, dispatchUtc, token).ConfigureAwait(false);
@@ -3800,10 +3806,21 @@ namespace Xeno.Server
                 }
                 else
                 {
-                    ClientResponseMessage response = await WaitForClientResponseAsync(request.RequestId, pending, token).ConfigureAwait(false);
+                    ClientResponseMessage response = await WaitForClientResponseAsync(request.RequestId, pending, EffectiveRequestTimeoutMs(decision), token).ConfigureAwait(false);
                     decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
                     await CompleteLocalInferenceClientResponseAsync(originSession, request, requestContext, decision, client, selectedModel, response, token).ConfigureAwait(false);
                 }
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                decision.Success = false;
+                decision.HttpStatusCode = 504;
+                decision.OutcomeCode = "ClientTimeout";
+                decision.Message = "The selected client did not respond before the timeout.";
+                decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - dispatchUtc).TotalMilliseconds);
+                decision.Timeline.Add("ClientTimeout");
+                await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, CancellationToken.None).ConfigureAwait(false);
+                await SendLocalInferenceErrorAsync(originSession, request, decision.HttpStatusCode, decision.Message, requestContext, decision, CancellationToken.None).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -3918,7 +3935,12 @@ namespace Xeno.Server
 
         private async Task SendLocalInferenceErrorAsync(WebSocketSession session, ClientLocalInferenceRequestMessage request, int statusCode, string message, CancellationToken token)
         {
-            Dictionary<string, string> headers = LocalInferenceTraceHeaders(null, request.Model, null);
+            await SendLocalInferenceErrorAsync(session, request, statusCode, message, null, null, token).ConfigureAwait(false);
+        }
+
+        private async Task SendLocalInferenceErrorAsync(WebSocketSession session, ClientLocalInferenceRequestMessage request, int statusCode, string message, RequestContext? requestContext, RoutingDecision? decision, CancellationToken token)
+        {
+            Dictionary<string, string> headers = LocalInferenceTraceHeaders(requestContext, request.Model, decision);
             string body = BuildLocalInferenceErrorBody(request.RelativePath, message, statusCode);
             await SendLocalInferenceMessageAsync(session, request.ClientId, new ServerLocalInferenceResponseMessage
             {
@@ -4090,6 +4112,10 @@ namespace Xeno.Server
             {
                 headers["X-Xeno-Routing-Outcome"] = decision.OutcomeCode;
                 headers["X-Xeno-Routing-Message"] = decision.Message;
+                headers["X-Xeno-Routing-Candidate-Count"] = decision.CandidateCount.ToString(CultureInfo.InvariantCulture);
+                if (decision.CandidateClientIds.Count > 0) headers["X-Xeno-Routing-Candidates"] = String.Join(",", decision.CandidateClientIds);
+                if (decision.CandidateClientNames.Count > 0) headers["X-Xeno-Routing-Candidate-Names"] = String.Join(",", decision.CandidateClientNames);
+                if (decision.ExcludedClientReasons.Count > 0) headers["X-Xeno-Routing-Exclusions"] = String.Join(" | ", decision.ExcludedClientReasons);
             }
 
             return headers;
@@ -4101,6 +4127,10 @@ namespace Xeno.Server
             headers["X-Xeno-Tenant-ID"] = requestContext.TenantId;
             headers["X-Xeno-Routing-Outcome"] = decision.OutcomeCode;
             headers["X-Xeno-Routing-Message"] = decision.Message;
+            headers["X-Xeno-Routing-Candidate-Count"] = decision.CandidateCount.ToString(CultureInfo.InvariantCulture);
+            if (decision.CandidateClientIds.Count > 0) headers["X-Xeno-Routing-Candidates"] = String.Join(",", decision.CandidateClientIds);
+            if (decision.CandidateClientNames.Count > 0) headers["X-Xeno-Routing-Candidate-Names"] = String.Join(",", decision.CandidateClientNames);
+            if (decision.ExcludedClientReasons.Count > 0) headers["X-Xeno-Routing-Exclusions"] = String.Join(" | ", decision.ExcludedClientReasons);
             if (!String.IsNullOrWhiteSpace(decision.EffectiveModel)) headers["X-Xeno-Model"] = decision.EffectiveModel;
             headers["X-Xeno-Selected-Client-Name"] = client.Name;
             if (selectedModel != null)
@@ -4845,6 +4875,8 @@ namespace Xeno.Server
             AddTraceHeader(context, "X-Xeno-Routing-Policy-Reason", decision.RoutingPolicyReason);
             AddTraceHeader(context, "X-Xeno-Routing-Candidate-Count", decision.CandidateCount.ToString(CultureInfo.InvariantCulture));
             AddTraceHeader(context, "X-Xeno-Routing-Candidates", String.Join(",", decision.CandidateClientIds));
+            AddTraceHeader(context, "X-Xeno-Routing-Candidate-Names", String.Join(",", decision.CandidateClientNames));
+            AddTraceHeader(context, "X-Xeno-Routing-Exclusions", String.Join(" | ", decision.ExcludedClientReasons));
             AddTraceHeader(context, "X-Xeno-Load-Balancing-Mode", decision.LoadBalancingMode.ToString());
             AddTraceHeader(context, "X-Xeno-Adaptive-Sample-Count", decision.AdaptiveSampleCount?.ToString(CultureInfo.InvariantCulture));
             AddTraceHeader(context, "X-Xeno-Adaptive-Score", decision.AdaptiveScore);
@@ -4944,6 +4976,7 @@ namespace Xeno.Server
             _Settings.Email = incoming.Email ?? new EmailSettings();
             _Settings.Ledger = incoming.Ledger ?? new LedgerSettings();
             ApplyEnvironmentSettings(_Settings);
+            AlignRoutingFreshnessWithWebSocketSettings(_Settings);
             if (_Database != null)
             {
                 _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
@@ -4954,6 +4987,11 @@ namespace Xeno.Server
                 _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger);
                 _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate });
             }
+        }
+
+        private static void AlignRoutingFreshnessWithWebSocketSettings(XenoSettings settings)
+        {
+            settings.Routing.ClientFreshnessTimeoutMs = settings.WebSocket.ClientStaleTimeoutMs;
         }
 
         private static string NormalizeOpenAiPath(string path)

@@ -22,6 +22,19 @@ namespace Xeno.Client.LocalInference
     {
         private readonly ClientSettings _Settings;
         private readonly Webserver _Webserver;
+        private static readonly string[] _RequestHeaderResponseDenyList =
+        {
+            "Accept",
+            "Accept-Charset",
+            "Accept-Encoding",
+            "Accept-Language",
+            "Cache-Control",
+            "Connection",
+            "Content-Length",
+            "Expect",
+            "Host",
+            "User-Agent"
+        };
         private bool _Disposed;
 
         /// <summary>
@@ -104,14 +117,17 @@ namespace Xeno.Client.LocalInference
 
         private async Task PreflightRouteAsync(HttpContextBase context)
         {
+            ClearResponseHeaders(context);
             ApplyCorsHeaders(context);
             context.Response.StatusCode = 204;
+            SanitizeResponseHeaders(context);
             await context.Response.Send(context.Token).ConfigureAwait(false);
         }
 
         private Task PostRoutingRouteAsync(HttpContextBase context)
         {
             ApplyCorsHeaders(context);
+            SanitizeResponseHeaders(context);
             return Task.CompletedTask;
         }
 
@@ -122,10 +138,12 @@ namespace Xeno.Client.LocalInference
             ClientConnectionState.MarkLocalInferenceRequest(_Settings);
             try
             {
+                ClearResponseHeaders(context);
                 ApplyCorsHeaders(context);
                 if ((method == "HEAD" || method == "GET") && String.Equals(path, "/", StringComparison.Ordinal))
                 {
                     context.Response.StatusCode = 200;
+                    SanitizeResponseHeaders(context);
                     await context.Response.Send(context.Token).ConfigureAwait(false);
                     return;
                 }
@@ -133,6 +151,7 @@ namespace Xeno.Client.LocalInference
                 if (method == "HEAD" && IsProviderPath(path))
                 {
                     context.Response.StatusCode = 200;
+                    SanitizeResponseHeaders(context);
                     await context.Response.Send(context.Token).ConfigureAwait(false);
                     return;
                 }
@@ -368,6 +387,7 @@ namespace Xeno.Client.LocalInference
             context.Response.ContentType = start.ContentType ?? "application/octet-stream";
             context.Response.ChunkedTransfer = true;
             ApplyResponseHeaders(context, start.Headers);
+            SanitizeResponseHeaders(context);
             while (await pending.Chunks.Reader.WaitToReadAsync(token).ConfigureAwait(false))
             {
                 while (pending.Chunks.Reader.TryRead(out ServerLocalInferenceChunkMessage? chunk))
@@ -388,6 +408,7 @@ namespace Xeno.Client.LocalInference
             context.Response.StatusCode = response.StatusCode ?? (response.Success ? 200 : 502);
             context.Response.ContentType = response.ContentType ?? "application/json";
             ApplyResponseHeaders(context, response.Headers);
+            SanitizeResponseHeaders(context);
             await context.Response.Send(response.Body ?? "{}", context.Token).ConfigureAwait(false);
         }
 
@@ -435,11 +456,44 @@ namespace Xeno.Client.LocalInference
             foreach (string? key in context.Request.Headers.AllKeys)
             {
                 if (String.IsNullOrWhiteSpace(key)) continue;
-                if (IsHopByHopHeader(key)) continue;
+                if (IsBlockedForwardedRequestHeader(key)) continue;
                 headers[key] = context.Request.Headers.Get(key) ?? String.Empty;
             }
 
             return headers;
+        }
+
+        private static void ClearResponseHeaders(HttpContextBase context)
+        {
+            context.Response.Headers.Clear();
+        }
+
+        private static void SanitizeResponseHeaders(HttpContextBase context)
+        {
+            foreach (string header in _RequestHeaderResponseDenyList)
+            {
+                try
+                {
+                    context.Response.Headers.Remove(header);
+                }
+                catch (ArgumentException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+
+                try
+                {
+                    context.Request.Headers.Remove(header);
+                }
+                catch (ArgumentException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+            }
         }
 
         private static void ApplyResponseHeaders(HttpContextBase context, Dictionary<string, string> headers)
@@ -477,6 +531,16 @@ namespace Xeno.Client.LocalInference
                    name.Equals("Upgrade", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsBlockedForwardedRequestHeader(string name)
+        {
+            return IsHopByHopHeader(name) ||
+                   name.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Expect", StringComparison.OrdinalIgnoreCase) ||
+                   name.Equals("Accept-Encoding", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void ApplyCorsHeaders(HttpContextBase context)
         {
             if (!_Settings.LocalInferenceServer.EnableCors) return;
@@ -503,12 +567,14 @@ namespace Xeno.Client.LocalInference
         private static async Task SendJsonAsync(HttpContextBase context, object value)
         {
             context.Response.ContentType = "application/json";
+            SanitizeResponseHeaders(context);
             await context.Response.Send(JsonUtil.Serialize(value, true), context.Token).ConfigureAwait(false);
         }
 
         private static async Task SendHtmlAsync(HttpContextBase context, string html)
         {
             context.Response.ContentType = "text/html; charset=utf-8";
+            SanitizeResponseHeaders(context);
             await context.Response.Send(html, context.Token).ConfigureAwait(false);
         }
 

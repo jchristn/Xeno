@@ -1217,6 +1217,12 @@ function DataTable({ actions, columns, compact = false, headerActions, onRefresh
     setPage(1);
   }
 
+  function updateDraftFilter(column, filterValue) {
+    setDraftFilters({ ...draftFilters, [column]: filterValue });
+    setFilters({ ...filters, [column]: filterValue });
+    setPage(1);
+  }
+
   function handleRowClick(event, row) {
     if (!onRowClick) return;
     const target = event.target instanceof Element ? event.target : event.currentTarget;
@@ -1266,7 +1272,7 @@ function DataTable({ actions, columns, compact = false, headerActions, onRefresh
                   <th className={columnClass(column)} key={column}>
                     <input
                       onBlur={() => applyFilter(column)}
-                      onChange={(event) => setDraftFilters({ ...draftFilters, [column]: event.target.value })}
+                      onChange={(event) => updateDraftFilter(column, event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') applyFilter(column);
                       }}

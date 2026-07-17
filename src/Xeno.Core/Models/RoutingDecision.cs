@@ -81,6 +81,16 @@ namespace Xeno.Core.Models
         public List<string> CandidateClientIds { get; set; } = new List<string>();
 
         /// <summary>
+        /// Candidate client names.
+        /// </summary>
+        public List<string> CandidateClientNames { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Human-readable reasons clients were excluded from the candidate set.
+        /// </summary>
+        public List<string> ExcludedClientReasons { get; set; } = new List<string>();
+
+        /// <summary>
         /// Number of eligible candidate clients.
         /// </summary>
         public int CandidateCount { get; set; } = 0;
