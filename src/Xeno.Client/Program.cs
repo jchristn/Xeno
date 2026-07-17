@@ -49,6 +49,28 @@ namespace Xeno.Client
         /// <returns>Exit code.</returns>
         public static async Task<int> Main(string[] args)
         {
+            TrailingBlankLineTextWriter output = new TrailingBlankLineTextWriter(Console.Out);
+            Console.SetOut(output);
+            try
+            {
+                return await RunAsync(args).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (!_UseJson && !_WorkerMode)
+                {
+                    output.EnsureTrailingBlankLine();
+                }
+
+                if (Object.ReferenceEquals(Console.Out, output))
+                {
+                    Console.SetOut(output.Inner);
+                }
+            }
+        }
+
+        private static async Task<int> RunAsync(string[] args)
+        {
             try
             {
                 string[] earlyArgs = ApplyGlobalOptions(args, null);
@@ -2631,6 +2653,166 @@ namespace Xeno.Client
         private static void WriteJson(object value)
         {
             Console.WriteLine(JsonUtil.Serialize(value, true));
+        }
+
+        private sealed class TrailingBlankLineTextWriter : TextWriter
+        {
+            private readonly object _SyncRoot = new object();
+            private readonly TextWriter _Inner;
+            private bool _HasWritten = false;
+            private int _TrailingNewlineCount = 0;
+
+            public TrailingBlankLineTextWriter(TextWriter inner)
+            {
+                _Inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
+
+            public TextWriter Inner
+            {
+                get
+                {
+                    return _Inner;
+                }
+            }
+
+            public override Encoding Encoding
+            {
+                get
+                {
+                    return _Inner.Encoding;
+                }
+            }
+
+            public override IFormatProvider FormatProvider
+            {
+                get
+                {
+                    return CultureInfo.InvariantCulture;
+                }
+            }
+
+            public override void Flush()
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.Flush();
+                }
+            }
+
+            public override Task FlushAsync()
+            {
+                Flush();
+                return Task.CompletedTask;
+            }
+
+            public override void Write(char value)
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.Write(value);
+                    Track(value);
+                }
+            }
+
+            public override void Write(char[] buffer, int index, int count)
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.Write(buffer, index, count);
+                    Track(buffer.AsSpan(index, count));
+                }
+            }
+
+            public override void Write(string? value)
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.Write(value);
+                    Track(value);
+                }
+            }
+
+            public override void Write(ReadOnlySpan<char> buffer)
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.Write(buffer);
+                    Track(buffer);
+                }
+            }
+
+            public override void WriteLine()
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.WriteLine();
+                    Track(Environment.NewLine);
+                }
+            }
+
+            public override void WriteLine(string? value)
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.WriteLine(value);
+                    Track(value);
+                    Track(Environment.NewLine);
+                }
+            }
+
+            public override void WriteLine(ReadOnlySpan<char> buffer)
+            {
+                lock (_SyncRoot)
+                {
+                    _Inner.WriteLine(buffer);
+                    Track(buffer);
+                    Track(Environment.NewLine);
+                }
+            }
+
+            public void EnsureTrailingBlankLine()
+            {
+                lock (_SyncRoot)
+                {
+                    if (!_HasWritten) return;
+                    while (_TrailingNewlineCount < 2)
+                    {
+                        _Inner.WriteLine();
+                        _TrailingNewlineCount++;
+                    }
+
+                    _Inner.Flush();
+                }
+            }
+
+            private void Track(string? value)
+            {
+                if (String.IsNullOrEmpty(value)) return;
+                Track(value.AsSpan());
+            }
+
+            private void Track(ReadOnlySpan<char> value)
+            {
+                for (int i = 0; i < value.Length; i++)
+                {
+                    Track(value[i]);
+                }
+            }
+
+            private void Track(char value)
+            {
+                _HasWritten = true;
+                if (value == '\n')
+                {
+                    _TrailingNewlineCount++;
+                    return;
+                }
+
+                if (value != '\r')
+                {
+                    _TrailingNewlineCount = 0;
+                }
+            }
         }
 
         private static string RequestorIpFromServerRequest(ServerRequestMessage request)

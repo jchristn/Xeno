@@ -1388,6 +1388,78 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "ClientCli",
+                        "ClientPlainCommandOutputEndsWithSingleBlankLine",
+                        "Client plain command output ends with exactly one empty line",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-output-spacing-" + Guid.NewGuid().ToString("N"));
+                            try
+                            {
+                                Directory.CreateDirectory(clientHome);
+                                List<TestCliCommandExpectation> commands = new List<TestCliCommandExpectation>
+                                {
+                                    new TestCliCommandExpectation(new[] { "help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "reset", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "config", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "server", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "auth", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "set-auth" }, 1),
+                                    new TestCliCommandExpectation(new[] { "login", "--help" }, 1),
+                                    new TestCliCommandExpectation(new[] { "provider", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "model", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "connect", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "start", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "logs", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "ping", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "dashboard", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "reload", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "stop", "--help" }, 0),
+                                    new TestCliCommandExpectation(new[] { "init" }, 0),
+                                    new TestCliCommandExpectation(new[] { "version" }, 0),
+                                    new TestCliCommandExpectation(new[] { "config", "show" }, 0),
+                                    new TestCliCommandExpectation(new[] { "config", "colors", "on" }, 0),
+                                    new TestCliCommandExpectation(new[] { "config", "colors", "off" }, 0),
+                                    new TestCliCommandExpectation(new[] { "server", "set-url", "ws://127.0.0.1:9000/ws/v1/clients" }, 0),
+                                    new TestCliCommandExpectation(new[] { "server", "set-rest-url", "http://127.0.0.1:9000" }, 0),
+                                    new TestCliCommandExpectation(new[] { "set-auth", "--access-key", "spacing-test-key" }, 0),
+                                    new TestCliCommandExpectation(new[] { "set-auth", "--clear" }, 0),
+                                    new TestCliCommandExpectation(new[] { "provider", "list" }, 0),
+                                    new TestCliCommandExpectation(new[] { "provider", "add", "--name", "spacing-provider", "--type", "Ollama", "--endpoint", "http://127.0.0.1:11436" }, 0),
+                                    new TestCliCommandExpectation(new[] { "provider", "update", "--name", "spacing-provider", "--new-name", "spacing-provider-renamed" }, 0),
+                                    new TestCliCommandExpectation(new[] { "provider", "delete", "--name", "spacing-provider-renamed" }, 0),
+                                    new TestCliCommandExpectation(new[] { "model", "list" }, 0),
+                                    new TestCliCommandExpectation(new[] { "model", "add", "--provider", "local-ollama", "--name", "spacing-model", "--type", "both" }, 0),
+                                    new TestCliCommandExpectation(new[] { "model", "update", "--name", "spacing-model", "--new-name", "spacing-model-renamed" }, 0),
+                                    new TestCliCommandExpectation(new[] { "model", "delete", "--name", "spacing-model-renamed" }, 0),
+                                    new TestCliCommandExpectation(new[] { "inventory" }, 0),
+                                    new TestCliCommandExpectation(new[] { "reload" }, 0),
+                                    new TestCliCommandExpectation(new[] { "logs", "--tail", "1" }, 0),
+                                    new TestCliCommandExpectation(new[] { "status" }, 0),
+                                    new TestCliCommandExpectation(new[] { "stop" }, 0),
+                                    new TestCliCommandExpectation(new[] { "dashboard" }, 1),
+                                    new TestCliCommandExpectation(new[] { "unknown-command" }, 1)
+                                };
+
+                                foreach (TestCliCommandExpectation command in commands)
+                                {
+                                    ClientCommandResult result = await RunXenoClientAsync(command.Args, clientHome).ConfigureAwait(false);
+                                    string commandText = String.Join(" ", command.Args);
+                                    if (result.ExitCode != command.ExpectedExitCode) throw new InvalidOperationException("Command '" + commandText + "' exit code mismatch. Expected " + command.ExpectedExitCode.ToString(CultureInfo.InvariantCulture) + " but received " + result.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + result.StandardError + result.StandardOutput);
+                                    AssertSingleTrailingBlankLine(result.StandardOutput, "Command '" + commandText + "'");
+                                }
+
+                                ClientCommandResult jsonStatus = await RunXenoClientAsync(new[] { "--json", "status" }, clientHome).ConfigureAwait(false);
+                                if (jsonStatus.ExitCode != 0) throw new InvalidOperationException("JSON status failed: " + jsonStatus.StandardError + jsonStatus.StandardOutput);
+                                string blankLine = Environment.NewLine + Environment.NewLine;
+                                if (jsonStatus.StandardOutput.EndsWith(blankLine, StringComparison.Ordinal)) throw new InvalidOperationException("JSON status should not include a trailing blank line.");
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
                         "ClientProviderUsageTelemetryPreparedAndParsed",
                         "Client provider usage telemetry is requested and parsed",
                         executeAsync: delegate
@@ -7888,6 +7960,20 @@ namespace Test.Shared
             }
         }
 
+        private static void AssertSingleTrailingBlankLine(string value, string label)
+        {
+            string blankLine = Environment.NewLine + Environment.NewLine;
+            if (!value.EndsWith(blankLine, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(label + " output did not end with one empty line: " + value);
+            }
+
+            if (value.EndsWith(blankLine + Environment.NewLine, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(label + " output ended with more than one empty line: " + value);
+            }
+        }
+
         private static async Task<ClientCommandResult> RunXenoClientAsync(string[] args, string clientHome, string? standardInput = null)
         {
             ProcessStartInfo startInfo = new ProcessStartInfo
@@ -8057,6 +8143,19 @@ VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider',
             }
 
             throw new InvalidOperationException("Expected ArgumentException was not thrown.");
+        }
+
+        private sealed class TestCliCommandExpectation
+        {
+            public TestCliCommandExpectation(string[] args, int expectedExitCode)
+            {
+                Args = args;
+                ExpectedExitCode = expectedExitCode;
+            }
+
+            public string[] Args { get; }
+
+            public int ExpectedExitCode { get; }
         }
 
         private sealed class ProcessCommandResult
