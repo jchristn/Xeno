@@ -1498,6 +1498,13 @@ namespace Test.Shared
                                 ClientCommandResult disabledStatus = await RunXenoClientAsync(new[] { "status" }, clientHome).ConfigureAwait(false);
                                 if (disabledStatus.ExitCode != 0) throw new InvalidOperationException("Disabled local dashboard status failed: " + disabledStatus.StandardError + disabledStatus.StandardOutput);
                                 if (!disabledStatus.StandardOutput.Contains("Local Dashboard: disabled", StringComparison.Ordinal)) throw new InvalidOperationException("Disabled local dashboard status was not compact: " + disabledStatus.StandardOutput);
+                                string statusBlankLine = Environment.NewLine + Environment.NewLine;
+                                if (!disabledStatus.StandardOutput.EndsWith(statusBlankLine, StringComparison.Ordinal)) throw new InvalidOperationException("Status output did not end with a trailing blank line.");
+                                if (!disabledStatus.StandardOutput.Contains("Local Inference Server", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference heading: " + disabledStatus.StandardOutput);
+                                if (!disabledStatus.StandardOutput.Contains("  Enabled:          false", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include disabled local inference state: " + disabledStatus.StandardOutput);
+                                if (!disabledStatus.StandardOutput.Contains("  Listening:        false", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference listening state: " + disabledStatus.StandardOutput);
+                                if (!disabledStatus.StandardOutput.Contains("  Host:             127.0.0.1", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference host: " + disabledStatus.StandardOutput);
+                                if (!disabledStatus.StandardOutput.Contains("  Port:             11434", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference port: " + disabledStatus.StandardOutput);
                                 disabledDashboardSettings.LocalDashboard.Enabled = true;
                                 File.WriteAllText(clientSettingsFile, JsonUtil.Serialize(disabledDashboardSettings, true));
                                 ClientCommandResult providerAdd = await RunXenoClientAsync(new[] { "provider", "add", "--name", "openai-compatible", "--type", "OpenAICompatible", "--endpoint", "http://127.0.0.1:11435" }, clientHome).ConfigureAwait(false);

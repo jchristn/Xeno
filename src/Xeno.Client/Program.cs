@@ -3343,6 +3343,7 @@ namespace Xeno.Client
             Console.WriteLine("  Last reason:         " + DisplayValue(connection.LastDisconnectReason, "(none)"));
             PrintLocalDashboardStatus(connection, settings);
             PrintLocalInferenceStatus(connection, settings);
+            Console.WriteLine();
         }
 
         private static object BuildLocalDashboardJson(ClientConnectionState state)
@@ -3452,12 +3453,6 @@ namespace Xeno.Client
         private static void PrintLocalInferenceStatus(ClientConnectionState connection, ClientSettings settings)
         {
             bool enabled = settings.LocalInferenceServer.Enabled || connection.LocalInferenceServerEnabled;
-            if (!enabled)
-            {
-                Console.WriteLine("  Local Inference: disabled");
-                return;
-            }
-
             WritePlainHeading("Local Inference Server");
             Console.WriteLine("  Enabled:          " + FormatTrueFalse(enabled));
             Console.WriteLine("  Listening:        " + FormatTrueFalse(connection.LocalInferenceServerListening));
@@ -3469,7 +3464,7 @@ namespace Xeno.Client
             Console.WriteLine("  Last request UTC: " + FormatUtc(connection.LocalInferenceServerLastRequestUtc));
             Console.WriteLine("  WebSocket ready:  " + FormatTrueFalse(connection.IsConnected && connection.IsRegistered));
             Console.WriteLine("  Last error:       " + DisplayValue(connection.LocalInferenceServerLastError, "(none)"));
-            if (!connection.IsConnected || !connection.IsRegistered)
+            if (enabled && (!connection.IsConnected || !connection.IsRegistered))
             {
                 Console.WriteLine("  Failure mode:     localhost inference endpoints return provider-shaped 502 responses until the websocket is registered.");
             }
