@@ -162,8 +162,13 @@ namespace Test.Shared
                                 if (settings.LocalInferenceServer.Enabled) throw new InvalidOperationException("Local inference should be disabled by default.");
                                 if (!String.Equals(settings.LocalInferenceServer.Host, "127.0.0.1", StringComparison.Ordinal)) throw new InvalidOperationException("Local inference default host is incorrect.");
                                 if (settings.LocalInferenceServer.Port != 11434) throw new InvalidOperationException("Local inference default port is incorrect.");
+                                if (settings.LocalInferenceServer.RequestTimeoutMs != 300000) throw new InvalidOperationException("Local inference default request timeout is incorrect.");
                                 TestClientSettingsPresenceProbe? probe = JsonUtil.Deserialize<TestClientSettingsPresenceProbe>(File.ReadAllText(ClientSettings.SettingsFile));
                                 if (probe == null || probe.LocalInferenceServer == null) throw new InvalidOperationException("Local inference settings were not written back to client.json.");
+
+                                File.WriteAllText(ClientSettings.SettingsFile, "{\"Name\":\"test-client\",\"LocalInferenceServer\":{\"Enabled\":true,\"Host\":\"127.0.0.1\",\"Port\":11434,\"RequestTimeoutMs\":120000},\"Providers\":[]}");
+                                settings = ClientSettings.Load();
+                                if (settings.LocalInferenceServer.RequestTimeoutMs != 300000) throw new InvalidOperationException("Old local inference request timeout default was not migrated.");
                             }
                             finally
                             {
@@ -441,6 +446,73 @@ namespace Test.Shared
                             }
                             finally
                             {
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
+                                if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "LocalInferenceListenerTimeoutCancelsTunnelAndReturnsProviderError",
+                        displayName: "Local inference listener timeout cancels tunnel and returns provider error",
+                        executeAsync: async delegate
+                        {
+                            string? previousHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
+                            string tempDirectory = Path.Combine(Path.GetTempPath(), "xeno-local-inference-timeout-" + Guid.NewGuid().ToString("N"));
+                            int port = GetFreePort();
+                            string? cancelReason = null;
+                            try
+                            {
+                                Directory.CreateDirectory(tempDirectory);
+                                Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", tempDirectory);
+                                ClientSettings settings = new ClientSettings
+                                {
+                                    ClientId = "xcl_timeout",
+                                    TenantId = "ten_default",
+                                    LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                    {
+                                        Enabled = true,
+                                        Host = "127.0.0.1",
+                                        Port = port,
+                                        RequestTimeoutMs = 1000
+                                    }
+                                };
+                                LocalInferenceTunnelBridge.Register(settings, async delegate(object payload, CancellationToken sendToken)
+                                {
+                                    ClientLocalInferenceCancelMessage? cancel = payload as ClientLocalInferenceCancelMessage;
+                                    if (cancel != null)
+                                    {
+                                        cancelReason = cancel.Reason;
+                                        await Task.CompletedTask.ConfigureAwait(false);
+                                        return;
+                                    }
+
+                                    ClientLocalInferenceRequestMessage? request = payload as ClientLocalInferenceRequestMessage;
+                                    if (request == null) throw new InvalidOperationException("Local inference bridge payload was not typed.");
+                                    if (request.Stream) throw new InvalidOperationException("Ollama non-streaming request was proxied as streaming.");
+                                    if (!String.Equals(request.RelativePath, "/api/chat", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected timeout test path.");
+                                    await Task.CompletedTask.ConfigureAwait(false);
+                                });
+
+                                using (LocalInferenceServerService service = new LocalInferenceServerService(settings))
+                                using (HttpClient client = new HttpClient())
+                                {
+                                    client.Timeout = TimeSpan.FromSeconds(10);
+                                    await service.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                                    using (StringContent content = new StringContent("{\"model\":\"m\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}", Encoding.UTF8, "application/json"))
+                                    using (HttpResponseMessage response = await client.PostAsync(service.Url + "/api/chat", content).ConfigureAwait(false))
+                                    {
+                                        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if ((int)response.StatusCode != 504) throw new InvalidOperationException("Local inference timeout status was not 504: " + body);
+                                        OllamaErrorResponse? error = JsonUtil.Deserialize<OllamaErrorResponse>(body);
+                                        if (error == null || String.IsNullOrWhiteSpace(error.Error) || !error.Error.Contains("timed out", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Local inference timeout response was not Ollama-shaped: " + body);
+                                    }
+                                }
+
+                                if (!String.Equals(cancelReason, "RequestTimeout", StringComparison.Ordinal)) throw new InvalidOperationException("Local inference timeout did not send the expected tunnel cancellation reason.");
+                            }
+                            finally
+                            {
+                                LocalInferenceTunnelBridge.Clear();
                                 Environment.SetEnvironmentVariable("XENO_CLIENT_HOME", previousHome);
                                 if (Directory.Exists(tempDirectory)) Directory.Delete(tempDirectory, true);
                             }

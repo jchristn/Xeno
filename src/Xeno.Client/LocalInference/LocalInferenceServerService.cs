@@ -5,6 +5,7 @@ namespace Xeno.Client.LocalInference
     using System.Globalization;
     using System.IO;
     using System.Net.Sockets;
+    using System.Net.WebSockets;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -299,6 +300,7 @@ namespace Xeno.Client.LocalInference
 
         private async Task ProxyAsync(HttpContextBase context, string path, string method, string providerFamily, string? model, bool embeddings, bool stream, string body)
         {
+            int requestTimeoutMs = Math.Max(1000, _Settings.LocalInferenceServer.RequestTimeoutMs);
             ClientLocalInferenceRequestMessage request = new ClientLocalInferenceRequestMessage
             {
                 RequestId = Guid.NewGuid().ToString("N"),
@@ -315,19 +317,39 @@ namespace Xeno.Client.LocalInference
             LocalInferencePendingResponse pending = await LocalInferenceTunnelBridge.SendRequestAsync(request, context.Token).ConfigureAwait(false);
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(context.Token))
             {
-                timeout.CancelAfter(TimeSpan.FromMilliseconds(_Settings.LocalInferenceServer.RequestTimeoutMs));
-                using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
-                using (context.Token.Register(delegate { _ = LocalInferenceTunnelBridge.SendCancelAsync(request.RequestId, "CallerDisconnected", CancellationToken.None); }))
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(requestTimeoutMs));
+                using (timeout.Token.Register(delegate { LocalInferenceTunnelBridge.CancelPending(request.RequestId, timeout.Token); }))
+                using (context.Token.Register(delegate { _ = TrySendLocalInferenceCancelAsync(request.RequestId, "CallerDisconnected"); }))
                 {
-                    ServerLocalInferenceResponseMessage first = await WaitForFirstResponseAsync(pending, timeout.Token).ConfigureAwait(false);
-                    if (stream && String.Equals(first.Type, "server.localInference.response.start", StringComparison.OrdinalIgnoreCase))
+                    try
                     {
-                        await StreamProxyResponseAsync(context, pending, first, timeout.Token).ConfigureAwait(false);
-                        return;
-                    }
+                        ServerLocalInferenceResponseMessage first = await WaitForFirstResponseAsync(pending, timeout.Token).ConfigureAwait(false);
+                        if (stream && String.Equals(first.Type, "server.localInference.response.start", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await StreamProxyResponseAsync(context, pending, first, timeout.Token).ConfigureAwait(false);
+                            return;
+                        }
 
-                    await SendProxyResponseAsync(context, first).ConfigureAwait(false);
+                        await SendProxyResponseAsync(context, first).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!context.Token.IsCancellationRequested && timeout.IsCancellationRequested)
+                    {
+                        await TrySendLocalInferenceCancelAsync(request.RequestId, "RequestTimeout").ConfigureAwait(false);
+                        string message = "Xeno local inference request timed out after " + requestTimeoutMs.ToString(CultureInfo.InvariantCulture) + "ms.";
+                        await SendProviderErrorAsync(context, path, 504, message, "server_error", "request_timeout").ConfigureAwait(false);
+                    }
                 }
+            }
+        }
+
+        private static async Task TrySendLocalInferenceCancelAsync(string requestId, string reason)
+        {
+            try
+            {
+                await LocalInferenceTunnelBridge.SendCancelAsync(requestId, reason, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is WebSocketException || ex is OperationCanceledException)
+            {
             }
         }
 

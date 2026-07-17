@@ -7,8 +7,9 @@ namespace Xeno.Client
     /// </summary>
     public class ClientLocalInferenceServerSettings
     {
+        private const int DefaultRequestTimeoutMs = 300000;
         private int _Port = 11434;
-        private int _RequestTimeoutMs = 120000;
+        private int _RequestTimeoutMs = DefaultRequestTimeoutMs;
         private int _MaxRequestBodyBytes = 10485760;
 
         /// <summary>
@@ -52,7 +53,7 @@ namespace Xeno.Client
         };
 
         /// <summary>
-        /// Local inference request timeout in milliseconds. Default is 120000.
+        /// Local inference request timeout in milliseconds. Default is 300000.
         /// </summary>
         public int RequestTimeoutMs
         {
@@ -62,7 +63,7 @@ namespace Xeno.Client
             }
             set
             {
-                _RequestTimeoutMs = value < 1000 ? 120000 : value;
+                _RequestTimeoutMs = value < 1000 ? DefaultRequestTimeoutMs : value;
             }
         }
 

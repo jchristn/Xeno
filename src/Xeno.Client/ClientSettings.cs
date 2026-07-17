@@ -232,6 +232,13 @@ namespace Xeno.Client
             if (probe.Server == null) rewritten = true;
             if (probe.LocalDashboard == null) rewritten = true;
             if (probe.LocalInferenceServer == null) rewritten = true;
+            else if (!probe.LocalInferenceServer.RequestTimeoutMs.HasValue) rewritten = true;
+            else if (probe.LocalInferenceServer.RequestTimeoutMs.Value == 120000)
+            {
+                LocalInferenceServer.RequestTimeoutMs = 300000;
+                rewritten = true;
+            }
+
             if (probe.Telemetry == null) rewritten = true;
             if (probe.Providers == null) rewritten = true;
             return rewritten;

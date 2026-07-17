@@ -135,6 +135,13 @@ namespace Xeno.Client.LocalInference
             }, token).ConfigureAwait(false);
         }
 
+        internal static void CancelPending(string requestId, CancellationToken token)
+        {
+            if (String.IsNullOrWhiteSpace(requestId)) return;
+            if (!_Pending.TryRemove(requestId, out LocalInferencePendingResponse? pending)) return;
+            pending.Cancel(token);
+        }
+
         /// <summary>
         /// Accept a server response message.
         /// </summary>

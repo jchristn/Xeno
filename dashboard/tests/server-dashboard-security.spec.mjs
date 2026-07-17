@@ -326,6 +326,90 @@ async function fulfillLeaderboard(route) {
   });
 }
 
+async function openApiExplorer(page) {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_admin'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname === '/api/v1/users' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: false, active: true }] });
+      return;
+    }
+
+    if (url.pathname === '/openapi.json' && method === 'GET') {
+      await route.fulfill({
+        json: {
+          openapi: '3.0.1',
+          paths: {
+            '/v1/chat/completions': {
+              post: {
+                operationId: 'createChatCompletion',
+                tags: ['OpenAI'],
+                summary: 'Create chat completion',
+                description: 'OpenAI-compatible chat completion.'
+              }
+            }
+          }
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === '/v1/models' && method === 'GET') {
+      await route.fulfill({ json: { data: [{ id: 'gpt-oss:120b' }] } });
+      return;
+    }
+
+    if (url.pathname === '/v1/chat/completions' && method === 'POST') {
+      const body = route.request().postDataJSON();
+      if (body.stream === true) {
+        await route.fulfill({
+          body: 'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n',
+          headers: { 'content-type': 'text/event-stream' },
+          status: 200
+        });
+        return;
+      }
+
+      await route.fulfill({
+        json: {
+          choices: [
+            { message: { content: 'hello' } }
+          ]
+        }
+      });
+      return;
+    }
+
+    await route.fulfill({ json: [] });
+  });
+  await page.goto('/dashboard/explorer');
+  await expect(page.locator('h1', { hasText: 'API Explorer' })).toBeVisible();
+}
+
+test('api explorer labels first response timing as first token only for streamed responses', async ({ page }) => {
+  await openApiExplorer(page);
+
+  const requestBody = page.locator('textarea.explorer-json-editor').nth(1);
+  await expect(requestBody).toHaveValue(/"stream": true/);
+  await page.getByRole('button', { name: 'Execute' }).click();
+
+  const indicators = page.locator('.api-explorer-response-indicators');
+  await expect(indicators).toContainText('Server-Sent Events');
+  await expect(indicators).toContainText('Time to First Token');
+  await expect(indicators).not.toContainText('Time To First Byte');
+
+  const currentBody = JSON.parse(await requestBody.inputValue());
+  await requestBody.fill(JSON.stringify({ ...currentBody, stream: false }, null, 2));
+  await page.getByRole('button', { name: 'Execute' }).click();
+
+  await expect(indicators).toContainText('Standard');
+  await expect(indicators).toContainText('Time To First Byte');
+  await expect(indicators).not.toContainText('Time to First Token');
+});
+
 test('login focuses tenant selector after email submit when multiple tenants are available', async ({ page }) => {
   await openLoginWithTenantLookup(page, [
     { id: 'ten_default', name: 'Default' },

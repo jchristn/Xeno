@@ -84,7 +84,8 @@ Add or edit this section in `~/.xeno/client.json`:
     "Enabled": true,
     "Host": "127.0.0.1",
     "Port": 11434,
-    "EnableCors": true
+    "EnableCors": true,
+    "RequestTimeoutMs": 300000
   }
 }
 ```
@@ -94,7 +95,7 @@ After `xeno start`, local apps can use:
 - OpenAI base URL: `http://127.0.0.1:11434/v1`
 - Ollama base URL: `http://127.0.0.1:11434/api`
 
-Supported routes are `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/models/{model}`, `/api/generate`, `/api/chat`, `/api/embeddings`, `/api/embed`, `/api/tags`, `/api/show`, and `/api/ps`. `HEAD /` and `GET /` return `200 OK` with no payload for compatibility probes. `HEAD` against any supported OpenAI- or Ollama-compatible route also returns `200 OK` with no payload and does not require the WebSocket tunnel. Streaming is supported for OpenAI chat completions, OpenAI completions, and Ollama generate/chat. If the Xeno WebSocket is disconnected, severed, or unauthorized, the listener stays up but returns provider-shaped `502` responses.
+Supported routes are `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/models/{model}`, `/api/generate`, `/api/chat`, `/api/embeddings`, `/api/embed`, `/api/tags`, `/api/show`, and `/api/ps`. `HEAD /` and `GET /` return `200 OK` with no payload for compatibility probes. `HEAD` against any supported OpenAI- or Ollama-compatible route also returns `200 OK` with no payload and does not require the WebSocket tunnel. Streaming is supported for OpenAI chat completions, OpenAI completions, and Ollama generate/chat. If the Xeno WebSocket is disconnected, severed, or unauthorized, the listener stays up but returns provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 
 ## Server Client Telemetry
 

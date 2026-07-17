@@ -5712,7 +5712,7 @@ function ExplorerResponsePanel({ isSending, onClear, response }) {
           {response ? (
             <div className="api-explorer-response-indicators" aria-label={t('responseStatus')}>
               <ResponseHeaderIndicator label={t('transferMode')} value={normalized.streamed ? streamTypeLabel(normalized.streamType, t) : t('standardResponse')} />
-              <ResponseHeaderIndicator label={t('timeToFirstByte')} value={formatDuration(normalized.timing.timeToFirstByteMs)} />
+              <ResponseHeaderIndicator label={normalized.streamed ? t('timeToFirstToken') : t('timeToFirstByte')} value={formatDuration(normalized.timing.timeToFirstByteMs)} />
               <ResponseHeaderIndicator label={t('totalTime')} value={formatDuration(normalized.timing.totalTimeMs ?? normalized.timing.requestTimeMs)} />
             </div>
           ) : null}

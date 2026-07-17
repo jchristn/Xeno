@@ -140,7 +140,8 @@ Edit `%USERPROFILE%\.xeno\client.json` and add:
   "Enabled": true,
   "Host": "127.0.0.1",
   "Port": 11434,
-  "EnableCors": true
+  "EnableCors": true,
+  "RequestTimeoutMs": 300000
 }
 ```
 
@@ -153,7 +154,7 @@ curl http://127.0.0.1:11434/v1/models
 curl http://127.0.0.1:11434/api/tags
 ```
 
-The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses.
+The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 
 13. Watch logs.
 
