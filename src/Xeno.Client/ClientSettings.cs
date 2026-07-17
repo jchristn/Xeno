@@ -2,7 +2,9 @@ namespace Xeno.Client
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
     using System.IO;
+    using System.Net;
     using System.Text.Json.Serialization;
     using Xeno.Core.Models;
     using Xeno.Core.Serialization;
@@ -140,8 +142,10 @@ namespace Xeno.Client
         /// Build advertised inventory.
         /// </summary>
         /// <returns>Inventory object.</returns>
+        /// <exception cref="InvalidOperationException">A provider endpoint points at the enabled local inference listener.</exception>
         public object BuildInventory()
         {
+            ValidateLocalInferenceProviderEndpoints();
             return new
             {
                 os = Environment.OSVersion.ToString(),
@@ -170,8 +174,10 @@ namespace Xeno.Client
         /// Build typed inventory protocol message.
         /// </summary>
         /// <returns>Inventory message.</returns>
+        /// <exception cref="InvalidOperationException">A provider endpoint points at the enabled local inference listener.</exception>
         public ClientInventoryMessage BuildInventoryMessage()
         {
+            ValidateLocalInferenceProviderEndpoints();
             ClientInventoryMessage inventory = new ClientInventoryMessage();
             foreach (ClientRunnerSettings runner in Runners)
             {
@@ -194,6 +200,60 @@ namespace Xeno.Client
             }
 
             return inventory;
+        }
+
+        /// <summary>
+        /// Validate that no advertised provider endpoint points at the enabled local inference listener.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">A provider endpoint points at the enabled local inference listener.</exception>
+        public void ValidateLocalInferenceProviderEndpoints()
+        {
+            ValidateLocalInferenceProviderEndpoints(LocalInferenceServer);
+        }
+
+        /// <summary>
+        /// Validate that no advertised provider endpoint points at the supplied local inference listener settings.
+        /// </summary>
+        /// <param name="localInferenceServer">Local inference listener settings to validate against.</param>
+        /// <exception cref="InvalidOperationException">A provider endpoint points at the enabled local inference listener.</exception>
+        public void ValidateLocalInferenceProviderEndpoints(ClientLocalInferenceServerSettings localInferenceServer)
+        {
+            ArgumentNullException.ThrowIfNull(localInferenceServer);
+            if (!localInferenceServer.Enabled) return;
+            if (Providers == null) return;
+            foreach (ClientRunnerSettings runner in Runners)
+            {
+                if (runner == null) continue;
+                ValidateProviderEndpointAgainstLocalInference(runner.Name, runner.Endpoint, localInferenceServer);
+            }
+        }
+
+        /// <summary>
+        /// Validate one provider endpoint against the configured local inference listener.
+        /// </summary>
+        /// <param name="providerName">Provider endpoint name used in error messages.</param>
+        /// <param name="endpoint">Provider endpoint URL.</param>
+        /// <exception cref="InvalidOperationException">The provider endpoint points at the enabled local inference listener.</exception>
+        public void ValidateProviderEndpointAgainstLocalInference(string providerName, string endpoint)
+        {
+            ValidateProviderEndpointAgainstLocalInference(providerName, endpoint, LocalInferenceServer);
+        }
+
+        /// <summary>
+        /// Validate one provider endpoint against supplied local inference listener settings.
+        /// </summary>
+        /// <param name="providerName">Provider endpoint name used in error messages.</param>
+        /// <param name="endpoint">Provider endpoint URL.</param>
+        /// <param name="localInferenceServer">Local inference listener settings to validate against.</param>
+        /// <exception cref="InvalidOperationException">The provider endpoint points at the enabled local inference listener.</exception>
+        public void ValidateProviderEndpointAgainstLocalInference(string providerName, string endpoint, ClientLocalInferenceServerSettings localInferenceServer)
+        {
+            ArgumentNullException.ThrowIfNull(localInferenceServer);
+            if (!ProviderEndpointMatchesLocalInference(endpoint, localInferenceServer)) return;
+
+            string name = String.IsNullOrWhiteSpace(providerName) ? "(unnamed)" : providerName;
+            string localEndpoint = LocalInferenceEndpoint(localInferenceServer);
+            throw new InvalidOperationException("Provider endpoint '" + name + "' points at the local inference server " + localEndpoint + ". This would route Xeno requests back into this Xeno client and can create an infinite loop. Change the provider endpoint or LocalInferenceServer host/port before starting the client.");
         }
 
         private bool ApplyDefaults(ClientSettingsDefaultProbe probe)
@@ -242,6 +302,49 @@ namespace Xeno.Client
             if (probe.Telemetry == null) rewritten = true;
             if (probe.Providers == null) rewritten = true;
             return rewritten;
+        }
+
+        private static bool ProviderEndpointMatchesLocalInference(string endpoint, ClientLocalInferenceServerSettings localInferenceServer)
+        {
+            if (!localInferenceServer.Enabled) return false;
+            if (String.IsNullOrWhiteSpace(endpoint)) return false;
+            if (!IsLoopbackAlias(localInferenceServer.Host)) return false;
+            Uri? providerUri = TryBuildProviderEndpointUri(endpoint);
+            if (providerUri == null) return false;
+            if (!String.Equals(providerUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)) return false;
+            if (providerUri.Port != localInferenceServer.Port) return false;
+            return IsLoopbackAlias(providerUri.Host);
+        }
+
+        private static Uri? TryBuildProviderEndpointUri(string endpoint)
+        {
+            if (Uri.TryCreate(endpoint.Trim(), UriKind.Absolute, out Uri? uri)) return uri;
+            return null;
+        }
+
+        private static bool IsLoopbackAlias(string host)
+        {
+            string normalized = NormalizeHost(host);
+            if (String.Equals(normalized, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+            if (IPAddress.TryParse(normalized, out IPAddress? address)) return IPAddress.IsLoopback(address);
+            return false;
+        }
+
+        private static string NormalizeHost(string host)
+        {
+            string normalized = (host ?? String.Empty).Trim();
+            if (normalized.StartsWith("[", StringComparison.Ordinal) && normalized.EndsWith("]", StringComparison.Ordinal) && normalized.Length > 2)
+            {
+                normalized = normalized.Substring(1, normalized.Length - 2);
+            }
+
+            return normalized;
+        }
+
+        private static string LocalInferenceEndpoint(ClientLocalInferenceServerSettings localInferenceServer)
+        {
+            string host = String.Equals(localInferenceServer.Host, "[::1]", StringComparison.OrdinalIgnoreCase) ? "[::1]" : localInferenceServer.Host;
+            return "http://" + host + ":" + localInferenceServer.Port.ToString(CultureInfo.InvariantCulture);
         }
     }
 }

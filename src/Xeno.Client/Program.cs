@@ -1584,6 +1584,7 @@ namespace Xeno.Client
 
         private static async Task<int> StartBackgroundConnectAsync(ClientSettings settings, int timeoutMs, CancellationToken token)
         {
+            settings.ValidateLocalInferenceProviderEndpoints();
             EnsureClientId(settings);
             if (!HasWebSocketCredential(settings))
             {
@@ -1672,6 +1673,7 @@ namespace Xeno.Client
 
         private static async Task RunForegroundConnectAsync(ClientSettings settings, bool worker, CancellationToken token)
         {
+            settings.ValidateLocalInferenceProviderEndpoints();
             ClientConnectionState.ClearStopRequest();
             using (CancellationTokenSource runtimeTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
@@ -2504,6 +2506,7 @@ namespace Xeno.Client
 
         private static void SaveInventorySettings(ClientSettings settings)
         {
+            settings.ValidateLocalInferenceProviderEndpoints();
             settings.Save();
             ClientConnectionState.MarkInventoryUpdateRequested();
         }

@@ -521,6 +521,7 @@ namespace Xeno.Client.LocalDashboard
             if (method == "POST" && String.Equals(path, "/api/v1/settings/reload", StringComparison.OrdinalIgnoreCase))
             {
                 ClientSettings reloaded = ClientSettings.Load();
+                reloaded.ValidateLocalInferenceProviderEndpoints();
                 ApplyReloadedSettings(reloaded);
                 await LocalDashboardRuntime.SnapshotConfigurationAsync(_History, _Settings, token).ConfigureAwait(false);
                 ClientConnectionState.MarkInventoryUpdateRequested();
@@ -532,7 +533,9 @@ namespace Xeno.Client.LocalDashboard
             {
                 LocalClientSettingsUpdateRequest request = ReadJson<LocalClientSettingsUpdateRequest>(context);
                 ValidateHost(request.Host);
-                LocalInferenceServerService.ValidateLoopbackHost(request.LocalInferenceServer.Host);
+                ClientLocalInferenceServerSettings localInferenceServer = request.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
+                LocalInferenceServerService.ValidateLoopbackHost(localInferenceServer.Host);
+                _Settings.ValidateLocalInferenceProviderEndpoints(localInferenceServer);
                 _Settings.LocalDashboard.Enabled = request.Enabled;
                 _Settings.LocalDashboard.Host = request.Host;
                 _Settings.LocalDashboard.Port = Math.Max(1, request.Port);
@@ -540,7 +543,7 @@ namespace Xeno.Client.LocalDashboard
                 _Settings.LocalDashboard.RequireLocalToken = request.RequireLocalToken;
                 _Settings.LocalDashboard.Database = request.Database ?? new ClientLocalDatabaseSettings();
                 _Settings.LocalDashboard.HistoryRetention = request.HistoryRetention ?? new ClientLocalHistorySettings();
-                _Settings.LocalInferenceServer = request.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
+                _Settings.LocalInferenceServer = localInferenceServer;
                 _Settings.Telemetry = request.Telemetry ?? new ClientTelemetrySettings();
                 _Settings.Save();
                 await SendJsonAsync(context, new LocalDashboardSettingsResponse { Settings = RedactedSettings(), SettingsFile = ClientSettings.SettingsFile, RestartRequired = true }).ConfigureAwait(false);
@@ -672,6 +675,7 @@ namespace Xeno.Client.LocalDashboard
 
         private async Task SaveInventoryConfigurationAsync(CancellationToken token)
         {
+            _Settings.ValidateLocalInferenceProviderEndpoints();
             _Settings.Save();
             await LocalDashboardRuntime.SnapshotConfigurationAsync(_History, _Settings, token).ConfigureAwait(false);
             ClientConnectionState.MarkInventoryUpdateRequested();
@@ -682,6 +686,7 @@ namespace Xeno.Client.LocalDashboard
             string name = String.IsNullOrWhiteSpace(routeName) ? request.Name : routeName;
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Provider name is required.");
             if (String.IsNullOrWhiteSpace(request.Endpoint)) throw new ArgumentException("Provider endpoint is required.");
+            _Settings.ValidateProviderEndpointAgainstLocalInference(name, request.Endpoint);
             ClientRunnerSettings? provider = _Settings.Runners.FirstOrDefault(item => String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
             if (provider == null)
             {

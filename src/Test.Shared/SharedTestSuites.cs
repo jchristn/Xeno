@@ -195,6 +195,65 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "LocalInferenceProviderLoopValidationBlocksSelfReferences",
+                        displayName: "Local inference provider loop validation blocks self references",
+                        executeAsync: delegate
+                        {
+                            ClientSettings disabled = new ClientSettings
+                            {
+                                LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                {
+                                    Enabled = false,
+                                    Host = "127.0.0.1",
+                                    Port = 11434
+                                },
+                                Providers = new List<ClientRunnerSettings>
+                                {
+                                    new ClientRunnerSettings
+                                    {
+                                        Name = "local-ollama",
+                                        Endpoint = "http://127.0.0.1:11434"
+                                    }
+                                }
+                            };
+                            disabled.ValidateLocalInferenceProviderEndpoints();
+
+                            ClientSettings enabled = new ClientSettings
+                            {
+                                LocalInferenceServer = new ClientLocalInferenceServerSettings
+                                {
+                                    Enabled = true,
+                                    Host = "127.0.0.1",
+                                    Port = 11434
+                                },
+                                Providers = new List<ClientRunnerSettings>
+                                {
+                                    new ClientRunnerSettings
+                                    {
+                                        Name = "loop",
+                                        Endpoint = "http://localhost:11434/v1"
+                                    }
+                                }
+                            };
+                            ExpectInvalidOperationException(delegate { enabled.ValidateLocalInferenceProviderEndpoints(); });
+                            ExpectInvalidOperationException(delegate { enabled.BuildInventoryMessage(); });
+
+                            enabled.Providers[0].Endpoint = "http://127.0.0.1:11435";
+                            enabled.ValidateLocalInferenceProviderEndpoints();
+
+                            enabled.Providers[0].Endpoint = "https://localhost:11434";
+                            enabled.ValidateLocalInferenceProviderEndpoints();
+
+                            enabled.LocalInferenceServer.Host = "[::1]";
+                            enabled.Providers[0].Endpoint = "http://[::1]:11434/api";
+                            ExpectInvalidOperationException(delegate { enabled.ValidateLocalInferenceProviderEndpoints(); });
+
+                            enabled.Providers[0].Endpoint = "http://192.168.1.10:11434";
+                            enabled.ValidateLocalInferenceProviderEndpoints();
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "LocalInferenceEmbeddingInputUnionDeserializes",
                         displayName: "Local inference embedding input union deserializes",
                         executeAsync: delegate
@@ -1576,6 +1635,32 @@ namespace Test.Shared
                             if (telemetry.TotalTokens != 14) throw new InvalidOperationException("Ollama total token telemetry was not computed.");
 
                             return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientStartRejectsLocalInferenceProviderLoop",
+                        "Client start rejects local inference provider loop",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-loop-guard-" + Guid.NewGuid().ToString("N"));
+                            try
+                            {
+                                Directory.CreateDirectory(clientHome);
+                                string settingsFile = Path.Combine(clientHome, "client.json");
+                                File.WriteAllText(settingsFile, "{\"Name\":\"loop-test\",\"LocalInferenceServer\":{\"Enabled\":true,\"Host\":\"127.0.0.1\",\"Port\":11434},\"Providers\":[{\"Name\":\"self\",\"ApiType\":\"Ollama\",\"Endpoint\":\"http://localhost:11434/api\",\"Models\":[]}]}");
+
+                                ClientCommandResult result = await RunXenoClientAsync(new[] { "start", "--timeout", "1000" }, clientHome).ConfigureAwait(false);
+                                if (result.ExitCode != 1) throw new InvalidOperationException("Conflicting local inference provider loop start command should fail. Output: " + result.StandardOutput + result.StandardError);
+                                string combinedOutput = result.StandardOutput + result.StandardError;
+                                if (!combinedOutput.Contains("points at the local inference server", StringComparison.Ordinal)) throw new InvalidOperationException("Loop guard error did not explain the local inference conflict: " + combinedOutput);
+                                if (!combinedOutput.Contains("infinite loop", StringComparison.Ordinal)) throw new InvalidOperationException("Loop guard error did not explain the infinite loop risk: " + combinedOutput);
+                                if (combinedOutput.Contains("configure an access key", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Loop guard should run before credential validation: " + combinedOutput);
+                                if (File.Exists(Path.Combine(clientHome, "state.json"))) throw new InvalidOperationException("Client start wrote runtime state before rejecting the provider loop.");
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
                         }),
                     new TestCaseDescriptor(
                         "ClientCli",
@@ -8215,6 +8300,20 @@ VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider',
             }
 
             throw new InvalidOperationException("Expected ArgumentException was not thrown.");
+        }
+
+        private static void ExpectInvalidOperationException(Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException("Expected InvalidOperationException was not thrown.");
         }
 
         private sealed class TestCliCommandExpectation
