@@ -2567,14 +2567,12 @@ function AdvertisedModelsView() {
           },
           { key: 'clientId', searchable: false },
           { key: 'clientConnected', label: 'connected', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'clientConnected')), searchable: false },
-          { key: 'clientLastHeartbeatUtc', label: 'lastHeartbeatUtc', searchable: false },
           { key: 'name', label: 'modelName', searchValue: (row) => value(row, 'name'), sortValue: (row) => value(row, 'name') },
           { key: 'apiType', searchable: false },
           { key: 'source', searchable: false },
           { key: 'modelManagementAllowed', label: 'modelManagement', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'modelManagementAllowed')), searchable: false },
           { key: 'supportsCompletions', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsCompletions')), searchable: false },
-          { key: 'supportsEmbeddings', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsEmbeddings')), searchable: false },
-          { key: 'lastAdvertisedUtc', searchable: false }
+          { key: 'supportsEmbeddings', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsEmbeddings')), searchable: false }
         ]}
         canDelete={(row) => canDeleteManagedAdvertisedModel(row)}
         deleteMessage={(row) => t('deleteManagedClientModelMessage', {
