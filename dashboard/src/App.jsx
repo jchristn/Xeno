@@ -3112,10 +3112,10 @@ function PerformanceSamplesTable({ hairpinLeg, nativeLeg }) {
               <th>{t('nativeFirstToken', 'Native First Token')}</th>
               <th>{t('nativeTokensPerSecond', 'Native Tokens/s')}</th>
               <th>{t('nativeStatus', 'Native Status')}</th>
-              <th>{t('hairpinTotal', 'Hairpin Total')}</th>
-              <th>{t('hairpinFirstToken', 'Hairpin First Token')}</th>
-              <th>{t('hairpinTokensPerSecond', 'Hairpin Tokens/s')}</th>
-              <th>{t('hairpinStatus', 'Hairpin Status')}</th>
+              <th>{t('hairpinTotal', 'Xeno Total')}</th>
+              <th>{t('hairpinFirstToken', 'Xeno First Token')}</th>
+              <th>{t('hairpinTokensPerSecond', 'Xeno Tokens/s')}</th>
+              <th>{t('hairpinStatus', 'Xeno Status')}</th>
             </tr>
           </thead>
           <tbody>
