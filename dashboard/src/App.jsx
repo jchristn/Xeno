@@ -425,7 +425,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="client-telemetry" element={<ClientTelemetryView canCollect={isGlobalAdmin || isTenantAdmin} />} />
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
             <Route path="analytics" element={<AnalyticsView />} />
-            <Route path="ledger" element={<LedgerView canOperate={isGlobalAdmin || isTenantAdmin} />} />
+            <Route path="ledger" element={<LedgerView canOperate={isGlobalAdmin || isTenantAdmin} session={session} />} />
             <Route path="settings" element={isGlobalAdmin ? <SettingsView /> : <NotFoundView />} />
             <Route path="*" element={<NotFoundView />} />
           </Routes>
@@ -3604,10 +3604,12 @@ function AnalyticsView() {
   );
 }
 
-function LedgerView({ canOperate = false }) {
+function LedgerView({ canOperate = false, session }) {
   const { t } = useTranslation();
   const tenantOptions = useResource('/api/v1/tenants', []);
   const userOptions = useResource('/api/v1/users', []);
+  const actor = collectionRows(userOptions.data).find((item) => recordId(item) === session?.userId);
+  const canManageUsers = isGlobalAdminUser(actor) || isTenantAdminUser(actor, session);
   const [entryFilters, setEntryFilters] = useState({ tenantId: '', userId: '', direction: '', fromUtc: '', toUtc: '' });
   const [trendRange, setTrendRange] = useState('lastDay');
   const [trendAnchor, setTrendAnchor] = useState(() => Date.now());
@@ -3619,6 +3621,9 @@ function LedgerView({ canOperate = false }) {
   const [error, setError] = useState('');
   const [requestDetails, setRequestDetails] = useState(null);
   const [requestDetailsError, setRequestDetailsError] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userDetails, setUserDetails] = useState(null);
+  const [userDetailsError, setUserDetailsError] = useState('');
   const [operationStatus, setOperationStatus] = useState('');
 
   const queue = value(status, 'queue') || {};
@@ -3637,12 +3642,9 @@ function LedgerView({ canOperate = false }) {
   const topCreditRows = useMemo(() => topLedgerRows(buildLedgerUserDirectionRows(filteredEntryRows, 'credit'), 'totalCredits'), [filteredEntryRows]);
   const clientCreditRows = useMemo(() => topLedgerRows(buildLedgerClientCreditRows(filteredEntryRows), 'totalCredits'), [filteredEntryRows]);
   const trendSummary = useMemo(() => buildLedgerTrendSummary(trendEntryRows, trendWindow), [trendEntryRows, trendWindow]);
-  const tenantCount = new Set(filteredBalanceRows.map((row) => ledgerTenantId(row)).filter(Boolean)).size;
   const totalBalance = filteredBalanceRows.reduce((sum, row) => sum + Number(value(row, 'balance') || 0), 0);
   const totalDebits = filteredBalanceRows.reduce((sum, row) => sum + Number(value(row, 'totalDebits') || 0), 0);
   const totalCredits = filteredBalanceRows.reduce((sum, row) => sum + Number(value(row, 'totalCredits') || 0), 0);
-  const netLedgerUiUrl = defaultNetLedgerUiUrl();
-
   const refreshLedger = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -3706,6 +3708,28 @@ function LedgerView({ canOperate = false }) {
     }
   }
 
+  async function saveLedgerUser(userId, payload) {
+    const result = await api.put(`/api/v1/users/${encodeURIComponent(userId)}`, payload);
+    if (result?.error) throw new Error(result.message || result.error);
+    setSelectedUser(result);
+    userOptions.refresh();
+  }
+
+  async function openLedgerUser(userId) {
+    if (!userId) return;
+
+    setUserDetailsError('');
+    const text = String(userId);
+    const localUser = ledgerUserOptions.find((user) => String(recordId(user) || value(user, 'id') || '') === text);
+    if (localUser) {
+      if (canManageUsers || text === session?.userId) setSelectedUser(localUser);
+      else setUserDetails(localUser);
+      return;
+    }
+
+    setUserDetailsError(t('userDetailsLoadFailed', 'Unable to load user details.'));
+  }
+
   const netLedgerHealthy = Boolean(value(status, 'netLedgerHealthy'));
   const netLedgerMessage = value(status, 'netLedgerMessage') || value(queue, 'lastFailure') || '';
   const balanceHeading = canOperate ? t('globalTokenBalance') : t('currentBalance');
@@ -3716,21 +3740,15 @@ function LedgerView({ canOperate = false }) {
         <IconButton iconOnly onClick={refreshLedger} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />
         {canOperate ? <IconButton onClick={runLedgerDrain} label={t('drain')} tooltip={t('tooltipLedgerDrain')} icon={<Play size={16} />} variant="secondary" /> : null}
         {canOperate ? <IconButton onClick={runLedgerReconcile} label={t('reconcile')} tooltip={t('tooltipLedgerReconcile')} icon={<RefreshCw size={16} />} variant="secondary" /> : null}
-        {canOperate ? (
-          <a className="action-button secondary" href={netLedgerUiUrl} rel="noreferrer" target="_blank" title={t('tooltipNetLedgerUi')}>
-            <Globe2 size={16} />
-            <span>{t('netLedgerUi')}</span>
-          </a>
-        ) : null}
       </div>
       {error ? <div className="leaderboard-error" role="alert">{error}</div> : null}
       {requestDetailsError ? <div className="leaderboard-error" role="alert">{requestDetailsError}</div> : null}
+      {userDetailsError ? <div className="leaderboard-error" role="alert">{userDetailsError}</div> : null}
       {operationStatus ? <p className="muted-copy">{operationStatus}</p> : null}
       <div className="metric-grid compact ledger-kpi-grid">
         <MetricCard icon={<Gauge size={18} />} label={balanceHeading} value={formatNumber(canOperate ? totalBalance : value(balance, 'balance') || 0)} tone={(canOperate ? totalBalance : value(balance, 'balance') || 0) < 0 ? 'warning' : 'success'} />
         <MetricCard icon={<ArrowDown size={18} />} label={t('totalDebits')} value={formatNumber(canOperate ? totalDebits : value(balance, 'totalDebits') || 0)} tone="warning" />
         <MetricCard icon={<ArrowUp size={18} />} label={t('totalCredits')} value={formatNumber(canOperate ? totalCredits : value(balance, 'totalCredits') || 0)} tone="success" />
-        <MetricCard icon={<Building2 size={18} />} label={t('tenants')} value={formatNumber(tenantCount)} />
         <MetricCard icon={<Activity size={18} />} label={t('queueDepth')} value={formatNumber(value(queue, 'queueDepth') || 0)} />
         <MetricCard icon={<ShieldCheck size={18} />} label={t('netLedgerHealth')} value={netLedgerHealthy ? t('healthy') : t('unhealthy')} tone={netLedgerHealthy ? 'success' : 'warning'} subtext={netLedgerMessage} />
         <MetricCard icon={<History size={18} />} label={t('processed')} value={formatNumber(value(queue, 'processedCount') || 0)} />
@@ -3882,10 +3900,10 @@ function LedgerView({ canOperate = false }) {
         columns={[
           { key: 'direction', label: 'direction', render: (row) => <StatusChip tone={String(value(row, 'direction')).toLowerCase().includes('credit') ? 'success' : 'warning'} value={String(value(row, 'direction') ?? '-')} /> },
           { key: 'amount', label: 'amount', render: (row) => formatNumber(value(row, 'amount') || 0), sortValue: (row) => Number(value(row, 'amount') || 0) },
-          { key: 'userId', label: 'userId', render: (row) => ledgerDisplayUserId(row) || '-', searchValue: (row) => ledgerDisplayUserId(row) },
-          { key: 'counterpartyUserId', label: 'counterpartyUserId', render: (row) => ledgerCounterpartyUserId(row) || '-', searchValue: (row) => ledgerCounterpartyUserId(row) },
+          { key: 'userId', label: 'userId', render: (row) => <LedgerUserLink onOpen={openLedgerUser} userId={ledgerDisplayUserId(row)} />, searchValue: (row) => ledgerDisplayUserId(row) },
+          { key: 'counterpartyUserId', label: 'counterpartyUserId', render: (row) => <LedgerUserLink onOpen={openLedgerUser} userId={ledgerCounterpartyUserId(row)} />, searchValue: (row) => ledgerCounterpartyUserId(row) },
           { key: 'selectedClientId', label: 'selectedClientId' },
-          { key: 'requestHistoryId', label: 'requestHistoryId', render: (row) => <LedgerRequestHistoryLink onOpen={openRequestDetails} requestHistoryId={value(row, 'requestHistoryId')} /> },
+          { key: 'requestHistoryId', label: 'requestHistoryId', render: (row) => <LedgerRequestHistoryLink onOpen={openRequestDetails} requestHistoryId={ledgerRequestHistoryId(row)} /> },
           { key: 'occurredUtc', label: 'occurredUtc', render: (row) => formatDateTime(value(row, 'occurredUtc')) }
         ]}
         loading={loading}
@@ -3895,6 +3913,8 @@ function LedgerView({ canOperate = false }) {
         title={t('ledgerEntries')}
       />
       {requestDetails ? <RequestDetailsModal data={requestDetails} onClose={() => setRequestDetails(null)} /> : null}
+      {selectedUser ? <UserEditModal actorUser={actor} data={selectedUser} onClose={() => setSelectedUser(null)} onSave={saveLedgerUser} session={session} /> : null}
+      {userDetails ? <EditRecordModal title={t('userDetails')} data={userDetails} onClose={() => setUserDetails(null)} /> : null}
     </div>
   );
 }
@@ -3986,6 +4006,10 @@ function ledgerServingUserId(entry) {
 
 function ledgerCounterpartyUserId(entry) {
   return value(entry, 'counterpartyUserId') || ledgerTag(entry, 'counterpartyUserId');
+}
+
+function ledgerRequestHistoryId(entry) {
+  return value(entry, 'requestHistoryId') || ledgerTag(entry, 'requestHistoryId');
 }
 
 function ledgerEntryUserIdForDirection(entry, targetDirection) {
@@ -4100,7 +4124,28 @@ function latestUtc(left, right) {
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
+function LedgerUserLink({ onOpen, userId }) {
+  const { t } = useTranslation();
+  if (!userId) return '-';
+  const text = String(userId);
+
+  function handleClick(event) {
+    event.preventDefault();
+    onOpen?.(text);
+  }
+
+  return (
+    <span className="ledger-request-history-link">
+      <a href={`/dashboard/users?query=${encodeURIComponent(text)}`} onClick={handleClick} title={t('userDetails')}>
+        <code>{text}</code>
+      </a>
+      <CopyButton label="copyValue" value={text} />
+    </span>
+  );
+}
+
 function LedgerRequestHistoryLink({ onOpen, requestHistoryId }) {
+  const { t } = useTranslation();
   if (!requestHistoryId) return '-';
   const text = String(requestHistoryId);
 
@@ -4111,16 +4156,12 @@ function LedgerRequestHistoryLink({ onOpen, requestHistoryId }) {
 
   return (
     <span className="ledger-request-history-link">
-      <a href={`/dashboard/requests?query=${encodeURIComponent(text)}`} onClick={handleClick} title="Open request details">
+      <a href={`/dashboard/requests?query=${encodeURIComponent(text)}`} onClick={handleClick} title={t('requestHistory')}>
         <code>{text}</code>
       </a>
       <CopyButton label="copyValue" value={text} />
     </span>
   );
-}
-
-function defaultNetLedgerUiUrl() {
-  return 'http://localhost:9200';
 }
 
 function TimeRangeSelector({ onChange, range }) {
