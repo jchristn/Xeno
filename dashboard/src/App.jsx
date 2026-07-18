@@ -2346,7 +2346,7 @@ function NukeCountTable({ entries, title }) {
         <tbody>
           {entries.map(([key, count]) => (
             <tr key={key}>
-              <th>{t(key, key)}</th>
+              <th>{dashboardLabel(t, key)}</th>
               <td>{formatNumber(count)}</td>
             </tr>
           ))}
@@ -4980,6 +4980,10 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
     return sort.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />;
   }
 
+  function columnLabel(column) {
+    return dashboardLabel(t, column.label || column.key);
+  }
+
   function handleRowClick(event, row) {
     if (!onRowClick) return;
     const target = event.target instanceof Element ? event.target : event.currentTarget;
@@ -5117,7 +5121,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
               {normalizedColumns.map((column) => (
                 <th className={[column.sortable === false ? '' : 'sortable', column.className || ''].filter(Boolean).join(' ')} key={column.key} onClick={() => handleSort(column)} title={column.sortable === false ? undefined : t('tooltipSortColumn')}>
                   <span className="th-content">
-                    <span>{t(column.label || column.key, column.label || column.key)}</span>
+                    <span>{columnLabel(column)}</span>
                     {renderSortIcon(column)}
                   </span>
                 </th>
@@ -5130,7 +5134,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
                   <th className={column.className || undefined} key={`${column.key}-filter`}>
                     {column.filterable === false ? <span /> : (
                       <input
-                        aria-label={t('filterColumn', { column: t(column.label || column.key, column.label || column.key) })}
+                        aria-label={t('filterColumn', { column: columnLabel(column) })}
                         onBlur={(event) => applyColumnFilter(column.key, event.target.value)}
                         onChange={(event) => updateColumnFilterDraft(column.key, event.target.value)}
                         onClick={(event) => event.stopPropagation()}
@@ -6173,7 +6177,7 @@ function RecordSummaryTable({ entries }) {
         <tbody>
           {safeEntries.map(([key, fieldValue]) => (
             <tr key={key}>
-              <th>{t(key, key)}</th>
+              <th>{dashboardLabel(t, key)}</th>
               <td><CellValue columnKey={key} value={fieldValue} /></td>
             </tr>
           ))}
@@ -6187,7 +6191,7 @@ function RecordField({ fieldKey, value: fieldValue }) {
   const { t } = useTranslation();
   return (
     <div className="record-field">
-      <span className="record-field-label">{t(fieldKey, fieldKey)}</span>
+      <span className="record-field-label">{dashboardLabel(t, fieldKey)}</span>
       <div className="record-field-value">
         <CellValue columnKey={fieldKey} value={fieldValue} />
       </div>
@@ -6197,7 +6201,7 @@ function RecordField({ fieldKey, value: fieldValue }) {
 
 function RecordComplexSection({ fieldKey, value: fieldValue }) {
   const { t } = useTranslation();
-  const title = t(fieldKey, fieldKey);
+  const title = dashboardLabel(t, fieldKey);
 
   if (Array.isArray(fieldValue)) {
     return (
@@ -6275,7 +6279,7 @@ function NestedRecordTable({ rows }) {
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column}>{t(column, column)}</th>
+              <th key={column}>{dashboardLabel(t, column)}</th>
             ))}
           </tr>
         </thead>
@@ -6455,6 +6459,60 @@ function describeRow(row) {
     || recordId(row)
     || 'record'
   );
+}
+
+function dashboardLabel(t, key) {
+  const rawKey = String(key || '');
+  if (!rawKey) return '';
+  return t(rawKey, humanizePropertyName(rawKey));
+}
+
+function humanizePropertyName(key) {
+  const normalized = String(key || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+
+  return normalized
+    .split(' ')
+    .map((part) => humanizePropertyWord(part))
+    .join(' ');
+}
+
+function humanizePropertyWord(word) {
+  const lower = String(word || '').toLowerCase();
+  const acronyms = {
+    api: 'API',
+    cpu: 'CPU',
+    db: 'DB',
+    gpu: 'GPU',
+    guid: 'GUID',
+    html: 'HTML',
+    http: 'HTTP',
+    id: 'ID',
+    ip: 'IP',
+    json: 'JSON',
+    ms: 'ms',
+    p50: 'P50',
+    p90: 'P90',
+    p95: 'P95',
+    p99: 'P99',
+    sql: 'SQL',
+    ssl: 'SSL',
+    tls: 'TLS',
+    toc: 'TOC',
+    uri: 'URI',
+    url: 'URL',
+    utc: 'UTC',
+    uuid: 'UUID',
+    ws: 'WS'
+  };
+  if (acronyms[lower]) return acronyms[lower];
+  if (/^p\d+$/i.test(word)) return word.toUpperCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function describePermission(permission) {

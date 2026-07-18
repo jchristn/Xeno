@@ -2009,19 +2009,12 @@ function title(value, t) {
   };
   if (mapped[key]) return t(mapped[key]);
   if (key.toLowerCase().includes('percent') || key.toLowerCase().includes('average') || key.toLowerCase().includes('utilization') || key.toLowerCase().includes('temperature')) {
-    return key
+    return humanizeLocalPropertyName(key)
       .replace(/Utilization/g, 'Util')
-      .replace(/utilization/g, 'util')
       .replace(/Temperature/g, 'Temp')
-      .replace(/temperature/g, 'temp')
       .replace(/Average/g, 'Avg')
-      .replace(/average/g, 'avg')
       .replace(/Percent/g, '%')
-      .replace(/percent/g, '%')
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/%/g, ' %')
       .replace(/\s+/g, ' ')
-      .replace(/^./, (letter) => letter.toUpperCase())
       .trim();
   }
 
@@ -2030,7 +2023,55 @@ function title(value, t) {
     if (translated !== key) return translated;
   }
 
-  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase()).trim();
+  return humanizeLocalPropertyName(key);
+}
+
+function humanizeLocalPropertyName(key) {
+  const normalized = String(key || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+
+  return normalized
+    .split(' ')
+    .map((part) => humanizeLocalPropertyWord(part))
+    .join(' ');
+}
+
+function humanizeLocalPropertyWord(word) {
+  const lower = String(word || '').toLowerCase();
+  const acronyms = {
+    api: 'API',
+    cpu: 'CPU',
+    db: 'DB',
+    gpu: 'GPU',
+    guid: 'GUID',
+    html: 'HTML',
+    http: 'HTTP',
+    id: 'ID',
+    ip: 'IP',
+    json: 'JSON',
+    ms: 'ms',
+    p50: 'P50',
+    p90: 'P90',
+    p95: 'P95',
+    p99: 'P99',
+    sql: 'SQL',
+    ssl: 'SSL',
+    tls: 'TLS',
+    toc: 'TOC',
+    uri: 'URI',
+    url: 'URL',
+    utc: 'UTC',
+    uuid: 'UUID',
+    ws: 'WS'
+  };
+  if (acronyms[lower]) return acronyms[lower];
+  if (/^p\d+$/i.test(word)) return word.toUpperCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function columnClass(column) {

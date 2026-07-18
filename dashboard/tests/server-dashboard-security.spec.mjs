@@ -1070,10 +1070,10 @@ test('advertised models model-name filters exclude non-matching model rows', asy
   await expect(page.getByText('llama3.2:latest')).toHaveCount(0);
   await page.getByRole('combobox', { name: 'Client', exact: true }).selectOption('all');
 
-  await page.getByRole('textbox', { name: 'Filter client', exact: true }).fill('gpt-host-b');
+  await page.getByRole('textbox', { name: 'Filter Client', exact: true }).fill('gpt-host-b');
   await expect(page.getByText('gpt-oss:120b')).toBeVisible();
   await expect(page.getByText('gpt-oss:20b')).toHaveCount(0);
-  await page.getByRole('textbox', { name: 'Filter client', exact: true }).fill('');
+  await page.getByRole('textbox', { name: 'Filter Client', exact: true }).fill('');
 
   await page.getByRole('textbox', { name: 'Filter Client ID', exact: true }).fill('xcl_gpt_a');
   await expect(page.getByText('gpt-oss:20b')).toBeVisible();
