@@ -1187,40 +1187,15 @@ server asks for them.
 
 ## HTTP Response Trace Headers
 
-When a routed request is returned to the original HTTP caller, the server adds
-trace headers that help developers troubleshoot routing and performance.
+When a routed request is returned to the original HTTP caller, the server only
+adds `X-Xeno-Request-ID` as a caller-visible Xeno trace header. For new routed
+requests, this value is also the persisted request history entry ID.
 
-Common headers:
-
-| Header | Description |
-| --- | --- |
-| `X-Client-ID` | Selected client ID. |
-| `X-Xeno-Request-ID` | Xeno request ID. |
-| `X-Xeno-Tenant-ID` | Tenant ID. |
-| `X-Xeno-Model` | Effective routed model. |
-| `X-Xeno-Routing-Outcome` | Routing outcome code. |
-| `X-Xeno-Routing-Message` | Human-readable routing result. |
-| `X-Xeno-Routing-Candidate-Count` | Number of candidate clients. |
-| `X-Xeno-Routing-Candidates` | Comma-separated candidate client IDs. |
-| `X-Xeno-Load-Balancing-Mode` | Selection strategy used for this request: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, or `Adaptive`. |
-| `X-Xeno-Adaptive-Sample-Count` | Number of candidates sampled by adaptive routing, when adaptive mode is used. |
-| `X-Xeno-Adaptive-Score` | Selected client adaptive score, when adaptive mode is used. |
-| `X-Xeno-Selection-Reason` | Reason the selected client was chosen. |
-| `X-Xeno-Selected-Client-Name` | Selected client name. |
-| `X-Xeno-Selected-API-Type` | Selected upstream API type. |
-| `X-Xeno-Selected-Provider` | Backward-compatible selected upstream API type header. |
-| `X-Xeno-Selected-Source` | Selected provider source. |
-| `X-Xeno-Selected-In-Flight` | Selected client in-flight count. |
-| `X-Xeno-Selected-Max-Parallel` | Selected client max parallel limit. |
-| `X-Xeno-Selected-Weight` | Selected client routing weight. |
-| `X-Xeno-Selected-Last-Heartbeat-UTC` | Last heartbeat timestamp. |
-| `X-Xeno-Client-Roundtrip-Ms` | Server-to-client round-trip time. |
-| `X-Xeno-Request-Duration-Ms` | End-to-end request duration. |
-| `X-Xeno-Request-History-ID` | Persisted request history entry ID. |
-| `X-Xeno-Routing-Timeline` | Routing timeline stages. |
-| `X-Xeno-Time-To-First-Token-Ms` | Time to first token or byte. |
-| `X-Xeno-Total-Tokens` | Total tokens, when available. |
-| `X-Xeno-Stream-Chunks` | Stream chunk count, when available. |
+Detailed routing diagnostics are not returned in HTTP or local inference
+response headers. Selected client, candidate clients, excluded clients, routing
+policy, load-balancing decision, selection reason, timing, token telemetry, and
+timeline are captured in Request History and exposed through the dashboard and
+protected Request History APIs.
 
 ## Request History Capture
 

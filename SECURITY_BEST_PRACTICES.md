@@ -192,7 +192,7 @@ When Xeno routes an inference request, the server adds forwarding headers such a
 
 Those headers help clients correlate requests and preserve caller context. They also reveal tenant and request identity to the selected client. Only connect clients operated by people or systems allowed to see that routing metadata.
 
-The server also returns routing trace headers to callers, including selected client information, routing policy details, timing, candidate counts, and token metrics where available. That visibility is useful for debugging, but it can disclose topology. Avoid exposing detailed routing headers to untrusted external callers unless they are meant to understand the fleet.
+The server returns `X-Xeno-Request-ID` to callers for request correlation. Detailed routing diagnostics such as selected client information, routing policy details, timing, candidate counts, and token metrics are kept in protected request history and dashboard views instead of caller-visible response headers.
 
 ## Multi-Tenant Operation
 

@@ -7211,23 +7211,20 @@ namespace Test.Shared
                                 string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Relay returned " + (int)response.StatusCode + ": " + body);
                                 if (!body.Contains("relay-ok", StringComparison.Ordinal)) throw new InvalidOperationException("Relay body mismatch: " + body);
-                                if (HeaderValue(response, "X-Client-ID") != "xcl_touchstone") throw new InvalidOperationException("Relay response did not include selected client header.");
-                                if (HeaderValue(response, "X-Xeno-Routing-Outcome") != "Completed") throw new InvalidOperationException("Relay response did not include completed routing outcome.");
-                                if (HeaderValue(response, "X-Xeno-Model") != "llama3.2:latest") throw new InvalidOperationException("Relay response did not include effective model header.");
-                                if (HeaderValue(response, "X-Xeno-Selected-API-Type") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include selected API type header.");
-                                if (HeaderValue(response, "X-Xeno-Selected-Provider") != "OpenAICompatible") throw new InvalidOperationException("Relay response did not include backward-compatible selected provider header.");
-                                if (HeaderValue(response, "X-Xeno-Selected-Source") != "touchstone-runner") throw new InvalidOperationException("Relay response did not include selected source header.");
-                                if (HeaderValue(response, "X-Xeno-Routing-Candidate-Count") != "1") throw new InvalidOperationException("Relay response did not include candidate count header.");
-                                if (HeaderValue(response, "X-Xeno-Load-Balancing-Mode") != "LeastRecentlyUsed") throw new InvalidOperationException("Relay response did not include load-balancing mode header.");
-                                if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Routing-Policy-ID"))) throw new InvalidOperationException("Relay response did not include routing policy ID header.");
-                                if (HeaderValue(response, "X-Xeno-Routing-Policy-Match") != "*/*") throw new InvalidOperationException("Relay response did not include routing policy match header.");
-                                if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Selection-Reason"))) throw new InvalidOperationException("Relay response did not include selection reason header.");
-                                if (String.IsNullOrWhiteSpace(HeaderValue(response, "X-Xeno-Request-History-ID"))) throw new InvalidOperationException("Relay response did not include request history trace header.");
-                                if (HeaderLong(response, "X-Xeno-Client-Roundtrip-Ms") < 0) throw new InvalidOperationException("Relay response included invalid client roundtrip header.");
-                                if (HeaderLong(response, "X-Xeno-Request-Duration-Ms") < 0) throw new InvalidOperationException("Relay response included invalid request duration header.");
-                                string timeline = HeaderValue(response, "X-Xeno-Routing-Timeline");
-                                if (!timeline.Contains("ClientSelection", StringComparison.Ordinal) || !timeline.Contains("ClientResponse", StringComparison.Ordinal)) throw new InvalidOperationException("Relay response did not include routing timeline header.");
-                                historyId = HeaderValue(response, "X-Xeno-Request-History-ID");
+                                historyId = HeaderValue(response, "X-Xeno-Request-ID");
+                                if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("Relay response did not include request trace header.");
+                                if (String.Equals(historyId, "req_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Relay response accepted spoofed request trace header.");
+                                if (String.Equals(historyId, "provider_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Relay response accepted spoofed provider request trace header.");
+                                AssertHeaderMissing(response, "X-Client-ID", "Relay response exposed selected client header.");
+                                AssertHeaderMissing(response, "X-Xeno-Tenant-ID", "Relay response exposed tenant trace header.");
+                                AssertHeaderMissing(response, "X-Xeno-Model", "Relay response exposed model trace header.");
+                                AssertHeaderMissing(response, "X-Xeno-Routing-Outcome", "Relay response exposed routing outcome header.");
+                                AssertHeaderMissing(response, "X-Xeno-Routing-Candidate-Count", "Relay response exposed routing candidate count header.");
+                                AssertHeaderMissing(response, "X-Xeno-Routing-Policy-ID", "Relay response exposed routing policy ID header.");
+                                AssertHeaderMissing(response, "X-Xeno-Selected-Client-Name", "Relay response exposed selected client name header.");
+                                AssertHeaderMissing(response, "X-Xeno-Selected-API-Type", "Relay response exposed selected API type header.");
+                                AssertHeaderMissing(response, "X-Xeno-Request-History-ID", "Relay response exposed request history ID header.");
+                                AssertHeaderMissing(response, "X-Xeno-Routing-Timeline", "Relay response exposed routing timeline header.");
                             }
 
                             using (HttpResponseMessage historyResponse = await httpClient.GetAsync("http://127.0.0.1:" + port + "/api/v1/requesthistory/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
@@ -7235,6 +7232,24 @@ namespace Test.Shared
                                 string historyJson = await historyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                                 if (!historyResponse.IsSuccessStatusCode) throw new InvalidOperationException("Request history lookup failed: " + historyJson);
                                 RequestHistoryEntry history = DeserializeRequired<RequestHistoryEntry>(historyJson);
+                                if (!String.Equals(history.Id, historyId, StringComparison.Ordinal)) throw new InvalidOperationException("Request history ID did not match response request ID.");
+                                if (history.RoutingDecision == null) throw new InvalidOperationException("Request history did not retain routing decision metadata.");
+                                RoutingDecision routing = history.RoutingDecision;
+                                if (!String.Equals(routing.OutcomeCode, "Completed", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain completed routing outcome.");
+                                if (!String.Equals(routing.EffectiveModel, "llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain effective model.");
+                                if (!String.Equals(routing.SelectedClientId, "xcl_touchstone", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain selected client ID.");
+                                if (!String.Equals(routing.SelectedClientName, "touchstone-client", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain selected client name.");
+                                if (!String.Equals(routing.SelectedProvider, "OpenAICompatible", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain selected provider.");
+                                if (!String.Equals(routing.SelectedSource, "touchstone-runner", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain selected source.");
+                                if (routing.CandidateCount != 1) throw new InvalidOperationException("Request history did not retain routing candidate count.");
+                                if (!routing.CandidateClientIds.Any(item => String.Equals(item, "xcl_touchstone", StringComparison.Ordinal))) throw new InvalidOperationException("Request history did not retain routing candidates.");
+                                if (routing.LoadBalancingMode != LoadBalancingModeEnum.LeastRecentlyUsed) throw new InvalidOperationException("Request history did not retain load-balancing mode.");
+                                if (String.IsNullOrWhiteSpace(routing.RoutingPolicyId)) throw new InvalidOperationException("Request history did not retain routing policy ID.");
+                                if (!String.Equals(routing.RoutingPolicyModelName, "*", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain routing policy model match.");
+                                if (!String.Equals(routing.RoutingPolicyClientName, "*", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not retain routing policy client match.");
+                                if (String.IsNullOrWhiteSpace(routing.SelectionReason)) throw new InvalidOperationException("Request history did not retain selection reason.");
+                                if (!history.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientSelection)) throw new InvalidOperationException("Request history did not retain client selection timeline.");
+                                if (!history.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientResponse)) throw new InvalidOperationException("Request history did not retain client response timeline.");
                                 if (!String.Equals(history.RequestorTenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Request history accepted spoofed tenant ID.");
                                 if (String.Equals(history.SourceIp, "203.0.113.66", StringComparison.Ordinal) || String.Equals(history.SourceIp, "198.51.100.77", StringComparison.Ordinal)) throw new InvalidOperationException("Request history accepted spoofed source IP.");
                                 if (!String.Equals(history.RequestHeaders["X-Api-Key"], "(redacted)", StringComparison.Ordinal)) throw new InvalidOperationException("Request history did not redact X-Api-Key.");
@@ -7607,17 +7622,23 @@ namespace Test.Shared
                                 if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Streaming relay returned " + (int)response.StatusCode + ": " + body);
                                 if (!body.Contains("stream-", StringComparison.Ordinal) || !body.Contains("\"ok\"", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming relay body mismatch: " + body);
                                 if (!((response.Content.Headers.ContentType?.ToString() ?? String.Empty).Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Streaming relay did not preserve event-stream content type.");
-                                if (HeaderValue(response, "X-Client-ID") != "xcl_touchstone") throw new InvalidOperationException("Streaming relay response did not include selected client header.");
-                                if (HeaderValue(response, "X-Xeno-Routing-Outcome") != "Streaming") throw new InvalidOperationException("Streaming relay initial routing outcome header mismatch.");
+                                AssertHeaderMissing(response, "X-Client-ID", "Streaming relay response exposed selected client header.");
+                                AssertHeaderMissing(response, "X-Xeno-Routing-Outcome", "Streaming relay response exposed routing outcome header.");
+                                AssertHeaderMissing(response, "X-Xeno-Request-History-ID", "Streaming relay response exposed request history ID header.");
 
-                                string historyId = HeaderValue(response, "X-Xeno-Request-History-ID");
-                                if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("Streaming relay response did not include request history trace header.");
+                                string historyId = HeaderValue(response, "X-Xeno-Request-ID");
+                                if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("Streaming relay response did not include request trace header.");
+                                if (String.Equals(historyId, "provider_spoofed", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming relay response accepted spoofed provider request trace header.");
 
                                 using (HttpResponseMessage historyResponse = await httpClient.GetAsync("http://127.0.0.1:" + port + "/api/v1/requesthistory/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
                                 {
                                     string historyJson = await historyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
                                     if (!historyResponse.IsSuccessStatusCode) throw new InvalidOperationException("Streaming request history lookup failed: " + historyJson);
                                     RequestHistoryEntry root = DeserializeRequired<RequestHistoryEntry>(historyJson);
+                                    if (root.RoutingDecision == null) throw new InvalidOperationException("Streaming request history did not retain routing decision metadata.");
+                                    if (!String.Equals(root.RoutingDecision.OutcomeCode, "Completed", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming request history did not retain completed routing outcome.");
+                                    if (!String.Equals(root.RoutingDecision.SelectedClientId, "xcl_touchstone", StringComparison.Ordinal)) throw new InvalidOperationException("Streaming request history did not retain selected client ID.");
+                                    if (root.RoutingDecision.CandidateCount != 1) throw new InvalidOperationException("Streaming request history did not retain routing candidate count.");
                                     if (!(root.RequestBody ?? String.Empty).Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming request body was not captured.");
                                     string responseBody = root.ResponseBody ?? String.Empty;
                                     if (!responseBody.Contains("stream-", StringComparison.OrdinalIgnoreCase) || !responseBody.Contains("\"ok\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Streaming response body was not captured.");
@@ -7631,6 +7652,8 @@ namespace Test.Shared
                                     if (root.Telemetry.TotalTokens != 7) throw new InvalidOperationException("Streaming total tokens were not persisted.");
                                     if (root.Telemetry.StreamChunkCount != 2) throw new InvalidOperationException("Streaming chunk count was not persisted.");
                                     if (root.Timeline.Count < 3) throw new InvalidOperationException("Streaming timeline was not captured.");
+                                    if (!root.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientResponseStart)) throw new InvalidOperationException("Streaming timeline did not retain client response start.");
+                                    if (!root.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientResponseComplete)) throw new InvalidOperationException("Streaming timeline did not retain client response completion.");
                                 }
                             }
                         }
@@ -8186,7 +8209,10 @@ namespace Test.Shared
                             headers = new Dictionary<string, string>
                             {
                                 ["Content-Type"] = "text/event-stream",
-                                ["x-request-id"] = "provider_touchstone"
+                                ["x-request-id"] = "provider_touchstone",
+                                ["X-Xeno-Request-ID"] = "provider_spoofed",
+                                ["X-Xeno-Routing-Outcome"] = "Spoofed",
+                                ["X-Client-ID"] = "provider_client"
                             },
                             telemetry = new
                             {
@@ -8229,7 +8255,10 @@ namespace Test.Shared
                             headers = new Dictionary<string, string>
                             {
                                 ["Content-Type"] = "text/event-stream",
-                                ["x-request-id"] = "provider_touchstone"
+                                ["x-request-id"] = "provider_touchstone",
+                                ["X-Xeno-Request-ID"] = "provider_spoofed",
+                                ["X-Xeno-Routing-Outcome"] = "Spoofed",
+                                ["X-Client-ID"] = "provider_client"
                             },
                             telemetry = new
                             {
@@ -8263,6 +8292,14 @@ namespace Test.Shared
                         success = true,
                         statusCode = 200,
                         contentType = "application/json",
+                        headers = new Dictionary<string, string>
+                        {
+                            ["Content-Type"] = "application/json",
+                            ["x-request-id"] = "provider_touchstone",
+                            ["X-Xeno-Request-ID"] = "provider_spoofed",
+                            ["X-Xeno-Routing-Outcome"] = "Spoofed",
+                            ["X-Client-ID"] = "provider_client"
+                        },
                         body = completion
                     }, token).ConfigureAwait(false);
             }
@@ -8550,6 +8587,11 @@ namespace Test.Shared
         {
             string value = HeaderValue(response, name);
             return Int64.TryParse(value, out long parsed) ? parsed : -1;
+        }
+
+        private static void AssertHeaderMissing(HttpResponseMessage response, string name, string message)
+        {
+            if (!String.IsNullOrWhiteSpace(HeaderValue(response, name))) throw new InvalidOperationException(message);
         }
 
         private static async Task<string> FirstRecordIdAsync(HttpClient httpClient, string url)

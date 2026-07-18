@@ -7,6 +7,7 @@ namespace Xeno.Core.Services
     using System.Threading;
     using System.Threading.Tasks;
     using Xeno.Core.Enums;
+    using Xeno.Core.Helpers;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
 
@@ -152,8 +153,14 @@ namespace Xeno.Core.Services
             if (context == null) throw new ArgumentNullException(nameof(context));
             if (decision == null) throw new ArgumentNullException(nameof(decision));
 
+            if (String.IsNullOrWhiteSpace(context.RequestId))
+            {
+                context.RequestId = IdGenerator.NewRequestHistoryId();
+            }
+
             RequestHistoryEntry entry = new RequestHistoryEntry
             {
+                Id = context.RequestId,
                 TenantId = context.TenantId,
                 RequestorTenantId = context.TenantId,
                 Path = path,

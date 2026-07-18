@@ -28,7 +28,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Can collect fleet-level client telemetry from the server. When `TelemetryCollection.Enabled` is true, the server requests host and provider telemetry over the authenticated client WebSocket, persists server-collected samples, and shows them under `CONTROL > Client Telemetry`.
 - Provides a multitenant server with tenants, users, roles, permissions, credentials, connected clients, advertised models, request history, analytics, settings, provider-backed email notifications, and audit-friendly telemetry.
 - Records request routing and response telemetry, including selected client, timing, token metadata, headers, bodies, and streaming metrics where available.
-- Returns useful routing headers such as `X-Client-ID` and `X-Xeno-*` trace headers so developers can troubleshoot model calls.
+- Returns `X-Xeno-Request-ID` for correlating model calls with protected request-history diagnostics.
 - Ships with a web dashboard, REST API, OpenAPI/Swagger documentation, Postman collection, Docker deployment assets, and C#, JavaScript, and Python SDKs.
 
 ## Why Use It
@@ -40,7 +40,7 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 - Mix providers without forcing application code to know where a model actually runs.
 - Add authentication, multitenancy, request history, dashboard visibility, and routing policy around model execution.
 - Move between local Ollama, hosted APIs, and OpenAI-compatible model servers while keeping the same application integration point.
-- Debug agentic applications with response headers and request history that show which node handled a request and why it was selected.
+- Debug agentic applications with request history that shows which node handled a request and why it was selected.
 
 ## Platform Vision
 

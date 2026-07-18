@@ -27,7 +27,7 @@ A routing policy contains:
 
 - `id`: compact PrettyId with the `rpol_` prefix.
 - `tenantId`: tenant that owns the policy.
-- `name`: operator-facing policy name shown in dashboard request details and trace headers.
+- `name`: operator-facing policy name shown in dashboard request details.
 - `modelName`: requested/effective model name to match, or `*` to match all models.
 - `clientName`: connected client name to match, or `*` to allow all clients that advertise the model.
 - `requestTimeoutMs`: request timeout associated with the policy. Values below 1000 are clamped to 1000; values above 3600000 are clamped to 3600000.
@@ -161,19 +161,13 @@ Use Create Routing Policy to add a tenant-scoped rule. Use `*` for model or clie
 
 Request History > Request Details includes routing policy ID, policy name, policy match, policy reason, timeout, load-balancing mode, candidate clients, selected client, and telemetry.
 
-## Trace Headers
+## Diagnostics
 
-Routed model responses include policy trace headers:
-
-- `X-Xeno-Routing-Policy-ID`
-- `X-Xeno-Routing-Policy-Name`
-- `X-Xeno-Routing-Policy-Match`
-- `X-Xeno-Routing-Policy-Reason`
-- `X-Xeno-Load-Balancing-Mode`
-- `X-Xeno-Selection-Reason`
-- `X-Client-ID`
-
-These headers are exposed through CORS so browser-based agent applications can inspect them.
+Routed model responses include `X-Xeno-Request-ID` for correlation. Detailed
+policy and routing diagnostics are stored in Request History and shown in the
+dashboard, including routing policy ID, policy name, policy match, policy
+reason, load-balancing mode, candidate clients, selected client, selection
+reason, timing, token telemetry, and timeline.
 
 ## SDKs
 
@@ -196,4 +190,6 @@ If a request returns `NoEligibleClients`, check:
 - The client has not exceeded `maxParallelRequests`.
 - The client heartbeat is recent.
 
-If a different client was selected than expected, inspect Request History and the `X-Xeno-*` trace headers. They show which policy matched, the candidate set, the load-balancing mode, and the selection reason.
+If a different client was selected than expected, inspect Request History. It
+shows which policy matched, the candidate set, the load-balancing mode, and the
+selection reason.

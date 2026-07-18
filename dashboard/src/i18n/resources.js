@@ -598,7 +598,7 @@ const en = {
     tooltipAutoRefresh: 'Choose how often this table refreshes itself. Select None to stop automatic refreshes.',
     tooltipManualRefresh: 'Refresh this table or data set immediately without changing filters or pagination.',
     tooltipCreateRoutingPolicy: 'Create a routing policy that matches a model and optional client name before selecting a connected client.',
-    tooltipRoutingPolicyName: 'Human-readable policy name shown in request history and trace headers when this rule is selected.',
+    tooltipRoutingPolicyName: 'Human-readable policy name shown in request history when this rule is selected.',
     tooltipRoutingPolicyModelName: 'Model name to match exactly, or * to match all requested models in this tenant.',
     tooltipRoutingPolicyClientName: 'Client name to route to exactly, or * to allow any connected client that advertises the requested model.',
     tooltipRoutingPolicyTimeout: 'Maximum time in milliseconds for requests routed by this policy before the server treats them as timed out.',

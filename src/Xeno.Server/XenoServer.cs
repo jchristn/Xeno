@@ -40,7 +40,7 @@ namespace Xeno.Server
     /// </summary>
     public sealed class XenoServer : IDisposable
     {
-        private const string RoutingTraceExposeHeaders = "X-Client-ID, X-Xeno-Request-ID, X-Xeno-Tenant-ID, X-Xeno-Model, X-Xeno-Routing-Outcome, X-Xeno-Routing-Message, X-Xeno-Routing-Policy-ID, X-Xeno-Routing-Policy-Name, X-Xeno-Routing-Policy-Match, X-Xeno-Routing-Policy-Reason, X-Xeno-Routing-Candidate-Count, X-Xeno-Routing-Candidates, X-Xeno-Routing-Candidate-Names, X-Xeno-Routing-Exclusions, X-Xeno-Load-Balancing-Mode, X-Xeno-Adaptive-Sample-Count, X-Xeno-Adaptive-Score, X-Xeno-Selection-Reason, X-Xeno-Selected-Client-Name, X-Xeno-Selected-API-Type, X-Xeno-Selected-Provider, X-Xeno-Selected-Source, X-Xeno-Selected-In-Flight, X-Xeno-Selected-Max-Parallel, X-Xeno-Selected-Weight, X-Xeno-Selected-Last-Heartbeat-UTC, X-Xeno-Client-Roundtrip-Ms, X-Xeno-Request-Duration-Ms, X-Xeno-Request-History-ID, X-Xeno-Routing-Timeline, X-Xeno-Time-To-First-Token-Ms, X-Xeno-Total-Tokens, X-Xeno-Stream-Chunks";
+        private const string RoutingTraceExposeHeaders = "X-Xeno-Request-ID";
         private const int MaxCapturedBodyChars = 131072;
         private const int ModelManagementTimeoutMs = 3600000;
 
@@ -4843,7 +4843,8 @@ namespace Xeno.Server
             CancellationToken token)
         {
             Dictionary<string, string> responseHeaders = ExtractHeaders(start);
-            AddLocalInferenceTraceHeaders(responseHeaders, requestContext, decision, client, selectedModel);
+            Dictionary<string, string> callerResponseHeaders = BuildPublicResponseHeaders(responseHeaders);
+            AddLocalInferenceTraceHeaders(callerResponseHeaders, requestContext);
             await SendLocalInferenceMessageAsync(originSession, request.ClientId, new ServerLocalInferenceResponseMessage
             {
                 Type = "server.localInference.response.start",
@@ -4851,7 +4852,7 @@ namespace Xeno.Server
                 Success = start.Success,
                 StatusCode = start.StatusCode,
                 ContentType = start.ContentType,
-                Headers = responseHeaders,
+                Headers = callerResponseHeaders,
                 Error = start.Error
             }, token).ConfigureAwait(false);
 
@@ -4897,7 +4898,8 @@ namespace Xeno.Server
             decision.OutcomeCode = success ? "Completed" : "ClientRequestFailed";
             decision.Message = success ? "Client completed the local inference request." : response.Error ?? "Client request failed.";
             Dictionary<string, string> responseHeaders = ExtractHeaders(response);
-            AddLocalInferenceTraceHeaders(responseHeaders, requestContext, decision, client, selectedModel);
+            Dictionary<string, string> callerResponseHeaders = BuildPublicResponseHeaders(responseHeaders);
+            AddLocalInferenceTraceHeaders(callerResponseHeaders, requestContext);
             await SendLocalInferenceMessageAsync(originSession, request.ClientId, new ServerLocalInferenceResponseMessage
             {
                 Type = request.Stream ? "server.localInference.response.complete" : "server.localInference.response",
@@ -4905,7 +4907,7 @@ namespace Xeno.Server
                 Success = success,
                 StatusCode = statusCode,
                 ContentType = response.ContentType,
-                Headers = responseHeaders,
+                Headers = callerResponseHeaders,
                 Body = response.Body,
                 Error = response.Error
             }, token).ConfigureAwait(false);
@@ -5091,40 +5093,14 @@ namespace Xeno.Server
             if (requestContext != null)
             {
                 headers["X-Xeno-Request-ID"] = requestContext.RequestId;
-                headers["X-Xeno-Tenant-ID"] = requestContext.TenantId;
-            }
-
-            if (!String.IsNullOrWhiteSpace(model)) headers["X-Xeno-Model"] = model;
-            if (decision != null)
-            {
-                headers["X-Xeno-Routing-Outcome"] = decision.OutcomeCode;
-                headers["X-Xeno-Routing-Message"] = decision.Message;
-                headers["X-Xeno-Routing-Candidate-Count"] = decision.CandidateCount.ToString(CultureInfo.InvariantCulture);
-                if (decision.CandidateClientIds.Count > 0) headers["X-Xeno-Routing-Candidates"] = String.Join(",", decision.CandidateClientIds);
-                if (decision.CandidateClientNames.Count > 0) headers["X-Xeno-Routing-Candidate-Names"] = String.Join(",", decision.CandidateClientNames);
-                if (decision.ExcludedClientReasons.Count > 0) headers["X-Xeno-Routing-Exclusions"] = String.Join(" | ", decision.ExcludedClientReasons);
             }
 
             return headers;
         }
 
-        private static void AddLocalInferenceTraceHeaders(Dictionary<string, string> headers, RequestContext requestContext, RoutingDecision decision, XenoClientRecord client, XenoClientModel? selectedModel)
+        private static void AddLocalInferenceTraceHeaders(Dictionary<string, string> headers, RequestContext requestContext)
         {
             headers["X-Xeno-Request-ID"] = requestContext.RequestId;
-            headers["X-Xeno-Tenant-ID"] = requestContext.TenantId;
-            headers["X-Xeno-Routing-Outcome"] = decision.OutcomeCode;
-            headers["X-Xeno-Routing-Message"] = decision.Message;
-            headers["X-Xeno-Routing-Candidate-Count"] = decision.CandidateCount.ToString(CultureInfo.InvariantCulture);
-            if (decision.CandidateClientIds.Count > 0) headers["X-Xeno-Routing-Candidates"] = String.Join(",", decision.CandidateClientIds);
-            if (decision.CandidateClientNames.Count > 0) headers["X-Xeno-Routing-Candidate-Names"] = String.Join(",", decision.CandidateClientNames);
-            if (decision.ExcludedClientReasons.Count > 0) headers["X-Xeno-Routing-Exclusions"] = String.Join(" | ", decision.ExcludedClientReasons);
-            if (!String.IsNullOrWhiteSpace(decision.EffectiveModel)) headers["X-Xeno-Model"] = decision.EffectiveModel;
-            headers["X-Xeno-Selected-Client-Name"] = client.Name;
-            if (selectedModel != null)
-            {
-                headers["X-Xeno-Selected-API-Type"] = selectedModel.Provider.ToString();
-                headers["X-Xeno-Selected-Source"] = selectedModel.Source;
-            }
         }
 
         private static string BuildLocalInferenceErrorBody(string path, string message, int statusCode)
@@ -5902,6 +5878,7 @@ namespace Xeno.Server
             foreach (KeyValuePair<string, string> header in headers)
             {
                 if (IsHopByHopHeader(header.Key)) continue;
+                if (IsInternalXenoResponseHeader(header.Key)) continue;
                 if (header.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.ContentType = header.Value;
@@ -5911,6 +5888,24 @@ namespace Xeno.Server
                 if (header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
                 context.Response.Headers.Add(header.Key, header.Value);
             }
+        }
+
+        private static Dictionary<string, string> BuildPublicResponseHeaders(Dictionary<string, string> headers)
+        {
+            Dictionary<string, string> responseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, string> header in headers)
+            {
+                if (IsInternalXenoResponseHeader(header.Key)) continue;
+                responseHeaders[header.Key] = header.Value;
+            }
+
+            return responseHeaders;
+        }
+
+        private static bool IsInternalXenoResponseHeader(string name)
+        {
+            if (name.Equals("X-Client-ID", StringComparison.OrdinalIgnoreCase)) return true;
+            return name.StartsWith("X-Xeno-", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsHopByHopHeader(string name)
@@ -5933,40 +5928,7 @@ namespace Xeno.Server
             XenoClientModel? selectedModel,
             RequestHistoryEntry? history)
         {
-            string? selectedClientId = FirstNonEmpty(decision.SelectedClientId, client?.Id);
-            AddTraceHeader(context, "X-Client-ID", selectedClientId);
             AddTraceHeader(context, "X-Xeno-Request-ID", requestContext.RequestId);
-            AddTraceHeader(context, "X-Xeno-Tenant-ID", requestContext.TenantId);
-            AddTraceHeader(context, "X-Xeno-Model", decision.EffectiveModel);
-            AddTraceHeader(context, "X-Xeno-Routing-Outcome", decision.OutcomeCode);
-            AddTraceHeader(context, "X-Xeno-Routing-Message", decision.Message);
-            AddTraceHeader(context, "X-Xeno-Routing-Policy-ID", decision.RoutingPolicyId);
-            AddTraceHeader(context, "X-Xeno-Routing-Policy-Name", decision.RoutingPolicyName);
-            AddTraceHeader(context, "X-Xeno-Routing-Policy-Match", FirstNonEmpty(decision.RoutingPolicyModelName, "*") + "/" + FirstNonEmpty(decision.RoutingPolicyClientName, "*"));
-            AddTraceHeader(context, "X-Xeno-Routing-Policy-Reason", decision.RoutingPolicyReason);
-            AddTraceHeader(context, "X-Xeno-Routing-Candidate-Count", decision.CandidateCount.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Routing-Candidates", String.Join(",", decision.CandidateClientIds));
-            AddTraceHeader(context, "X-Xeno-Routing-Candidate-Names", String.Join(",", decision.CandidateClientNames));
-            AddTraceHeader(context, "X-Xeno-Routing-Exclusions", String.Join(" | ", decision.ExcludedClientReasons));
-            AddTraceHeader(context, "X-Xeno-Load-Balancing-Mode", decision.LoadBalancingMode.ToString());
-            AddTraceHeader(context, "X-Xeno-Adaptive-Sample-Count", decision.AdaptiveSampleCount?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Adaptive-Score", decision.AdaptiveScore);
-            AddTraceHeader(context, "X-Xeno-Selection-Reason", decision.SelectionReason);
-            AddTraceHeader(context, "X-Xeno-Selected-Client-Name", FirstNonEmpty(decision.SelectedClientName, client?.Name));
-            AddTraceHeader(context, "X-Xeno-Selected-API-Type", FirstNonEmpty(decision.SelectedProvider, selectedModel?.Provider.ToString()));
-            AddTraceHeader(context, "X-Xeno-Selected-Provider", FirstNonEmpty(decision.SelectedProvider, selectedModel?.Provider.ToString()));
-            AddTraceHeader(context, "X-Xeno-Selected-Source", FirstNonEmpty(decision.SelectedSource, selectedModel?.Source));
-            AddTraceHeader(context, "X-Xeno-Selected-In-Flight", decision.SelectedClientInFlightRequests?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Selected-Max-Parallel", decision.SelectedClientMaxParallelRequests?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Selected-Weight", decision.SelectedClientWeight?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Selected-Last-Heartbeat-UTC", decision.SelectedClientLastHeartbeatUtc?.ToString("O", CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Client-Roundtrip-Ms", decision.ClientRoundTripMs?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Request-Duration-Ms", Math.Max(0, (long)(DateTime.UtcNow - requestContext.StartedUtc).TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Request-History-ID", history?.Id);
-            AddTraceHeader(context, "X-Xeno-Routing-Timeline", String.Join(",", decision.Timeline));
-            AddTraceHeader(context, "X-Xeno-Time-To-First-Token-Ms", history?.Telemetry.TimeToFirstTokenMs?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Total-Tokens", history?.Telemetry.TotalTokens?.ToString(CultureInfo.InvariantCulture));
-            AddTraceHeader(context, "X-Xeno-Stream-Chunks", history?.Telemetry.StreamChunkCount?.ToString(CultureInfo.InvariantCulture));
         }
 
         private static Dictionary<string, string> BuildForwardedHeaders(HttpContextBase context, RequestContext requestContext, string requestorIp)

@@ -590,24 +590,13 @@ must match the authenticated session or credential tenant unless the caller is a
 system admin. Anonymous requests receive 401 and cannot dispatch to a connected
 client.
 
-Routed OpenAI-compatible responses include Xeno trace headers for debugging model placement and node selection:
-
-- `X-Client-ID`: selected connected client/node ID.
-- `X-Xeno-Request-ID`: Xeno request trace ID.
-- `X-Xeno-Request-History-ID`: persisted request-history entry ID.
-- `X-Xeno-Model`: effective model used for routing.
-- `X-Xeno-Routing-Outcome`: routing outcome such as `Completed`, `ModelNotFound`, or `NoEligibleClients`.
-- `X-Xeno-Routing-Message`: human-readable routing result.
-- `X-Xeno-Routing-Policy-ID`, `X-Xeno-Routing-Policy-Name`, `X-Xeno-Routing-Policy-Match`, and `X-Xeno-Routing-Policy-Reason`: policy selected for this request and why it matched.
-- `X-Xeno-Routing-Candidate-Count` and `X-Xeno-Routing-Candidates`: eligible client count and IDs.
-- `X-Xeno-Load-Balancing-Mode`: configured selection strategy used for the request. Supported values are `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
-- `X-Xeno-Adaptive-Sample-Count` and `X-Xeno-Adaptive-Score`: adaptive scoring evidence when `Adaptive` mode is used.
-- `X-Xeno-Selection-Reason`: reason the selected node won.
-- `X-Xeno-Selected-Client-Name`, `X-Xeno-Selected-API-Type`, `X-Xeno-Selected-Provider` (backward-compatible), and `X-Xeno-Selected-Source`: selected node and advertised model source metadata.
-- `X-Xeno-Selected-In-Flight`, `X-Xeno-Selected-Max-Parallel`, `X-Xeno-Selected-Weight`, and `X-Xeno-Selected-Last-Heartbeat-UTC`: selected node load and health inputs.
-- `X-Xeno-Client-Roundtrip-Ms` and `X-Xeno-Request-Duration-Ms`: relay timing.
-- `X-Xeno-Total-Tokens`: provider-reported or normalized total token count when available.
-- `X-Xeno-Routing-Timeline`: comma-separated routing steps.
+Routed OpenAI-compatible responses include only `X-Xeno-Request-ID` as a
+caller-visible Xeno trace header. The request ID is also the persisted request
+history entry ID for new routed requests. Detailed routing diagnostics such as
+selected client, candidate clients, excluded clients, routing policy, selection
+reason, timing, token telemetry, and timeline are captured in Request History
+and surfaced through the dashboard and protected Request History APIs instead
+of HTTP response headers.
 
 For streamed completion and chat requests, the selected `xeno` client requests
 provider usage chunks with `stream_options.include_usage = true` for Ollama,
@@ -656,8 +645,8 @@ Ollama-compatible routes are protected application APIs. `GET /api/tags`
 requires `Inference.Read`. Generation and embedding requests require
 `Inference.Execute`. These routes are relayed to connected Ollama providers
 using the native Ollama path, and successful responses preserve the provider's
-Ollama response body shape. Xeno routing and trace metadata is returned in
-headers.
+Ollama response body shape. Routed responses include `X-Xeno-Request-ID` for
+correlation with Request History.
 
 Requests relayed from the Xeno server to a connected `xeno` client also include a forwarded requestor identity header set. The client forwards these headers to its configured provider endpoint and prints the requestor IP in `xeno connect` logs:
 
