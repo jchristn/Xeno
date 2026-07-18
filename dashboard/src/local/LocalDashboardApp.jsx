@@ -78,6 +78,14 @@ const tooltipBackfillSelector = [
 
 const chartRefreshIntervals = [0, 15, 30, 60, 180, 300];
 
+const localProviderApiTypeOptions = [
+  { label: 'Ollama', value: 'Ollama' },
+  { label: 'OpenAI', value: 'OpenAI' },
+  { label: 'Gemini', value: 'Gemini' },
+  { label: 'vLLM', value: 'vLLM' },
+  { label: 'OpenAI Compatible', value: 'OpenAICompatible' }
+];
+
 const localHostTelemetryChartConfigs = [
   { color: 'var(--color-info)', key: 'cpu', labelFallback: 'CPU', labelKey: 'cpu', metric: 'CpuUtilizationPercent', titleFallback: 'CPU Telemetry', titleKey: 'cpuTelemetry' },
   { color: 'var(--color-success)', key: 'memory', labelFallback: 'Memory', labelKey: 'memory', metric: 'MemoryUtilizationPercent', titleFallback: 'Memory Telemetry', titleKey: 'memoryTelemetry' },
@@ -288,7 +296,7 @@ export default function LocalDashboardApp() {
           {page === 'apiExplorer' ? <LocalApiExplorer state={state} /> : null}
           {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} metric={telemetryMetric} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} setModal={setModal} /> : null}
           {page === 'logs' ? <Logs followLogs={followLogs} logSeverity={logSeverity} logTail={logTail} logs={logs} setFollowLogs={setFollowLogs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
-          {page === 'providerTelemetry' ? <ProviderTelemetry latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
+          {page === 'providerTelemetry' ? <ProviderTelemetry advertisedModels={models} latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerEndpoints={providers} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
           {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
         </main>
       </div>
@@ -636,8 +644,10 @@ function TimeRangeButtons({ range, setRange }) {
   );
 }
 
-function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range, refresh, rollups, samples, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
+function ProviderTelemetry({ advertisedModels, latest, metric, modelFilter, providerEndpoints, providerFilter, range, refresh, rollups, samples, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
   const { t } = useTranslation();
+  const configuredModels = Array.isArray(advertisedModels) ? advertisedModels : [];
+  const configuredProviders = Array.isArray(providerEndpoints) ? providerEndpoints : [];
   const providers = latest?.snapshot?.providers || [];
   const latestSample = latest?.detail?.sample || {};
   const modelRows = latest?.detail?.models || providers.flatMap((provider) => provider.models || []);
@@ -645,6 +655,16 @@ function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range,
   const loadedModels = providers.reduce((sum, provider) => sum + Number(provider.loadedModelCount || 0), 0);
   const activeRequests = providers.reduce((sum, provider) => sum + Number(provider.activeRequests || 0), 0);
   const queuedRequests = providers.reduce((sum, provider) => sum + Number(provider.queuedRequests || 0), 0);
+  const providerOptions = uniqueSortedValues([
+    ...configuredProviders.map((provider) => value(provider, 'name') || value(provider, 'providerName')),
+    ...providers.map((provider) => value(provider, 'name') || value(provider, 'providerName')),
+    ...samples.map((sample) => value(sample, 'providerName'))
+  ]);
+  const modelOptions = uniqueSortedValues([
+    ...configuredModels.map((model) => value(model, 'name') || value(model, 'modelName')),
+    ...modelRows.map((model) => value(model, 'modelName') || value(model, 'name')),
+    ...samples.map((sample) => value(sample, 'modelName'))
+  ]);
 
   async function details(row) {
     const entry = await localApi(`/api/v1/telemetry/providers/history/${encodeURIComponent(row.id)}`);
@@ -679,7 +699,7 @@ function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range,
       <div className="chart-controls page-level-controls split telemetry-selector-bar" aria-label={t('chartRange')}>
         <TimeRangeButtons range={range} setRange={setRange} />
         <div className="chart-action-row telemetry-control-actions">
-          <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} providerFilter={providerFilter} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
+          <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} modelOptions={modelOptions} providerFilter={providerFilter} providerOptions={providerOptions} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
           <button className="icon-button" onClick={collect} title={t('tooltipCollectProviderTelemetry')} type="button"><Zap size={16} /></button>
         </div>
       </div>
@@ -734,18 +754,26 @@ function ProviderTelemetry({ latest, metric, modelFilter, providerFilter, range,
   );
 }
 
-function ProviderTelemetryControls({ metric, modelFilter, providerFilter, setMetric, setModelFilter, setProviderFilter }) {
+function ProviderTelemetryControls({ metric, modelFilter, modelOptions, providerFilter, providerOptions, setMetric, setModelFilter, setProviderFilter }) {
   const { t } = useTranslation();
   return (
     <div className="chart-action-row provider-telemetry-controls">
       <ProviderTelemetryMetricSelect metric={metric} setMetric={setMetric} />
       <label className="form-field inline compact-field" title={t('tooltipProviderTelemetryProviderFilter')}>
         <span>{t('provider')}</span>
-        <input onChange={(event) => setProviderFilter(event.target.value)} placeholder={t('all')} title={t('tooltipProviderTelemetryProviderFilter')} value={providerFilter} />
+        <select onChange={(event) => setProviderFilter(event.target.value)} title={t('tooltipProviderTelemetryProviderFilter')} value={providerFilter}>
+          <option value="">{t('all')}</option>
+          {!providerOptions.includes(providerFilter) && providerFilter ? <option value={providerFilter}>{providerFilter}</option> : null}
+          {providerOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
       </label>
       <label className="form-field inline compact-field" title={t('tooltipProviderTelemetryModelFilter')}>
         <span>{t('model')}</span>
-        <input onChange={(event) => setModelFilter(event.target.value)} placeholder={t('all')} title={t('tooltipProviderTelemetryModelFilter')} value={modelFilter} />
+        <select onChange={(event) => setModelFilter(event.target.value)} title={t('tooltipProviderTelemetryModelFilter')} value={modelFilter}>
+          <option value="">{t('all')}</option>
+          {!modelOptions.includes(modelFilter) && modelFilter ? <option value={modelFilter}>{modelFilter}</option> : null}
+          {modelOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
       </label>
     </div>
   );
@@ -1123,7 +1151,7 @@ function providerModal(t, provider, refresh) {
     body: (
       <form className="form-grid" id="provider-form" onSubmit={save}>
         <Field defaultValue={provider?.name || ''} label={t('name')} name="name" tooltip={t('tooltipLocalProviderName')} />
-        <Field defaultValue={provider?.apiType || 'Ollama'} label={t('apiType')} name="apiType" tooltip={t('tooltipLocalProviderApiType')} />
+        <SelectField defaultValue={provider?.apiType || 'Ollama'} label={t('apiType')} name="apiType" options={localProviderApiTypeOptions} tooltip={t('tooltipLocalProviderApiType')} />
         <Field defaultValue={provider?.endpoint || ''} label={t('endpoint')} name="endpoint" tooltip={t('tooltipLocalProviderEndpoint')} />
         <Field defaultValue={provider?.timeoutMs || 300000} label={t('timeoutMs')} name="timeoutMs" tooltip={t('tooltipLocalProviderTimeout')} type="number" />
         <Field defaultValue="" label={t('credential')} name="credential" tooltip={t('tooltipLocalProviderCredential')} />
@@ -1912,6 +1940,21 @@ function Field({ defaultValue, label, name, tooltip, type = 'text' }) {
   return <label className="form-field" title={tooltip}><span>{label}</span><input defaultValue={defaultValue || ''} name={name} title={tooltip} type={type} /></label>;
 }
 
+function SelectField({ defaultValue, label, name, options, tooltip }) {
+  const rows = Array.isArray(options) ? options : [];
+  const current = defaultValue || rows[0]?.value || '';
+  const hasCurrent = rows.some((option) => option.value === current);
+  return (
+    <label className="form-field" title={tooltip}>
+      <span>{label}</span>
+      <select defaultValue={current} name={name} title={tooltip}>
+        {!hasCurrent && current ? <option value={current}>{current}</option> : null}
+        {rows.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function Toggle({ checked, label, name, tooltip }) {
   return <label className="toggle-field" title={tooltip}><input defaultChecked={!!checked} name={name} title={tooltip} type="checkbox" />{label}</label>;
 }
@@ -1931,6 +1974,11 @@ function localApiRange(range) {
 
 function sortLogLinesDescending(lines) {
   return [...(Array.isArray(lines) ? lines : [])].sort((left, right) => logLineTimestampMs(right) - logLineTimestampMs(left));
+}
+
+function uniqueSortedValues(values) {
+  return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function logLineTimestampMs(line) {

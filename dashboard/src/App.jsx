@@ -2407,8 +2407,8 @@ function CredentialsView({ session }) {
         subtitle={t('credentialsTableSubtitle')}
         title={t('credentials')}
       />
-      {creating && <CredentialEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveCredential} />}
-      {selected && <CredentialEditModal data={selected} onClose={() => setSelected(null)} onSave={saveCredential} />}
+      {creating && <CredentialEditModal data={null} mode="create" onClose={() => setCreating(false)} onSave={saveCredential} users={users.data} />}
+      {selected && <CredentialEditModal data={selected} onClose={() => setSelected(null)} onSave={saveCredential} users={users.data} />}
     </div>
   );
 }
@@ -4037,6 +4037,10 @@ function ledgerTenantOptionLabel(tenant) {
 }
 
 function ledgerUserOptionLabel(user) {
+  return userOptionLabel(user);
+}
+
+function userOptionLabel(user) {
   const id = recordId(user) || value(user, 'id') || '';
   const display = value(user, 'email') || value(user, 'username') || value(user, 'name');
   return display && display !== id ? `${display} (${id})` : id;
@@ -5672,18 +5676,25 @@ function TenantEditModal({ data, mode = 'edit', onClose, onSave }) {
   );
 }
 
-function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
+function CredentialEditModal({ data, mode = 'edit', onClose, onSave, users }) {
   const { t } = useTranslation();
   const credentialId = recordId(data);
   const isCreate = mode === 'create';
+  const userRows = useMemo(() => Array.isArray(users) ? users : [], [users]);
   const [draft, setDraft] = useState(() => ({
-    userId: value(data, 'userId') || '',
+    userId: value(data, 'userId') || recordId(userRows[0]) || '',
     accessKey: value(data, 'accessKey') || '',
     active: value(data, 'active') !== false
   }));
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [statusTone, setStatusTone] = useState('success');
+
+  useEffect(() => {
+    if (!draft.userId && userRows.length > 0) {
+      setDraft((current) => current.userId ? current : { ...current, userId: recordId(userRows[0]) || '' });
+    }
+  }, [draft.userId, userRows]);
 
   function updateField(key, fieldValue) {
     setDraft((current) => ({ ...current, [key]: fieldValue }));
@@ -5717,7 +5728,7 @@ function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
       actions={(
         <>
           <button className="action-button secondary" onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
-          <button className="action-button primary" disabled={saving || (!isCreate && !draft.accessKey.trim())} onClick={save} title={t('tooltipFormSave')} type="button">
+          <button className="action-button primary" disabled={saving || !draft.userId || (!isCreate && !draft.accessKey.trim())} onClick={save} title={t('tooltipFormSave')} type="button">
             {saving ? t('saving') : t('save')}
           </button>
         </>
@@ -5733,7 +5744,11 @@ function CredentialEditModal({ data, mode = 'edit', onClose, onSave }) {
         <div className="form-grid two">
           <label className="form-field">
             <span>{t('userId')}</span>
-            <input value={draft.userId} onChange={(event) => updateField('userId', event.target.value)} />
+            <select value={draft.userId} onChange={(event) => updateField('userId', event.target.value)}>
+              {!draft.userId ? <option value="">{t('none')}</option> : null}
+              {draft.userId && !userRows.some((user) => recordId(user) === draft.userId) ? <option value={draft.userId}>{draft.userId}</option> : null}
+              {userRows.map((user) => <option key={recordId(user)} value={recordId(user)}>{userOptionLabel(user)}</option>)}
+            </select>
           </label>
           <label className="form-field">
             <span>{t('accessKey')}</span>
