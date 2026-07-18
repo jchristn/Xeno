@@ -111,7 +111,12 @@ Invalid authentication frame:
 10. Client answers with `client.response` for buffered responses or
    `client.response.start`, `client.response.chunk`, and
    `client.response.complete` for streamed responses.
-11. On disconnect, the server marks the client disconnected and clears in-flight
+11. For dashboard model performance tests, the server sends
+   `server.performanceTest.request` to one or more clients. Clients answer with
+   `client.performanceTest.response`. Hairpin samples use
+   `client.performanceTest.relay.request` and
+   `server.performanceTest.relay.response` for each measured sample.
+12. On disconnect, the server marks the client disconnected and clears in-flight
     connection state.
 
 ## Common Message Rules
@@ -293,6 +298,108 @@ Example:
     "X-Xeno-Tenant-ID": "ten_default"
   },
   "body": "{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":true}"
+}
+```
+
+### `server.performanceTest.request`
+
+Asks a connected client to run one model performance benchmark leg.
+
+`mode` controls where requests are executed:
+
+- `direct`: sent to the target client that hosts the model. The client runs
+  each sample against its local provider endpoint.
+- `relay`: sent to the source client selected in the dashboard. The source
+  client creates one `client.performanceTest.relay.request` per sample so the
+  request hairpins through the Xeno server to the target client.
+
+The server clamps `requestCount` to 1 through 10 before dispatch.
+Completion and chat-completion tests use streaming requests so time-to-first
+token can be measured. Embedding tests use non-streaming requests.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `server.performanceTest.request`. |
+| `requestId` | string | yes | Benchmark leg request ID. |
+| `tenantId` | string | yes | Tenant ID. |
+| `clientId` | string | yes | Recipient client ID. |
+| `mode` | string | yes | `direct` or `relay`. |
+| `model` | string | yes | Model name to test. |
+| `requestType` | string | yes | `chatCompletions`, `completions`, or `embeddings`. |
+| `requestCount` | number | yes | Number of samples to run, 1 through 10. |
+| `targetClientId` | string | yes | Client that hosts and processes the model. |
+| `targetClientName` | string | no | Human-readable target client name. |
+| `targetApiType` | string | no | Target provider API type. |
+| `targetSource` | string | no | Target client-local provider endpoint name. |
+| `timeoutMs` | number | yes | Per-leg timeout in milliseconds. |
+
+Example:
+
+```json
+{
+  "type": "server.performanceTest.request",
+  "requestId": "req_mqtycz54_Xz6cpgzPb7yB",
+  "tenantId": "ten_default",
+  "clientId": "xcl_source",
+  "mode": "relay",
+  "model": "gemma3:4b",
+  "requestType": "chatCompletions",
+  "requestCount": 5,
+  "targetClientId": "xcl_gb10",
+  "targetClientName": "GB10",
+  "targetApiType": "Ollama",
+  "targetSource": "local-ollama",
+  "timeoutMs": 300000
+}
+```
+
+### `server.performanceTest.relay.response`
+
+Returns one relayed benchmark sample from the server to the source client.
+
+The server sends this response after it has dispatched the sample to the target
+client with a normal `server.request` and received the target client's
+`client.response` or streaming response sequence.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `server.performanceTest.relay.response`. |
+| `requestId` | string | yes | Parent benchmark leg request ID. |
+| `sampleId` | string | yes | Per-sample request ID. |
+| `index` | number | yes | One-based sample index. |
+| `success` | boolean | yes | Whether the relayed sample succeeded. |
+| `result` | object | yes | Sample timing, token, byte, and status metrics. |
+| `error` | string | no | Error text when the sample failed. |
+
+Example:
+
+```json
+{
+  "type": "server.performanceTest.relay.response",
+  "requestId": "req_mqtycz54_Xz6cpgzPb7yB",
+  "sampleId": "d57af9d926a74a8c9e5d4c81b3c70391",
+  "index": 1,
+  "success": true,
+  "result": {
+    "index": 1,
+    "success": true,
+    "statusCode": 200,
+    "totalTimeMs": 842.4,
+    "timeToFirstTokenMs": 211.6,
+    "timeToLastTokenMs": 842.4,
+    "tokensPerSecond": 29.68,
+    "promptTokens": 19,
+    "completionTokens": 25,
+    "totalTokens": 44,
+    "streamChunkCount": 8,
+    "requestBytes": 196,
+    "responseBytes": 1280,
+    "startedUtc": "2026-07-17T20:15:10.143Z"
+  }
 }
 ```
 
@@ -639,6 +746,172 @@ Example:
 }
 ```
 
+### `client.performanceTest.response`
+
+Returns one completed model performance benchmark leg to the server.
+
+The response contains a leg result with per-sample metrics plus aggregate
+summary values. Direct/native and hairpin/relay legs use the same shape.
+
+Timing semantics:
+
+- Direct/native samples are measured by the target client around its local
+  provider HTTP call.
+- Hairpin/relay sample `totalTimeMs` and `timeToLastTokenMs` are measured by
+  the source client around the full source-client to Xeno server to target
+  client round trip. `timeToFirstTokenMs` is the server-observed time until the
+  target side produces the first response byte or streamed token; benchmark
+  relay samples return one completed sample result to the source client instead
+  of streaming sample chunks back to it.
+- Embedding samples are non-streaming, so first-token, last-token, and
+  tokens-per-second fields are omitted unless the provider returns compatible
+  token telemetry.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.performanceTest.response`. |
+| `requestId` | string | yes | Correlates to `server.performanceTest.request.requestId`. |
+| `clientId` | string | yes | Client sending the result. |
+| `tenantId` | string | yes | Tenant ID. |
+| `mode` | string | yes | `direct` or `relay`. |
+| `success` | boolean | yes | True when at least one sample succeeded. |
+| `result` | object | yes | Leg result containing `name`, `description`, `samples`, and `summary`. |
+| `error` | string | no | Error text when the leg failed before samples completed. |
+
+Sample result fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `index` | number | One-based sample index. |
+| `success` | boolean | Whether the sample succeeded. |
+| `statusCode` | number | Provider or relay HTTP status code. |
+| `totalTimeMs` | number | Total elapsed time in milliseconds. |
+| `timeToFirstTokenMs` | number | Time to first token or first response byte. |
+| `timeToLastTokenMs` | number | Time to final token or final response byte. |
+| `tokensPerSecond` | number | Completion/output tokens per second when token counts are available. |
+| `promptTokens` | number | Prompt token count when reported by the provider. |
+| `completionTokens` | number | Completion token count when reported by the provider. |
+| `totalTokens` | number | Total token count when reported by the provider. |
+| `streamChunkCount` | number | Streaming chunks observed for the sample. |
+| `requestBytes` | number | Request body bytes. |
+| `responseBytes` | number | Response body bytes. |
+| `error` | string | Error text for failed samples. |
+| `startedUtc` | string | UTC timestamp when the sample started. |
+
+Summary fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `successCount` | number | Successful sample count. |
+| `failureCount` | number | Failed sample count. |
+| `averageTotalTimeMs` | number | Average total response time. |
+| `medianTotalTimeMs` | number | Median total response time. |
+| `minimumTotalTimeMs` | number | Minimum total response time. |
+| `maximumTotalTimeMs` | number | Maximum total response time. |
+| `averageTimeToFirstTokenMs` | number | Average time to first token or byte. |
+| `medianTimeToFirstTokenMs` | number | Median time to first token or byte. |
+| `averageTimeToLastTokenMs` | number | Average time to last token or byte. |
+| `averageTokensPerSecond` | number | Average output tokens per second. |
+| `averageResponseBytes` | number | Average response body size. |
+
+Example:
+
+```json
+{
+  "type": "client.performanceTest.response",
+  "requestId": "req_mqtycz54_Xz6cpgzPb7yB",
+  "clientId": "xcl_gb10",
+  "tenantId": "ten_default",
+  "mode": "direct",
+  "success": true,
+  "result": {
+    "name": "native",
+    "description": "Ran 5 chatCompletions request(s) from the system hosting the model.",
+    "samples": [
+      {
+        "index": 1,
+        "success": true,
+        "statusCode": 200,
+        "totalTimeMs": 615.2,
+        "timeToFirstTokenMs": 144.8,
+        "timeToLastTokenMs": 615.2,
+        "tokensPerSecond": 40.64,
+        "completionTokens": 25,
+        "totalTokens": 44,
+        "streamChunkCount": 8,
+        "responseBytes": 1210
+      }
+    ],
+    "summary": {
+      "successCount": 5,
+      "failureCount": 0,
+      "averageTotalTimeMs": 621.7,
+      "medianTotalTimeMs": 615.2,
+      "averageTimeToFirstTokenMs": 146.1,
+      "averageTimeToLastTokenMs": 621.7,
+      "averageTokensPerSecond": 40.2,
+      "averageResponseBytes": 1210
+    }
+  }
+}
+```
+
+### `client.performanceTest.relay.request`
+
+Asks the server to relay one benchmark sample from the source client to the
+target client that hosts the model.
+
+The frame is sent only while processing a `server.performanceTest.request` with
+`mode` set to `relay`. The server validates that the source client ID, tenant
+ID, and WebSocket session match the authenticated connection before dispatching
+the sample to the target client.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.performanceTest.relay.request`. |
+| `requestId` | string | yes | Parent benchmark leg request ID. |
+| `sampleId` | string | yes | Per-sample request ID. |
+| `index` | number | yes | One-based sample index. |
+| `sourceClientId` | string | yes | Source client that initiated the hairpin sample. |
+| `targetClientId` | string | yes | Client that hosts and processes the model. |
+| `tenantId` | string | yes | Tenant ID. |
+| `targetApiType` | string | no | Target provider API type. |
+| `targetSource` | string | no | Target provider endpoint name. |
+| `model` | string | yes | Model name. |
+| `requestType` | string | yes | `chatCompletions`, `completions`, or `embeddings`. |
+| `method` | string | yes | Provider HTTP method, normally `POST`. |
+| `relativePath` | string | yes | Provider path such as `/v1/chat/completions` or `/api/chat`. |
+| `stream` | boolean | yes | Whether the target request should stream. |
+| `headers` | object | yes | Forwarded provider headers. |
+| `body` | string | yes | JSON provider request body. |
+
+Example:
+
+```json
+{
+  "type": "client.performanceTest.relay.request",
+  "requestId": "req_mqtycz54_Xz6cpgzPb7yB",
+  "sampleId": "d57af9d926a74a8c9e5d4c81b3c70391",
+  "index": 1,
+  "sourceClientId": "xcl_source",
+  "targetClientId": "xcl_gb10",
+  "tenantId": "ten_default",
+  "targetApiType": "Ollama",
+  "targetSource": "local-ollama",
+  "model": "gemma3:4b",
+  "requestType": "chatCompletions",
+  "method": "POST",
+  "relativePath": "/api/chat",
+  "stream": true,
+  "headers": {},
+  "body": "{\"model\":\"gemma3:4b\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply in one short sentence: latency matters. Sample 1.\"}]}"
+}
+```
+
 ## Telemetry Object
 
 Telemetry is represented as a stable JSON object and persisted into request
@@ -807,6 +1080,27 @@ client.response.chunk
 client.response.chunk
 ...
 client.response.complete
+```
+
+Direct model performance leg ordering:
+
+```text
+server.performanceTest.request
+client.performanceTest.response
+```
+
+Hairpin model performance leg ordering:
+
+```text
+server.performanceTest.request
+client.performanceTest.relay.request
+server.request
+client.response.start
+client.response.chunk
+...
+client.response.complete
+server.performanceTest.relay.response
+client.performanceTest.response
 ```
 
 Only one final response is expected per request. The server ignores chunks that

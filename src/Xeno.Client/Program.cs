@@ -41,6 +41,7 @@ namespace Xeno.Client
         private static readonly SemaphoreSlim _SendLock = new SemaphoreSlim(1, 1);
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _RequestCancellationSources = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, string> _RequestCancellationReasons = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, TaskCompletionSource<ServerPerformanceTestRelayResponseMessage>> _PerformanceRelayResponses = new ConcurrentDictionary<string, TaskCompletionSource<ServerPerformanceTestRelayResponseMessage>>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Run the Xeno client CLI.
@@ -2006,6 +2007,20 @@ namespace Xeno.Client
                 return;
             }
 
+            if (String.Equals(type, "server.performanceTest.request", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientSettings runtimeSettings = LoadRuntimeSettingsForConnectedSession(settings);
+                StartServerPerformanceTestTask(socket, runtimeSettings, message, token);
+                return;
+            }
+
+            if (String.Equals(type, "server.performanceTest.relay.response", StringComparison.OrdinalIgnoreCase))
+            {
+                ServerPerformanceTestRelayResponseMessage? response = JsonUtil.Deserialize<ServerPerformanceTestRelayResponseMessage>(message);
+                if (response != null) CompletePerformanceRelayResponse(response);
+                return;
+            }
+
             if (String.Equals(type, "server.localInference.response.start", StringComparison.OrdinalIgnoreCase) ||
                 String.Equals(type, "server.localInference.response.complete", StringComparison.OrdinalIgnoreCase) ||
                 String.Equals(type, "server.localInference.response", StringComparison.OrdinalIgnoreCase))
@@ -2117,6 +2132,403 @@ namespace Xeno.Client
                     }, token).ConfigureAwait(false);
                 }
             }
+        }
+
+        private static void StartServerPerformanceTestTask(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
+        {
+            ServerPerformanceTestRequestMessage? request = JsonUtil.Deserialize<ServerPerformanceTestRequestMessage>(message);
+            if (request == null) return;
+            CancellationTokenSource requestTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token);
+            _ = ProcessServerPerformanceTestAsync(socket, settings, request, requestTokenSource);
+        }
+
+        private static async Task ProcessServerPerformanceTestAsync(ClientWebSocket socket, ClientSettings settings, ServerPerformanceTestRequestMessage request, CancellationTokenSource requestTokenSource)
+        {
+            try
+            {
+                ClientPerformanceTestResponseMessage response = String.Equals(request.Mode, "relay", StringComparison.OrdinalIgnoreCase)
+                    ? await RunRelayPerformanceTestAsync(socket, settings, request, requestTokenSource.Token).ConfigureAwait(false)
+                    : await RunDirectPerformanceTestAsync(settings, request, requestTokenSource.Token).ConfigureAwait(false);
+                await SendMessageAsync(socket, response, requestTokenSource.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException || ex is OperationCanceledException)
+            {
+                ClientPerformanceTestResponseMessage response = new ClientPerformanceTestResponseMessage
+                {
+                    Type = "client.performanceTest.response",
+                    RequestId = request.RequestId,
+                    TenantId = settings.TenantId ?? String.Empty,
+                    ClientId = settings.ClientId ?? String.Empty,
+                    Mode = request.Mode,
+                    Success = false,
+                    Error = ex.Message,
+                    Result = new ModelPerformanceTestLegResult
+                    {
+                        Name = request.Mode,
+                        Description = ex.Message
+                    }
+                };
+                await SendMessageAsync(socket, response, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                requestTokenSource.Dispose();
+            }
+        }
+
+        private static async Task<ClientPerformanceTestResponseMessage> RunDirectPerformanceTestAsync(ClientSettings settings, ServerPerformanceTestRequestMessage request, CancellationToken token)
+        {
+            ModelPerformanceTestLegResult result = new ModelPerformanceTestLegResult
+            {
+                Name = "native",
+                Description = "Ran " + request.RequestCount.ToString(CultureInfo.InvariantCulture) + " " + request.RequestType + " request(s) from the system hosting the model."
+            };
+
+            for (int index = 1; index <= Math.Clamp(request.RequestCount, 1, 10); index++)
+            {
+                token.ThrowIfCancellationRequested();
+                try
+                {
+                    result.Samples.Add(await ExecutePerformanceProviderSampleAsync(settings, request, index, token).ConfigureAwait(false));
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is HttpRequestException || ex is TaskCanceledException)
+                {
+                    result.Samples.Add(FailedPerformanceSample(index, ex.Message));
+                }
+            }
+
+            result.Summary = SummarizePerformanceSamples(result.Samples);
+            return new ClientPerformanceTestResponseMessage
+            {
+                Type = "client.performanceTest.response",
+                RequestId = request.RequestId,
+                TenantId = settings.TenantId ?? String.Empty,
+                ClientId = settings.ClientId ?? String.Empty,
+                Mode = "direct",
+                Success = result.Samples.Any(item => item.Success),
+                Result = result
+            };
+        }
+
+        private static async Task<ClientPerformanceTestResponseMessage> RunRelayPerformanceTestAsync(ClientWebSocket socket, ClientSettings settings, ServerPerformanceTestRequestMessage request, CancellationToken token)
+        {
+            ModelPerformanceTestLegResult result = new ModelPerformanceTestLegResult
+            {
+                Name = "hairpin",
+                Description = "Ran " + request.RequestCount.ToString(CultureInfo.InvariantCulture) + " " + request.RequestType + " request(s) from this selected client through Xeno server to " + (request.TargetClientName ?? request.TargetClientId) + "."
+            };
+
+            for (int index = 1; index <= Math.Clamp(request.RequestCount, 1, 10); index++)
+            {
+                token.ThrowIfCancellationRequested();
+                try
+                {
+                    result.Samples.Add(await ExecutePerformanceRelaySampleAsync(socket, settings, request, index, token).ConfigureAwait(false));
+                }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is WebSocketException || ex is OperationCanceledException)
+                {
+                    result.Samples.Add(FailedPerformanceSample(index, ex.Message));
+                }
+            }
+
+            result.Summary = SummarizePerformanceSamples(result.Samples);
+            return new ClientPerformanceTestResponseMessage
+            {
+                Type = "client.performanceTest.response",
+                RequestId = request.RequestId,
+                TenantId = settings.TenantId ?? String.Empty,
+                ClientId = settings.ClientId ?? String.Empty,
+                Mode = "relay",
+                Success = result.Samples.Any(item => item.Success),
+                Result = result
+            };
+        }
+
+        private static async Task<ModelPerformanceTestSampleResult> ExecutePerformanceProviderSampleAsync(ClientSettings settings, ServerPerformanceTestRequestMessage request, int index, CancellationToken token)
+        {
+            ClientRunnerSettings runner = FindPerformanceRunner(settings, request.TargetSource, request.Model, request.RequestType)
+                ?? throw new InvalidOperationException("No configured provider endpoint can run model '" + request.Model + "'.");
+            ServerRequestMessage sample = BuildPerformanceSampleRequest(request, runner.ApiType, index);
+            string endpoint = runner.Endpoint.TrimEnd('/') + "/" + sample.RelativePath.TrimStart('/');
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            DateTime startedUtc = DateTime.UtcNow;
+            using (HttpClient httpClient = new HttpClient())
+            using (HttpRequestMessage httpRequest = new HttpRequestMessage(new HttpMethod(sample.Method), endpoint))
+            {
+                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
+                if (!String.IsNullOrWhiteSpace(runner.Credential))
+                {
+                    httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
+                }
+
+                if (!String.Equals(sample.Method, "GET", StringComparison.OrdinalIgnoreCase))
+                {
+                    string body = PrepareUpstreamRequestBody(runner.ApiType, sample.RelativePath, sample.Body, sample.Stream);
+                    httpRequest.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    sample.Body = body;
+                }
+
+                HttpCompletionOption completionOption = sample.Stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead;
+                using (HttpResponseMessage response = await httpClient.SendAsync(httpRequest, completionOption, token).ConfigureAwait(false))
+                {
+                    if (sample.Stream)
+                    {
+                        return await ReadPerformanceStreamSampleAsync(response, sample, stopwatch, startedUtc, index, token).ConfigureAwait(false);
+                    }
+
+                    string content = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    stopwatch.Stop();
+                    Dictionary<string, string> responseHeaders = ExtractResponseHeaders(response);
+                    RequestHistoryTelemetry telemetry = BuildTelemetry(sample.Body, content, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, null, null, 0, 0, false);
+                    return SampleFromTelemetry(index, response.IsSuccessStatusCode, (int)response.StatusCode, telemetry, Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3), startedUtc, null);
+                }
+            }
+        }
+
+        private static async Task<ModelPerformanceTestSampleResult> ReadPerformanceStreamSampleAsync(HttpResponseMessage response, ServerRequestMessage sample, Stopwatch stopwatch, DateTime startedUtc, int index, CancellationToken token)
+        {
+            Dictionary<string, string> responseHeaders = ExtractResponseHeaders(response);
+            double requestToHeadersMs = stopwatch.Elapsed.TotalMilliseconds;
+            using (Stream responseStream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false))
+            using (MemoryStream captured = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192];
+                int sequence = 0;
+                double? firstByteMs = null;
+                while (true)
+                {
+                    int read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), token).ConfigureAwait(false);
+                    if (read < 1) break;
+                    if (!firstByteMs.HasValue) firstByteMs = stopwatch.Elapsed.TotalMilliseconds;
+                    await captured.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
+                    sequence++;
+                }
+
+                stopwatch.Stop();
+                string body = Encoding.UTF8.GetString(captured.ToArray());
+                int streamEvents = CountStreamEvents(response.Content.Headers.ContentType?.ToString(), body, sequence);
+                RequestHistoryTelemetry telemetry = BuildTelemetry(sample.Body, body, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, requestToHeadersMs, firstByteMs, sequence, streamEvents, true);
+                return SampleFromTelemetry(index, response.IsSuccessStatusCode, (int)response.StatusCode, telemetry, Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3), startedUtc, null);
+            }
+        }
+
+        private static async Task<ModelPerformanceTestSampleResult> ExecutePerformanceRelaySampleAsync(ClientWebSocket socket, ClientSettings settings, ServerPerformanceTestRequestMessage request, int index, CancellationToken token)
+        {
+            ClientRunnerSettings syntheticRunner = new ClientRunnerSettings
+            {
+                ApiType = request.TargetApiType ?? "OpenAICompatible",
+                Name = request.TargetSource ?? "target-provider"
+            };
+            ServerRequestMessage sample = BuildPerformanceSampleRequest(request, syntheticRunner.ApiType, index);
+            string sampleId = Guid.NewGuid().ToString("N");
+            TaskCompletionSource<ServerPerformanceTestRelayResponseMessage> pending = new TaskCompletionSource<ServerPerformanceTestRelayResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _PerformanceRelayResponses[sampleId] = pending;
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                await SendMessageAsync(socket, new ClientPerformanceTestRelayRequestMessage
+                {
+                    Type = "client.performanceTest.relay.request",
+                    RequestId = request.RequestId,
+                    SampleId = sampleId,
+                    Index = index,
+                    SourceClientId = settings.ClientId ?? String.Empty,
+                    TargetClientId = request.TargetClientId,
+                    TenantId = settings.TenantId ?? String.Empty,
+                    TargetApiType = request.TargetApiType,
+                    TargetSource = request.TargetSource,
+                    Model = request.Model,
+                    RequestType = request.RequestType,
+                    Method = sample.Method,
+                    RelativePath = sample.RelativePath,
+                    Stream = sample.Stream,
+                    Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                    Body = sample.Body
+                }, token).ConfigureAwait(false);
+
+                using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+                {
+                    timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, request.TimeoutMs)));
+                    using (timeout.Token.Register(delegate { pending.TrySetCanceled(timeout.Token); }))
+                    {
+                        ServerPerformanceTestRelayResponseMessage response = await pending.Task.ConfigureAwait(false);
+                        stopwatch.Stop();
+                        ModelPerformanceTestSampleResult result = response.Result ?? FailedPerformanceSample(index, response.Error ?? "Relay sample failed.");
+                        result.TotalTimeMs = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3);
+                        result.TimeToLastTokenMs = result.TotalTimeMs;
+                        if (!response.Success && String.IsNullOrWhiteSpace(result.Error)) result.Error = response.Error;
+                        return result;
+                    }
+                }
+            }
+            finally
+            {
+                _PerformanceRelayResponses.TryRemove(sampleId, out TaskCompletionSource<ServerPerformanceTestRelayResponseMessage>? _);
+            }
+        }
+
+        private static void CompletePerformanceRelayResponse(ServerPerformanceTestRelayResponseMessage response)
+        {
+            if (String.IsNullOrWhiteSpace(response.SampleId)) return;
+            if (_PerformanceRelayResponses.TryGetValue(response.SampleId, out TaskCompletionSource<ServerPerformanceTestRelayResponseMessage>? pending))
+            {
+                pending.TrySetResult(response);
+            }
+        }
+
+        private static ClientRunnerSettings? FindPerformanceRunner(ClientSettings settings, string? source, string model, string requestType)
+        {
+            if (!String.IsNullOrWhiteSpace(source))
+            {
+                ClientRunnerSettings? bySource = settings.Runners.FirstOrDefault(item => String.Equals(item.Name, source, StringComparison.OrdinalIgnoreCase));
+                if (bySource != null) return bySource;
+            }
+
+            bool embeddings = String.Equals(requestType, "embeddings", StringComparison.OrdinalIgnoreCase);
+            return settings.Runners.FirstOrDefault(runner => runner.Models.Any(item =>
+                String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase) &&
+                (embeddings ? item.SupportsEmbeddings : item.SupportsCompletions))) ?? settings.Runners.FirstOrDefault();
+        }
+
+        private static ServerRequestMessage BuildPerformanceSampleRequest(ServerPerformanceTestRequestMessage request, string apiType, int index)
+        {
+            bool ollama = String.Equals(apiType, "Ollama", StringComparison.OrdinalIgnoreCase);
+            bool embeddings = String.Equals(request.RequestType, "embeddings", StringComparison.OrdinalIgnoreCase);
+            bool completions = String.Equals(request.RequestType, "completions", StringComparison.OrdinalIgnoreCase);
+            string prompt = "Reply in one short sentence: latency matters. Sample " + index.ToString(CultureInfo.InvariantCulture) + ".";
+            if (embeddings)
+            {
+                return new ServerRequestMessage
+                {
+                    Method = "POST",
+                    RelativePath = ollama ? "/api/embed" : "/v1/embeddings",
+                    Model = request.Model,
+                    Embeddings = true,
+                    Stream = false,
+                    Body = ollama
+                        ? JsonUtil.Serialize(new { model = request.Model, input = new[] { "local inference performance sample " + index.ToString(CultureInfo.InvariantCulture) } })
+                        : JsonUtil.Serialize(new { model = request.Model, input = new[] { "local inference performance sample " + index.ToString(CultureInfo.InvariantCulture) } })
+                };
+            }
+
+            if (completions)
+            {
+                return new ServerRequestMessage
+                {
+                    Method = "POST",
+                    RelativePath = ollama ? "/api/generate" : "/v1/completions",
+                    Model = request.Model,
+                    Stream = true,
+                    Body = ollama
+                        ? JsonUtil.Serialize(new { model = request.Model, prompt, stream = true })
+                        : JsonUtil.Serialize(new { model = request.Model, prompt, stream = true, temperature = 0, max_tokens = 32 })
+                };
+            }
+
+            return new ServerRequestMessage
+            {
+                Method = "POST",
+                RelativePath = ollama ? "/api/chat" : "/v1/chat/completions",
+                Model = request.Model,
+                Stream = true,
+                Body = JsonUtil.Serialize(new
+                {
+                    model = request.Model,
+                    stream = true,
+                    messages = new[]
+                    {
+                        new { role = "user", content = prompt }
+                    },
+                    temperature = 0,
+                    max_tokens = 32
+                })
+            };
+        }
+
+        private static ModelPerformanceTestSampleResult SampleFromTelemetry(int index, bool success, int? statusCode, RequestHistoryTelemetry telemetry, double totalMs, DateTime startedUtc, string? error)
+        {
+            return new ModelPerformanceTestSampleResult
+            {
+                Index = index,
+                Success = success,
+                StatusCode = statusCode,
+                TotalTimeMs = totalMs,
+                TimeToFirstTokenMs = telemetry.TimeToFirstTokenMs,
+                TimeToLastTokenMs = totalMs,
+                TokensPerSecond = CalculateTokensPerSecond(telemetry.CompletionTokens, totalMs),
+                PromptTokens = telemetry.PromptTokens,
+                CompletionTokens = telemetry.CompletionTokens,
+                TotalTokens = telemetry.TotalTokens,
+                StreamChunkCount = telemetry.StreamChunkCount,
+                RequestBytes = telemetry.RequestBytes,
+                ResponseBytes = telemetry.ResponseBytes,
+                Error = error,
+                StartedUtc = startedUtc
+            };
+        }
+
+        private static ModelPerformanceTestSampleResult FailedPerformanceSample(int index, string message)
+        {
+            return new ModelPerformanceTestSampleResult
+            {
+                Index = index,
+                Success = false,
+                Error = message,
+                StartedUtc = DateTime.UtcNow
+            };
+        }
+
+        private static double? CalculateTokensPerSecond(int? completionTokens, double? totalMs)
+        {
+            if (!completionTokens.HasValue || completionTokens.Value <= 0) return null;
+            if (!totalMs.HasValue || totalMs.Value <= 0) return null;
+            return Math.Round(completionTokens.Value / (totalMs.Value / 1000d), 3);
+        }
+
+        private static ModelPerformanceTestSummary SummarizePerformanceSamples(List<ModelPerformanceTestSampleResult> samples)
+        {
+            List<ModelPerformanceTestSampleResult> rows = samples ?? new List<ModelPerformanceTestSampleResult>();
+            return new ModelPerformanceTestSummary
+            {
+                SuccessCount = rows.Count(item => item.Success),
+                FailureCount = rows.Count(item => !item.Success),
+                AverageTotalTimeMs = Average(rows.Select(item => item.TotalTimeMs)),
+                MedianTotalTimeMs = Median(rows.Select(item => item.TotalTimeMs)),
+                MinimumTotalTimeMs = Minimum(rows.Select(item => item.TotalTimeMs)),
+                MaximumTotalTimeMs = Maximum(rows.Select(item => item.TotalTimeMs)),
+                AverageTimeToFirstTokenMs = Average(rows.Select(item => item.TimeToFirstTokenMs)),
+                MedianTimeToFirstTokenMs = Median(rows.Select(item => item.TimeToFirstTokenMs)),
+                AverageTimeToLastTokenMs = Average(rows.Select(item => item.TimeToLastTokenMs)),
+                AverageTokensPerSecond = Average(rows.Select(item => item.TokensPerSecond)),
+                AverageResponseBytes = Average(rows.Select(item => item.ResponseBytes.HasValue ? (double?)item.ResponseBytes.Value : null))
+            };
+        }
+
+        private static double? Average(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Average(), 3);
+        }
+
+        private static double? Median(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).OrderBy(item => item).ToList();
+            if (usable.Count == 0) return null;
+            int midpoint = usable.Count / 2;
+            if (usable.Count % 2 == 1) return Math.Round(usable[midpoint], 3);
+            return Math.Round((usable[midpoint - 1] + usable[midpoint]) / 2d, 3);
+        }
+
+        private static double? Minimum(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Min(), 3);
+        }
+
+        private static double? Maximum(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Max(), 3);
         }
 
         private static void StartServerRequestTask(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)

@@ -3637,6 +3637,198 @@ html[data-theme='dark'] .primitive-list-item {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
 }
 
+.model-performance-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.model-performance-config {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(240px, 1.35fr) minmax(180px, 0.9fr) minmax(120px, 0.55fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.model-performance-config .request-count-field {
+  max-width: 160px;
+}
+
+.model-performance-error {
+  border: 1px solid rgba(199, 55, 55, 0.28);
+  border-radius: 8px;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.model-performance-running {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel-soft);
+  color: var(--color-muted);
+}
+
+.model-performance-running strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.model-performance-results {
+  display: grid;
+  gap: 16px;
+}
+
+.performance-leg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.performance-leg-summary {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel-soft);
+  padding: 12px;
+}
+
+.performance-leg-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.performance-leg-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  color: var(--color-accent);
+}
+
+.performance-leg-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.performance-leg-heading p {
+  margin: 4px 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.performance-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.performance-summary-grid .detail-item {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  padding: 8px;
+}
+
+.performance-summary-grid .detail-item strong {
+  overflow-wrap: anywhere;
+}
+
+.performance-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.performance-chart-panel {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  padding: 12px;
+}
+
+.performance-chart-panel h3,
+.performance-samples-section h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.performance-bar-chart {
+  width: 100%;
+  height: auto;
+  min-height: 142px;
+  display: block;
+}
+
+.performance-chart-axis,
+.performance-chart-tick {
+  stroke: var(--color-border-strong);
+  stroke-width: 1;
+}
+
+.performance-chart-tick {
+  opacity: 0.68;
+}
+
+.performance-chart-bar.native {
+  fill: var(--color-success);
+}
+
+.performance-chart-bar.hairpin {
+  fill: var(--color-info);
+}
+
+.performance-chart-row-label,
+.performance-chart-value {
+  fill: var(--color-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.performance-chart-tick-label,
+.performance-chart-axis-label {
+  fill: var(--color-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.performance-samples-section {
+  display: grid;
+  gap: 8px;
+}
+
+.performance-sample-table {
+  min-width: 1040px;
+}
+
+.performance-sample-table th,
+.performance-sample-table td {
+  white-space: nowrap;
+}
+
 @media (max-width: 1120px) {
   .app-shell {
     grid-template-columns: 232px minmax(0, 1fr);
@@ -3646,8 +3838,14 @@ html[data-theme='dark'] .primitive-list-item {
   .workspace-grid.wide-left,
   .workspace-grid.explorer-grid,
   .dashboard-grid.two-column,
-  .settings-grid {
+  .settings-grid,
+  .model-performance-config,
+  .performance-chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .model-performance-config .request-count-field {
+    max-width: none;
   }
 }
 
@@ -3664,6 +3862,11 @@ html[data-theme='dark'] .primitive-list-item {
 
   .login-brand-panel {
     min-height: 360px;
+  }
+
+  .performance-leg-grid,
+  .performance-summary-grid {
+    grid-template-columns: 1fr;
   }
 
   .app-shell {

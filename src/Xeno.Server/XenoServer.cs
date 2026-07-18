@@ -3,6 +3,7 @@ namespace Xeno.Server
     using System;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Globalization;
     using System.IO;
     using System.Linq;
@@ -48,10 +49,12 @@ namespace Xeno.Server
         private readonly object _ClientConnectionsLock = new object();
         private readonly object _PendingResponsesLock = new object();
         private readonly object _PendingTelemetryResponsesLock = new object();
+        private readonly object _PendingPerformanceTestResponsesLock = new object();
         private readonly object _AuthRateLimitLock = new object();
         private readonly Dictionary<string, ClientConnection> _ClientConnections = new Dictionary<string, ClientConnection>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, PendingClientResponse> _PendingClientResponses = new Dictionary<string, PendingClientResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, PendingTelemetryResponse> _PendingTelemetryResponses = new Dictionary<string, PendingTelemetryResponse>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, PendingPerformanceTestResponse> _PendingPerformanceTestResponses = new Dictionary<string, PendingPerformanceTestResponse>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<DateTime>> _AuthRateLimitAttempts = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingCallerDisconnects = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _PendingLocalInferenceRequests = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
@@ -347,6 +350,8 @@ namespace Xeno.Server
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/clients", "List clients", "Clients");
             RegisterStaticRoute(HttpMethod.DELETE, "/api/v1/clientmodels", "Delete client-advertised model", "Clients");
             RegisterStaticRoute(HttpMethod.DELETE, "/v1.0/api/client-models", "Delete client-advertised model", "Clients");
+            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelperformance/test", "Test model performance", "Clients");
+            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-performance/test", "Test model performance", "Clients");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/status", "Client telemetry status", "Client Telemetry");
             RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/latest", "Latest client telemetry", "Client Telemetry");
             RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/collect", "Trigger client telemetry collection", "Client Telemetry");
@@ -666,6 +671,30 @@ namespace Xeno.Server
                     new Dictionary<string, object>
                     {
                         ["accessKey"] = "default"
+                    });
+            }
+
+            if (method == HttpMethod.POST && IsPath(path, "/api/v1/modelperformance/test", "/v1.0/api/model-performance/test"))
+            {
+                return JsonBody(
+                    "Model performance comparison request.",
+                    ObjectSchemaMetadata(
+                        "Model performance comparison request.",
+                        new[] { "model", "sourceClientId", "targetClientId", "requestType", "requestCount" },
+                        SchemaProperty("model", OpenApiSchemaMetadata.String("Model name to test.")),
+                        SchemaProperty("sourceClientId", OpenApiSchemaMetadata.String("Client ID that initiates the hairpin leg.")),
+                        SchemaProperty("targetClientId", OpenApiSchemaMetadata.String("Client ID that hosts and processes the model.")),
+                        SchemaProperty("targetSource", OpenApiSchemaMetadata.String("Optional target provider source name.")),
+                        SchemaProperty("requestType", StringEnumSchemaMetadata("Request type to test.", "chatCompletions", "completions", "embeddings")),
+                        SchemaProperty("requestCount", IntegerSchemaMetadata("Number of requests per leg. The server clamps this to 1 through 10."))),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "gemma3:4b",
+                        ["sourceClientId"] = "xcl_source",
+                        ["targetClientId"] = "xcl_target",
+                        ["targetSource"] = "local-ollama",
+                        ["requestType"] = "chatCompletions",
+                        ["requestCount"] = 5
                     });
             }
 
@@ -1968,6 +1997,15 @@ namespace Xeno.Server
                 int removed = DeleteClientModel(requestContext, context);
                 if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && IsPath(path, "/api/v1/modelperformance/test", "/v1.0/api/model-performance/test"))
+            {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+                ModelPerformanceTestRequest body = ReadJsonBody<ModelPerformanceTestRequest>(context);
+                ModelPerformanceTestResponse response = await RunModelPerformanceTestAsync(requestContext, body, token).ConfigureAwait(false);
+                await SendJsonAsync(context, response).ConfigureAwait(false);
                 return;
             }
 
@@ -3573,6 +3611,19 @@ namespace Xeno.Server
                 return null;
             }
 
+            if (String.Equals(type, "client.performanceTest.response", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientPerformanceTestResponseMessage? message = JsonUtil.Deserialize<ClientPerformanceTestResponseMessage>(json);
+                if (message != null) CompletePerformanceTestResponse(session, message, requestContext);
+                return null;
+            }
+
+            if (String.Equals(type, "client.performanceTest.relay.request", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleClientPerformanceTestRelayRequestAsync(session, json, requestContext, token).ConfigureAwait(false);
+                return null;
+            }
+
             if (String.Equals(type, "client.telemetry.snapshot", StringComparison.OrdinalIgnoreCase))
             {
                 ClientTelemetrySnapshotMessage? message = JsonUtil.Deserialize<ClientTelemetrySnapshotMessage>(json);
@@ -3851,6 +3902,364 @@ namespace Xeno.Server
                     _PendingClientResponses.Remove(request.RequestId);
                 }
             }
+        }
+
+        private async Task<ModelPerformanceTestResponse> RunModelPerformanceTestAsync(RequestContext requestContext, ModelPerformanceTestRequest request, CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            token.ThrowIfCancellationRequested();
+            string model = request.Model?.Trim() ?? String.Empty;
+            if (String.IsNullOrWhiteSpace(model)) throw new ArgumentException("Model performance test requires a model name.");
+
+            string sourceClientId = request.SourceClientId?.Trim() ?? String.Empty;
+            string targetClientId = request.TargetClientId?.Trim() ?? String.Empty;
+            if (String.IsNullOrWhiteSpace(sourceClientId)) throw new ArgumentException("Model performance test requires a source client ID.");
+            if (String.IsNullOrWhiteSpace(targetClientId)) throw new ArgumentException("Model performance test requires a target client ID.");
+
+            string requestType = NormalizePerformanceRequestType(request.RequestType);
+            int requestCount = Math.Clamp(request.RequestCount, 1, 10);
+            XenoPlatform platform = RequirePlatform();
+            XenoClientRecord sourceClient = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, sourceClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new KeyNotFoundException("Source client was not found in the current tenant: " + sourceClientId);
+            XenoClientRecord targetClient = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, targetClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new KeyNotFoundException("Target client was not found in the current tenant: " + targetClientId);
+            ClientConnection sourceConnection = GetClientConnection(sourceClient.Id) ?? throw new InvalidOperationException("Source client is not connected: " + sourceClient.Name);
+            ClientConnection targetConnection = GetClientConnection(targetClient.Id) ?? throw new InvalidOperationException("Target client is not connected: " + targetClient.Name);
+            if (!sourceConnection.Session.IsConnected) throw new InvalidOperationException("Source client is not connected: " + sourceClient.Name);
+            if (!targetConnection.Session.IsConnected) throw new InvalidOperationException("Target client is not connected: " + targetClient.Name);
+
+            XenoClientModel selectedModel = FindPerformanceTestModel(targetClient, model, request.TargetSource, PerformanceRequestIsEmbedding(requestType))
+                ?? throw new KeyNotFoundException("Target client does not advertise model '" + model + "' for request type '" + requestType + "'.");
+            string requestId = IdGenerator.NewRequestHistoryId();
+            int timeoutMs = Math.Max(1000, _Settings.Routing.DefaultTimeoutMs);
+
+            ClientPerformanceTestResponseMessage native = await SendPerformanceTestRequestAsync(targetConnection, new ServerPerformanceTestRequestMessage
+            {
+                Type = "server.performanceTest.request",
+                RequestId = IdGenerator.NewRequestHistoryId(),
+                TenantId = requestContext.TenantId,
+                ClientId = targetClient.Id,
+                Mode = "direct",
+                Model = model,
+                RequestType = requestType,
+                RequestCount = requestCount,
+                TargetClientId = targetClient.Id,
+                TargetClientName = targetClient.Name,
+                TargetApiType = selectedModel.Provider.ToString(),
+                TargetSource = selectedModel.Source,
+                TimeoutMs = timeoutMs
+            }, timeoutMs, token).ConfigureAwait(false);
+
+            ClientPerformanceTestResponseMessage hairpin = await SendPerformanceTestRequestAsync(sourceConnection, new ServerPerformanceTestRequestMessage
+            {
+                Type = "server.performanceTest.request",
+                RequestId = IdGenerator.NewRequestHistoryId(),
+                TenantId = requestContext.TenantId,
+                ClientId = sourceClient.Id,
+                Mode = "relay",
+                Model = model,
+                RequestType = requestType,
+                RequestCount = requestCount,
+                TargetClientId = targetClient.Id,
+                TargetClientName = targetClient.Name,
+                TargetApiType = selectedModel.Provider.ToString(),
+                TargetSource = selectedModel.Source,
+                TimeoutMs = timeoutMs
+            }, timeoutMs, token).ConfigureAwait(false);
+
+            native.Result.Summary = SummarizePerformanceSamples(native.Result.Samples);
+            hairpin.Result.Summary = SummarizePerformanceSamples(hairpin.Result.Samples);
+            return new ModelPerformanceTestResponse
+            {
+                RequestId = requestId,
+                Model = model,
+                RequestType = requestType,
+                RequestCount = requestCount,
+                SourceClientId = sourceClient.Id,
+                SourceClientName = sourceClient.Name,
+                TargetClientId = targetClient.Id,
+                TargetClientName = targetClient.Name,
+                Native = native.Result,
+                Hairpin = hairpin.Result
+            };
+        }
+
+        private async Task<ClientPerformanceTestResponseMessage> SendPerformanceTestRequestAsync(ClientConnection connection, ServerPerformanceTestRequestMessage message, int timeoutMs, CancellationToken token)
+        {
+            PendingPerformanceTestResponse pending = new PendingPerformanceTestResponse();
+            lock (_PendingPerformanceTestResponsesLock)
+            {
+                _PendingPerformanceTestResponses[message.RequestId] = pending;
+            }
+
+            try
+            {
+                await SendToClientAsync(connection, JsonUtil.Serialize(message), token).ConfigureAwait(false);
+                using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+                {
+                    timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs)));
+                    using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
+                    {
+                        return await pending.Response.Task.ConfigureAwait(false);
+                    }
+                }
+            }
+            finally
+            {
+                lock (_PendingPerformanceTestResponsesLock)
+                {
+                    _PendingPerformanceTestResponses.Remove(message.RequestId);
+                }
+            }
+        }
+
+        private XenoClientModel? FindPerformanceTestModel(XenoClientRecord client, string model, string? source, bool embeddings)
+        {
+            return client.Models.FirstOrDefault(item =>
+                String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase) &&
+                (String.IsNullOrWhiteSpace(source) || String.Equals(item.Source, source, StringComparison.OrdinalIgnoreCase)) &&
+                (embeddings ? item.SupportsEmbeddings : item.SupportsCompletions));
+        }
+
+        private static string NormalizePerformanceRequestType(string? requestType)
+        {
+            string normalized = (requestType ?? String.Empty).Trim();
+            if (String.Equals(normalized, "chat", StringComparison.OrdinalIgnoreCase)) return "chatCompletions";
+            if (String.Equals(normalized, "chatCompletions", StringComparison.OrdinalIgnoreCase)) return "chatCompletions";
+            if (String.Equals(normalized, "completions", StringComparison.OrdinalIgnoreCase)) return "completions";
+            if (String.Equals(normalized, "completion", StringComparison.OrdinalIgnoreCase)) return "completions";
+            if (String.Equals(normalized, "embeddings", StringComparison.OrdinalIgnoreCase)) return "embeddings";
+            if (String.Equals(normalized, "embedding", StringComparison.OrdinalIgnoreCase)) return "embeddings";
+            throw new ArgumentException("Unsupported model performance request type: " + requestType);
+        }
+
+        private static bool PerformanceRequestIsEmbedding(string requestType)
+        {
+            return String.Equals(requestType, "embeddings", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task HandleClientPerformanceTestRelayRequestAsync(WebSocketSession session, string json, RequestContext requestContext, CancellationToken token)
+        {
+            ClientPerformanceTestRelayRequestMessage? message = JsonUtil.Deserialize<ClientPerformanceTestRelayRequestMessage>(json);
+            if (message == null) throw new ArgumentException("Client performance relay request message is invalid.", nameof(json));
+            ServerPerformanceTestRelayResponseMessage response = await RelayPerformanceTestSampleAsync(session, message, requestContext, token).ConfigureAwait(false);
+            await SendLocalPerformanceRelayResponseAsync(session, response, token).ConfigureAwait(false);
+        }
+
+        private async Task<ServerPerformanceTestRelayResponseMessage> RelayPerformanceTestSampleAsync(WebSocketSession sourceSession, ClientPerformanceTestRelayRequestMessage request, RequestContext requestContext, CancellationToken token)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                ValidatePerformanceRelayRequest(sourceSession, request, requestContext);
+                XenoPlatform platform = RequirePlatform();
+                XenoClientRecord target = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, request.TargetClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new KeyNotFoundException("Performance test target client was not found: " + request.TargetClientId);
+                ClientConnection targetConnection = GetClientConnection(target.Id) ?? throw new InvalidOperationException("Performance test target client is not connected: " + target.Name);
+                if (!targetConnection.Session.IsConnected) throw new InvalidOperationException("Performance test target client is not connected: " + target.Name);
+
+                PendingClientResponse pending = new PendingClientResponse();
+                lock (_PendingResponsesLock)
+                {
+                    _PendingClientResponses[request.SampleId] = pending;
+                }
+
+                target.InFlightRequests++;
+                try
+                {
+                    ServerRequestMessage payload = new ServerRequestMessage
+                    {
+                        Type = "server.request",
+                        RequestId = request.SampleId,
+                        TenantId = requestContext.TenantId,
+                        RequestorTenantId = requestContext.TenantId,
+                        RequestorPrincipalType = requestContext.PrincipalType.ToString(),
+                        RequestorPrincipalId = requestContext.PrincipalId,
+                        ClientId = target.Id,
+                        ClientName = target.Name,
+                        ApiType = request.TargetApiType,
+                        Source = request.TargetSource,
+                        Method = request.Method,
+                        RelativePath = request.RelativePath,
+                        Model = request.Model,
+                        Embeddings = PerformanceRequestIsEmbedding(request.RequestType),
+                        Stream = request.Stream,
+                        RequestorIp = "xeno-performance-test:" + request.SourceClientId,
+                        Headers = request.Headers,
+                        Body = request.Body
+                    };
+                    await SendToClientAsync(targetConnection, JsonUtil.Serialize(payload), token).ConfigureAwait(false);
+                    ModelPerformanceTestSampleResult result = request.Stream
+                        ? await WaitForPerformanceStreamSampleAsync(request, pending, stopwatch, token).ConfigureAwait(false)
+                        : await WaitForPerformanceStandardSampleAsync(request, pending, stopwatch, token).ConfigureAwait(false);
+                    return new ServerPerformanceTestRelayResponseMessage
+                    {
+                        Type = "server.performanceTest.relay.response",
+                        RequestId = request.RequestId,
+                        SampleId = request.SampleId,
+                        Index = request.Index,
+                        Success = result.Success,
+                        Result = result,
+                        Error = result.Error
+                    };
+                }
+                finally
+                {
+                    target.InFlightRequests = Math.Max(0, target.InFlightRequests - 1);
+                    lock (_PendingResponsesLock)
+                    {
+                        _PendingClientResponses.Remove(request.SampleId);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is KeyNotFoundException || ex is OperationCanceledException || ex is UnauthorizedAccessException)
+            {
+                stopwatch.Stop();
+                return new ServerPerformanceTestRelayResponseMessage
+                {
+                    Type = "server.performanceTest.relay.response",
+                    RequestId = request.RequestId,
+                    SampleId = request.SampleId,
+                    Index = request.Index,
+                    Success = false,
+                    Error = ex.Message,
+                    Result = new ModelPerformanceTestSampleResult
+                    {
+                        Index = request.Index,
+                        Success = false,
+                        Error = ex.Message,
+                        StartedUtc = DateTime.UtcNow,
+                        TotalTimeMs = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3),
+                        TimeToLastTokenMs = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3)
+                    }
+                };
+            }
+        }
+
+        private void ValidatePerformanceRelayRequest(WebSocketSession sourceSession, ClientPerformanceTestRelayRequestMessage request, RequestContext requestContext)
+        {
+            if (String.IsNullOrWhiteSpace(request.RequestId)) throw new ArgumentException("Performance relay request ID is required.");
+            if (String.IsNullOrWhiteSpace(request.SampleId)) throw new ArgumentException("Performance relay sample ID is required.");
+            if (!String.Equals(request.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Performance relay tenant does not match authenticated tenant.");
+            ClientConnection? sourceConnection = GetClientConnection(request.SourceClientId);
+            if (sourceConnection == null) throw new UnauthorizedAccessException("Performance relay source client is not registered.");
+            if (!String.Equals(sourceConnection.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Performance relay source client tenant is invalid.");
+            if (!String.Equals(sourceConnection.Session.Id.ToString(), sourceSession.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Performance relay request arrived on the wrong source client session.");
+        }
+
+        private async Task<ModelPerformanceTestSampleResult> WaitForPerformanceStandardSampleAsync(ClientPerformanceTestRelayRequestMessage request, PendingClientResponse pending, Stopwatch stopwatch, CancellationToken token)
+        {
+            ClientResponseMessage response = await WaitForClientResponseAsync(request.SampleId, pending, Math.Max(1000, _Settings.Routing.DefaultTimeoutMs), token).ConfigureAwait(false);
+            stopwatch.Stop();
+            double totalMs = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3);
+            return BuildPerformanceSampleResult(request.Index, response, totalMs, response.Telemetry?.TimeToFirstTokenMs, totalMs);
+        }
+
+        private async Task<ModelPerformanceTestSampleResult> WaitForPerformanceStreamSampleAsync(ClientPerformanceTestRelayRequestMessage request, PendingClientResponse pending, Stopwatch stopwatch, CancellationToken token)
+        {
+            ClientResponseMessage first = await WaitForClientFirstResponseAsync(request.SampleId, pending, Math.Max(1000, _Settings.Routing.DefaultTimeoutMs), token).ConfigureAwait(false);
+            double? firstTokenMs = null;
+            if (IsClientResponseStart(first))
+            {
+                while (await pending.Chunks.Reader.WaitToReadAsync(token).ConfigureAwait(false))
+                {
+                    while (pending.Chunks.Reader.TryRead(out ClientResponseChunkMessage? chunk))
+                    {
+                        if (chunk == null) continue;
+                        if (!firstTokenMs.HasValue) firstTokenMs = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3);
+                    }
+                }
+
+                ClientResponseMessage final = await pending.Final.Task.ConfigureAwait(false);
+                stopwatch.Stop();
+                return BuildPerformanceSampleResult(request.Index, final, Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3), firstTokenMs ?? final.Telemetry?.TimeToFirstTokenMs, Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3));
+            }
+
+            stopwatch.Stop();
+            return BuildPerformanceSampleResult(request.Index, first, Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3), first.Telemetry?.TimeToFirstTokenMs, Math.Round(stopwatch.Elapsed.TotalMilliseconds, 3));
+        }
+
+        private static ModelPerformanceTestSampleResult BuildPerformanceSampleResult(int index, ClientResponseMessage response, double? totalMs, double? firstTokenMs, double? lastTokenMs)
+        {
+            RequestHistoryTelemetry? telemetry = response.Telemetry;
+            int? completionTokens = telemetry?.CompletionTokens;
+            double? tokensPerSecond = CalculateTokensPerSecond(completionTokens, totalMs);
+            return new ModelPerformanceTestSampleResult
+            {
+                Index = index,
+                Success = response.Success,
+                StatusCode = response.StatusCode,
+                TotalTimeMs = totalMs,
+                TimeToFirstTokenMs = firstTokenMs,
+                TimeToLastTokenMs = lastTokenMs ?? totalMs,
+                TokensPerSecond = tokensPerSecond,
+                PromptTokens = telemetry?.PromptTokens,
+                CompletionTokens = completionTokens,
+                TotalTokens = telemetry?.TotalTokens,
+                StreamChunkCount = telemetry?.StreamChunkCount,
+                RequestBytes = telemetry?.RequestBytes,
+                ResponseBytes = telemetry?.ResponseBytes,
+                Error = response.Error,
+                StartedUtc = DateTime.UtcNow
+            };
+        }
+
+        private static double? CalculateTokensPerSecond(int? completionTokens, double? totalMs)
+        {
+            if (!completionTokens.HasValue || completionTokens.Value <= 0) return null;
+            if (!totalMs.HasValue || totalMs.Value <= 0) return null;
+            return Math.Round(completionTokens.Value / (totalMs.Value / 1000d), 3);
+        }
+
+        private static ModelPerformanceTestSummary SummarizePerformanceSamples(List<ModelPerformanceTestSampleResult> samples)
+        {
+            List<ModelPerformanceTestSampleResult> rows = samples ?? new List<ModelPerformanceTestSampleResult>();
+            return new ModelPerformanceTestSummary
+            {
+                SuccessCount = rows.Count(item => item.Success),
+                FailureCount = rows.Count(item => !item.Success),
+                AverageTotalTimeMs = Average(rows.Select(item => item.TotalTimeMs)),
+                MedianTotalTimeMs = Median(rows.Select(item => item.TotalTimeMs)),
+                MinimumTotalTimeMs = Minimum(rows.Select(item => item.TotalTimeMs)),
+                MaximumTotalTimeMs = Maximum(rows.Select(item => item.TotalTimeMs)),
+                AverageTimeToFirstTokenMs = Average(rows.Select(item => item.TimeToFirstTokenMs)),
+                MedianTimeToFirstTokenMs = Median(rows.Select(item => item.TimeToFirstTokenMs)),
+                AverageTimeToLastTokenMs = Average(rows.Select(item => item.TimeToLastTokenMs)),
+                AverageTokensPerSecond = Average(rows.Select(item => item.TokensPerSecond)),
+                AverageResponseBytes = Average(rows.Select(item => item.ResponseBytes.HasValue ? (double?)item.ResponseBytes.Value : null))
+            };
+        }
+
+        private static double? Average(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Average(), 3);
+        }
+
+        private static double? Median(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).OrderBy(item => item).ToList();
+            if (usable.Count == 0) return null;
+            int midpoint = usable.Count / 2;
+            if (usable.Count % 2 == 1) return Math.Round(usable[midpoint], 3);
+            return Math.Round((usable[midpoint - 1] + usable[midpoint]) / 2d, 3);
+        }
+
+        private static double? Minimum(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Min(), 3);
+        }
+
+        private static double? Maximum(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Max(), 3);
+        }
+
+        private async Task SendLocalPerformanceRelayResponseAsync(WebSocketSession session, ServerPerformanceTestRelayResponseMessage message, CancellationToken token)
+        {
+            await session.SendTextAsync(JsonUtil.Serialize(message), token).ConfigureAwait(false);
         }
 
         private async Task StreamLocalInferenceClientResponseAsync(
@@ -4502,6 +4911,24 @@ namespace Xeno.Server
             }
 
             pending?.SetFinal(message);
+        }
+
+        private void CompletePerformanceTestResponse(WebSocketSession session, ClientPerformanceTestResponseMessage message, RequestContext requestContext)
+        {
+            if (message == null) throw new ArgumentNullException(nameof(message));
+            if (String.IsNullOrWhiteSpace(message.RequestId)) throw new ArgumentException("Performance test response request ID is required.", nameof(message));
+            if (!String.Equals(message.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Performance test response tenant does not match authenticated tenant.");
+            ClientConnection? connection = GetClientConnection(message.ClientId);
+            if (connection == null) throw new UnauthorizedAccessException("Performance test response client is not registered.");
+            if (!String.Equals(connection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Performance test response arrived on the wrong client session.");
+
+            PendingPerformanceTestResponse? pending = null;
+            lock (_PendingPerformanceTestResponsesLock)
+            {
+                _PendingPerformanceTestResponses.TryGetValue(message.RequestId, out pending);
+            }
+
+            pending?.SetResponse(message);
         }
 
         private ClientConnection? GetClientConnection(string? clientId)
@@ -7602,6 +8029,7 @@ namespace Xeno.Server
                     ["/v1.0/api/clients"] = Path(Operation("get", "listClients", "Clients", "List clients", "Lists connected or registered Xeno clients and their advertised models.", "ClientArray", true)),
                     ["/v1.0/api/clients/{id}"] = Path(Operation("delete", "deleteClient", "Clients", "Delete client", "Deletes a registered Xeno client.", "GenericObject", true)),
                     ["/v1.0/api/client-models"] = Path(Operation("delete", "deleteClientModel", "Clients", "Delete client model", "Deletes one model advertised by a client.", "GenericObject", true)),
+                    ["/v1.0/api/model-performance/test"] = Path(Operation("post", "testModelPerformance", "Clients", "Test model performance", "Runs native and hairpin benchmark legs for an advertised model.", "ModelPerformanceTestResponse", true)),
                     ["/v1.0/api/client-telemetry/status"] = Path(Operation("get", "getClientTelemetryStatus", "Client Telemetry", "Client telemetry status", "Returns collection settings, running state, next cycle, connected clients, and recent failures.", "ServerClientTelemetryCollectionStatusResponse", true)),
                     ["/v1.0/api/client-telemetry/latest"] = Path(Operation("get", "getLatestClientTelemetry", "Client Telemetry", "Latest client telemetry", "Returns latest host and provider telemetry for the tenant.", "ServerClientTelemetryLatestResponse", true)),
                     ["/v1.0/api/client-telemetry/collect"] = Path(Operation("post", "collectClientTelemetry", "Client Telemetry", "Collect client telemetry", "Triggers immediate host and provider telemetry collection.", "ServerClientTelemetryCollectResponse", true)),
@@ -7765,6 +8193,17 @@ namespace Xeno.Server
                         ["EffectivePermissionArray"] = ArraySchema("EffectivePermission"),
                         ["AuditRecordArray"] = ArraySchema("AuditRecord"),
                         ["ClientArray"] = ArraySchema("XenoClientRecord"),
+                        ["ModelPerformanceTestResponse"] = ObjectSchema(
+                            Property("requestId", StringSchema()),
+                            Property("model", StringSchema()),
+                            Property("requestType", StringSchema()),
+                            Property("requestCount", IntegerSchema()),
+                            Property("sourceClientId", StringSchema()),
+                            Property("sourceClientName", StringSchema()),
+                            Property("targetClientId", StringSchema()),
+                            Property("targetClientName", StringSchema()),
+                            Property("native", ObjectSchema()),
+                            Property("hairpin", ObjectSchema())),
                         ["ServerClientTelemetrySampleRecordArray"] = ArraySchema("ServerClientTelemetrySampleRecord"),
                         ["ServerProviderTelemetrySampleRecordArray"] = ArraySchema("ServerProviderTelemetrySampleRecord"),
                         ["ServerClientTelemetryRollupBucketArray"] = ArraySchema("ServerClientTelemetryRollupBucket"),
@@ -8624,6 +9063,28 @@ namespace Xeno.Server
                         Property("path", StringSchema()),
                         Property("selectedClientId", StringSchema())),
                     new Dictionary<string, object> { ["ids"] = new[] { "req_example" }, ["model"] = "llama3.2:latest", ["path"] = "/v1/chat/completions" });
+            }
+
+            if (String.Equals(operationId, "testModelPerformance", StringComparison.Ordinal))
+            {
+                return JsonRequestBody(
+                    "Model performance comparison request.",
+                    ObjectSchema(
+                        Property("model", StringSchema()),
+                        Property("sourceClientId", StringSchema()),
+                        Property("targetClientId", StringSchema()),
+                        Property("targetSource", StringSchema()),
+                        Property("requestType", StringEnumSchema("chatCompletions", "completions", "embeddings")),
+                        Property("requestCount", IntegerSchema())),
+                    new Dictionary<string, object>
+                    {
+                        ["model"] = "gemma3:4b",
+                        ["sourceClientId"] = "xcl_source",
+                        ["targetClientId"] = "xcl_target",
+                        ["targetSource"] = "local-ollama",
+                        ["requestType"] = "chatCompletions",
+                        ["requestCount"] = 5
+                    });
             }
 
             if (String.Equals(operationId, "queryModelTokenLeaderboard", StringComparison.Ordinal))

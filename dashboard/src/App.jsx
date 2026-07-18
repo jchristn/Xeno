@@ -2465,6 +2465,7 @@ function AdvertisedModelsView() {
   const [clientIdFilter, setClientIdFilter] = useState('');
   const [includeInactiveModels, setIncludeInactiveModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState(null);
+  const [performanceModel, setPerformanceModel] = useState(null);
   const clientOptions = useMemo(() => buildAdvertisedModelClientOptions(clients.data), [clients.data]);
   const clientModels = useMemo(() => flattenClientModels(clients.data), [clients.data]);
   const visibleClientModels = includeInactiveModels
@@ -2550,6 +2551,14 @@ function AdvertisedModelsView() {
           if (recordId(selectedModel) === recordId(row)) setSelectedModel(null);
           return deleteClientModel(row);
         }}
+        getRowActions={(row) => [{
+          disabled: !isActiveAdvertisedModelClient(row),
+          icon: <Gauge size={14} />,
+          key: 'test-performance',
+          label: t('testPerformance', 'Test Performance'),
+          tooltip: t('tooltipTestModelPerformance', 'Compare native and hairpin performance for this advertised model.'),
+          onSelect: () => setPerformanceModel(row)
+        }]}
         onRefresh={clients.refresh}
         onRowClick={setSelectedModel}
         loading={clients.loading}
@@ -2558,8 +2567,297 @@ function AdvertisedModelsView() {
         title={t('advertisedModels')}
       />
       {selectedModel && <EditRecordModal title={t('modelDetails')} data={selectedModel} onClose={() => setSelectedModel(null)} />}
+      {performanceModel ? <ModelPerformanceTestModal clients={clients.data} model={performanceModel} onClose={() => setPerformanceModel(null)} /> : null}
     </div>
   );
+}
+
+function ModelPerformanceTestModal({ clients, model, onClose }) {
+  const { t } = useTranslation();
+  const modelName = String(value(model, 'name') || '');
+  const allAdvertisedModels = useMemo(() => flattenClientModels(clients), [clients]);
+  const sourceOptions = useMemo(() => buildPerformanceSourceOptions(clients), [clients]);
+  const [requestType, setRequestType] = useState(defaultPerformanceRequestType(model));
+  const targetOptions = useMemo(
+    () => buildPerformanceTargetOptions(allAdvertisedModels, modelName, requestType),
+    [allAdvertisedModels, modelName, requestType]
+  );
+  const [targetKey, setTargetKey] = useState(() => performanceTargetKey(model));
+  const [sourceClientId, setSourceClientId] = useState(() => defaultPerformanceSourceClientId(sourceOptions, value(model, 'clientId')));
+  const [requestCount, setRequestCount] = useState(5);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const selectedTarget = targetOptions.find((option) => option.key === targetKey) || null;
+  const requestTypes = performanceRequestTypes(t);
+  const canRun = !running && Boolean(modelName && sourceClientId && selectedTarget);
+
+  useEffect(() => {
+    if (sourceOptions.some((option) => option.id === sourceClientId)) return;
+    setSourceClientId(sourceOptions[0]?.id || '');
+  }, [sourceClientId, sourceOptions]);
+
+  useEffect(() => {
+    if (targetOptions.some((option) => option.key === targetKey)) return;
+    setTargetKey(targetOptions[0]?.key || '');
+  }, [targetKey, targetOptions]);
+
+  function updateRequestType(nextRequestType) {
+    setRequestType(nextRequestType);
+    setResult(null);
+    setError('');
+  }
+
+  function updateTarget(nextTargetKey) {
+    setTargetKey(nextTargetKey);
+    setResult(null);
+    setError('');
+  }
+
+  function updateSource(nextSourceClientId) {
+    setSourceClientId(nextSourceClientId);
+    setResult(null);
+    setError('');
+  }
+
+  async function runTest() {
+    if (!canRun) return;
+    setRunning(true);
+    setError('');
+    setResult(null);
+    try {
+      const response = await api.post('/v1.0/api/model-performance/test', {
+        model: modelName,
+        requestCount: coerceInteger(requestCount, 5, 1, 10),
+        requestType,
+        sourceClientId,
+        targetClientId: selectedTarget.clientId,
+        targetSource: selectedTarget.source || ''
+      });
+      if (value(response, 'error')) throw new Error(value(response, 'message') || value(response, 'error'));
+      setResult(response);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" disabled={running} onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={!canRun} onClick={runTest} title={t('tooltipRunPerformanceTest', 'Run the selected native and hairpin benchmark legs.')} type="button">
+            {running ? <RefreshCw size={16} /> : <Play size={16} />}
+            <span>{running ? t('running', 'Running') : t('runTest', 'Run Test')}</span>
+          </button>
+        </>
+      )}
+      onClose={running ? undefined : onClose}
+      open
+      size="xlarge"
+      subtitle={t('modelPerformanceSubtitle', { model: modelName, defaultValue: 'Native provider timing vs Xeno hairpin timing for {{model}}.' })}
+      title={t('testPerformance', 'Test Performance')}
+    >
+      <div className="model-performance-layout">
+        <section className="model-performance-config">
+          <label className="form-field compact-field">
+            <span>{t('sourceClient', 'Source Client')}</span>
+            <select disabled={running || sourceOptions.length === 0} onChange={(event) => updateSource(event.target.value)} value={sourceClientId}>
+              {sourceOptions.length === 0 ? <option value="">{t('noConnectedClients', 'No connected clients')}</option> : null}
+              {sourceOptions.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field compact-field">
+            <span>{t('processedOnClient', 'Processed On')}</span>
+            <select disabled={running || targetOptions.length === 0} onChange={(event) => updateTarget(event.target.value)} value={targetKey}>
+              {targetOptions.length === 0 ? <option value="">{t('noCompatibleTargetClients', 'No compatible target clients')}</option> : null}
+              {targetOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field compact-field">
+            <span>{t('requestType', 'Request Type')}</span>
+            <select disabled={running} onChange={(event) => updateRequestType(event.target.value)} value={requestType}>
+              {requestTypes.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field compact-field request-count-field">
+            <span>{t('requestCount', 'Request Count')}</span>
+            <input disabled={running} max="10" min="1" onChange={(event) => setRequestCount(coerceInteger(event.target.value, 1, 1, 10))} type="number" value={requestCount} />
+          </label>
+        </section>
+
+        {error ? <div className="model-performance-error" role="alert">{error}</div> : null}
+        {running ? (
+          <div aria-live="polite" className="model-performance-running" role="status">
+            <div aria-hidden="true" className="table-loading-spinner" />
+            <strong>{t('runningPerformanceTest', 'Running performance test')}</strong>
+          </div>
+        ) : null}
+        {!running && !result ? (
+          <EmptyState message={t('noPerformanceResults', 'No performance test has run for this model yet.')} title={t('noData')} />
+        ) : null}
+        {result ? <ModelPerformanceResults result={result} /> : null}
+      </div>
+    </Modal>
+  );
+}
+
+function ModelPerformanceResults({ result }) {
+  const { t } = useTranslation();
+  const nativeLeg = value(result, 'native') || {};
+  const hairpinLeg = value(result, 'hairpin') || {};
+  const metrics = buildPerformanceChartMetrics(result, t);
+  return (
+    <div className="model-performance-results">
+      <div className="performance-leg-grid">
+        <PerformanceLegSummary icon={<Server size={17} />} leg={nativeLeg} title={t('nativeProvider', 'Native Provider')} />
+        <PerformanceLegSummary icon={<Network size={17} />} leg={hairpinLeg} title={t('xenoHairpin', 'Xeno Hairpin')} />
+      </div>
+      <div className="performance-chart-grid">
+        {metrics.map((metric) => (
+          <PerformanceMetricBarChart key={metric.key} metric={metric} />
+        ))}
+      </div>
+      <PerformanceSamplesTable hairpinLeg={hairpinLeg} nativeLeg={nativeLeg} />
+    </div>
+  );
+}
+
+function PerformanceLegSummary({ icon, leg, title }) {
+  const { t } = useTranslation();
+  const summary = value(leg, 'summary') || {};
+  return (
+    <section className="performance-leg-summary">
+      <div className="performance-leg-heading">
+        <span className="performance-leg-icon">{icon}</span>
+        <div>
+          <h3>{title}</h3>
+          <p>{value(leg, 'description') || '-'}</p>
+        </div>
+      </div>
+      <div className="performance-summary-grid">
+        <KeyValue label={t('success')} value={formatOptionalNumber(value(summary, 'successCount'))} />
+        <KeyValue label={t('failed')} value={formatOptionalNumber(value(summary, 'failureCount'))} />
+        <KeyValue label={t('averageTotalTime', 'Avg Total Time')} value={formatDuration(value(summary, 'averageTotalTimeMs'))} />
+        <KeyValue label={t('medianTotalTime', 'Median Total')} value={formatDuration(value(summary, 'medianTotalTimeMs'))} />
+        <KeyValue label={t('averageFirstToken', 'Avg First Token')} value={formatDuration(value(summary, 'averageTimeToFirstTokenMs'))} />
+        <KeyValue label={t('tokensPerSecond', 'Tokens/s')} value={formatMetricNumber(value(summary, 'averageTokensPerSecond'), 'tokensPerSecond')} />
+      </div>
+    </section>
+  );
+}
+
+function PerformanceMetricBarChart({ metric }) {
+  const width = 540;
+  const height = 142;
+  const left = 118;
+  const right = 96;
+  const plotWidth = width - left - right;
+  const axisY = 112;
+  const maxValue = Math.max(1, metric.nativeValue || 0, metric.hairpinValue || 0);
+  const tickValues = [0, maxValue / 2, maxValue];
+  const nativeWidth = ((metric.nativeValue || 0) / maxValue) * plotWidth;
+  const hairpinWidth = ((metric.hairpinValue || 0) / maxValue) * plotWidth;
+  const rows = [
+    { className: 'native', label: metric.nativeLabel, value: metric.nativeValue, width: nativeWidth, y: 48 },
+    { className: 'hairpin', label: metric.hairpinLabel, value: metric.hairpinValue, width: hairpinWidth, y: 78 }
+  ];
+
+  return (
+    <section className="performance-chart-panel">
+      <h3>{metric.label}</h3>
+      <svg aria-label={`${metric.label} ${metric.axisLabel}`} className="performance-bar-chart" role="img" viewBox={`0 0 ${width} ${height}`}>
+        <line className="performance-chart-axis" x1={left} x2={left + plotWidth} y1={axisY} y2={axisY} />
+        {tickValues.map((tick, index) => {
+          const x = left + (tick / maxValue) * plotWidth;
+          return (
+            <g key={`${metric.key}-tick-${index}`}>
+              <line className="performance-chart-tick" x1={x} x2={x} y1={axisY - 70} y2={axisY + 4} />
+              <text className="performance-chart-tick-label" textAnchor="middle" x={x} y={axisY + 18}>{metric.format(tick)}</text>
+            </g>
+          );
+        })}
+        <text className="performance-chart-axis-label" textAnchor="middle" x={left + plotWidth / 2} y={height - 6}>{metric.axisLabel}</text>
+        {rows.map((row) => (
+          <g key={`${metric.key}-${row.className}`}>
+            <text className="performance-chart-row-label" textAnchor="end" x={left - 12} y={row.y + 12}>{row.label}</text>
+            <rect className={`performance-chart-bar ${row.className}`} height="18" rx="4" ry="4" width={Math.max(0, row.width)} x={left} y={row.y} />
+            <text className="performance-chart-value" x={left + plotWidth + 10} y={row.y + 12}>{metric.format(row.value)}</text>
+          </g>
+        ))}
+      </svg>
+    </section>
+  );
+}
+
+function PerformanceSamplesTable({ hairpinLeg, nativeLeg }) {
+  const { t } = useTranslation();
+  const nativeSamples = collectionRows(value(nativeLeg, 'samples'));
+  const hairpinSamples = collectionRows(value(hairpinLeg, 'samples'));
+  const rowCount = Math.max(nativeSamples.length, hairpinSamples.length);
+  const rows = Array.from({ length: rowCount }, (_, index) => ({
+    hairpin: hairpinSamples[index] || null,
+    index: index + 1,
+    native: nativeSamples[index] || null
+  }));
+
+  if (rows.length === 0) return null;
+
+  return (
+    <section className="performance-samples-section">
+      <h3>{t('sampleResults', 'Sample Results')}</h3>
+      <div className="table-scroll">
+        <table className="data-table performance-sample-table">
+          <thead>
+            <tr>
+              <th>{t('sample', 'Sample')}</th>
+              <th>{t('nativeTotal', 'Native Total')}</th>
+              <th>{t('nativeFirstToken', 'Native First Token')}</th>
+              <th>{t('nativeTokensPerSecond', 'Native Tokens/s')}</th>
+              <th>{t('nativeStatus', 'Native Status')}</th>
+              <th>{t('hairpinTotal', 'Hairpin Total')}</th>
+              <th>{t('hairpinFirstToken', 'Hairpin First Token')}</th>
+              <th>{t('hairpinTokensPerSecond', 'Hairpin Tokens/s')}</th>
+              <th>{t('hairpinStatus', 'Hairpin Status')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`sample-${row.index}`}>
+                <td>{row.index}</td>
+                <td>{formatDuration(value(row.native, 'totalTimeMs'))}</td>
+                <td>{formatDuration(value(row.native, 'timeToFirstTokenMs'))}</td>
+                <td>{formatMetricNumber(value(row.native, 'tokensPerSecond'), 'tokensPerSecond')}</td>
+                <td><PerformanceSampleStatus sample={row.native} /></td>
+                <td>{formatDuration(value(row.hairpin, 'totalTimeMs'))}</td>
+                <td>{formatDuration(value(row.hairpin, 'timeToFirstTokenMs'))}</td>
+                <td>{formatMetricNumber(value(row.hairpin, 'tokensPerSecond'), 'tokensPerSecond')}</td>
+                <td><PerformanceSampleStatus sample={row.hairpin} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function PerformanceSampleStatus({ sample }) {
+  const { t } = useTranslation();
+  if (!sample) return <span className="muted-cell">-</span>;
+  const success = value(sample, 'success') === true;
+  const statusCode = value(sample, 'statusCode');
+  const error = value(sample, 'error');
+  const label = statusCode ? String(statusCode) : (success ? t('success') : t('failed'));
+  return <StatusChip tone={success ? 'success' : 'danger'} value={error ? `${label}: ${error}` : label} />;
 }
 
 function ModelLeaderboardView({ publicMode = false, session = null }) {
@@ -6000,6 +6298,15 @@ function formatBytes(input) {
   return `${(number / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function formatMetricNumber(input, kind) {
+  const number = Number(input);
+  if (!Number.isFinite(number)) return '-';
+  if (kind === 'duration') return formatDuration(number);
+  if (kind === 'bytes') return formatBytes(number);
+  if (kind === 'tokensPerSecond') return `${number.toLocaleString(undefined, { maximumFractionDigits: 2 })} tok/s`;
+  return number.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
 function formatDateTime(input) {
   if (!input) return '-';
   const date = new Date(input);
@@ -6735,6 +7042,137 @@ function advertisedModelClientId(client) {
 
 function advertisedModelClientKey(client, index) {
   return advertisedModelClientId(client) || value(client, 'name') || `client-index-${index}`;
+}
+
+function defaultPerformanceRequestType(model) {
+  if (value(model, 'supportsCompletions') === true) return 'chatCompletions';
+  if (value(model, 'supportsEmbeddings') === true) return 'embeddings';
+  return 'chatCompletions';
+}
+
+function performanceRequestTypes(t) {
+  return [
+    { key: 'chatCompletions', label: t('chatCompletions', 'Chat Completions') },
+    { key: 'completions', label: t('completions', 'Completions') },
+    { key: 'embeddings', label: t('embeddings', 'Embeddings') }
+  ];
+}
+
+function buildPerformanceSourceOptions(clients) {
+  const seen = new Set();
+  return collectionRows(clients)
+    .map((client, index) => {
+      const id = advertisedModelClientId(client);
+      return {
+        client,
+        id,
+        label: performanceClientLabel(client, index)
+      };
+    })
+    .filter((option) => {
+      if (!option.id) return false;
+      if (seen.has(option.id)) return false;
+      if (!performanceClientConnected(option.client)) return false;
+      seen.add(option.id);
+      return true;
+    })
+    .map((option) => ({ id: option.id, label: option.label }));
+}
+
+function buildPerformanceTargetOptions(models, modelName, requestType) {
+  const seen = new Set();
+  return collectionRows(models)
+    .filter((advertisedModel) => isActiveAdvertisedModelClient(advertisedModel))
+    .filter((advertisedModel) => String(value(advertisedModel, 'name') || '') === modelName)
+    .filter((advertisedModel) => modelSupportsPerformanceRequest(advertisedModel, requestType))
+    .map((advertisedModel) => {
+      const clientId = String(value(advertisedModel, 'clientId') || '');
+      const key = performanceTargetKey(advertisedModel);
+      const clientName = value(advertisedModel, 'clientName') || clientId;
+      const source = value(advertisedModel, 'source') || '';
+      const apiType = value(advertisedModel, 'apiType') || '';
+      const labelParts = [clientName];
+      if (source) labelParts.push(source);
+      if (apiType) labelParts.push(apiType);
+      return {
+        apiType,
+        clientId,
+        key,
+        label: labelParts.filter(Boolean).join(' - '),
+        source
+      };
+    })
+    .filter((option) => {
+      if (!option.clientId || !option.key) return false;
+      if (seen.has(option.key)) return false;
+      seen.add(option.key);
+      return true;
+    });
+}
+
+function performanceTargetKey(model) {
+  return JSON.stringify([
+    String(value(model, 'clientId') || ''),
+    String(value(model, 'source') || ''),
+    String(value(model, 'apiType') || '')
+  ]);
+}
+
+function defaultPerformanceSourceClientId(sourceOptions, targetClientId) {
+  const nonTarget = sourceOptions.find((option) => option.id && option.id !== targetClientId);
+  return nonTarget?.id || sourceOptions[0]?.id || String(targetClientId || '');
+}
+
+function performanceClientConnected(client) {
+  if (value(client, 'connected') === false) return false;
+  const serviceState = String(value(client, 'serviceState') || '').trim().toLowerCase();
+  if (serviceState && serviceState !== 'normal') return false;
+  return true;
+}
+
+function performanceClientLabel(client, index) {
+  const clientId = advertisedModelClientId(client);
+  const clientName = value(client, 'name');
+  if (clientName && clientId && clientName !== clientId) return `${clientName} (${clientId})`;
+  return clientName || clientId || `Client ${index + 1}`;
+}
+
+function modelSupportsPerformanceRequest(model, requestType) {
+  if (String(requestType || '').toLowerCase() === 'embeddings') return value(model, 'supportsEmbeddings') === true;
+  return value(model, 'supportsCompletions') === true;
+}
+
+function buildPerformanceChartMetrics(result, t) {
+  const nativeSummary = value(value(result, 'native'), 'summary') || {};
+  const hairpinSummary = value(value(result, 'hairpin'), 'summary') || {};
+  const nativeLabel = t('native', 'Native');
+  const hairpinLabel = t('hairpin', 'Hairpin');
+  return [
+    performanceChartMetric('averageTotalTimeMs', t('averageTotalTime', 'Avg Total Time'), t('elapsedTime', 'Elapsed time'), 'duration', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),
+    performanceChartMetric('medianTotalTimeMs', t('medianTotalTime', 'Median Total'), t('elapsedTime', 'Elapsed time'), 'duration', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),
+    performanceChartMetric('averageTimeToFirstTokenMs', t('averageFirstToken', 'Avg First Token'), t('elapsedTime', 'Elapsed time'), 'duration', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),
+    performanceChartMetric('averageTimeToLastTokenMs', t('averageLastToken', 'Avg Last Token'), t('elapsedTime', 'Elapsed time'), 'duration', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),
+    performanceChartMetric('averageTokensPerSecond', t('tokensPerSecond', 'Tokens/s'), t('outputTokensPerSecond', 'Output tokens per second'), 'tokensPerSecond', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),
+    performanceChartMetric('averageResponseBytes', t('responseBytes', 'Response Bytes'), t('responseBytesAxis', 'Response bytes'), 'bytes', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel)
+  ];
+}
+
+function performanceChartMetric(key, label, axisLabel, kind, nativeSummary, hairpinSummary, nativeLabel, hairpinLabel) {
+  return {
+    axisLabel,
+    format: (input) => formatMetricNumber(input, kind),
+    hairpinLabel,
+    hairpinValue: finiteMetricValue(value(hairpinSummary, key)),
+    key,
+    label,
+    nativeLabel,
+    nativeValue: finiteMetricValue(value(nativeSummary, key))
+  };
+}
+
+function finiteMetricValue(input) {
+  const number = Number(input);
+  return Number.isFinite(number) ? number : null;
 }
 
 function isScalarValue(input) {

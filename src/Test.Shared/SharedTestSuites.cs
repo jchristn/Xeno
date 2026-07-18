@@ -4649,6 +4649,11 @@ namespace Test.Shared
                         executeAsync: delegate { return RunRelayStreamingSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "Relay",
+                        "ModelPerformanceTestComparesNativeAndHairpin",
+                        "Dashboard model performance test dispatches native and hairpin benchmark legs over WebSockets",
+                        executeAsync: delegate { return RunModelPerformanceTestSmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
                         "WebSocketRequiresCredential",
                         "WebSocket client connections require client credential authentication",
                         executeAsync: delegate { return RunWebSocketGateSmokeAsync(); }),
@@ -6049,6 +6054,7 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/auth/logout", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies", Method = "get" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/model-performance/test", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/api/tags", Method = "get" }
                         })
                         {
@@ -6084,6 +6090,7 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/client-models", Method = "delete" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/request-history/bulk", Method = "post" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/model-performance/test", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/settings", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/email/test", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1/chat/completions", Method = "post" },
@@ -6692,6 +6699,140 @@ namespace Test.Shared
             }
         }
 
+        private static async Task RunModelPerformanceTestSmokeAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-performance-test-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+            settings.WebSocket.RequestTimeoutMs = 10000;
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (ClientWebSocket sourceSocket = new ClientWebSocket())
+                    using (ClientWebSocket targetSocket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(sourceSocket);
+                        ApplySeedCredentialHeaders(targetSocket);
+                        await sourceSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        await targetSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        string? sourceConnected = await ReceiveWebSocketTextAsync(sourceSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        string? targetConnected = await ReceiveWebSocketTextAsync(targetSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(sourceConnected) || !sourceConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Performance source socket did not connect: " + sourceConnected);
+                        if (String.IsNullOrWhiteSpace(targetConnected) || !targetConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Performance target socket did not connect: " + targetConnected);
+
+                        await SendWebSocketJsonAsync(sourceSocket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_performance_source",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "performance-source",
+                            inventory = new
+                            {
+                                runners = Array.Empty<object>()
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+                        await SendWebSocketJsonAsync(targetSocket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_performance_target",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "performance-target",
+                            inventory = new
+                            {
+                                runners = new[]
+                                {
+                                    new
+                                    {
+                                        name = "touchstone-provider",
+                                        apiType = "OpenAICompatible",
+                                        endpoint = "http://127.0.0.1:1",
+                                        models = new[]
+                                        {
+                                            new { name = "touchstone-performance-model", supportsCompletions = true, supportsEmbeddings = true }
+                                        }
+                                    }
+                                }
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+
+                        string? sourceRegistered = await ReceiveWebSocketTextAsync(sourceSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        string? targetRegistered = await ReceiveWebSocketTextAsync(targetSocket, clientTokenSource.Token).ConfigureAwait(false);
+                        if (String.IsNullOrWhiteSpace(sourceRegistered) || !sourceRegistered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Performance source did not register: " + sourceRegistered);
+                        if (String.IsNullOrWhiteSpace(targetRegistered) || !targetRegistered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Performance target did not register: " + targetRegistered);
+
+                        Task sourceTask = FakePerformanceSourceLoopAsync(sourceSocket, clientTokenSource.Token);
+                        Task targetTask = FakePerformanceTargetLoopAsync(targetSocket, clientTokenSource.Token);
+                        await WaitForRegisteredClientAsync(port, "performance-source").ConfigureAwait(false);
+                        await WaitForRegisteredClientAsync(port, "performance-target").ConfigureAwait(false);
+
+                        using (HttpClient httpClient = new HttpClient())
+                        {
+                            string baseUrl = "http://127.0.0.1:" + port;
+                            await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                            using (HttpResponseMessage response = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/model-performance/test", JsonUtil.Serialize(new ModelPerformanceTestRequest
+                            {
+                                Model = "touchstone-performance-model",
+                                SourceClientId = "xcl_performance_source",
+                                TargetClientId = "xcl_performance_target",
+                                TargetSource = "touchstone-provider",
+                                RequestType = "chatCompletions",
+                                RequestCount = 1
+                            })).ConfigureAwait(false))
+                            {
+                                string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Model performance test failed: " + (int)response.StatusCode + " " + json);
+                                ModelPerformanceTestResponse result = DeserializeRequired<ModelPerformanceTestResponse>(json);
+                                if (!String.Equals(result.Model, "touchstone-performance-model", StringComparison.Ordinal)) throw new InvalidOperationException("Performance response model mismatch.");
+                                if (result.RequestCount != 1) throw new InvalidOperationException("Performance response request count mismatch.");
+                                if (!String.Equals(result.SourceClientId, "xcl_performance_source", StringComparison.Ordinal)) throw new InvalidOperationException("Performance response source client mismatch.");
+                                if (!String.Equals(result.TargetClientId, "xcl_performance_target", StringComparison.Ordinal)) throw new InvalidOperationException("Performance response target client mismatch.");
+                                AssertPerformanceLeg(result.Native, "native");
+                                AssertPerformanceLeg(result.Hairpin, "hairpin");
+                                if (result.Hairpin.Samples[0].TimeToFirstTokenMs == null) throw new InvalidOperationException("Hairpin performance result did not include time to first token.");
+                                if (result.Hairpin.Samples[0].TokensPerSecond == null) throw new InvalidOperationException("Hairpin performance result did not include tokens per second.");
+                            }
+                        }
+
+                        clientTokenSource.Cancel();
+                        try
+                        {
+                            await Task.WhenAll(sourceTask, targetTask).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                        }
+                        catch (WebSocketException)
+                        {
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
         private static async Task RunRelaySmokeAsync()
         {
             int port = GetFreePort();
@@ -7284,6 +7425,272 @@ namespace Test.Shared
                     await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
+        }
+
+        private static async Task FakePerformanceTargetLoopAsync(ClientWebSocket socket, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+            {
+                string? message = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+                if (String.IsNullOrWhiteSpace(message)) continue;
+                WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+                if (envelope == null) continue;
+
+                if (String.Equals(envelope.Type, "server.performanceTest.request", StringComparison.OrdinalIgnoreCase))
+                {
+                    ServerPerformanceTestRequestMessage? request = JsonUtil.Deserialize<ServerPerformanceTestRequestMessage>(message);
+                    if (request == null) throw new InvalidOperationException("Performance target request could not be deserialized.");
+                    ModelPerformanceTestSampleResult sample = BuildPerformanceSample(1, 52, 11, 22, 384);
+                    await SendWebSocketJsonAsync(socket, new ClientPerformanceTestResponseMessage
+                    {
+                        Type = "client.performanceTest.response",
+                        RequestId = request.RequestId,
+                        ClientId = "xcl_performance_target",
+                        TenantId = Constants.DefaultTenantId,
+                        Mode = "direct",
+                        Success = true,
+                        Result = new ModelPerformanceTestLegResult
+                        {
+                            Name = "native",
+                            Description = "native performance smoke",
+                            Samples = new List<ModelPerformanceTestSampleResult> { sample },
+                            Summary = BuildSinglePerformanceSummary(sample)
+                        }
+                    }, token).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (String.Equals(envelope.Type, "server.request", StringComparison.OrdinalIgnoreCase))
+                {
+                    ServerRequestMessage? request = JsonUtil.Deserialize<ServerRequestMessage>(message);
+                    if (request == null) throw new InvalidOperationException("Performance relay target request could not be deserialized.");
+                    await SendPerformanceTargetStreamResponseAsync(socket, request, token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task FakePerformanceSourceLoopAsync(ClientWebSocket socket, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+            {
+                string? message = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+                if (String.IsNullOrWhiteSpace(message)) continue;
+                WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+                if (envelope == null) continue;
+                if (!String.Equals(envelope.Type, "server.performanceTest.request", StringComparison.OrdinalIgnoreCase)) continue;
+
+                ServerPerformanceTestRequestMessage? request = JsonUtil.Deserialize<ServerPerformanceTestRequestMessage>(message);
+                if (request == null) throw new InvalidOperationException("Performance source request could not be deserialized.");
+                List<ModelPerformanceTestSampleResult> samples = new List<ModelPerformanceTestSampleResult>();
+                int requestCount = Math.Clamp(request.RequestCount, 1, 10);
+                for (int index = 1; index <= requestCount; index++)
+                {
+                    string sampleId = "pts_" + Guid.NewGuid().ToString("N");
+                    await SendWebSocketJsonAsync(socket, new ClientPerformanceTestRelayRequestMessage
+                    {
+                        Type = "client.performanceTest.relay.request",
+                        RequestId = request.RequestId,
+                        SampleId = sampleId,
+                        Index = index,
+                        SourceClientId = "xcl_performance_source",
+                        TargetClientId = request.TargetClientId,
+                        TenantId = Constants.DefaultTenantId,
+                        TargetApiType = request.TargetApiType,
+                        TargetSource = request.TargetSource,
+                        Model = request.Model,
+                        RequestType = request.RequestType,
+                        Method = "POST",
+                        RelativePath = "/v1/chat/completions",
+                        Stream = true,
+                        Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                        Body = "{\"model\":\"" + request.Model + "\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"touchstone performance\"}]}"
+                    }, token).ConfigureAwait(false);
+
+                    ServerPerformanceTestRelayResponseMessage relayResponse = await ReceivePerformanceRelayResponseAsync(socket, sampleId, token).ConfigureAwait(false);
+                    ModelPerformanceTestSampleResult sample = relayResponse.Result ?? BuildPerformanceSample(index, 80, 24, 16, 420);
+                    samples.Add(sample);
+                }
+
+                await SendWebSocketJsonAsync(socket, new ClientPerformanceTestResponseMessage
+                {
+                    Type = "client.performanceTest.response",
+                    RequestId = request.RequestId,
+                    ClientId = "xcl_performance_source",
+                    TenantId = Constants.DefaultTenantId,
+                    Mode = "relay",
+                    Success = samples.Any(item => item.Success),
+                    Result = new ModelPerformanceTestLegResult
+                    {
+                        Name = "hairpin",
+                        Description = "hairpin performance smoke",
+                        Samples = samples,
+                        Summary = BuildPerformanceSummary(samples)
+                    }
+                }, token).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task<ServerPerformanceTestRelayResponseMessage> ReceivePerformanceRelayResponseAsync(ClientWebSocket socket, string sampleId, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+            {
+                string? message = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+                if (String.IsNullOrWhiteSpace(message)) continue;
+                WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+                if (envelope == null) continue;
+                if (!String.Equals(envelope.Type, "server.performanceTest.relay.response", StringComparison.OrdinalIgnoreCase)) continue;
+                ServerPerformanceTestRelayResponseMessage? response = JsonUtil.Deserialize<ServerPerformanceTestRelayResponseMessage>(message);
+                if (response != null && String.Equals(response.SampleId, sampleId, StringComparison.Ordinal)) return response;
+            }
+
+            throw new OperationCanceledException("Performance relay response was not received.");
+        }
+
+        private static async Task SendPerformanceTargetStreamResponseAsync(ClientWebSocket socket, ServerRequestMessage request, CancellationToken token)
+        {
+            string requestId = String.IsNullOrWhiteSpace(request.RequestId) ? Guid.NewGuid().ToString("N") : request.RequestId;
+            string first = "data: {\"choices\":[{\"delta\":{\"content\":\"perf-\"}}]}\n\n";
+            string second = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":16,\"total_tokens\":21}}\n\ndata: [DONE]\n\n";
+            string fullBody = first + second;
+            await SendWebSocketJsonAsync(socket, new ClientResponseMessage
+            {
+                Type = "client.response.start",
+                RequestId = requestId,
+                ClientId = "xcl_performance_target",
+                TenantId = Constants.DefaultTenantId,
+                Success = true,
+                StatusCode = 200,
+                ContentType = "text/event-stream",
+                Headers = new Dictionary<string, string>
+                {
+                    ["Content-Type"] = "text/event-stream"
+                },
+                Telemetry = new RequestHistoryTelemetry
+                {
+                    RequestToHeadersMs = 7,
+                    TransferMode = RequestTransferModeEnum.Stream
+                }
+            }, token).ConfigureAwait(false);
+            await SendWebSocketJsonAsync(socket, new ClientResponseChunkMessage
+            {
+                Type = "client.response.chunk",
+                RequestId = requestId,
+                ClientId = "xcl_performance_target",
+                TenantId = Constants.DefaultTenantId,
+                Sequence = 1,
+                Encoding = "base64",
+                ByteCount = Encoding.UTF8.GetByteCount(first),
+                ContentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(first)),
+                SentUtc = DateTime.UtcNow
+            }, token).ConfigureAwait(false);
+            await Task.Delay(10, token).ConfigureAwait(false);
+            await SendWebSocketJsonAsync(socket, new ClientResponseChunkMessage
+            {
+                Type = "client.response.chunk",
+                RequestId = requestId,
+                ClientId = "xcl_performance_target",
+                TenantId = Constants.DefaultTenantId,
+                Sequence = 2,
+                Encoding = "base64",
+                ByteCount = Encoding.UTF8.GetByteCount(second),
+                ContentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(second)),
+                SentUtc = DateTime.UtcNow
+            }, token).ConfigureAwait(false);
+            await SendWebSocketJsonAsync(socket, new ClientResponseMessage
+            {
+                Type = "client.response.complete",
+                RequestId = requestId,
+                ClientId = "xcl_performance_target",
+                TenantId = Constants.DefaultTenantId,
+                Success = true,
+                StatusCode = 200,
+                ContentType = "text/event-stream",
+                Headers = new Dictionary<string, string>
+                {
+                    ["Content-Type"] = "text/event-stream"
+                },
+                Telemetry = new RequestHistoryTelemetry
+                {
+                    TotalTimeMs = 66,
+                    UpstreamTotalMs = 66,
+                    RequestToHeadersMs = 7,
+                    TimeToFirstTokenMs = 18,
+                    TotalStreamingTimeMs = 48,
+                    PromptTokens = 5,
+                    CompletionTokens = 16,
+                    TotalTokens = 21,
+                    StreamChunkCount = 2,
+                    StreamEventCount = 3,
+                    RequestBytes = Encoding.UTF8.GetByteCount(request.Body ?? String.Empty),
+                    ResponseBytes = Encoding.UTF8.GetByteCount(fullBody),
+                    TransferMode = RequestTransferModeEnum.Stream,
+                    ProviderRequestId = "performance_touchstone"
+                },
+                Body = fullBody
+            }, token).ConfigureAwait(false);
+        }
+
+        private static ModelPerformanceTestSampleResult BuildPerformanceSample(int index, double totalMs, double firstTokenMs, int completionTokens, long responseBytes)
+        {
+            return new ModelPerformanceTestSampleResult
+            {
+                Index = index,
+                Success = true,
+                StatusCode = 200,
+                TotalTimeMs = totalMs,
+                TimeToFirstTokenMs = firstTokenMs,
+                TimeToLastTokenMs = totalMs,
+                TokensPerSecond = Math.Round(completionTokens / (totalMs / 1000d), 3),
+                PromptTokens = 5,
+                CompletionTokens = completionTokens,
+                TotalTokens = completionTokens + 5,
+                StreamChunkCount = 2,
+                RequestBytes = 128,
+                ResponseBytes = responseBytes,
+                StartedUtc = DateTime.UtcNow
+            };
+        }
+
+        private static ModelPerformanceTestSummary BuildSinglePerformanceSummary(ModelPerformanceTestSampleResult sample)
+        {
+            return BuildPerformanceSummary(new List<ModelPerformanceTestSampleResult> { sample });
+        }
+
+        private static ModelPerformanceTestSummary BuildPerformanceSummary(List<ModelPerformanceTestSampleResult> samples)
+        {
+            List<ModelPerformanceTestSampleResult> rows = samples ?? new List<ModelPerformanceTestSampleResult>();
+            return new ModelPerformanceTestSummary
+            {
+                SuccessCount = rows.Count(item => item.Success),
+                FailureCount = rows.Count(item => !item.Success),
+                AverageTotalTimeMs = AveragePerformanceMetric(rows.Select(item => item.TotalTimeMs)),
+                MedianTotalTimeMs = AveragePerformanceMetric(rows.Select(item => item.TotalTimeMs)),
+                MinimumTotalTimeMs = AveragePerformanceMetric(rows.Select(item => item.TotalTimeMs)),
+                MaximumTotalTimeMs = AveragePerformanceMetric(rows.Select(item => item.TotalTimeMs)),
+                AverageTimeToFirstTokenMs = AveragePerformanceMetric(rows.Select(item => item.TimeToFirstTokenMs)),
+                MedianTimeToFirstTokenMs = AveragePerformanceMetric(rows.Select(item => item.TimeToFirstTokenMs)),
+                AverageTimeToLastTokenMs = AveragePerformanceMetric(rows.Select(item => item.TimeToLastTokenMs)),
+                AverageTokensPerSecond = AveragePerformanceMetric(rows.Select(item => item.TokensPerSecond)),
+                AverageResponseBytes = AveragePerformanceMetric(rows.Select(item => item.ResponseBytes.HasValue ? (double?)item.ResponseBytes.Value : null))
+            };
+        }
+
+        private static double? AveragePerformanceMetric(IEnumerable<double?> values)
+        {
+            List<double> usable = values.Where(item => item.HasValue).Select(item => item!.Value).ToList();
+            return usable.Count == 0 ? null : Math.Round(usable.Average(), 3);
+        }
+
+        private static void AssertPerformanceLeg(ModelPerformanceTestLegResult leg, string expectedName)
+        {
+            if (leg == null) throw new InvalidOperationException("Performance leg was null: " + expectedName);
+            if (!String.Equals(leg.Name, expectedName, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Performance leg name mismatch: " + leg.Name);
+            if (leg.Samples.Count != 1) throw new InvalidOperationException("Performance leg sample count mismatch for " + expectedName + ".");
+            ModelPerformanceTestSampleResult sample = leg.Samples[0];
+            if (!sample.Success) throw new InvalidOperationException("Performance sample failed for " + expectedName + ": " + sample.Error);
+            if (sample.TotalTimeMs == null || sample.TotalTimeMs <= 0) throw new InvalidOperationException("Performance sample missing total time for " + expectedName + ".");
+            if (leg.Summary.SuccessCount != 1) throw new InvalidOperationException("Performance leg summary success count mismatch for " + expectedName + ".");
+            if (leg.Summary.AverageTotalTimeMs == null || leg.Summary.AverageTotalTimeMs <= 0) throw new InvalidOperationException("Performance leg summary missing average total time for " + expectedName + ".");
         }
 
         private static async Task FakeClientLoopAsync(ClientWebSocket socket, CancellationToken token)
