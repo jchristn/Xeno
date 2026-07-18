@@ -2319,9 +2319,9 @@ namespace Xeno.Client
                 }
             }
 
-            AddPulledModel(settings, runner, request.Model);
-            SaveInventorySettings(settings);
-            await SendClientInventoryUpdateAsync(socket, settings, token).ConfigureAwait(false);
+            ClientSettings persistedSettings = SavePulledModelSettings(settings, runner, request.Model);
+            await LocalDashboardRuntime.RefreshSettingsAsync(persistedSettings, token).ConfigureAwait(false);
+            await SendClientInventoryUpdateAsync(socket, persistedSettings, token).ConfigureAwait(false);
             await SendModelManagementProgressAsync(socket, settings, request, "completed", "success", "Ollama model pull completed.", null, null, null, null, token).ConfigureAwait(false);
             return BuildModelManagementResponse(settings, request, true, statusCode, "Ollama model pull completed.", null, responseBody);
         }
@@ -2366,9 +2366,28 @@ namespace Xeno.Client
             return BuildModelManagementResponse(settings, request, true, statusCode, "Ollama model delete completed.", null, responseBody);
         }
 
-        private static void AddPulledModel(ClientSettings settings, ClientRunnerSettings runner, string modelName)
+        private static ClientSettings SavePulledModelSettings(ClientSettings runtimeSettings, ClientRunnerSettings runtimeRunner, string modelName)
         {
-            if (runner.Models.Any(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase))) return;
+            ClientSettings latestSettings = LoadRuntimeSettingsForConnectedSession(runtimeSettings);
+            ClientRunnerSettings latestRunner = latestSettings.Runners.FirstOrDefault(item => String.Equals(item.Name, runtimeRunner.Name, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("The Ollama provider selected for model pull is no longer configured: " + runtimeRunner.Name);
+            AddPulledModel(latestRunner, modelName);
+            SaveInventorySettings(latestSettings);
+            runtimeSettings.Providers = latestSettings.Providers;
+            return latestSettings;
+        }
+
+        private static void AddPulledModel(ClientRunnerSettings runner, string modelName)
+        {
+            runner.Models ??= new List<ClientModelSettings>();
+            ClientModelSettings? model = runner.Models.FirstOrDefault(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
+            if (model != null)
+            {
+                model.SupportsCompletions = true;
+                model.SupportsEmbeddings = false;
+                return;
+            }
+
             runner.Models.Add(new ClientModelSettings
             {
                 Name = modelName,

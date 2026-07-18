@@ -2353,6 +2353,14 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             await RunClientBackgroundConnectSmokeAsync().ConfigureAwait(false);
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientModelPullPersistsAdvertisedModel",
+                        "Client model pull persists advertised model",
+                        executeAsync: async delegate
+                        {
+                            await RunClientModelPullPersistsModelAsync().ConfigureAwait(false);
                         })
                 });
         }
@@ -6823,6 +6831,126 @@ namespace Test.Shared
                     if (stop.ExitCode != 0) throw new InvalidOperationException("Stop command failed: " + stop.StandardError + stop.StandardOutput);
                     if (!stop.StandardOutput.Contains("\"stopped\": true", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Stop did not report success: " + stop.StandardOutput);
                     if (restartedState.ProcessId != null && IsProcessRunningForTest(restartedState.ProcessId.Value)) throw new InvalidOperationException("Background worker still running after stop.");
+                }
+                finally
+                {
+                    await RunXenoClientAsync(new[] { "stop", "--force" }, clientHome).ConfigureAwait(false);
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                    if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                }
+            }
+        }
+
+        private static async Task RunClientModelPullPersistsModelAsync()
+        {
+            int port = GetFreePort();
+            int dashboardPort = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-client-pull-" + Guid.NewGuid().ToString("N") + ".db");
+            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-pull-" + Guid.NewGuid().ToString("N"));
+            string settingsFile = Path.Combine(clientHome, "client.json");
+            string pulledModelName = "touchstone-pulled-from-server:latest";
+            string providerName = "pull-ollama";
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            using (FakeOllamaPullServer ollama = new FakeOllamaPullServer())
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    Directory.CreateDirectory(clientHome);
+                    ClientSettings clientSettings = new ClientSettings
+                    {
+                        TenantId = Constants.DefaultTenantId,
+                        Name = "model-pull-touchstone"
+                    };
+                    clientSettings.Server.Url = "ws://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) + settings.WebSocket.Path;
+                    clientSettings.Server.RestUrl = "http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture);
+                    clientSettings.Server.AccessKey = "default";
+                    clientSettings.LocalDashboard.Enabled = true;
+                    clientSettings.LocalDashboard.Host = "127.0.0.1";
+                    clientSettings.LocalDashboard.Port = dashboardPort;
+                    clientSettings.LocalDashboard.RequireLocalToken = false;
+                    clientSettings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
+                    clientSettings.Telemetry.Enabled = false;
+                    clientSettings.Telemetry.ProviderTelemetry.Enabled = false;
+                    clientSettings.Providers.Add(new ClientRunnerSettings
+                    {
+                        Name = providerName,
+                        ApiType = "Ollama",
+                        Endpoint = ollama.BaseUrl,
+                        AllowModelManagement = true,
+                        Models = new List<ClientModelSettings>()
+                    });
+                    File.WriteAllText(settingsFile, JsonUtil.Serialize(clientSettings, true));
+
+                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                    if (connect.ExitCode != 0) throw new InvalidOperationException("Background client start failed: " + connect.StandardError + connect.StandardOutput);
+                    await WaitForRegisteredClientAsync(port, "model-pull-touchstone").ConfigureAwait(false);
+
+                    ClientSettings connectedSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(settingsFile));
+                    string clientId = connectedSettings.ClientId ?? throw new InvalidOperationException("Client ID was not written to client.json.");
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string baseUrl = "http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture);
+                        await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                        using (HttpResponseMessage pullResponse = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models/pull", JsonUtil.Serialize(new ClientModelPullRequest
+                        {
+                            ClientId = clientId,
+                            Model = pulledModelName,
+                            Source = providerName
+                        })).ConfigureAwait(false))
+                        {
+                            string pullJson = await pullResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!pullResponse.IsSuccessStatusCode) throw new InvalidOperationException("Client model pull failed: " + pullJson);
+                            ClientModelManagementResponseMessage pullResult = DeserializeRequired<ClientModelManagementResponseMessage>(pullJson);
+                            if (!pullResult.Success) throw new InvalidOperationException("Client model pull did not report success: " + pullJson);
+                        }
+
+                        string clientsJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
+                        List<XenoClientRecord> clients = DeserializeRequired<List<XenoClientRecord>>(clientsJson);
+                        XenoClientRecord serverClient = clients.FirstOrDefault(item => String.Equals(item.Id, clientId, StringComparison.Ordinal))
+                            ?? throw new InvalidOperationException("Pulled-model client was not returned by server: " + clientsJson);
+                        if (!serverClient.Models.Any(item => String.Equals(item.Name, pulledModelName, StringComparison.OrdinalIgnoreCase) && String.Equals(item.Source, providerName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            throw new InvalidOperationException("Server advertised models did not include pulled model: " + clientsJson);
+                        }
+                    }
+
+                    if (ollama.PullCount != 1) throw new InvalidOperationException("Fake Ollama pull count mismatch: " + ollama.PullCount.ToString(CultureInfo.InvariantCulture));
+                    ClientSettings persistedSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(settingsFile));
+                    ClientRunnerSettings provider = persistedSettings.Providers.FirstOrDefault(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new InvalidOperationException("Pulled model provider was not persisted.");
+                    if (!provider.Models.Any(item => String.Equals(item.Name, pulledModelName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new InvalidOperationException("Pulled model was not persisted to client.json: " + File.ReadAllText(settingsFile));
+                    }
+
+                    using (HttpClient localClient = new HttpClient())
+                    {
+                        string localModelsJson = await localClient.GetStringAsync("http://127.0.0.1:" + dashboardPort.ToString(CultureInfo.InvariantCulture) + "/api/v1/models").ConfigureAwait(false);
+                        LocalModelListResponse localModels = DeserializeRequired<LocalModelListResponse>(localModelsJson);
+                        if (!localModels.Models.Any(item => String.Equals(item.Name, pulledModelName, StringComparison.OrdinalIgnoreCase) && String.Equals(item.Provider, providerName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            throw new InvalidOperationException("Local dashboard models did not include pulled model: " + localModelsJson);
+                        }
+                    }
                 }
                 finally
                 {

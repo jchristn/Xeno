@@ -103,6 +103,14 @@ namespace Xeno.Client.LocalDashboard
             GC.SuppressFinalize(this);
         }
 
+        internal async Task RefreshSettingsAsync(ClientSettings settings, CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            token.ThrowIfCancellationRequested();
+            ApplyReloadedSettings(settings);
+            await LocalDashboardRuntime.SnapshotConfigurationAsync(_History, _Settings, token).ConfigureAwait(false);
+        }
+
         private static void ValidateHost(string host)
         {
             if (String.IsNullOrWhiteSpace(host)) throw new ArgumentException("Local dashboard host cannot be empty.");

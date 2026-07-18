@@ -198,6 +198,18 @@ namespace Xeno.Client.LocalDashboard
             await SnapshotConfigurationAsync(history, settings, token).ConfigureAwait(false);
         }
 
+        internal static async Task RefreshSettingsAsync(ClientSettings settings, CancellationToken token)
+        {
+            LocalDashboardService? service = _Service;
+            if (service != null)
+            {
+                await service.RefreshSettingsAsync(settings, token).ConfigureAwait(false);
+                return;
+            }
+
+            await SnapshotConfigurationAsync(settings, token).ConfigureAwait(false);
+        }
+
         /// <summary>
         /// Snapshot provider and model configuration to a specific history store.
         /// </summary>
