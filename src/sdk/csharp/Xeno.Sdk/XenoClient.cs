@@ -533,6 +533,17 @@
         }
 
         /// <summary>
+        /// Pulls a model on a managed Ollama client provider.
+        /// </summary>
+        /// <param name="request">Client model pull payload.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Pull response JSON.</returns>
+        public async Task<XenoObjectResponse> PullClientModelAsync(object request, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoObjectResponse>("/v1.0/api/client-models/pull", request ?? new object(), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets server-collected client telemetry status.
         /// </summary>
         /// <param name="token">Cancellation token.</param>

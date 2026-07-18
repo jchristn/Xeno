@@ -89,7 +89,7 @@ For the seeded Docker server, use password `password`.
 6. Add a local Ollama provider.
 
 ```powershell
-xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:11434
+xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:11434 --allow-model-management
 ```
 
 7. Advertise a completion model.

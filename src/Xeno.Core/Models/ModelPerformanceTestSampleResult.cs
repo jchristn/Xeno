@@ -8,7 +8,7 @@ namespace Xeno.Core.Models
     public class ModelPerformanceTestSampleResult
     {
         /// <summary>
-        /// One-based sample index.
+        /// One-based measured sample index. Warmup progress samples may use 0.
         /// </summary>
         public int Index { get; set; } = 0;
 

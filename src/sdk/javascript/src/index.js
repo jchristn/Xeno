@@ -257,6 +257,10 @@ export class XenoClient {
     return this.#request('DELETE', '/v1.0/api/client-models', model);
   }
 
+  async pullClientModel(request = {}) {
+    return this.#request('POST', '/v1.0/api/client-models/pull', request);
+  }
+
   async getClientTelemetryStatus() {
     return this.#request('GET', '/v1.0/api/client-telemetry/status');
   }

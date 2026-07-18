@@ -19,5 +19,10 @@ namespace Test.Shared
         /// Whether embeddings are supported.
         /// </summary>
         public bool SupportsEmbeddings { get; set; } = false;
+
+        /// <summary>
+        /// Whether server-side model management is allowed for this model provider.
+        /// </summary>
+        public bool ModelManagementAllowed { get; set; } = false;
     }
 }

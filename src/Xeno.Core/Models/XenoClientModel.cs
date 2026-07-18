@@ -34,6 +34,11 @@ namespace Xeno.Core.Models
         public bool SupportsEmbeddings { get; set; } = false;
 
         /// <summary>
+        /// Whether the backing provider allows server-initiated model management operations.
+        /// </summary>
+        public bool ModelManagementAllowed { get; set; } = false;
+
+        /// <summary>
         /// Last advertisement timestamp.
         /// </summary>
         public DateTime LastAdvertisedUtc { get; set; } = DateTime.UtcNow;

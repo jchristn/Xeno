@@ -34,5 +34,10 @@ namespace Xeno.Client.LocalDashboard.Models
         /// Timeout in milliseconds.
         /// </summary>
         public int TimeoutMs { get; set; } = 300000;
+
+        /// <summary>
+        /// Allow server-initiated model pull and delete operations for Ollama providers.
+        /// </summary>
+        public bool? AllowModelManagement { get; set; } = null;
     }
 }

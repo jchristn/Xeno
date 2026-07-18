@@ -204,7 +204,7 @@ Log in and configure a local Ollama provider:
 
 ```powershell
 xeno login -u admin@xeno --server http://localhost:9000
-xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:11434
+xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:11434 --allow-model-management
 xeno model add --provider local-ollama --name llama3.2:latest --type completion
 xeno inventory
 xeno connect
@@ -213,6 +213,10 @@ xeno connect
 `xeno connect` starts a background client process and returns after the client
 registers with the server. Use `xeno connect --foreground` when you want the
 WebSocket loop to stay attached to the current terminal.
+
+`--allow-model-management` is only valid for Ollama providers. When enabled, the
+client advertises `modelManagementAllowed` to the server and the dashboard can
+pull or delete Ollama models on that client through the authenticated WebSocket.
 
 Useful client commands:
 
@@ -230,7 +234,7 @@ xeno stop
 xeno disconnect
 xeno provider list
 xeno provider ls
-xeno provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000
+xeno provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000 --allow-model-management
 xeno provider delete --name local-ollama
 xeno provider rm --name local-ollama
 xeno model list

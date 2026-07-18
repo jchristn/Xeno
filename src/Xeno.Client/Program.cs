@@ -1064,6 +1064,7 @@ namespace Xeno.Client
                 string? endpoint = null;
                 string? credential = null;
                 bool clearCredential = false;
+                bool? allowModelManagement = null;
                 int? timeoutMs = null;
                 for (int i = 2; i < args.Length; i++)
                 {
@@ -1071,6 +1072,20 @@ namespace Xeno.Client
                     if (String.Equals(option, "--clear-credential", StringComparison.OrdinalIgnoreCase))
                     {
                         clearCredential = true;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--allow-model-management", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--model-management", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 < args.Length && IsBooleanLiteral(args[i + 1])) allowModelManagement = ParseBooleanLiteral(args[++i]);
+                        else allowModelManagement = true;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--no-model-management", StringComparison.OrdinalIgnoreCase))
+                    {
+                        allowModelManagement = false;
                         continue;
                     }
 
@@ -1131,6 +1146,14 @@ namespace Xeno.Client
                 if (timeoutMs != null) runner.TimeoutMs = timeoutMs.Value;
                 if (clearCredential) runner.Credential = null;
                 else if (credential != null) runner.Credential = credential;
+                if (allowModelManagement != null) runner.AllowModelManagement = allowModelManagement.Value;
+                if (runner.AllowModelManagement && !IsOllamaApiType(runner.ApiType))
+                {
+                    WriteError("Model management can only be enabled for Ollama providers.");
+                    return 1;
+                }
+
+                if (!IsOllamaApiType(runner.ApiType)) runner.AllowModelManagement = false;
 
                 SaveInventorySettings(settings);
                 WriteSuccess("Updated provider endpoint '" + runner.Name + "'.");
@@ -1147,6 +1170,20 @@ namespace Xeno.Client
                 for (int i = 2; i < args.Length; i++)
                 {
                     string option = args[i];
+                    if (String.Equals(option, "--allow-model-management", StringComparison.OrdinalIgnoreCase) ||
+                        String.Equals(option, "--model-management", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 < args.Length && IsBooleanLiteral(args[i + 1])) runner.AllowModelManagement = ParseBooleanLiteral(args[++i]);
+                        else runner.AllowModelManagement = true;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--no-model-management", StringComparison.OrdinalIgnoreCase))
+                    {
+                        runner.AllowModelManagement = false;
+                        continue;
+                    }
+
                     if (i + 1 >= args.Length)
                     {
                         WriteError(option + " requires a value.");
@@ -1189,6 +1226,12 @@ namespace Xeno.Client
                     if (String.IsNullOrWhiteSpace(runner.Endpoint)) missing.Add("--endpoint");
                     WriteError("Missing required option(s): " + String.Join(", ", missing) + ".");
                     PrintProviderHelp();
+                    return 1;
+                }
+
+                if (runner.AllowModelManagement && !IsOllamaApiType(runner.ApiType))
+                {
+                    WriteError("Model management can only be enabled for Ollama providers.");
                     return 1;
                 }
 
@@ -1892,8 +1935,8 @@ namespace Xeno.Client
                             SentUtc = DateTime.UtcNow,
                             Inventory = latestSettings.BuildInventoryMessage()
                         }, token).ConfigureAwait(false);
-                        WriteInfo("Sent client inventory update to Xeno server.");
                         ClientConnectionState.MarkInventoryUpdateSent();
+                        WriteInfo("Sent client inventory update to Xeno server.");
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -2004,6 +2047,13 @@ namespace Xeno.Client
             {
                 ClientSettings runtimeSettings = LoadRuntimeSettingsForConnectedSession(settings);
                 await HandleServerTelemetryRequestAsync(socket, runtimeSettings, message, token).ConfigureAwait(false);
+                return;
+            }
+
+            if (String.Equals(type, "server.modelManagement.request", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientSettings runtimeSettings = LoadRuntimeSettingsForConnectedSession(settings);
+                StartServerModelManagementTask(socket, runtimeSettings, message, token);
                 return;
             }
 
@@ -2134,6 +2184,266 @@ namespace Xeno.Client
             }
         }
 
+        private static void StartServerModelManagementTask(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
+        {
+            ServerModelManagementRequestMessage? request = JsonUtil.Deserialize<ServerModelManagementRequestMessage>(message);
+            if (request == null || String.IsNullOrWhiteSpace(request.RequestId)) return;
+            CancellationTokenSource requestTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token);
+            _ = ProcessServerModelManagementAsync(socket, settings, request, requestTokenSource);
+        }
+
+        private static async Task ProcessServerModelManagementAsync(ClientWebSocket socket, ClientSettings settings, ServerModelManagementRequestMessage request, CancellationTokenSource requestTokenSource)
+        {
+            try
+            {
+                ClientModelManagementResponseMessage response = await ExecuteServerModelManagementAsync(socket, settings, request, requestTokenSource.Token).ConfigureAwait(false);
+                await SendMessageAsync(socket, response, requestTokenSource.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is HttpRequestException || ex is TaskCanceledException || ex is OperationCanceledException)
+            {
+                await SendMessageAsync(socket, new ClientModelManagementResponseMessage
+                {
+                    Type = "client.modelManagement.response",
+                    RequestId = request.RequestId,
+                    TenantId = settings.TenantId ?? String.Empty,
+                    ClientId = settings.ClientId ?? String.Empty,
+                    Operation = request.Operation,
+                    Model = request.Model,
+                    Source = request.Source,
+                    Success = false,
+                    Message = ex.Message,
+                    Error = ex.Message
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                requestTokenSource.Dispose();
+            }
+        }
+
+        private static async Task<ClientModelManagementResponseMessage> ExecuteServerModelManagementAsync(ClientWebSocket socket, ClientSettings settings, ServerModelManagementRequestMessage request, CancellationToken token)
+        {
+            ValidateModelManagementIdentity(settings, request);
+            string operation = NormalizeModelManagementOperation(request.Operation);
+            if (String.IsNullOrWhiteSpace(operation)) throw new InvalidOperationException("Unsupported model management operation: " + request.Operation);
+            if (String.IsNullOrWhiteSpace(request.Model)) throw new InvalidOperationException("Model management request model is required.");
+
+            ClientRunnerSettings runner = FindModelManagementRunner(settings, request.Source)
+                ?? throw new InvalidOperationException("No Ollama provider with AllowModelManagement enabled was found for this request.");
+
+            if (String.Equals(operation, "pull", StringComparison.OrdinalIgnoreCase))
+            {
+                return await ExecuteOllamaModelPullAsync(socket, settings, runner, request, token).ConfigureAwait(false);
+            }
+
+            return await ExecuteOllamaModelDeleteAsync(socket, settings, runner, request, token).ConfigureAwait(false);
+        }
+
+        private static void ValidateModelManagementIdentity(ClientSettings settings, ServerModelManagementRequestMessage request)
+        {
+            string tenantId = settings.TenantId ?? String.Empty;
+            string clientId = settings.ClientId ?? String.Empty;
+            if (!String.Equals(request.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) ||
+                !String.Equals(request.ClientId, clientId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Model management request tenant or client did not match this client.");
+            }
+        }
+
+        private static string NormalizeModelManagementOperation(string? operation)
+        {
+            if (String.Equals(operation, "pull", StringComparison.OrdinalIgnoreCase)) return "pull";
+            if (String.Equals(operation, "delete", StringComparison.OrdinalIgnoreCase)) return "delete";
+            return String.Empty;
+        }
+
+        private static ClientRunnerSettings? FindModelManagementRunner(ClientSettings settings, string? source)
+        {
+            IEnumerable<ClientRunnerSettings> runners = String.IsNullOrWhiteSpace(source)
+                ? settings.Runners
+                : settings.Runners.Where(item => String.Equals(item.Name, source, StringComparison.OrdinalIgnoreCase));
+            return runners.FirstOrDefault(item =>
+                String.Equals(item.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) &&
+                item.AllowModelManagement);
+        }
+
+        private static async Task<ClientModelManagementResponseMessage> ExecuteOllamaModelPullAsync(ClientWebSocket socket, ClientSettings settings, ClientRunnerSettings runner, ServerModelManagementRequestMessage request, CancellationToken token)
+        {
+            await SendModelManagementProgressAsync(socket, settings, request, "started", "starting", "Starting Ollama model pull.", null, null, null, null, token).ConfigureAwait(false);
+            string endpoint = runner.Endpoint.TrimEnd('/') + "/api/pull";
+            string requestBody = JsonUtil.Serialize(new OllamaModelPullRequest
+            {
+                Model = request.Model,
+                Stream = true,
+                Insecure = request.Insecure
+            });
+            string responseBody = String.Empty;
+            int statusCode = 0;
+            using (HttpClient httpClient = new HttpClient())
+            using (HttpRequestMessage httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint))
+            {
+                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, request.TimeoutMs > 0 ? request.TimeoutMs : runner.TimeoutMs));
+                if (!String.IsNullOrWhiteSpace(runner.Credential))
+                {
+                    httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
+                }
+
+                httpRequest.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+                using (HttpResponseMessage response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false))
+                {
+                    statusCode = (int)response.StatusCode;
+                    using (Stream responseStream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false))
+                    using (StreamReader reader = new StreamReader(responseStream, Encoding.UTF8))
+                    {
+                        StringBuilder captured = new StringBuilder();
+                        while (true)
+                        {
+                            string? line = await reader.ReadLineAsync(token).ConfigureAwait(false);
+                            if (line == null) break;
+                            if (String.IsNullOrWhiteSpace(line)) continue;
+                            captured.AppendLine(line);
+                            OllamaModelPullProgress? progress = null;
+                            JsonUtil.TryDeserialize(line, out progress);
+                            string status = progress?.Status ?? line;
+                            await SendModelManagementProgressAsync(socket, settings, request, "progress", status, status, progress?.Completed, progress?.Total, progress?.Digest, line, token).ConfigureAwait(false);
+                        }
+
+                        responseBody = captured.ToString();
+                    }
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        string message = String.IsNullOrWhiteSpace(responseBody) ? response.ReasonPhrase ?? "Ollama pull failed." : responseBody.Trim();
+                        return BuildModelManagementResponse(settings, request, false, statusCode, message, message, responseBody);
+                    }
+                }
+            }
+
+            AddPulledModel(settings, runner, request.Model);
+            SaveInventorySettings(settings);
+            await SendClientInventoryUpdateAsync(socket, settings, token).ConfigureAwait(false);
+            await SendModelManagementProgressAsync(socket, settings, request, "completed", "success", "Ollama model pull completed.", null, null, null, null, token).ConfigureAwait(false);
+            return BuildModelManagementResponse(settings, request, true, statusCode, "Ollama model pull completed.", null, responseBody);
+        }
+
+        private static async Task<ClientModelManagementResponseMessage> ExecuteOllamaModelDeleteAsync(ClientWebSocket socket, ClientSettings settings, ClientRunnerSettings runner, ServerModelManagementRequestMessage request, CancellationToken token)
+        {
+            await SendModelManagementProgressAsync(socket, settings, request, "started", "starting", "Deleting Ollama model.", null, null, null, null, token).ConfigureAwait(false);
+            string endpoint = runner.Endpoint.TrimEnd('/') + "/api/delete";
+            string requestBody = JsonUtil.Serialize(new OllamaModelDeleteRequest { Model = request.Model });
+            string responseBody = String.Empty;
+            int statusCode;
+            using (HttpClient httpClient = new HttpClient())
+            using (HttpRequestMessage httpRequest = new HttpRequestMessage(HttpMethod.Delete, endpoint))
+            {
+                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, request.TimeoutMs > 0 ? request.TimeoutMs : runner.TimeoutMs));
+                if (!String.IsNullOrWhiteSpace(runner.Credential))
+                {
+                    httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
+                }
+
+                httpRequest.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+                using (HttpResponseMessage response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseContentRead, token).ConfigureAwait(false))
+                {
+                    statusCode = (int)response.StatusCode;
+                    responseBody = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        string message = String.IsNullOrWhiteSpace(responseBody) ? response.ReasonPhrase ?? "Ollama delete failed." : responseBody.Trim();
+                        return BuildModelManagementResponse(settings, request, false, statusCode, message, message, responseBody);
+                    }
+                }
+            }
+
+            int removed = runner.Models.RemoveAll(item => String.Equals(item.Name, request.Model, StringComparison.OrdinalIgnoreCase));
+            if (removed > 0)
+            {
+                SaveInventorySettings(settings);
+                await SendClientInventoryUpdateAsync(socket, settings, token).ConfigureAwait(false);
+            }
+
+            await SendModelManagementProgressAsync(socket, settings, request, "completed", "success", "Ollama model delete completed.", null, null, null, null, token).ConfigureAwait(false);
+            return BuildModelManagementResponse(settings, request, true, statusCode, "Ollama model delete completed.", null, responseBody);
+        }
+
+        private static void AddPulledModel(ClientSettings settings, ClientRunnerSettings runner, string modelName)
+        {
+            if (runner.Models.Any(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase))) return;
+            runner.Models.Add(new ClientModelSettings
+            {
+                Name = modelName,
+                SupportsCompletions = true,
+                SupportsEmbeddings = false
+            });
+        }
+
+        private static ClientModelManagementResponseMessage BuildModelManagementResponse(ClientSettings settings, ServerModelManagementRequestMessage request, bool success, int statusCode, string message, string? error, string? body)
+        {
+            return new ClientModelManagementResponseMessage
+            {
+                Type = "client.modelManagement.response",
+                RequestId = request.RequestId,
+                TenantId = settings.TenantId ?? String.Empty,
+                ClientId = settings.ClientId ?? String.Empty,
+                Operation = NormalizeModelManagementOperation(request.Operation),
+                Model = request.Model,
+                Source = request.Source,
+                Success = success,
+                StatusCode = statusCode,
+                Message = message,
+                Error = error,
+                Body = body,
+                SentUtc = DateTime.UtcNow
+            };
+        }
+
+        private static async Task SendModelManagementProgressAsync(
+            ClientWebSocket socket,
+            ClientSettings settings,
+            ServerModelManagementRequestMessage request,
+            string eventType,
+            string? status,
+            string message,
+            long? completed,
+            long? total,
+            string? digest,
+            string? rawLine,
+            CancellationToken token)
+        {
+            await SendMessageAsync(socket, new ClientModelManagementProgressMessage
+            {
+                Type = "client.modelManagement.progress",
+                RequestId = request.RequestId,
+                TenantId = settings.TenantId ?? String.Empty,
+                ClientId = settings.ClientId ?? String.Empty,
+                Operation = NormalizeModelManagementOperation(request.Operation),
+                Model = request.Model,
+                Source = request.Source,
+                EventType = eventType,
+                Status = status,
+                Message = message,
+                Completed = completed,
+                Total = total,
+                Digest = digest,
+                RawLine = rawLine,
+                SentUtc = DateTime.UtcNow
+            }, token).ConfigureAwait(false);
+        }
+
+        private static async Task SendClientInventoryUpdateAsync(ClientWebSocket socket, ClientSettings settings, CancellationToken token)
+        {
+            await SendMessageAsync(socket, new ClientInventoryUpdateMessage
+            {
+                Type = "client.inventory.update",
+                ClientId = settings.ClientId,
+                TenantId = settings.TenantId,
+                SentUtc = DateTime.UtcNow,
+                Inventory = settings.BuildInventoryMessage()
+            }, token).ConfigureAwait(false);
+            ClientConnectionState.MarkInventoryUpdateSent();
+            WriteInfo("Sent client inventory update to Xeno server.");
+        }
+
         private static void StartServerPerformanceTestTask(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
         {
             ServerPerformanceTestRequestMessage? request = JsonUtil.Deserialize<ServerPerformanceTestRequestMessage>(message);
@@ -2148,7 +2458,7 @@ namespace Xeno.Client
             {
                 ClientPerformanceTestResponseMessage response = String.Equals(request.Mode, "relay", StringComparison.OrdinalIgnoreCase)
                     ? await RunRelayPerformanceTestAsync(socket, settings, request, requestTokenSource.Token).ConfigureAwait(false)
-                    : await RunDirectPerformanceTestAsync(settings, request, requestTokenSource.Token).ConfigureAwait(false);
+                    : await RunDirectPerformanceTestAsync(socket, settings, request, requestTokenSource.Token).ConfigureAwait(false);
                 await SendMessageAsync(socket, response, requestTokenSource.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException || ex is OperationCanceledException)
@@ -2176,28 +2486,48 @@ namespace Xeno.Client
             }
         }
 
-        private static async Task<ClientPerformanceTestResponseMessage> RunDirectPerformanceTestAsync(ClientSettings settings, ServerPerformanceTestRequestMessage request, CancellationToken token)
+        private static async Task<ClientPerformanceTestResponseMessage> RunDirectPerformanceTestAsync(ClientWebSocket socket, ClientSettings settings, ServerPerformanceTestRequestMessage request, CancellationToken token)
         {
+            int requestCount = Math.Clamp(request.RequestCount, 1, 10);
             ModelPerformanceTestLegResult result = new ModelPerformanceTestLegResult
             {
                 Name = "native",
-                Description = "Ran " + request.RequestCount.ToString(CultureInfo.InvariantCulture) + " " + request.RequestType + " request(s) from the system hosting the model."
+                Description = "Ran " + requestCount.ToString(CultureInfo.InvariantCulture) + " " + request.RequestType + " request(s) from the system hosting the model."
             };
 
-            for (int index = 1; index <= Math.Clamp(request.RequestCount, 1, 10); index++)
+            await SendPerformanceProgressAsync(socket, settings, request, "direct", "legStarted", "Starting native provider samples on this model host.", null, result, 0, requestCount, token).ConfigureAwait(false);
+            await SendPerformanceProgressAsync(socket, settings, request, "direct", "warmupStarted", "Running unmeasured native provider warmup request.", null, result, 0, requestCount, token).ConfigureAwait(false);
+            ModelPerformanceTestSampleResult warmup;
+            try
+            {
+                warmup = await ExecutePerformanceProviderSampleAsync(settings, request, 0, token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is HttpRequestException || ex is TaskCanceledException)
+            {
+                warmup = FailedPerformanceSample(0, ex.Message);
+            }
+
+            await SendPerformanceProgressAsync(socket, settings, request, "direct", "warmupCompleted", PerformanceWarmupProgressMessage("Native", warmup), warmup, result, 0, requestCount, token).ConfigureAwait(false);
+            for (int index = 1; index <= requestCount; index++)
             {
                 token.ThrowIfCancellationRequested();
+                ModelPerformanceTestSampleResult sample;
                 try
                 {
-                    result.Samples.Add(await ExecutePerformanceProviderSampleAsync(settings, request, index, token).ConfigureAwait(false));
+                    sample = await ExecutePerformanceProviderSampleAsync(settings, request, index, token).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is HttpRequestException || ex is TaskCanceledException)
                 {
-                    result.Samples.Add(FailedPerformanceSample(index, ex.Message));
+                    sample = FailedPerformanceSample(index, ex.Message);
                 }
+
+                result.Samples.Add(sample);
+                result.Summary = SummarizePerformanceSamples(result.Samples);
+                await SendPerformanceProgressAsync(socket, settings, request, "direct", "sampleCompleted", PerformanceSampleProgressMessage("Native", sample), sample, result, result.Samples.Count, requestCount, token).ConfigureAwait(false);
             }
 
             result.Summary = SummarizePerformanceSamples(result.Samples);
+            await SendPerformanceProgressAsync(socket, settings, request, "direct", "legCompleted", "Native provider samples completed.", null, result, result.Samples.Count, requestCount, token).ConfigureAwait(false);
             return new ClientPerformanceTestResponseMessage
             {
                 Type = "client.performanceTest.response",
@@ -2212,26 +2542,46 @@ namespace Xeno.Client
 
         private static async Task<ClientPerformanceTestResponseMessage> RunRelayPerformanceTestAsync(ClientWebSocket socket, ClientSettings settings, ServerPerformanceTestRequestMessage request, CancellationToken token)
         {
+            int requestCount = Math.Clamp(request.RequestCount, 1, 10);
             ModelPerformanceTestLegResult result = new ModelPerformanceTestLegResult
             {
                 Name = "hairpin",
-                Description = "Ran " + request.RequestCount.ToString(CultureInfo.InvariantCulture) + " " + request.RequestType + " request(s) from this selected client through Xeno server to " + (request.TargetClientName ?? request.TargetClientId) + "."
+                Description = "Ran " + requestCount.ToString(CultureInfo.InvariantCulture) + " " + request.RequestType + " request(s) from this selected client through Xeno server to " + (request.TargetClientName ?? request.TargetClientId) + "."
             };
 
-            for (int index = 1; index <= Math.Clamp(request.RequestCount, 1, 10); index++)
+            await SendPerformanceProgressAsync(socket, settings, request, "relay", "legStarted", "Starting Xeno samples through Xeno server to " + (request.TargetClientName ?? request.TargetClientId) + ".", null, result, 0, requestCount, token).ConfigureAwait(false);
+            await SendPerformanceProgressAsync(socket, settings, request, "relay", "warmupStarted", "Running unmeasured Xeno warmup request through Xeno server.", null, result, 0, requestCount, token).ConfigureAwait(false);
+            ModelPerformanceTestSampleResult warmup;
+            try
+            {
+                warmup = await ExecutePerformanceRelaySampleAsync(socket, settings, request, 0, token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is WebSocketException || ex is OperationCanceledException)
+            {
+                warmup = FailedPerformanceSample(0, ex.Message);
+            }
+
+            await SendPerformanceProgressAsync(socket, settings, request, "relay", "warmupCompleted", PerformanceWarmupProgressMessage("Xeno", warmup), warmup, result, 0, requestCount, token).ConfigureAwait(false);
+            for (int index = 1; index <= requestCount; index++)
             {
                 token.ThrowIfCancellationRequested();
+                ModelPerformanceTestSampleResult sample;
                 try
                 {
-                    result.Samples.Add(await ExecutePerformanceRelaySampleAsync(socket, settings, request, index, token).ConfigureAwait(false));
+                    sample = await ExecutePerformanceRelaySampleAsync(socket, settings, request, index, token).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is WebSocketException || ex is OperationCanceledException)
                 {
-                    result.Samples.Add(FailedPerformanceSample(index, ex.Message));
+                    sample = FailedPerformanceSample(index, ex.Message);
                 }
+
+                result.Samples.Add(sample);
+                result.Summary = SummarizePerformanceSamples(result.Samples);
+                await SendPerformanceProgressAsync(socket, settings, request, "relay", "sampleCompleted", PerformanceSampleProgressMessage("Xeno", sample), sample, result, result.Samples.Count, requestCount, token).ConfigureAwait(false);
             }
 
             result.Summary = SummarizePerformanceSamples(result.Samples);
+            await SendPerformanceProgressAsync(socket, settings, request, "relay", "legCompleted", "Xeno samples completed.", null, result, result.Samples.Count, requestCount, token).ConfigureAwait(false);
             return new ClientPerformanceTestResponseMessage
             {
                 Type = "client.performanceTest.response",
@@ -2242,6 +2592,77 @@ namespace Xeno.Client
                 Success = result.Samples.Any(item => item.Success),
                 Result = result
             };
+        }
+
+        private static async Task SendPerformanceProgressAsync(
+            ClientWebSocket socket,
+            ClientSettings settings,
+            ServerPerformanceTestRequestMessage request,
+            string mode,
+            string eventType,
+            string message,
+            ModelPerformanceTestSampleResult? sample,
+            ModelPerformanceTestLegResult result,
+            int completedSamples,
+            int totalSamples,
+            CancellationToken token)
+        {
+            await SendMessageAsync(socket, new ClientPerformanceTestProgressMessage
+            {
+                Type = "client.performanceTest.progress",
+                RequestId = request.RequestId,
+                TenantId = settings.TenantId ?? String.Empty,
+                ClientId = settings.ClientId ?? String.Empty,
+                Mode = mode,
+                EventType = eventType,
+                Message = message,
+                Index = sample?.Index,
+                CompletedSamples = completedSamples,
+                TotalSamples = totalSamples,
+                Sample = sample,
+                Summary = result.Summary,
+                LegResult = String.Equals(eventType, "legCompleted", StringComparison.OrdinalIgnoreCase) ? result : null,
+                SentUtc = DateTime.UtcNow
+            }, token).ConfigureAwait(false);
+        }
+
+        private static string PerformanceSampleProgressMessage(string legName, ModelPerformanceTestSampleResult sample)
+        {
+            string sampleName = sample.Index.ToString(CultureInfo.InvariantCulture);
+            if (!sample.Success)
+            {
+                return legName + " sample " + sampleName + " failed: " + (sample.Error ?? "request failed");
+            }
+
+            string total = sample.TotalTimeMs.HasValue
+                ? sample.TotalTimeMs.Value.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+                : "unknown duration";
+            string firstToken = sample.TimeToFirstTokenMs.HasValue
+                ? ", first token " + sample.TimeToFirstTokenMs.Value.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+                : String.Empty;
+            string tokens = sample.TokensPerSecond.HasValue
+                ? ", " + sample.TokensPerSecond.Value.ToString("0.###", CultureInfo.InvariantCulture) + " tokens/s"
+                : String.Empty;
+            return legName + " sample " + sampleName + " completed in " + total + firstToken + tokens + ".";
+        }
+
+        private static string PerformanceWarmupProgressMessage(string legName, ModelPerformanceTestSampleResult sample)
+        {
+            if (!sample.Success)
+            {
+                return legName + " warmup failed: " + (sample.Error ?? "request failed") + ". Measured samples will still run.";
+            }
+
+            string total = sample.TotalTimeMs.HasValue
+                ? sample.TotalTimeMs.Value.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+                : "unknown duration";
+            string firstToken = sample.TimeToFirstTokenMs.HasValue
+                ? ", first token " + sample.TimeToFirstTokenMs.Value.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+                : String.Empty;
+            string tokens = sample.TokensPerSecond.HasValue
+                ? ", " + sample.TokensPerSecond.Value.ToString("0.###", CultureInfo.InvariantCulture) + " tokens/s"
+                : String.Empty;
+            return legName + " warmup completed in " + total + firstToken + tokens + ". Measured samples start next.";
         }
 
         private static async Task<ModelPerformanceTestSampleResult> ExecutePerformanceProviderSampleAsync(ClientSettings settings, ServerPerformanceTestRequestMessage request, int index, CancellationToken token)
@@ -4155,6 +4576,7 @@ namespace Xeno.Client
                     apiType = runner.ApiType,
                     endpoint = runner.Endpoint,
                     timeoutMs = runner.TimeoutMs,
+                    allowModelManagement = IsOllamaApiType(runner.ApiType) && runner.AllowModelManagement,
                     credentialConfigured = !String.IsNullOrWhiteSpace(runner.Credential),
                     models = runner.Models.ConvertAll(model => new
                     {
@@ -4182,6 +4604,7 @@ namespace Xeno.Client
                 Console.WriteLine("    Endpoint:   " + runner.Endpoint);
                 Console.WriteLine("    Timeout:    " + runner.TimeoutMs + " ms");
                 Console.WriteLine("    Credential: " + (String.IsNullOrWhiteSpace(runner.Credential) ? "not configured" : "configured"));
+                Console.WriteLine("    Model mgmt: " + (IsOllamaApiType(runner.ApiType) ? FormatBool(runner.AllowModelManagement) : "not supported"));
                 Console.WriteLine("    Models:     " + runner.Models.Count);
                 if (includeModelDetails && runner.Models.Count > 0)
                 {
@@ -4209,6 +4632,7 @@ namespace Xeno.Client
                             name = model.Name,
                             providerName = runner.Name,
                             apiType = runner.ApiType,
+                            modelManagementAllowed = IsOllamaApiType(runner.ApiType) && runner.AllowModelManagement,
                             supportsCompletions = model.SupportsCompletions,
                             supportsEmbeddings = model.SupportsEmbeddings
                         });
@@ -4395,6 +4819,11 @@ namespace Xeno.Client
                    String.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool IsOllamaApiType(string? value)
+        {
+            return String.Equals(value, "Ollama", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool ParseBooleanLiteral(string value)
         {
             return String.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
@@ -4467,9 +4896,10 @@ namespace Xeno.Client
             Console.WriteLine("  xeno provider delete --name <name>");
             Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete one configured provider endpoint.");
-            Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>]");
+            Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>] [--allow-model-management]");
             Console.WriteLine("      Add an Ollama, OpenAI, Gemini, or compatible endpoint.");
-            Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential]");
+            Console.WriteLine("      --allow-model-management permits dashboard pull/delete commands for Ollama providers.");
+            Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential] [--allow-model-management|--no-model-management]");
             Console.WriteLine("      Update a configured provider endpoint and request inventory re-advertisement when connected.");
             Console.WriteLine();
         }
@@ -4687,8 +5117,8 @@ namespace Xeno.Client
             Console.WriteLine("  xeno provider ls");
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("  xeno provider delete --name <name>  (aliases: remove, remote, rm)");
-            Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>]");
-            Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential]");
+            Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>] [--allow-model-management]");
+            Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential] [--allow-model-management|--no-model-management]");
             WritePlainHeading("Models:");
             Console.WriteLine("  xeno model list");
             Console.WriteLine("  xeno model ls");

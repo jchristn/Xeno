@@ -2418,6 +2418,7 @@ function ClientsView() {
   const navigate = useNavigate();
   const clients = useResource('/api/v1/clients', []);
   const [selectedClient, setSelectedClient] = useState(null);
+  const [pullClient, setPullClient] = useState(null);
   const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
   const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
@@ -2439,14 +2440,33 @@ function ClientsView() {
         onRowClick={setSelectedClient}
         getRowActions={(row) => {
           const clientId = recordId(row);
-          return [{
-            disabled: !clientId,
-            icon: <LineChart size={14} />,
-            key: 'view-telemetry',
-            label: t('viewTelemetry', 'View Telemetry'),
-            tooltip: t('tooltipViewClientTelemetry', 'Open client telemetry filtered to this client.'),
-            onSelect: () => navigate(`/dashboard/client-telemetry?clientId=${encodeURIComponent(clientId)}`)
-          }];
+          const canPull = clientAllowsOllamaModelManagement(row) && performanceClientConnected(row);
+          return [
+            {
+              disabled: !clientId,
+              icon: <LineChart size={14} />,
+              key: 'view-telemetry',
+              label: t('viewTelemetry', 'View Telemetry'),
+              tooltip: t('tooltipViewClientTelemetry', 'Open client telemetry filtered to this client.'),
+              onSelect: () => navigate(`/dashboard/client-telemetry?clientId=${encodeURIComponent(clientId)}`)
+            },
+            {
+              disabled: !clientId,
+              icon: <BrainCircuit size={14} />,
+              key: 'view-models',
+              label: t('viewModels', 'View Models'),
+              tooltip: t('tooltipViewClientModels', 'Open Models filtered to this client.'),
+              onSelect: () => navigate(`/dashboard/clients/advertised-models?clientId=${encodeURIComponent(clientId)}`)
+            },
+            {
+              disabled: !canPull,
+              icon: <Download size={14} />,
+              key: 'pull-model',
+              label: t('pullModel', 'Pull Model'),
+              tooltip: canPull ? t('tooltipPullModel', 'Pull an Ollama model on this client.') : t('tooltipPullModelUnavailable', 'Requires a connected Ollama client with model management enabled.'),
+              onSelect: () => setPullClient(row)
+            }
+          ];
         }}
         loading={clients.loading}
         rows={clients.data}
@@ -2454,15 +2474,17 @@ function ClientsView() {
         title={t('clients')}
       />
       {selectedClient && <EditRecordModal title={t('clientDetails')} data={selectedClient} onClose={() => setSelectedClient(null)} />}
+      {pullClient ? <PullModelModal client={pullClient} onClose={() => setPullClient(null)} onComplete={clients.refresh} /> : null}
     </div>
   );
 }
 
 function AdvertisedModelsView() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const clients = useResource('/api/v1/clients', []);
   const [selectedClientKey, setSelectedClientKey] = useState('all');
-  const [clientIdFilter, setClientIdFilter] = useState('');
+  const [clientIdFilter, setClientIdFilter] = useState(() => searchParams.get('clientId') || '');
   const [includeInactiveModels, setIncludeInactiveModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState(null);
   const [performanceModel, setPerformanceModel] = useState(null);
@@ -2484,6 +2506,12 @@ function AdvertisedModelsView() {
   const filteredModels = clientIdFilteredModels;
   const completionModelCount = filteredModels.filter((model) => value(model, 'supportsCompletions') === true).length;
   const embeddingModelCount = filteredModels.filter((model) => value(model, 'supportsEmbeddings') === true).length;
+
+  useEffect(() => {
+    const nextClientId = searchParams.get('clientId') || '';
+    setClientIdFilter(nextClientId);
+    if (nextClientId) setSelectedClientKey('all');
+  }, [searchParams]);
 
   function selectClientFromModel(row) {
     const nextClientKey = String(value(row, 'clientKey') || 'all');
@@ -2543,10 +2571,19 @@ function AdvertisedModelsView() {
           { key: 'name', label: 'modelName', searchValue: (row) => value(row, 'name'), sortValue: (row) => value(row, 'name') },
           { key: 'apiType', searchable: false },
           { key: 'source', searchable: false },
+          { key: 'modelManagementAllowed', label: 'modelManagement', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'modelManagementAllowed')), searchable: false },
           { key: 'supportsCompletions', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsCompletions')), searchable: false },
           { key: 'supportsEmbeddings', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsEmbeddings')), searchable: false },
           { key: 'lastAdvertisedUtc', searchable: false }
         ]}
+        canDelete={(row) => canDeleteManagedAdvertisedModel(row)}
+        deleteMessage={(row) => t('deleteManagedClientModelMessage', {
+          client: value(row, 'clientName') || value(row, 'clientId') || t('client'),
+          model: value(row, 'name') || t('model'),
+          source: value(row, 'source') || t('provider'),
+          defaultValue: 'Delete model {{model}} from {{client}} provider {{source}}? This sends the delete command to the client.'
+        })}
+        deleteTitle={t('deleteManagedClientModelTitle', 'Delete Model')}
         onDelete={(row) => {
           if (recordId(selectedModel) === recordId(row)) setSelectedModel(null);
           return deleteClientModel(row);
@@ -2572,6 +2609,152 @@ function AdvertisedModelsView() {
   );
 }
 
+function PullModelModal({ client, onClose, onComplete }) {
+  const { t } = useTranslation();
+  const clientId = recordId(client);
+  const clientName = value(client, 'name') || clientId;
+  const providers = manageableOllamaProviders(client);
+  const [source, setSource] = useState(() => providers[0]?.name || '');
+  const [modelName, setModelName] = useState('');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const [events, setEvents] = useState([]);
+  const [status, setStatus] = useState('');
+  const [result, setResult] = useState(null);
+  const selectedProvider = providers.find((provider) => provider.name === source) || providers[0] || null;
+  const canRun = !running && Boolean(clientId && selectedProvider && modelName.trim());
+
+  useEffect(() => {
+    if (providers.some((provider) => provider.name === source)) return;
+    setSource(providers[0]?.name || '');
+  }, [providers, source]);
+
+  async function runPull() {
+    if (!canRun) return;
+    const requestedModel = modelName.trim();
+    setRunning(true);
+    setError('');
+    setEvents([]);
+    setResult(null);
+    setStatus(t('dispatchingModelPull', 'Dispatching model pull request.'));
+    try {
+      const streamedEvents = await api.postJsonLines('/v1.0/api/client-models/pull', {
+        clientId,
+        model: requestedModel,
+        source,
+        stream: true
+      }, (event) => {
+        setEvents((current) => [...current, event].slice(-60));
+        const message = value(event, 'message') || value(event, 'status');
+        if (message) setStatus(String(message));
+        const eventResult = value(event, 'result');
+        if (eventResult) setResult(eventResult);
+        if (String(value(event, 'eventType') || '').toLowerCase() === 'error') {
+          setError(String(message || t('modelPullFailed', 'Model pull failed.')));
+        }
+      });
+      const finalEvent = [...streamedEvents].reverse().find((event) => value(event, 'result'));
+      const finalResult = finalEvent ? value(finalEvent, 'result') : null;
+      if (finalResult) {
+        setResult(finalResult);
+        if (value(finalResult, 'success') === true) onComplete?.();
+        else setError(value(finalResult, 'error') || value(finalResult, 'message') || t('modelPullFailed', 'Model pull failed.'));
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <Modal
+      actions={(
+        <>
+          <button className="action-button secondary" disabled={running} onClick={onClose} title={t('tooltipFormClose')} type="button">{t('close')}</button>
+          <button className="action-button primary" disabled={!canRun} onClick={runPull} title={t('tooltipRunModelPull', 'Pull the model on this client provider.')} type="button">
+            {running ? <RefreshCw size={16} /> : <Download size={16} />}
+            <span>{running ? t('pulling', 'Pulling') : t('pullModel', 'Pull Model')}</span>
+          </button>
+        </>
+      )}
+      onClose={running ? undefined : onClose}
+      open
+      size="large"
+      subtitle={t('pullModelSubtitle', { client: clientName, defaultValue: 'Pull an Ollama model on {{client}}.' })}
+      title={t('pullModel', 'Pull Model')}
+    >
+      <div className="model-pull-layout">
+        <RecordSummaryTable entries={[['client', clientName], ['clientId', clientId]]} />
+        <section className="model-pull-config">
+          <label className="form-field compact-field">
+            <span>{t('processedOnClient', 'Processed On')}</span>
+            <input disabled value={clientName || clientId || '-'} />
+          </label>
+          <label className="form-field compact-field">
+            <span>{t('provider', 'Provider')}</span>
+            <select disabled={running || providers.length === 0} onChange={(event) => setSource(event.target.value)} value={source}>
+              {providers.length === 0 ? <option value="">{t('noManagedOllamaProviders', 'No managed Ollama providers')}</option> : null}
+              {providers.map((provider) => (
+                <option key={provider.name} value={provider.name}>{pullProviderLabel(provider)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field compact-field model-pull-name-field">
+            <span>{t('model', 'Model')}</span>
+            <input disabled={running} onChange={(event) => setModelName(event.target.value)} placeholder={t('modelNamePlaceholder', 'gemma3:4b')} value={modelName} />
+          </label>
+        </section>
+
+        {error ? <div className="model-performance-error" role="alert">{error}</div> : null}
+        {running || events.length > 0 || result ? (
+          <PullModelProgressPanel events={events} result={result} status={status} />
+        ) : (
+          <EmptyState message={t('noModelPullStarted', 'No pull request has been submitted yet.')} title={t('noData')} />
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function PullModelProgressPanel({ events, result, status }) {
+  const { t } = useTranslation();
+  const rows = collectionRows(events);
+  const recentEvents = [...rows].reverse().slice(0, 8);
+  const latestProgress = [...rows].reverse().find((event) => Number(value(event, 'total')) > 0 && Number(value(event, 'completed')) >= 0);
+  const percent = modelPullProgressPercent(latestProgress);
+  const success = value(result, 'success') === true;
+  return (
+    <section aria-live="polite" className="model-pull-progress" role="status">
+      <div className="model-performance-progress-heading">
+        {success ? <CheckCircle2 aria-hidden="true" size={18} /> : <div aria-hidden="true" className="table-loading-spinner" />}
+        <div>
+          <span>{t('currentStatus', 'Current status')}</span>
+          <strong>{status || value(result, 'message') || t('waitingForProgress', 'Waiting for progress')}</strong>
+        </div>
+      </div>
+      <div className="model-pull-meter" aria-label={t('modelPullProgress', 'Model pull progress')}>
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <div className="model-pull-progress-meta">
+        <KeyValue label={t('progress', 'Progress')} value={latestProgress ? `${percent.toFixed(1)}%` : '-'} />
+        <KeyValue label={t('downloaded', 'Downloaded')} value={latestProgress ? `${formatBytes(value(latestProgress, 'completed'))} / ${formatBytes(value(latestProgress, 'total'))}` : '-'} />
+        <KeyValue label={t('result', 'Result')} value={result ? (success ? t('success') : t('failed')) : '-'} />
+      </div>
+      {recentEvents.length > 0 ? (
+        <ol className="model-performance-event-list">
+          {recentEvents.map((event, index) => (
+            <li key={`${value(event, 'eventType') || 'event'}-${value(event, 'digest') || index}-${value(event, 'sentUtc') || index}`}>
+              <span>{value(event, 'status') || value(event, 'eventType') || t('status', 'Status')}</span>
+              <strong>{value(event, 'message') || value(event, 'rawLine') || '-'}</strong>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
 function ModelPerformanceTestModal({ clients, model, onClose }) {
   const { t } = useTranslation();
   const modelName = String(value(model, 'name') || '');
@@ -2588,7 +2771,10 @@ function ModelPerformanceTestModal({ clients, model, onClose }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [progressEvents, setProgressEvents] = useState([]);
+  const [progressStatus, setProgressStatus] = useState('');
   const selectedTarget = targetOptions.find((option) => option.key === targetKey) || null;
+  const selectedSource = sourceOptions.find((option) => option.id === sourceClientId) || null;
   const requestTypes = performanceRequestTypes(t);
   const canRun = !running && Boolean(modelName && sourceClientId && selectedTarget);
 
@@ -2606,36 +2792,67 @@ function ModelPerformanceTestModal({ clients, model, onClose }) {
     setRequestType(nextRequestType);
     setResult(null);
     setError('');
+    setProgressEvents([]);
+    setProgressStatus('');
   }
 
   function updateTarget(nextTargetKey) {
     setTargetKey(nextTargetKey);
     setResult(null);
     setError('');
+    setProgressEvents([]);
+    setProgressStatus('');
   }
 
   function updateSource(nextSourceClientId) {
     setSourceClientId(nextSourceClientId);
     setResult(null);
     setError('');
+    setProgressEvents([]);
+    setProgressStatus('');
   }
 
   async function runTest() {
     if (!canRun) return;
+    const count = coerceInteger(requestCount, 5, 1, 10);
+    const initialResult = buildInitialPerformanceResult({
+      model: modelName,
+      requestCount: count,
+      requestType,
+      sourceClientId,
+      sourceClientName: selectedSource?.name || selectedSource?.label || sourceClientId,
+      targetClientId: selectedTarget.clientId,
+      targetClientName: selectedTarget.label || selectedTarget.clientId,
+      nativeDescription: t('waitingNativePerformance', 'Waiting for native provider samples.'),
+      hairpinDescription: t('waitingHairpinPerformance', 'Waiting for Xeno hairpin samples.')
+    });
     setRunning(true);
     setError('');
-    setResult(null);
+    setProgressEvents([]);
+    setProgressStatus(t('preparingPerformanceTest', 'Preparing performance test'));
+    setResult(initialResult);
     try {
-      const response = await api.post('/v1.0/api/model-performance/test', {
+      const events = await api.postJsonLines('/v1.0/api/model-performance/test', {
         model: modelName,
-        requestCount: coerceInteger(requestCount, 5, 1, 10),
+        requestCount: count,
         requestType,
         sourceClientId,
         targetClientId: selectedTarget.clientId,
-        targetSource: selectedTarget.source || ''
+        targetSource: selectedTarget.source || '',
+        stream: true
+      }, (event) => {
+        setProgressEvents((current) => [...current, event].slice(-24));
+        const message = value(event, 'message');
+        if (message) setProgressStatus(message);
+        if (value(event, 'eventType') === 'error') {
+          setError(message || t('performanceTestFailed', 'Performance test failed.'));
+          return;
+        }
+
+        setResult((current) => mergePerformanceProgressEvent(current || initialResult, event));
       });
-      if (value(response, 'error')) throw new Error(value(response, 'message') || value(response, 'error'));
-      setResult(response);
+      const finalResponse = events.find((event) => value(event, 'native') && value(event, 'hairpin'));
+      if (finalResponse) setResult(finalResponse);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     } finally {
@@ -2657,7 +2874,7 @@ function ModelPerformanceTestModal({ clients, model, onClose }) {
       onClose={running ? undefined : onClose}
       open
       size="xlarge"
-      subtitle={t('modelPerformanceSubtitle', { model: modelName, defaultValue: 'Native provider timing vs Xeno hairpin timing for {{model}}.' })}
+      subtitle={t('modelPerformanceSubtitle', { model: modelName, defaultValue: 'Native provider timing vs Xeno for model {{model}}' })}
       title={t('testPerformance', 'Test Performance')}
     >
       <div className="model-performance-layout">
@@ -2696,10 +2913,7 @@ function ModelPerformanceTestModal({ clients, model, onClose }) {
 
         {error ? <div className="model-performance-error" role="alert">{error}</div> : null}
         {running ? (
-          <div aria-live="polite" className="model-performance-running" role="status">
-            <div aria-hidden="true" className="table-loading-spinner" />
-            <strong>{t('runningPerformanceTest', 'Running performance test')}</strong>
-          </div>
+          <ModelPerformanceProgressPanel events={progressEvents} result={result} status={progressStatus || t('runningPerformanceTest', 'Running performance test')} />
         ) : null}
         {!running && !result ? (
           <EmptyState message={t('noPerformanceResults', 'No performance test has run for this model yet.')} title={t('noData')} />
@@ -2708,6 +2922,83 @@ function ModelPerformanceTestModal({ clients, model, onClose }) {
       </div>
     </Modal>
   );
+}
+
+function ModelPerformanceProgressPanel({ events, result, status }) {
+  const { t } = useTranslation();
+  const nativeLeg = value(result, 'native') || {};
+  const hairpinLeg = value(result, 'hairpin') || {};
+  const requestCount = coerceInteger(value(result, 'requestCount'), 0, 0, 10);
+  const recentEvents = [...collectionRows(events)].reverse().slice(0, 6);
+  return (
+    <section aria-live="polite" className="model-performance-progress" role="status">
+      <div className="model-performance-progress-heading">
+        <div aria-hidden="true" className="table-loading-spinner" />
+        <div>
+          <span>{t('currentStatus', 'Current status')}</span>
+          <strong>{status || t('runningPerformanceTest', 'Running performance test')}</strong>
+        </div>
+      </div>
+      <div className="model-performance-progress-grid">
+        <PerformanceProgressLeg label={t('nativeProvider', 'Native Provider')} leg={nativeLeg} total={requestCount} />
+        <PerformanceProgressLeg label={t('xenoHairpin', 'Xeno')} leg={hairpinLeg} total={requestCount} />
+      </div>
+      {recentEvents.length > 0 ? (
+        <ol className="model-performance-event-list">
+          {recentEvents.map((event, index) => (
+            <li key={`${value(event, 'eventType') || 'event'}-${value(event, 'leg') || 'all'}-${value(event, 'index') || index}-${value(event, 'sentUtc') || index}`}>
+              <span>{performanceProgressEventLabel(event, t)}</span>
+              <strong>{value(event, 'message') || '-'}</strong>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
+function PerformanceProgressLeg({ label, leg, total }) {
+  const { t } = useTranslation();
+  const samples = collectionRows(value(leg, 'samples'));
+  const summary = value(leg, 'summary') || {};
+  const success = coerceInteger(value(summary, 'successCount'), 0, 0, Number.MAX_SAFE_INTEGER);
+  const failed = coerceInteger(value(summary, 'failureCount'), 0, 0, Number.MAX_SAFE_INTEGER);
+  const completed = samples.length;
+  const lastSample = samples[samples.length - 1] || null;
+  return (
+    <div className="model-performance-progress-leg">
+      <div>
+        <span>{label}</span>
+        <strong>{completed}/{total || completed}</strong>
+      </div>
+      <div className="model-performance-progress-meter" aria-hidden="true">
+        <span style={{ width: `${total ? Math.min(100, (completed / total) * 100) : 0}%` }} />
+      </div>
+      <p>
+        {t('success')}: {success} · {t('failed')}: {failed}
+        {lastSample ? ` · ${t('latestSample', 'Latest')}: ${formatDuration(value(lastSample, 'totalTimeMs'))}` : ''}
+      </p>
+    </div>
+  );
+}
+
+function performanceProgressEventLabel(event, t) {
+  const leg = String(value(event, 'leg') || '').toLowerCase();
+  const eventType = String(value(event, 'eventType') || '').toLowerCase();
+  const legLabel = leg === 'native' ? t('native', 'Native') : (leg === 'hairpin' ? t('xenoHairpin', 'Xeno') : t('sample', 'Sample'));
+  if (eventType === 'warmupstarted' || eventType === 'warmupcompleted') {
+    return `${legLabel} ${t('warmup', 'Warmup')}`.trim();
+  }
+
+  if (eventType === 'samplecompleted') {
+    const sampleIndex = value(event, 'index');
+    return `${legLabel} ${sampleIndex || ''}`.trim();
+  }
+
+  if (eventType === 'legcompleted') return leg === 'native' ? t('nativeComplete', 'Native complete') : (leg === 'hairpin' ? t('hairpinComplete', 'Hairpin complete') : t('complete', 'Complete'));
+  if (eventType === 'completed') return t('complete', 'Complete');
+  if (eventType === 'error') return t('failed');
+  return t('status', 'Status');
 }
 
 function ModelPerformanceResults({ result }) {
@@ -2719,7 +3010,7 @@ function ModelPerformanceResults({ result }) {
     <div className="model-performance-results">
       <div className="performance-leg-grid">
         <PerformanceLegSummary icon={<Server size={17} />} leg={nativeLeg} title={t('nativeProvider', 'Native Provider')} />
-        <PerformanceLegSummary icon={<Network size={17} />} leg={hairpinLeg} title={t('xenoHairpin', 'Xeno Hairpin')} />
+        <PerformanceLegSummary icon={<Network size={17} />} leg={hairpinLeg} title={t('xenoHairpin', 'Xeno')} />
       </div>
       <div className="performance-chart-grid">
         {metrics.map((metric) => (
@@ -2757,7 +3048,7 @@ function PerformanceLegSummary({ icon, leg, title }) {
 
 function PerformanceMetricBarChart({ metric }) {
   const width = 540;
-  const height = 142;
+  const height = 160;
   const left = 118;
   const right = 96;
   const plotWidth = width - left - right;
@@ -6180,11 +6471,14 @@ async function deleteRecord(path, row) {
 }
 
 async function deleteClientModel(row) {
-  await api.delete('/api/v1/clientmodels', {
+  const response = await api.delete('/v1.0/api/client-models', {
     clientId: value(row, 'clientId'),
     name: value(row, 'name'),
     source: value(row, 'source')
   });
+  if (value(response, 'success') === false) {
+    throw new Error(value(response, 'error') || value(response, 'message') || 'Client model delete failed.');
+  }
 }
 
 async function deleteRequestHistoryGroup(filter) {
@@ -6414,6 +6708,7 @@ function operationKind(operation) {
       createpermission: 'createPermission',
       updatepermission: 'updatePermission',
       deleteclientmodel: 'deleteClientModel',
+      pullclientmodel: 'pullClientModel',
       bulkdeleterequesthistory: 'bulkDeleteRequestHistory',
       updatesettings: 'updateSettings',
       restore: 'restore',
@@ -6445,6 +6740,7 @@ function operationKind(operation) {
   if (method === 'PUT' && path.includes('/roles/{id}')) return 'updateRole';
   if (method === 'POST' && path.endsWith('/permissions')) return 'createPermission';
   if (method === 'PUT' && path.includes('/permissions/{id}')) return 'updatePermission';
+  if (method === 'POST' && (path.endsWith('/client-models/pull') || path.endsWith('/clientmodels/pull'))) return 'pullClientModel';
   if (method === 'DELETE' && (path.endsWith('/client-models') || path.endsWith('/clientmodels'))) return 'deleteClientModel';
   if (method === 'POST' && path.endsWith('/request-history/bulk')) return 'bulkDeleteRequestHistory';
   if (method === 'POST' && path.endsWith('/requesthistory/bulk')) return 'bulkDeleteRequestHistory';
@@ -6457,6 +6753,7 @@ function normalizeOperationPath(path) {
   const normalized = String(path || '').toLowerCase().replace(/\/+$/, '');
   if (normalized.startsWith('/api/v1/openai/v1/')) return normalized.replace('/api/v1/openai/v1/', '/v1/');
   if (normalized.startsWith('/api/v1/requesthistory')) return normalized.replace('/api/v1/requesthistory', '/v1.0/api/request-history');
+  if (normalized === '/api/v1/clientmodels/pull') return '/v1.0/api/client-models/pull';
   if (normalized === '/api/v1/clientmodels') return '/v1.0/api/client-models';
   return normalized;
 }
@@ -6596,6 +6893,14 @@ function exampleBodyForOperation(operation, model) {
         clientId: 'xcl_replace_me',
         name: selectedModel || 'gpt-oss:120b',
         source: ''
+      };
+    case 'pullClientModel':
+      return {
+        clientId: 'xcl_replace_me',
+        model: selectedModel || 'gemma3:4b',
+        source: 'local-ollama',
+        insecure: false,
+        stream: true
       };
     case 'bulkDeleteRequestHistory':
       return {
@@ -6990,7 +7295,7 @@ function flattenClientModels(clients) {
     const clientKey = advertisedModelClientKey(client, clientIndex);
     const models = value(client, 'models');
     return (Array.isArray(models) ? models : []).map((model, index) => ({
-      id: `${clientId || clientName || 'client'}:${value(model, 'name') || index}`,
+      id: `${clientId || clientName || 'client'}:${value(model, 'source') || 'local'}:${value(model, 'name') || index}`,
       clientKey,
       clientId,
       clientName,
@@ -7000,11 +7305,53 @@ function flattenClientModels(clients) {
       name: value(model, 'name'),
       apiType: value(model, 'apiType') || value(model, 'provider'),
       source: value(model, 'source'),
+      modelManagementAllowed: value(model, 'modelManagementAllowed') === true || value(model, 'allowModelManagement') === true,
       supportsCompletions: value(model, 'supportsCompletions'),
       supportsEmbeddings: value(model, 'supportsEmbeddings'),
       lastAdvertisedUtc: value(model, 'lastAdvertisedUtc')
     }));
   });
+}
+
+function manageableOllamaProviders(client) {
+  return collectionRows(value(client, 'providers'))
+    .filter((provider) => isOllamaApiType(value(provider, 'apiType')) && providerAllowsModelManagement(provider))
+    .map((provider) => ({
+      apiType: value(provider, 'apiType') || 'Ollama',
+      lastAdvertisedUtc: value(provider, 'lastAdvertisedUtc'),
+      name: value(provider, 'name') || value(provider, 'source') || 'local'
+    }));
+}
+
+function clientAllowsOllamaModelManagement(client) {
+  return manageableOllamaProviders(client).length > 0;
+}
+
+function providerAllowsModelManagement(provider) {
+  return value(provider, 'modelManagementAllowed') === true || value(provider, 'allowModelManagement') === true;
+}
+
+function isOllamaApiType(input) {
+  return String(input || '').trim().toLowerCase() === 'ollama';
+}
+
+function canDeleteManagedAdvertisedModel(model) {
+  return isActiveAdvertisedModelClient(model) &&
+    isOllamaApiType(value(model, 'apiType')) &&
+    value(model, 'modelManagementAllowed') === true;
+}
+
+function pullProviderLabel(provider) {
+  const name = value(provider, 'name') || 'local';
+  const apiType = value(provider, 'apiType') || 'Ollama';
+  return `${name} - ${apiType}`;
+}
+
+function modelPullProgressPercent(event) {
+  const total = Number(value(event, 'total'));
+  const completed = Number(value(event, 'completed'));
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(completed) || completed < 0) return 0;
+  return Math.max(0, Math.min(100, (completed / total) * 100));
 }
 
 function isActiveAdvertisedModelClient(model) {
@@ -7142,11 +7489,141 @@ function modelSupportsPerformanceRequest(model, requestType) {
   return value(model, 'supportsCompletions') === true;
 }
 
+function buildInitialPerformanceResult(config) {
+  const requestCount = coerceInteger(config.requestCount, 0, 0, 10);
+  return {
+    model: config.model,
+    requestCount,
+    requestType: config.requestType,
+    sourceClientId: config.sourceClientId,
+    sourceClientName: config.sourceClientName,
+    targetClientId: config.targetClientId,
+    targetClientName: config.targetClientName,
+    native: {
+      name: 'native',
+      description: config.nativeDescription || 'Waiting for native provider samples.',
+      samples: [],
+      summary: emptyPerformanceSummary()
+    },
+    hairpin: {
+      name: 'hairpin',
+      description: config.hairpinDescription || 'Waiting for Xeno hairpin samples.',
+      samples: [],
+      summary: emptyPerformanceSummary()
+    }
+  };
+}
+
+function mergePerformanceProgressEvent(current, event) {
+  const finalResult = value(event, 'result');
+  if (finalResult) return finalResult;
+
+  const leg = normalizePerformanceLegName(value(event, 'leg'));
+  if (!leg) return current;
+
+  const legResult = value(event, 'legResult');
+  if (legResult) {
+    return {
+      ...current,
+      [leg]: legResult
+    };
+  }
+
+  const eventType = String(value(event, 'eventType') || '').toLowerCase();
+  if (eventType === 'warmupstarted' || eventType === 'warmupcompleted') return current;
+
+  const sample = value(event, 'sample');
+  if (!sample) return current;
+
+  const existingLeg = value(current, leg) || {};
+  const samples = collectionRows(value(existingLeg, 'samples'));
+  const sampleIndex = coerceInteger(value(sample, 'index'), samples.length + 1, 1, Number.MAX_SAFE_INTEGER);
+  const nextSamples = samples.filter((item) => coerceInteger(value(item, 'index'), 0, 0, Number.MAX_SAFE_INTEGER) !== sampleIndex);
+  nextSamples.push(sample);
+  nextSamples.sort((left, right) => coerceInteger(value(left, 'index'), 0, 0, Number.MAX_SAFE_INTEGER) - coerceInteger(value(right, 'index'), 0, 0, Number.MAX_SAFE_INTEGER));
+
+  return {
+    ...current,
+    [leg]: {
+      ...existingLeg,
+      samples: nextSamples,
+      summary: value(event, 'summary') || summarizePerformanceSamplesForDashboard(nextSamples)
+    }
+  };
+}
+
+function normalizePerformanceLegName(input) {
+  const text = String(input || '').toLowerCase();
+  if (text === 'direct' || text === 'native') return 'native';
+  if (text === 'relay' || text === 'hairpin') return 'hairpin';
+  return '';
+}
+
+function emptyPerformanceSummary() {
+  return {
+    successCount: 0,
+    failureCount: 0,
+    averageTotalTimeMs: null,
+    medianTotalTimeMs: null,
+    minimumTotalTimeMs: null,
+    maximumTotalTimeMs: null,
+    averageTimeToFirstTokenMs: null,
+    medianTimeToFirstTokenMs: null,
+    averageTimeToLastTokenMs: null,
+    averageTokensPerSecond: null,
+    averageResponseBytes: null
+  };
+}
+
+function summarizePerformanceSamplesForDashboard(samples) {
+  const rows = collectionRows(samples);
+  return {
+    successCount: rows.filter((item) => value(item, 'success') === true).length,
+    failureCount: rows.filter((item) => value(item, 'success') !== true).length,
+    averageTotalTimeMs: averagePerformanceMetric(rows, 'totalTimeMs'),
+    medianTotalTimeMs: medianPerformanceMetric(rows, 'totalTimeMs'),
+    minimumTotalTimeMs: minimumPerformanceMetric(rows, 'totalTimeMs'),
+    maximumTotalTimeMs: maximumPerformanceMetric(rows, 'totalTimeMs'),
+    averageTimeToFirstTokenMs: averagePerformanceMetric(rows, 'timeToFirstTokenMs'),
+    medianTimeToFirstTokenMs: medianPerformanceMetric(rows, 'timeToFirstTokenMs'),
+    averageTimeToLastTokenMs: averagePerformanceMetric(rows, 'timeToLastTokenMs'),
+    averageTokensPerSecond: averagePerformanceMetric(rows, 'tokensPerSecond'),
+    averageResponseBytes: averagePerformanceMetric(rows, 'responseBytes')
+  };
+}
+
+function performanceMetricValues(rows, key) {
+  return rows.map((item) => Number(value(item, key))).filter((item) => Number.isFinite(item));
+}
+
+function averagePerformanceMetric(rows, key) {
+  const values = performanceMetricValues(rows, key);
+  return values.length === 0 ? null : Math.round((values.reduce((sum, item) => sum + item, 0) / values.length) * 1000) / 1000;
+}
+
+function medianPerformanceMetric(rows, key) {
+  const values = performanceMetricValues(rows, key).sort((left, right) => left - right);
+  if (values.length === 0) return null;
+  const midpoint = Math.floor(values.length / 2);
+  if (values.length % 2 === 1) return Math.round(values[midpoint] * 1000) / 1000;
+  return Math.round(((values[midpoint - 1] + values[midpoint]) / 2) * 1000) / 1000;
+}
+
+function minimumPerformanceMetric(rows, key) {
+  const values = performanceMetricValues(rows, key);
+  return values.length === 0 ? null : Math.round(Math.min(...values) * 1000) / 1000;
+}
+
+function maximumPerformanceMetric(rows, key) {
+  const values = performanceMetricValues(rows, key);
+  return values.length === 0 ? null : Math.round(Math.max(...values) * 1000) / 1000;
+}
+
 function buildPerformanceChartMetrics(result, t) {
   const nativeSummary = value(value(result, 'native'), 'summary') || {};
   const hairpinSummary = value(value(result, 'hairpin'), 'summary') || {};
   const nativeLabel = t('native', 'Native');
-  const hairpinLabel = t('hairpin', 'Hairpin');
+  const hairpinLabel = t('appTitle', 'Xeno');
   return [
     performanceChartMetric('averageTotalTimeMs', t('averageTotalTime', 'Avg Total Time'), t('elapsedTime', 'Elapsed time'), 'duration', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),
     performanceChartMetric('medianTotalTimeMs', t('medianTotalTime', 'Median Total'), t('elapsedTime', 'Elapsed time'), 'duration', nativeSummary, hairpinSummary, nativeLabel, hairpinLabel),

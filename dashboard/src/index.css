@@ -539,18 +539,19 @@ textarea {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px;
+  gap: 16px;
+  padding: 16px;
   overflow-y: auto;
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
+  font-size: 15px;
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.09);
 }
 
@@ -563,7 +564,7 @@ textarea {
 .sidebar-brand strong {
   display: block;
   color: var(--sidebar-active);
-  font-size: 18px;
+  font-size: 17px;
 }
 
 .sidebar-brand span,
@@ -590,7 +591,7 @@ textarea {
 
 .sidebar-nav {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
 
 .sidebar-group {
@@ -608,18 +609,18 @@ textarea {
 
 .sidebar-group-label {
   color: var(--sidebar-muted);
-  padding: 0 10px 4px;
+  padding: 0 8px 3px;
 }
 
 .sidebar-link {
-  min-height: 38px;
+  min-height: 35px;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) 14px;
   align-items: center;
   gap: 8px;
   border-radius: 6px;
   color: var(--sidebar-text);
-  padding: 0 10px;
+  padding: 0 8px;
   text-decoration: none;
 }
 
@@ -633,10 +634,10 @@ button.sidebar-link {
 }
 
 .sidebar-link.nested {
-  margin-left: 18px;
-  min-height: 34px;
+  margin-left: 16px;
+  min-height: 32px;
   grid-template-columns: 18px minmax(0, 1fr) 14px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .sidebar-link:hover {
@@ -673,7 +674,7 @@ html[data-theme='dark'] .sidebar-link.active {
   justify-content: space-between;
   gap: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.09);
-  padding-top: 14px;
+  padding-top: 12px;
 }
 
 .sidebar-footer strong {
@@ -3642,15 +3643,71 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 16px;
 }
 
+.model-pull-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.model-pull-config {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(240px, 1.4fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.model-pull-name-field {
+  min-width: 0;
+}
+
+.model-pull-progress {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel-soft);
+  padding: 12px;
+}
+
+.model-pull-meter {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.model-pull-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-info);
+  transition: width 160ms ease;
+}
+
+.model-pull-progress-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.model-pull-progress-meta .detail-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  padding: 8px;
+}
+
 .model-performance-config {
   display: grid;
-  grid-template-columns: minmax(220px, 1.1fr) minmax(240px, 1.35fr) minmax(180px, 0.9fr) minmax(120px, 0.55fr);
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 12px;
   align-items: end;
 }
 
 .model-performance-config .request-count-field {
-  max-width: 160px;
+  max-width: 220px;
 }
 
 .model-performance-error {
@@ -3677,6 +3734,122 @@ html[data-theme='dark'] .primitive-list-item {
 .model-performance-running strong {
   color: var(--color-text);
   font-size: 13px;
+}
+
+.model-performance-progress {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel-soft);
+  padding: 12px;
+}
+
+.model-performance-progress-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.model-performance-progress-heading div:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.model-performance-progress-heading span,
+.model-performance-progress-leg span,
+.model-performance-event-list span {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.model-performance-progress-heading strong {
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.model-performance-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.model-performance-progress-leg {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  padding: 10px;
+}
+
+.model-performance-progress-leg > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-performance-progress-leg strong {
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.model-performance-progress-leg p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.model-performance-progress-meter {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.model-performance-progress-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-info);
+  transition: width 160ms ease;
+}
+
+.model-performance-event-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.model-performance-event-list li {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.model-performance-event-list strong {
+  min-width: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .model-performance-results {
@@ -3779,7 +3952,7 @@ html[data-theme='dark'] .primitive-list-item {
 .performance-bar-chart {
   width: 100%;
   height: auto;
-  min-height: 142px;
+  min-height: 160px;
   display: block;
 }
 
@@ -3839,7 +4012,10 @@ html[data-theme='dark'] .primitive-list-item {
   .workspace-grid.explorer-grid,
   .dashboard-grid.two-column,
   .settings-grid,
+  .model-pull-config,
+  .model-pull-progress-meta,
   .model-performance-config,
+  .model-performance-progress-grid,
   .performance-chart-grid {
     grid-template-columns: 1fr;
   }

@@ -12,11 +12,20 @@ namespace Xeno.Client
 
         public ClientTelemetrySettings? Telemetry { get; set; } = null;
 
-        public List<ClientRunnerSettings>? Providers { get; set; } = null;
+        public List<ClientRunnerSettingsProbe>? Providers { get; set; } = null;
     }
 
     internal class ClientLocalInferenceServerSettingsProbe
     {
         public int? RequestTimeoutMs { get; set; } = null;
+    }
+
+    internal class ClientRunnerSettingsProbe
+    {
+        public string? ApiType { get; set; } = null;
+
+        public string? Provider { get; set; } = null;
+
+        public bool? AllowModelManagement { get; set; } = null;
     }
 }

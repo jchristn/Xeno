@@ -381,7 +381,7 @@ function Providers({ providers, refresh, setModal }) {
         { divider: true, key: 'divider-delete' },
         { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalProvider') }
       ]}
-      columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential']}
+      columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential', 'allowModelManagement']}
       headerActions={<button className="primary-button" onClick={() => setModal(providerModal(t, null, refresh))} title={t('tooltipCreateLocalProvider')} type="button"><Plus size={16} />{t('createProvider')}</button>}
       onRefresh={refresh}
       onRowClick={(row) => setModal(providerModal(t, row, refresh))}
@@ -415,7 +415,7 @@ function Models({ models, providerFilter, providers, refresh, setModal, setProvi
       actions={(row) => [
         { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalModel') }
       ]}
-      columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings']}
+      columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings', 'modelManagementAllowed']}
       headerActions={(
         <>
           <label className="form-field inline compact-field" title={t('tooltipLocalModelProviderFilter')}>
@@ -1110,7 +1110,8 @@ function providerModal(t, provider, refresh) {
         endpoint: form.get('endpoint'),
         timeoutMs: Number(form.get('timeoutMs')),
         credential: form.get('credential') || null,
-        clearCredential: form.get('clearCredential') === 'on'
+        clearCredential: form.get('clearCredential') === 'on',
+        allowModelManagement: form.get('allowModelManagement') === 'on'
       })
     });
     refresh();
@@ -1127,6 +1128,7 @@ function providerModal(t, provider, refresh) {
         <Field defaultValue={provider?.timeoutMs || 300000} label={t('timeoutMs')} name="timeoutMs" tooltip={t('tooltipLocalProviderTimeout')} type="number" />
         <Field defaultValue="" label={t('credential')} name="credential" tooltip={t('tooltipLocalProviderCredential')} />
         <Toggle checked={false} label={t('clearCredential')} name="clearCredential" tooltip={t('tooltipLocalProviderClearCredential')} />
+        <Toggle checked={provider?.allowModelManagement} label={t('modelManagement')} name="allowModelManagement" tooltip={t('tooltipLocalProviderModelManagement')} />
       </form>
     ),
     actions: <button className="primary-button" form="provider-form" title={t('tooltipSaveLocalProvider')} type="submit">{t('save')}</button>
@@ -1998,6 +2000,8 @@ function copyColumn(column, value) {
 function title(value, t) {
   const key = String(value || '');
   const mapped = {
+    allowModelManagement: 'modelManagement',
+    modelManagementAllowed: 'modelManagement',
     modelName: 'model',
     providerName: 'provider',
     providerKind: 'providerKind',

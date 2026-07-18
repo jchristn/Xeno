@@ -375,6 +375,9 @@ class XenoClient:
     def delete_client_model(self, model: dict[str, Any]) -> dict[str, Any]:
         return self._request("DELETE", "/v1.0/api/client-models", model)
 
+    def pull_client_model(self, request: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1.0/api/client-models/pull", request)
+
     def get_client_telemetry_status(self) -> dict[str, Any]:
         return self._request("GET", "/v1.0/api/client-telemetry/status")
 

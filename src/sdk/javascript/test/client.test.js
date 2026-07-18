@@ -130,6 +130,8 @@ test('management CRUD methods use expected routes and bodies', async () => {
   await client.createRoutingPolicy({ name: 'Policy', modelName: '*', clientName: '*' });
   await client.updateRoutingPolicy('rpol_1', { loadBalancingMode: 'Random' });
   await client.deleteRoutingPolicy('rpol_1');
+  await client.pullClientModel({ clientId: 'xcl_1', model: 'llama3.2:latest', source: 'local-ollama' });
+  await client.deleteClientModel({ clientId: 'xcl_1', name: 'llama3.2:latest', source: 'local-ollama' });
 
   assert.deepEqual(fetchImpl.calls.map((call) => [call.options.method, call.url]), [
     ['POST', 'https://xeno.local/v1.0/api/tenants'],
@@ -155,7 +157,9 @@ test('management CRUD methods use expected routes and bodies', async () => {
     ['DELETE', 'https://xeno.local/v1.0/api/role-assignments/rassn_1'],
     ['POST', 'https://xeno.local/v1.0/api/routing-policies'],
     ['PUT', 'https://xeno.local/v1.0/api/routing-policies/rpol_1'],
-    ['DELETE', 'https://xeno.local/v1.0/api/routing-policies/rpol_1']
+    ['DELETE', 'https://xeno.local/v1.0/api/routing-policies/rpol_1'],
+    ['POST', 'https://xeno.local/v1.0/api/client-models/pull'],
+    ['DELETE', 'https://xeno.local/v1.0/api/client-models']
   ]);
   assert.match(fetchImpl.calls[0].options.body, /"name":"Tenant"/);
   assert.match(fetchImpl.calls[3].options.body, /"confirmTenantId":"ten_1"/);
@@ -163,6 +167,8 @@ test('management CRUD methods use expected routes and bodies', async () => {
   assert.match(fetchImpl.calls[12].options.body, /"permissionIds":\["perm_1"\]/);
   assert.match(fetchImpl.calls[19].options.body, /"principalId":"usr_1"/);
   assert.match(fetchImpl.calls[21].options.body, /"modelName":"\*"/);
+  assert.match(fetchImpl.calls[24].options.body, /"model":"llama3.2:latest"/);
+  assert.match(fetchImpl.calls[25].options.body, /"name":"llama3.2:latest"/);
 });
 
 test('OpenAI and request history methods use expected routes', async () => {

@@ -169,6 +169,14 @@ namespace Test.Shared
                                 File.WriteAllText(ClientSettings.SettingsFile, "{\"Name\":\"test-client\",\"LocalInferenceServer\":{\"Enabled\":true,\"Host\":\"127.0.0.1\",\"Port\":11434,\"RequestTimeoutMs\":120000},\"Providers\":[]}");
                                 settings = ClientSettings.Load();
                                 if (settings.LocalInferenceServer.RequestTimeoutMs != 300000) throw new InvalidOperationException("Old local inference request timeout default was not migrated.");
+
+                                File.WriteAllText(ClientSettings.SettingsFile, "{\"Name\":\"test-client\",\"LocalInferenceServer\":{\"Enabled\":false,\"Host\":\"127.0.0.1\",\"Port\":11434,\"RequestTimeoutMs\":300000},\"Providers\":[{\"Name\":\"ollama\",\"ApiType\":\"Ollama\",\"Endpoint\":\"http://127.0.0.1:11434\",\"Models\":[]}]}");
+                                settings = ClientSettings.Load();
+                                ClientRunnerSettings? ollamaProvider = settings.Providers.FirstOrDefault(item => String.Equals(item.Name, "ollama", StringComparison.Ordinal));
+                                if (ollamaProvider == null) throw new InvalidOperationException("Ollama provider was not loaded.");
+                                if (ollamaProvider.AllowModelManagement) throw new InvalidOperationException("Ollama model management should be disabled by default.");
+                                string rewrittenSettings = File.ReadAllText(ClientSettings.SettingsFile);
+                                if (!rewrittenSettings.Contains("AllowModelManagement", StringComparison.Ordinal)) throw new InvalidOperationException("Ollama provider model-management default was not written back to client.json.");
                             }
                             finally
                             {
@@ -1745,6 +1753,16 @@ namespace Test.Shared
                                 File.WriteAllText(clientSettingsFile, JsonUtil.Serialize(disabledDashboardSettings, true));
                                 ClientCommandResult providerAdd = await RunXenoClientAsync(new[] { "provider", "add", "--name", "openai-compatible", "--type", "OpenAICompatible", "--endpoint", "http://127.0.0.1:11435" }, clientHome).ConfigureAwait(false);
                                 if (providerAdd.ExitCode != 0) throw new InvalidOperationException("Provider add with API type failed: " + providerAdd.StandardError + providerAdd.StandardOutput);
+                                ClientCommandResult providerManagementUpdate = await RunXenoClientAsync(new[] { "provider", "update", "--name", "local-ollama", "--allow-model-management" }, clientHome).ConfigureAwait(false);
+                                if (providerManagementUpdate.ExitCode != 0) throw new InvalidOperationException("Provider model-management update failed: " + providerManagementUpdate.StandardError + providerManagementUpdate.StandardOutput);
+                                ClientSettings providerManagementSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(clientSettingsFile));
+                                ClientRunnerSettings? managedOllamaProvider = providerManagementSettings.Providers.FirstOrDefault(item => String.Equals(item.Name, "local-ollama", StringComparison.Ordinal));
+                                if (managedOllamaProvider == null || !managedOllamaProvider.AllowModelManagement) throw new InvalidOperationException("Provider model-management flag was not persisted by CLI update.");
+                                ClientCommandResult managedModelListResult = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
+                                if (managedModelListResult.ExitCode != 0) throw new InvalidOperationException("Managed model list failed: " + managedModelListResult.StandardError + managedModelListResult.StandardOutput);
+                                List<TestCliModelRecord> managedModelList = DeserializeRequired<List<TestCliModelRecord>>(managedModelListResult.StandardOutput);
+                                TestCliModelRecord? defaultManagedModel = managedModelList.FirstOrDefault(item => String.Equals(item.Name, "llama3.2:latest", StringComparison.Ordinal));
+                                if (defaultManagedModel == null || !defaultManagedModel.ModelManagementAllowed) throw new InvalidOperationException("Model list did not expose model-management capability for Ollama models.");
                                 ClientCommandResult startHelp = await RunXenoClientAsync(new[] { "start", "--help" }, clientHome).ConfigureAwait(false);
                                 if (startHelp.ExitCode != 0 || !startHelp.StandardOutput.Contains("xeno start", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Start alias help failed: " + startHelp.StandardError + startHelp.StandardOutput);
                                 ClientCommandResult pingHelp = await RunXenoClientAsync(new[] { "ping", "--help" }, clientHome).ConfigureAwait(false);
@@ -2178,13 +2196,16 @@ namespace Test.Shared
                                         Name = "touchstone",
                                         ApiType = "Ollama",
                                         Endpoint = baseUrl,
-                                        TimeoutMs = 300000
+                                        TimeoutMs = 300000,
+                                        AllowModelManagement = true
                                     });
                                     HttpResponseMessage providerCreate = await PostJsonAsync(httpClient, baseUrl + "/api/v1/providers", providerJson).ConfigureAwait(false);
                                     if (!providerCreate.IsSuccessStatusCode) throw new InvalidOperationException("Provider create failed: " + await providerCreate.Content.ReadAsStringAsync().ConfigureAwait(false));
 
                                     LocalProviderListResponse providers = DeserializeRequired<LocalProviderListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/providers").ConfigureAwait(false));
                                     if (!providers.Providers.Any(item => String.Equals(item.Name, "touchstone", StringComparison.Ordinal))) throw new InvalidOperationException("Created provider was not listed.");
+                                    ClientRunnerSettings? createdProvider = providers.Providers.FirstOrDefault(item => String.Equals(item.Name, "touchstone", StringComparison.Ordinal));
+                                    if (createdProvider == null || !createdProvider.AllowModelManagement) throw new InvalidOperationException("Provider create did not persist model-management permission.");
                                     if (!ClientConnectionState.IsInventoryUpdatePending()) throw new InvalidOperationException("Provider create did not request inventory re-advertisement.");
                                     ILocalDashboardMetadataMethods metadataMethods = (ILocalDashboardMetadataMethods)history;
                                     string? snapshotUtc = await metadataMethods.GetMetadataAsync("last_configuration_snapshot_utc", CancellationToken.None).ConfigureAwait(false);
@@ -2200,13 +2221,15 @@ namespace Test.Shared
                                         Name = "touchstone",
                                         ApiType = "OpenAICompatible",
                                         Endpoint = "http://127.0.0.1:11435",
-                                        TimeoutMs = 120000
+                                        TimeoutMs = 120000,
+                                        AllowModelManagement = false
                                     });
                                     HttpResponseMessage providerUpdate = await PutJsonAsync(httpClient, baseUrl + "/api/v1/providers/touchstone", providerUpdateJson).ConfigureAwait(false);
                                     if (!providerUpdate.IsSuccessStatusCode) throw new InvalidOperationException("Provider update failed: " + await providerUpdate.Content.ReadAsStringAsync().ConfigureAwait(false));
                                     providers = DeserializeRequired<LocalProviderListResponse>(await httpClient.GetStringAsync(baseUrl + "/api/v1/providers").ConfigureAwait(false));
                                     ClientRunnerSettings? updatedProvider = providers.Providers.FirstOrDefault(item => String.Equals(item.Name, "touchstone", StringComparison.Ordinal));
                                     if (updatedProvider == null || !String.Equals(updatedProvider.ApiType, "OpenAICompatible", StringComparison.Ordinal)) throw new InvalidOperationException("Provider update was not persisted.");
+                                    if (updatedProvider.AllowModelManagement) throw new InvalidOperationException("Provider update did not clear model-management permission for non-Ollama providers.");
 
                                     string modelJson = JsonUtil.Serialize(new LocalModelUpsertRequest
                                     {
@@ -2222,6 +2245,7 @@ namespace Test.Shared
                                     LocalModelEntry? model = models.Models.FirstOrDefault(item => String.Equals(item.Name, "touchstone-model", StringComparison.Ordinal));
                                     if (model == null) throw new InvalidOperationException("Created model was not listed.");
                                     if (model.SupportsCompletions || !model.SupportsEmbeddings) throw new InvalidOperationException("Created model capability flags were not persisted.");
+                                    if (model.ModelManagementAllowed) throw new InvalidOperationException("Non-Ollama local model should not advertise model-management permission.");
 
                                     string modelUpdateJson = JsonUtil.Serialize(new LocalModelUpsertRequest
                                     {
@@ -6088,6 +6112,7 @@ namespace Test.Shared
                             new OpenApiRouteExpectation { Route = "/v1.0/api/users/{id}", Method = "put" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/routing-policies/{id}", Method = "put" },
+                            new OpenApiRouteExpectation { Route = "/v1.0/api/client-models/pull", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/client-models", Method = "delete" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/request-history/bulk", Method = "post" },
                             new OpenApiRouteExpectation { Route = "/v1.0/api/model-performance/test", Method = "post" },
@@ -6165,31 +6190,133 @@ namespace Test.Shared
                             }
                         }
 
-                        string clientsJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
-                        List<XenoClientRecord> clients = DeserializeRequired<List<XenoClientRecord>>(clientsJson);
-                        XenoClientRecord? client = clients.FirstOrDefault();
-                        string clientId = client?.Id ?? String.Empty;
-                        if (String.IsNullOrWhiteSpace(clientId)) throw new InvalidOperationException("Seed client not found.");
-
-                        XenoClientModel? model = client?.Models.FirstOrDefault();
-                        string modelName = model?.Name ?? String.Empty;
-                        string source = model?.Source ?? String.Empty;
-                        if (String.IsNullOrWhiteSpace(modelName)) throw new InvalidOperationException("Seed client model not found.");
-
-                        string deleteModelBody = JsonUtil.Serialize(new { clientId, name = modelName, source });
-                        using (HttpResponseMessage deleteModel = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models", deleteModelBody).ConfigureAwait(false))
+                        using (CancellationTokenSource managedClientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+                        using (ClientWebSocket managedSocket = new ClientWebSocket())
                         {
-                            string deleteModelJson = await deleteModel.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            if (!deleteModel.IsSuccessStatusCode || !deleteModelJson.Contains("\"removed\": 1", StringComparison.Ordinal)) throw new InvalidOperationException("Client model delete failed: " + deleteModelJson);
-                        }
+                            string managedClientId = "xcl_model_management_smoke";
+                            string managedSource = "managed-ollama";
+                            string existingModelName = "touchstone-managed-delete-model";
+                            ApplySeedCredentialHeaders(managedSocket);
+                            await managedSocket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), managedClientTokenSource.Token).ConfigureAwait(false);
+                            string? managedConnected = await ReceiveWebSocketTextAsync(managedSocket, managedClientTokenSource.Token).ConfigureAwait(false);
+                            if (String.IsNullOrWhiteSpace(managedConnected) || !managedConnected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Managed model client did not connect: " + managedConnected);
 
-                        using (HttpResponseMessage deleteClient = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(clientId)).ConfigureAwait(false))
-                        {
-                            if (!deleteClient.IsSuccessStatusCode) throw new InvalidOperationException("Client delete failed: " + (int)deleteClient.StatusCode);
-                        }
+                            await SendWebSocketJsonAsync(managedSocket, new
+                            {
+                                type = "client.register",
+                                clientId = managedClientId,
+                                tenantId = Constants.DefaultTenantId,
+                                name = "managed-model-client",
+                                inventory = new
+                                {
+                                    runners = new[]
+                                    {
+                                        new
+                                        {
+                                            name = managedSource,
+                                            apiType = "Ollama",
+                                            endpoint = "http://127.0.0.1:11434",
+                                            modelManagementAllowed = true,
+                                            models = new[]
+                                            {
+                                                new { name = existingModelName, supportsCompletions = true, supportsEmbeddings = false }
+                                            }
+                                        }
+                                    }
+                                }
+                            }, managedClientTokenSource.Token).ConfigureAwait(false);
 
-                        string clientsAfterDelete = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
-                        if (clientsAfterDelete.Contains(clientId, StringComparison.Ordinal)) throw new InvalidOperationException("Deleted client was still returned.");
+                            string? managedRegistered = await ReceiveWebSocketTextAsync(managedSocket, managedClientTokenSource.Token).ConfigureAwait(false);
+                            if (String.IsNullOrWhiteSpace(managedRegistered) || !managedRegistered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Managed model client did not register: " + managedRegistered);
+                            Task managedTask = FakeModelManagementClientLoopAsync(managedSocket, managedClientId, managedSource, managedClientTokenSource.Token);
+
+                            try
+                            {
+                                await WaitForRegisteredClientAsync(port, "managed-model-client").ConfigureAwait(false);
+                                string clientsJson = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
+                                List<XenoClientRecord> clients = DeserializeRequired<List<XenoClientRecord>>(clientsJson);
+                                XenoClientRecord client = clients.FirstOrDefault(item => String.Equals(item.Id, managedClientId, StringComparison.Ordinal))
+                                    ?? throw new InvalidOperationException("Managed model client not found: " + clientsJson);
+                                if (!client.Providers.Any(item => String.Equals(item.Name, managedSource, StringComparison.Ordinal) && item.ModelManagementAllowed)) throw new InvalidOperationException("Managed Ollama provider did not advertise model management: " + clientsJson);
+                                XenoClientModel managedModel = client.Models.FirstOrDefault(item => String.Equals(item.Name, existingModelName, StringComparison.Ordinal))
+                                    ?? throw new InvalidOperationException("Managed Ollama model was not advertised: " + clientsJson);
+                                if (!managedModel.ModelManagementAllowed) throw new InvalidOperationException("Managed Ollama model did not inherit provider model-management capability.");
+
+                                using (HttpResponseMessage pullModel = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models/pull", JsonUtil.Serialize(new ClientModelPullRequest
+                                {
+                                    ClientId = managedClientId,
+                                    Model = "touchstone-managed-pulled-model",
+                                    Source = managedSource
+                                })).ConfigureAwait(false))
+                                {
+                                    string pullModelJson = await pullModel.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    if (!pullModel.IsSuccessStatusCode) throw new InvalidOperationException("Client model pull failed: " + pullModelJson);
+                                    ClientModelManagementResponseMessage pullResult = DeserializeRequired<ClientModelManagementResponseMessage>(pullModelJson);
+                                    if (!pullResult.Success || !String.Equals(pullResult.Operation, "pull", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client model pull response mismatch: " + pullModelJson);
+                                }
+
+                                using (HttpRequestMessage pullStreamRequest = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/v1.0/api/client-models/pull"))
+                                {
+                                    pullStreamRequest.Headers.TryAddWithoutValidation("Accept", "application/x-ndjson");
+                                    pullStreamRequest.Content = new StringContent(JsonUtil.Serialize(new ClientModelPullRequest
+                                    {
+                                        ClientId = managedClientId,
+                                        Model = "touchstone-managed-streamed-model",
+                                        Source = managedSource,
+                                        Stream = true
+                                    }), Encoding.UTF8, "application/json");
+
+                                    using (HttpResponseMessage pullStream = await httpClient.SendAsync(pullStreamRequest, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+                                    {
+                                        string pullStreamLines = await pullStream.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if (!pullStream.IsSuccessStatusCode) throw new InvalidOperationException("Client model pull stream failed: " + pullStreamLines);
+                                        string contentType = pullStream.Content.Headers.ContentType?.MediaType ?? String.Empty;
+                                        if (!String.Equals(contentType, "application/x-ndjson", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client model pull stream content type mismatch: " + contentType);
+
+                                        List<ModelManagementProgressEvent> pullEvents = ParseModelManagementProgressEvents(pullStreamLines);
+                                        if (!pullEvents.Any(item => String.Equals(item.EventType, "progress", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Client model pull stream did not include provider progress: " + pullStreamLines);
+                                        ModelManagementProgressEvent completedPull = pullEvents.LastOrDefault(item => String.Equals(item.EventType, "completed", StringComparison.OrdinalIgnoreCase) && item.Result != null)
+                                            ?? throw new InvalidOperationException("Client model pull stream did not include final result: " + pullStreamLines);
+                                        if (completedPull.Result == null || !completedPull.Result.Success) throw new InvalidOperationException("Client model pull stream final result failed: " + pullStreamLines);
+                                    }
+                                }
+
+                                using (HttpResponseMessage deleteModel = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/client-models", JsonUtil.Serialize(new ClientModelDeleteRequest
+                                {
+                                    ClientId = managedClientId,
+                                    Name = existingModelName,
+                                    Source = managedSource
+                                })).ConfigureAwait(false))
+                                {
+                                    string deleteModelJson = await deleteModel.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    if (!deleteModel.IsSuccessStatusCode) throw new InvalidOperationException("Client model delete failed: " + deleteModelJson);
+                                    ClientModelManagementResponseMessage deleteResult = DeserializeRequired<ClientModelManagementResponseMessage>(deleteModelJson);
+                                    if (!deleteResult.Success || !String.Equals(deleteResult.Operation, "delete", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Client model delete response mismatch: " + deleteModelJson);
+                                }
+
+                                using (HttpResponseMessage deleteClient = await DeleteJsonAsync(httpClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(managedClientId)).ConfigureAwait(false))
+                                {
+                                    if (!deleteClient.IsSuccessStatusCode) throw new InvalidOperationException("Client delete failed: " + (int)deleteClient.StatusCode);
+                                }
+
+                                string clientsAfterDelete = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
+                                if (clientsAfterDelete.Contains(managedClientId, StringComparison.Ordinal)) throw new InvalidOperationException("Deleted client was still returned.");
+                            }
+                            finally
+                            {
+                                managedClientTokenSource.Cancel();
+                                try
+                                {
+                                    await managedTask.ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                }
+                                catch (WebSocketException)
+                                {
+                                }
+                            }
+                        }
                     }
                 }
                 finally
@@ -6539,6 +6666,7 @@ namespace Test.Shared
                                     {
                                         name = "updated-provider",
                                         apiType = "OpenAICompatible",
+                                        modelManagementAllowed = false,
                                         models = new[]
                                         {
                                             new { name = "touchstone-updated-model", supportsCompletions = true, supportsEmbeddings = false }
@@ -6548,6 +6676,7 @@ namespace Test.Shared
                                     {
                                         name = "updated-ollama-provider",
                                         apiType = "Ollama",
+                                        modelManagementAllowed = true,
                                         models = new[]
                                         {
                                             new { name = "touchstone-ollama-model", supportsCompletions = true, supportsEmbeddings = true }
@@ -6567,6 +6696,11 @@ namespace Test.Shared
                         await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
                         string clients = await httpClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false);
                         if (!clients.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("Updated client models did not include inventory update model: " + clients);
+                        List<XenoClientRecord> registeredClients = DeserializeRequired<List<XenoClientRecord>>(clients);
+                        XenoClientRecord registeredClient = registeredClients.FirstOrDefault(item => String.Equals(item.Id, "xcl_pascal_inventory", StringComparison.Ordinal))
+                            ?? throw new InvalidOperationException("Pascal inventory client was not persisted: " + clients);
+                        if (!registeredClient.Providers.Any(item => String.Equals(item.Name, "updated-ollama-provider", StringComparison.Ordinal) && item.ModelManagementAllowed)) throw new InvalidOperationException("Ollama provider model-management flag was not persisted: " + clients);
+                        if (!registeredClient.Models.Any(item => String.Equals(item.Name, "touchstone-ollama-model", StringComparison.Ordinal) && item.ModelManagementAllowed)) throw new InvalidOperationException("Ollama model model-management flag was not persisted: " + clients);
 
                         string models = await httpClient.GetStringAsync(baseUrl + "/v1/models").ConfigureAwait(false);
                         if (!models.Contains("touchstone-updated-model", StringComparison.Ordinal)) throw new InvalidOperationException("OpenAI model list did not include inventory update model: " + models);
@@ -6810,6 +6944,39 @@ namespace Test.Shared
                                 AssertPerformanceLeg(result.Hairpin, "hairpin");
                                 if (result.Hairpin.Samples[0].TimeToFirstTokenMs == null) throw new InvalidOperationException("Hairpin performance result did not include time to first token.");
                                 if (result.Hairpin.Samples[0].TokensPerSecond == null) throw new InvalidOperationException("Hairpin performance result did not include tokens per second.");
+                            }
+
+                            using (HttpRequestMessage streamRequest = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/v1.0/api/model-performance/test"))
+                            {
+                                streamRequest.Headers.TryAddWithoutValidation("Accept", "application/x-ndjson");
+                                streamRequest.Content = new StringContent(JsonUtil.Serialize(new ModelPerformanceTestRequest
+                                {
+                                    Model = "touchstone-performance-model",
+                                    SourceClientId = "xcl_performance_source",
+                                    TargetClientId = "xcl_performance_target",
+                                    TargetSource = "touchstone-provider",
+                                    RequestType = "chatCompletions",
+                                    RequestCount = 1,
+                                    Stream = true
+                                }), Encoding.UTF8, "application/json");
+
+                                using (HttpResponseMessage streamResponse = await httpClient.SendAsync(streamRequest, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+                                {
+                                    string lines = await streamResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    if (!streamResponse.IsSuccessStatusCode) throw new InvalidOperationException("Model performance stream failed: " + (int)streamResponse.StatusCode + " " + lines);
+                                    string contentType = streamResponse.Content.Headers.ContentType?.MediaType ?? String.Empty;
+                                    if (!String.Equals(contentType, "application/x-ndjson", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model performance stream content type mismatch: " + contentType);
+
+                                    List<ModelPerformanceTestProgressEvent> events = ParsePerformanceProgressEvents(lines);
+                                    if (!events.Any(item => String.Equals(item.EventType, "warmupCompleted", StringComparison.OrdinalIgnoreCase) && String.Equals(item.Leg, "native", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Native streamed performance warmup progress was not observed.");
+                                    if (!events.Any(item => String.Equals(item.EventType, "warmupCompleted", StringComparison.OrdinalIgnoreCase) && String.Equals(item.Leg, "hairpin", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Hairpin streamed performance warmup progress was not observed.");
+                                    if (!events.Any(item => String.Equals(item.EventType, "sampleCompleted", StringComparison.OrdinalIgnoreCase) && String.Equals(item.Leg, "native", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Native streamed performance sample progress was not observed.");
+                                    if (!events.Any(item => String.Equals(item.EventType, "sampleCompleted", StringComparison.OrdinalIgnoreCase) && String.Equals(item.Leg, "hairpin", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Hairpin streamed performance sample progress was not observed.");
+                                    ModelPerformanceTestProgressEvent completed = events.LastOrDefault(item => String.Equals(item.EventType, "completed", StringComparison.OrdinalIgnoreCase) && item.Result != null)
+                                        ?? throw new InvalidOperationException("Final streamed performance completion event was not observed.");
+                                    AssertPerformanceLeg(completed.Result!.Native, "native");
+                                    AssertPerformanceLeg(completed.Result.Hairpin, "hairpin");
+                                }
                             }
                         }
 
@@ -7440,7 +7607,20 @@ namespace Test.Shared
                 {
                     ServerPerformanceTestRequestMessage? request = JsonUtil.Deserialize<ServerPerformanceTestRequestMessage>(message);
                     if (request == null) throw new InvalidOperationException("Performance target request could not be deserialized.");
+                    ModelPerformanceTestSampleResult warmup = BuildPerformanceSample(0, 47, 10, 18, 320);
                     ModelPerformanceTestSampleResult sample = BuildPerformanceSample(1, 52, 11, 22, 384);
+                    ModelPerformanceTestLegResult leg = new ModelPerformanceTestLegResult
+                    {
+                        Name = "native",
+                        Description = "native performance smoke",
+                        Samples = new List<ModelPerformanceTestSampleResult> { sample },
+                        Summary = BuildSinglePerformanceSummary(sample)
+                    };
+                    await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_target", "direct", "legStarted", "Native smoke leg started.", null, null, 0, 1, token).ConfigureAwait(false);
+                    await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_target", "direct", "warmupStarted", "Native smoke warmup started.", null, null, 0, 1, token).ConfigureAwait(false);
+                    await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_target", "direct", "warmupCompleted", "Native smoke warmup completed.", warmup, null, 0, 1, token).ConfigureAwait(false);
+                    await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_target", "direct", "sampleCompleted", "Native smoke sample completed.", sample, leg, 1, 1, token).ConfigureAwait(false);
+                    await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_target", "direct", "legCompleted", "Native smoke leg completed.", null, leg, 1, 1, token).ConfigureAwait(false);
                     await SendWebSocketJsonAsync(socket, new ClientPerformanceTestResponseMessage
                     {
                         Type = "client.performanceTest.response",
@@ -7449,13 +7629,7 @@ namespace Test.Shared
                         TenantId = Constants.DefaultTenantId,
                         Mode = "direct",
                         Success = true,
-                        Result = new ModelPerformanceTestLegResult
-                        {
-                            Name = "native",
-                            Description = "native performance smoke",
-                            Samples = new List<ModelPerformanceTestSampleResult> { sample },
-                            Summary = BuildSinglePerformanceSummary(sample)
-                        }
+                        Result = leg
                     }, token).ConfigureAwait(false);
                     continue;
                 }
@@ -7483,6 +7657,10 @@ namespace Test.Shared
                 if (request == null) throw new InvalidOperationException("Performance source request could not be deserialized.");
                 List<ModelPerformanceTestSampleResult> samples = new List<ModelPerformanceTestSampleResult>();
                 int requestCount = Math.Clamp(request.RequestCount, 1, 10);
+                await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_source", "relay", "legStarted", "Hairpin smoke leg started.", null, null, 0, requestCount, token).ConfigureAwait(false);
+                ModelPerformanceTestSampleResult warmup = BuildPerformanceSample(0, 72, 20, 12, 360);
+                await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_source", "relay", "warmupStarted", "Hairpin smoke warmup started.", null, null, 0, requestCount, token).ConfigureAwait(false);
+                await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_source", "relay", "warmupCompleted", "Hairpin smoke warmup completed.", warmup, null, 0, requestCount, token).ConfigureAwait(false);
                 for (int index = 1; index <= requestCount; index++)
                 {
                     string sampleId = "pts_" + Guid.NewGuid().ToString("N");
@@ -7509,8 +7687,24 @@ namespace Test.Shared
                     ServerPerformanceTestRelayResponseMessage relayResponse = await ReceivePerformanceRelayResponseAsync(socket, sampleId, token).ConfigureAwait(false);
                     ModelPerformanceTestSampleResult sample = relayResponse.Result ?? BuildPerformanceSample(index, 80, 24, 16, 420);
                     samples.Add(sample);
+                    ModelPerformanceTestLegResult progressLeg = new ModelPerformanceTestLegResult
+                    {
+                        Name = "hairpin",
+                        Description = "hairpin performance smoke",
+                        Samples = new List<ModelPerformanceTestSampleResult>(samples),
+                        Summary = BuildPerformanceSummary(samples)
+                    };
+                    await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_source", "relay", "sampleCompleted", "Hairpin smoke sample completed.", sample, progressLeg, samples.Count, requestCount, token).ConfigureAwait(false);
                 }
 
+                ModelPerformanceTestLegResult leg = new ModelPerformanceTestLegResult
+                {
+                    Name = "hairpin",
+                    Description = "hairpin performance smoke",
+                    Samples = samples,
+                    Summary = BuildPerformanceSummary(samples)
+                };
+                await SendFakePerformanceProgressAsync(socket, request, "xcl_performance_source", "relay", "legCompleted", "Hairpin smoke leg completed.", null, leg, samples.Count, requestCount, token).ConfigureAwait(false);
                 await SendWebSocketJsonAsync(socket, new ClientPerformanceTestResponseMessage
                 {
                     Type = "client.performanceTest.response",
@@ -7519,13 +7713,7 @@ namespace Test.Shared
                     TenantId = Constants.DefaultTenantId,
                     Mode = "relay",
                     Success = samples.Any(item => item.Success),
-                    Result = new ModelPerformanceTestLegResult
-                    {
-                        Name = "hairpin",
-                        Description = "hairpin performance smoke",
-                        Samples = samples,
-                        Summary = BuildPerformanceSummary(samples)
-                    }
+                    Result = leg
                 }, token).ConfigureAwait(false);
             }
         }
@@ -7691,6 +7879,138 @@ namespace Test.Shared
             if (sample.TotalTimeMs == null || sample.TotalTimeMs <= 0) throw new InvalidOperationException("Performance sample missing total time for " + expectedName + ".");
             if (leg.Summary.SuccessCount != 1) throw new InvalidOperationException("Performance leg summary success count mismatch for " + expectedName + ".");
             if (leg.Summary.AverageTotalTimeMs == null || leg.Summary.AverageTotalTimeMs <= 0) throw new InvalidOperationException("Performance leg summary missing average total time for " + expectedName + ".");
+        }
+
+        private static List<ModelPerformanceTestProgressEvent> ParsePerformanceProgressEvents(string lines)
+        {
+            List<ModelPerformanceTestProgressEvent> events = new List<ModelPerformanceTestProgressEvent>();
+            foreach (string line in (lines ?? String.Empty).Replace("\r\n", "\n").Split('\n'))
+            {
+                string trimmed = line.Trim();
+                if (String.IsNullOrWhiteSpace(trimmed)) continue;
+                ModelPerformanceTestProgressEvent? item = JsonUtil.Deserialize<ModelPerformanceTestProgressEvent>(trimmed);
+                if (item != null) events.Add(item);
+            }
+
+            return events;
+        }
+
+        private static List<ModelManagementProgressEvent> ParseModelManagementProgressEvents(string lines)
+        {
+            List<ModelManagementProgressEvent> events = new List<ModelManagementProgressEvent>();
+            foreach (string line in (lines ?? String.Empty).Replace("\r\n", "\n").Split('\n'))
+            {
+                string trimmed = line.Trim();
+                if (String.IsNullOrWhiteSpace(trimmed)) continue;
+                ModelManagementProgressEvent? item = JsonUtil.Deserialize<ModelManagementProgressEvent>(trimmed);
+                if (item != null) events.Add(item);
+            }
+
+            return events;
+        }
+
+        private static async Task SendFakePerformanceProgressAsync(ClientWebSocket socket, ServerPerformanceTestRequestMessage request, string clientId, string mode, string eventType, string message, ModelPerformanceTestSampleResult? sample, ModelPerformanceTestLegResult? legResult, int completedSamples, int totalSamples, CancellationToken token)
+        {
+            await SendWebSocketJsonAsync(socket, new ClientPerformanceTestProgressMessage
+            {
+                Type = "client.performanceTest.progress",
+                RequestId = request.RequestId,
+                ClientId = clientId,
+                TenantId = Constants.DefaultTenantId,
+                Mode = mode,
+                EventType = eventType,
+                Message = message,
+                Index = sample?.Index,
+                CompletedSamples = completedSamples,
+                TotalSamples = totalSamples,
+                Sample = sample,
+                Summary = legResult?.Summary,
+                LegResult = legResult,
+                SentUtc = DateTime.UtcNow
+            }, token).ConfigureAwait(false);
+        }
+
+        private static async Task FakeModelManagementClientLoopAsync(ClientWebSocket socket, string clientId, string source, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+            {
+                string? message = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+                if (String.IsNullOrWhiteSpace(message)) continue;
+                if (!message.Contains("\"server.modelManagement.request\"", StringComparison.OrdinalIgnoreCase)) continue;
+
+                ServerModelManagementRequestMessage? request = JsonUtil.Deserialize<ServerModelManagementRequestMessage>(message);
+                if (request == null) throw new InvalidOperationException("Server model-management request could not be deserialized.");
+                if (!String.Equals(request.ClientId, clientId, StringComparison.Ordinal)) throw new InvalidOperationException("Server model-management request client ID mismatch.");
+                if (!String.Equals(request.Source, source, StringComparison.Ordinal)) throw new InvalidOperationException("Server model-management request source mismatch.");
+                if (!String.Equals(request.TenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Server model-management request tenant ID mismatch.");
+
+                await SendWebSocketJsonAsync(socket, new ClientModelManagementProgressMessage
+                {
+                    Type = "client.modelManagement.progress",
+                    RequestId = request.RequestId,
+                    ClientId = clientId,
+                    TenantId = Constants.DefaultTenantId,
+                    Operation = request.Operation,
+                    Model = request.Model,
+                    Source = source,
+                    EventType = "started",
+                    Status = "starting",
+                    Message = "Touchstone model management started.",
+                    SentUtc = DateTime.UtcNow
+                }, token).ConfigureAwait(false);
+
+                await SendWebSocketJsonAsync(socket, new ClientModelManagementProgressMessage
+                {
+                    Type = "client.modelManagement.progress",
+                    RequestId = request.RequestId,
+                    ClientId = clientId,
+                    TenantId = Constants.DefaultTenantId,
+                    Operation = request.Operation,
+                    Model = request.Model,
+                    Source = source,
+                    EventType = "progress",
+                    Status = "pulling manifest",
+                    Message = "pulling manifest",
+                    Completed = 5,
+                    Total = 10,
+                    Digest = "sha256:touchstone",
+                    RawLine = "{\"status\":\"pulling manifest\"}",
+                    SentUtc = DateTime.UtcNow
+                }, token).ConfigureAwait(false);
+
+                await SendWebSocketJsonAsync(socket, new ClientModelManagementProgressMessage
+                {
+                    Type = "client.modelManagement.progress",
+                    RequestId = request.RequestId,
+                    ClientId = clientId,
+                    TenantId = Constants.DefaultTenantId,
+                    Operation = request.Operation,
+                    Model = request.Model,
+                    Source = source,
+                    EventType = "completed",
+                    Status = "success",
+                    Message = "Touchstone model management completed.",
+                    Completed = 10,
+                    Total = 10,
+                    SentUtc = DateTime.UtcNow
+                }, token).ConfigureAwait(false);
+
+                await SendWebSocketJsonAsync(socket, new ClientModelManagementResponseMessage
+                {
+                    Type = "client.modelManagement.response",
+                    RequestId = request.RequestId,
+                    ClientId = clientId,
+                    TenantId = Constants.DefaultTenantId,
+                    Operation = request.Operation,
+                    Model = request.Model,
+                    Source = source,
+                    Success = true,
+                    StatusCode = 200,
+                    Message = "Touchstone model management completed.",
+                    Body = "{\"status\":\"success\"}",
+                    SentUtc = DateTime.UtcNow
+                }, token).ConfigureAwait(false);
+            }
         }
 
         private static async Task FakeClientLoopAsync(ClientWebSocket socket, CancellationToken token)

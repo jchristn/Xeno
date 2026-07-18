@@ -98,6 +98,7 @@ namespace Xeno.Sdk.Tests
         {
             RecordingHandler handler = new RecordingHandler(request =>
             {
+                if (request.Method == HttpMethod.Delete && request.RequestUri?.AbsolutePath.Equals("/v1.0/api/client-models", StringComparison.OrdinalIgnoreCase) == true) return JsonResponse("{}");
                 if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.NoContent);
                 if (request.Method == HttpMethod.Get) return JsonResponse("[]");
                 return JsonResponse("{}");
@@ -130,6 +131,8 @@ namespace Xeno.Sdk.Tests
                 await client.ValidateRoutingPolicyAsync(new { name = "Policy", modelName = "*", clientName = "*" });
                 await client.UpdateRoutingPolicyAsync("rpol_1", new { loadBalancingMode = "Random" });
                 await client.DeleteRoutingPolicyAsync("rpol_1");
+                await client.PullClientModelAsync(new { clientId = "xcl_1", model = "llama3.2:latest", source = "local-ollama" });
+                await client.DeleteClientModelAsync(new { clientId = "xcl_1", name = "llama3.2:latest", source = "local-ollama" });
 
                 Assert.Collection(
                     handler.Requests,
@@ -157,7 +160,9 @@ namespace Xeno.Sdk.Tests
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/routing-policies", "\"modelName\":\"*\""),
                     request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/routing-policies/validate", "\"modelName\":\"*\""),
                     request => AssertRequest(request, HttpMethod.Put, "https://xeno.local/v1.0/api/routing-policies/rpol_1", "\"loadBalancingMode\":\"Random\""),
-                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/routing-policies/rpol_1"));
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
+                    request => AssertRequest(request, HttpMethod.Post, "https://xeno.local/v1.0/api/client-models/pull", "\"model\":\"llama3.2:latest\""),
+                    request => AssertRequest(request, HttpMethod.Delete, "https://xeno.local/v1.0/api/client-models", "\"name\":\"llama3.2:latest\""));
             }
         }
 

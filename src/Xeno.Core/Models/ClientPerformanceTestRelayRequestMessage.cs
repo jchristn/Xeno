@@ -19,7 +19,7 @@ namespace Xeno.Core.Models
         public string SampleId { get; set; } = String.Empty;
 
         /// <summary>
-        /// One-based sample index.
+        /// One-based measured sample index. Warmup relay requests use 0.
         /// </summary>
         public int Index { get; set; } = 0;
 

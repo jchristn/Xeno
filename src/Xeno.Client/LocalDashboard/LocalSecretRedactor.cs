@@ -41,6 +41,7 @@ namespace Xeno.Client.LocalDashboard
                 Endpoint = provider.Endpoint,
                 Credential = String.IsNullOrWhiteSpace(provider.Credential) ? null : "configured",
                 TimeoutMs = provider.TimeoutMs,
+                AllowModelManagement = String.Equals(provider.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) && provider.AllowModelManagement,
                 Models = provider.Models
             };
             return copy;

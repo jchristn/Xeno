@@ -34,5 +34,10 @@ namespace Xeno.Client.LocalDashboard.Models
         /// Supports embeddings.
         /// </summary>
         public bool SupportsEmbeddings { get; set; } = false;
+
+        /// <summary>
+        /// Whether the backing Ollama provider allows server-initiated model management.
+        /// </summary>
+        public bool ModelManagementAllowed { get; set; } = false;
     }
 }

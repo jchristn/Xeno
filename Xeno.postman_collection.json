@@ -793,7 +793,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null\n}",
+                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"allowModelManagement\": true\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -826,7 +826,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"clearCredential\": false\n}",
+                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"clearCredential\": false,\n  \"allowModelManagement\": true\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3709,7 +3709,44 @@
               }
             },
             {
-              "name": "Delete Client Advertised Model",
+              "name": "Pull Client Model",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/x-ndjson"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}{{serverApiBaseUrl}}/client-models/pull",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "client-models",
+                    "pull"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"model\": \"{{clientModelName}}\",\n  \"source\": \"{{clientModelSource}}\",\n  \"insecure\": false,\n  \"stream\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Delete Managed Client Model",
               "request": {
                 "method": "DELETE",
                 "header": [
@@ -3731,7 +3768,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"modelName\": \"{{clientModelName}}\",\n  \"source\": \"{{clientModelSource}}\"\n}",
+                  "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"name\": \"{{clientModelName}}\",\n  \"source\": \"{{clientModelSource}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

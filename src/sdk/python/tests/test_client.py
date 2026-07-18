@@ -135,6 +135,8 @@ class XenoClientTests(unittest.TestCase):
         client.create_routing_policy({"name": "Policy", "modelName": "*", "clientName": "*"})
         client.update_routing_policy("rpol_1", {"loadBalancingMode": "Random"})
         client.delete_routing_policy("rpol_1")
+        client.pull_client_model({"clientId": "xcl_1", "model": "llama3.2:latest", "source": "local-ollama"})
+        client.delete_client_model({"clientId": "xcl_1", "name": "llama3.2:latest", "source": "local-ollama"})
 
         self.assertEqual(
             [(call["request"].get_method(), call["request"].full_url) for call in opener.calls],
@@ -163,6 +165,8 @@ class XenoClientTests(unittest.TestCase):
                 ("POST", "https://xeno.local/v1.0/api/routing-policies"),
                 ("PUT", "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
                 ("DELETE", "https://xeno.local/v1.0/api/routing-policies/rpol_1"),
+                ("POST", "https://xeno.local/v1.0/api/client-models/pull"),
+                ("DELETE", "https://xeno.local/v1.0/api/client-models"),
             ],
         )
         self.assertIn('"name": "Tenant"', opener.calls[0]["body"])
@@ -171,6 +175,8 @@ class XenoClientTests(unittest.TestCase):
         self.assertIn('"permissionIds": ["perm_1"]', opener.calls[12]["body"])
         self.assertIn('"principalId": "usr_1"', opener.calls[19]["body"])
         self.assertIn('"modelName": "*"', opener.calls[21]["body"])
+        self.assertIn('"model": "llama3.2:latest"', opener.calls[24]["body"])
+        self.assertIn('"name": "llama3.2:latest"', opener.calls[25]["body"])
 
     def test_openai_and_request_history_methods_use_expected_routes(self):
         opener = FakeOpener()

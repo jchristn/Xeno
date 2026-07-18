@@ -38,6 +38,28 @@ namespace Xeno.Core.Models
         }
 
         /// <summary>
+        /// Whether this source allows server-initiated model management operations.
+        /// </summary>
+        [JsonPropertyName("modelManagementAllowed")]
+        public bool ModelManagementAllowed { get; set; } = false;
+
+        /// <summary>
+        /// Backward-compatible model management permission alias.
+        /// </summary>
+        [JsonPropertyName("allowModelManagement")]
+        public bool? AllowModelManagement
+        {
+            get
+            {
+                return null;
+            }
+            set
+            {
+                if (value.HasValue) ModelManagementAllowed = value.Value;
+            }
+        }
+
+        /// <summary>
         /// Models exposed through this source.
         /// </summary>
         [JsonPropertyName("models")]

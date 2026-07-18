@@ -36,5 +36,10 @@ namespace Xeno.Core.Models
         /// Number of requests to run. The server clamps values to 1 through 10.
         /// </summary>
         public int RequestCount { get; set; } = 5;
+
+        /// <summary>
+        /// Whether to stream progress events as line-delimited JSON.
+        /// </summary>
+        public bool Stream { get; set; } = false;
     }
 }

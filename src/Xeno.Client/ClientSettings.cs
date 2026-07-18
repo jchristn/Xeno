@@ -159,6 +159,7 @@ namespace Xeno.Client
                     name = runner.Name,
                     apiType = runner.ApiType,
                     endpoint = runner.Endpoint,
+                    modelManagementAllowed = IsOllamaProvider(runner.ApiType) && runner.AllowModelManagement,
                     timeoutMs = runner.TimeoutMs,
                     models = runner.Models.ConvertAll(model => new
                     {
@@ -184,7 +185,8 @@ namespace Xeno.Client
                 ClientInventorySourceMessage source = new ClientInventorySourceMessage
                 {
                     Name = runner.Name,
-                    ApiType = runner.ApiType
+                    ApiType = runner.ApiType,
+                    ModelManagementAllowed = IsOllamaProvider(runner.ApiType) && runner.AllowModelManagement
                 };
                 foreach (ClientModelSettings model in runner.Models)
                 {
@@ -301,7 +303,24 @@ namespace Xeno.Client
 
             if (probe.Telemetry == null) rewritten = true;
             if (probe.Providers == null) rewritten = true;
+            else if (HasOllamaProviderMissingModelManagement(probe.Providers)) rewritten = true;
             return rewritten;
+        }
+
+        private static bool HasOllamaProviderMissingModelManagement(List<ClientRunnerSettingsProbe> providers)
+        {
+            foreach (ClientRunnerSettingsProbe provider in providers)
+            {
+                string apiType = String.IsNullOrWhiteSpace(provider.ApiType) ? provider.Provider ?? String.Empty : provider.ApiType;
+                if (IsOllamaProvider(apiType) && !provider.AllowModelManagement.HasValue) return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsOllamaProvider(string? apiType)
+        {
+            return String.Equals(apiType, "Ollama", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool ProviderEndpointMatchesLocalInference(string endpoint, ClientLocalInferenceServerSettings localInferenceServer)

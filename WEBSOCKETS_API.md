@@ -113,10 +113,16 @@ Invalid authentication frame:
    `client.response.complete` for streamed responses.
 11. For dashboard model performance tests, the server sends
    `server.performanceTest.request` to one or more clients. Clients answer with
-   `client.performanceTest.response`. Hairpin samples use
+   `client.performanceTest.progress` while samples run and
+   `client.performanceTest.response` when a leg completes. Hairpin samples use
    `client.performanceTest.relay.request` and
-   `server.performanceTest.relay.response` for each measured sample.
-12. On disconnect, the server marks the client disconnected and clears in-flight
+   `server.performanceTest.relay.response` for each warmup or measured sample.
+12. For dashboard model management, the server sends
+   `server.modelManagement.request` to a client that advertised an Ollama
+   provider with model management enabled. Clients answer with
+   `client.modelManagement.progress` while a pull runs and
+   `client.modelManagement.response` when the pull or delete completes.
+13. On disconnect, the server marks the client disconnected and clears in-flight
     connection state.
 
 ## Common Message Rules
@@ -355,6 +361,52 @@ Example:
 }
 ```
 
+### `server.modelManagement.request`
+
+Asks a connected client to run one server-initiated model management operation
+against a local Ollama provider that has `modelManagementAllowed` set to `true`
+in advertised inventory.
+
+Supported operations:
+
+- `pull`: POSTs to the provider's Ollama `/api/pull` endpoint with streaming
+  enabled, forwards progress with `client.modelManagement.progress`, updates
+  local `client.json` model inventory on success, and sends
+  `client.inventory.update`.
+- `delete`: DELETEs the provider's Ollama `/api/delete` endpoint, removes the
+  model from local `client.json` model inventory on success, and sends
+  `client.inventory.update`.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `server.modelManagement.request`. |
+| `requestId` | string | yes | Model management request ID. |
+| `tenantId` | string | yes | Tenant ID. |
+| `clientId` | string | yes | Recipient client ID. |
+| `operation` | string | yes | `pull` or `delete`. |
+| `model` | string | yes | Model name to pull or delete. |
+| `source` | string | no | Client-local Ollama provider endpoint name. |
+| `insecure` | boolean | no | Passed to Ollama pull to allow insecure registry connections. |
+| `timeoutMs` | number | yes | Operation timeout in milliseconds. |
+
+Example:
+
+```json
+{
+  "type": "server.modelManagement.request",
+  "requestId": "req_mqtz7f3c_d4p4pW8Kc9Lq",
+  "tenantId": "ten_default",
+  "clientId": "xcl_gb10",
+  "operation": "pull",
+  "model": "gemma3:4b",
+  "source": "local-ollama",
+  "insecure": false,
+  "timeoutMs": 3600000
+}
+```
+
 ### `server.performanceTest.relay.response`
 
 Returns one relayed benchmark sample from the server to the source client.
@@ -435,6 +487,7 @@ Provider source schema:
 | `name` | string | yes | Client-local provider endpoint name. |
 | `apiType` | string | yes | Upstream API type: `Ollama`, `OpenAI`, `Gemini`, `vLLM`, or `OpenAICompatible`. |
 | `provider` | string | no | Backward-compatible alias for `apiType`. |
+| `modelManagementAllowed` | boolean | no | True only for Ollama providers whose local `client.json` allows server-initiated model pull/delete operations. |
 | `models` | array | yes | Models exposed by this provider endpoint. |
 
 Model schema:
@@ -458,6 +511,7 @@ Example:
       {
         "name": "local-ollama",
         "apiType": "Ollama",
+        "modelManagementAllowed": true,
         "models": [
           {
             "name": "llama3.2:latest",
@@ -483,6 +537,8 @@ Server behavior:
 - The client record is marked connected.
 - Existing advertised models for that client are replaced with the current
   inventory.
+- Existing advertised provider sources for that client are replaced with the
+  current inventory, including the `modelManagementAllowed` capability.
 - Model definitions are created or refreshed for newly advertised model names.
 
 ### `client.heartbeat`
@@ -540,6 +596,7 @@ Example:
       {
         "name": "local-ollama",
         "apiType": "Ollama",
+        "modelManagementAllowed": true,
         "models": [
           {
             "name": "llama3.2:latest",
@@ -746,6 +803,173 @@ Example:
 }
 ```
 
+### `client.modelManagement.progress`
+
+Reports live progress for a `server.modelManagement.request`. Pull operations
+forward Ollama's line-delimited pull status as progress frames. Delete
+operations may emit only `started` and `completed` progress.
+
+When the dashboard posts `ClientModelPullRequest` with `stream` set to `true`,
+or sends `Accept: application/x-ndjson`, the REST response is line-delimited
+`ModelManagementProgressEvent` JSON objects converted from these websocket
+progress frames.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.modelManagement.progress`. |
+| `requestId` | string | yes | Correlates to `server.modelManagement.request.requestId`. |
+| `tenantId` | string | yes | Tenant ID. |
+| `clientId` | string | yes | Client sending the progress event. |
+| `operation` | string | yes | `pull` or `delete`. |
+| `model` | string | yes | Model name. |
+| `source` | string | no | Client-local Ollama provider endpoint name. |
+| `eventType` | string | yes | `started`, `progress`, `completed`, or `error`. |
+| `status` | string | no | Ollama status text. |
+| `message` | string | yes | Human-readable progress status. |
+| `completed` | number | no | Bytes completed when reported by Ollama. |
+| `total` | number | no | Total bytes when reported by Ollama. |
+| `digest` | string | no | Layer digest when reported by Ollama. |
+| `rawLine` | string | no | Raw Ollama progress JSON line. |
+| `sentUtc` | string | no | UTC timestamp when the client emitted the frame. |
+
+Example:
+
+```json
+{
+  "type": "client.modelManagement.progress",
+  "requestId": "req_mqtz7f3c_d4p4pW8Kc9Lq",
+  "tenantId": "ten_default",
+  "clientId": "xcl_gb10",
+  "operation": "pull",
+  "model": "gemma3:4b",
+  "source": "local-ollama",
+  "eventType": "progress",
+  "status": "pulling 91ab477bec9d",
+  "message": "pulling 91ab477bec9d",
+  "completed": 734003200,
+  "total": 1426063360,
+  "digest": "sha256:91ab477bec9d",
+  "rawLine": "{\"status\":\"pulling 91ab477bec9d\",\"digest\":\"sha256:91ab477bec9d\",\"total\":1426063360,\"completed\":734003200}",
+  "sentUtc": "2026-07-17T20:20:10.143Z"
+}
+```
+
+### `client.modelManagement.response`
+
+Completes one `server.modelManagement.request`.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.modelManagement.response`. |
+| `requestId` | string | yes | Correlates to `server.modelManagement.request.requestId`. |
+| `tenantId` | string | yes | Tenant ID. |
+| `clientId` | string | yes | Client sending the response. |
+| `operation` | string | yes | `pull` or `delete`. |
+| `model` | string | yes | Model name. |
+| `source` | string | no | Client-local Ollama provider endpoint name. |
+| `success` | boolean | yes | Whether the operation succeeded. |
+| `statusCode` | number | no | Upstream Ollama HTTP status code. |
+| `message` | string | yes | Completion or failure message. |
+| `error` | string | no | Error text when the operation failed. |
+| `body` | string | no | Captured upstream response body or pull progress lines. |
+| `sentUtc` | string | no | UTC timestamp when the client emitted the frame. |
+
+Example:
+
+```json
+{
+  "type": "client.modelManagement.response",
+  "requestId": "req_mqtz7f3c_d4p4pW8Kc9Lq",
+  "tenantId": "ten_default",
+  "clientId": "xcl_gb10",
+  "operation": "pull",
+  "model": "gemma3:4b",
+  "source": "local-ollama",
+  "success": true,
+  "statusCode": 200,
+  "message": "Ollama model pull completed.",
+  "sentUtc": "2026-07-17T20:21:03.511Z"
+}
+```
+
+### `client.performanceTest.progress`
+
+Reports live progress for one model performance benchmark leg. The dashboard
+uses these frames to update status text, sample rows, summaries, and charts
+before the final leg response arrives.
+
+Progress frames are optional for protocol compatibility. A client that only
+sends `client.performanceTest.response` still completes the benchmark, but the
+dashboard cannot show per-sample progress for that leg.
+
+Each client should run one unmeasured warmup request of the requested type before
+the measured samples for that leg. Warmup progress should be reported with
+`warmupStarted` and `warmupCompleted`. Warmup sample metrics are progress-only:
+they are not included in the leg `samples` array, the aggregate `summary`, or
+the requested measured sample count.
+
+When the dashboard posts `ModelPerformanceTestRequest` with `stream` set to
+`true`, or sends `Accept: application/x-ndjson`, the server responds with
+line-delimited `ModelPerformanceTestProgressEvent` JSON objects. Those REST
+events include server status updates, these client progress frames, leg
+completion events, and one final `completed` event containing the full
+`ModelPerformanceTestResponse`.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.performanceTest.progress`. |
+| `requestId` | string | yes | Correlates to `server.performanceTest.request.requestId`. |
+| `clientId` | string | yes | Client sending the progress event. |
+| `tenantId` | string | yes | Tenant ID. |
+| `mode` | string | yes | `direct` or `relay`. |
+| `eventType` | string | yes | `legStarted`, `warmupStarted`, `warmupCompleted`, `sampleCompleted`, or `legCompleted`. |
+| `message` | string | yes | Human-readable progress status. |
+| `index` | number | no | One-based measured sample index for sample events. Warmup completion may use `0`. |
+| `completedSamples` | number | no | Completed sample count for this leg. |
+| `totalSamples` | number | no | Expected sample count for this leg. |
+| `sample` | object | no | Completed sample result using the sample result schema below. |
+| `summary` | object | no | Current aggregate summary for completed samples. |
+| `legResult` | object | no | Complete leg result for `legCompleted`. |
+| `sentUtc` | string | no | UTC timestamp when the client emitted the frame. |
+
+Example:
+
+```json
+{
+  "type": "client.performanceTest.progress",
+  "requestId": "req_mqtycz54_Xz6cpgzPb7yB",
+  "clientId": "xcl_gb10",
+  "tenantId": "ten_default",
+  "mode": "direct",
+  "eventType": "sampleCompleted",
+  "message": "Native sample 1 completed in 615.2 ms, first token 144.8 ms, 40.64 tokens/s.",
+  "index": 1,
+  "completedSamples": 1,
+  "totalSamples": 5,
+  "sample": {
+    "index": 1,
+    "success": true,
+    "statusCode": 200,
+    "totalTimeMs": 615.2,
+    "timeToFirstTokenMs": 144.8,
+    "timeToLastTokenMs": 615.2,
+    "tokensPerSecond": 40.64
+  },
+  "summary": {
+    "successCount": 1,
+    "failureCount": 0,
+    "averageTotalTimeMs": 615.2
+  },
+  "sentUtc": "2026-07-17T20:15:10.143Z"
+}
+```
+
 ### `client.performanceTest.response`
 
 Returns one completed model performance benchmark leg to the server.
@@ -784,7 +1008,7 @@ Sample result fields:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `index` | number | One-based sample index. |
+| `index` | number | One-based measured sample index. Warmup samples may use `0` in progress events only. |
 | `success` | boolean | Whether the sample succeeded. |
 | `statusCode` | number | Provider or relay HTTP status code. |
 | `totalTimeMs` | number | Total elapsed time in milliseconds. |
@@ -1086,6 +1310,12 @@ Direct model performance leg ordering:
 
 ```text
 server.performanceTest.request
+client.performanceTest.progress (legStarted)
+client.performanceTest.progress (warmupStarted)
+client.performanceTest.progress (warmupCompleted)
+client.performanceTest.progress (sampleCompleted)
+...
+client.performanceTest.progress (legCompleted)
 client.performanceTest.response
 ```
 
@@ -1093,6 +1323,8 @@ Hairpin model performance leg ordering:
 
 ```text
 server.performanceTest.request
+client.performanceTest.progress (legStarted)
+client.performanceTest.progress (warmupStarted)
 client.performanceTest.relay.request
 server.request
 client.response.start
@@ -1100,7 +1332,40 @@ client.response.chunk
 ...
 client.response.complete
 server.performanceTest.relay.response
+client.performanceTest.progress (warmupCompleted)
+client.performanceTest.relay.request
+server.request
+client.response.start
+client.response.chunk
+...
+client.response.complete
+server.performanceTest.relay.response
+client.performanceTest.progress (sampleCompleted)
+...
+client.performanceTest.progress (legCompleted)
 client.performanceTest.response
+```
+
+Model pull ordering:
+
+```text
+server.modelManagement.request (pull)
+client.modelManagement.progress (started)
+client.modelManagement.progress (progress)
+...
+client.inventory.update
+client.modelManagement.progress (completed)
+client.modelManagement.response
+```
+
+Model delete ordering:
+
+```text
+server.modelManagement.request (delete)
+client.modelManagement.progress (started)
+client.inventory.update
+client.modelManagement.progress (completed)
+client.modelManagement.response
 ```
 
 Only one final response is expected per request. The server ignores chunks that
@@ -1151,6 +1416,7 @@ The server currently accepts these compatibility aliases:
 | New field | Alias |
 | --- | --- |
 | `apiType` | `provider` |
+| `modelManagementAllowed` | `allowModelManagement` |
 | `source` | `runnerName` |
 | `relativePath` | `path` |
 | `inventory.providers` | `inventory.runners` |

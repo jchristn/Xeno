@@ -76,6 +76,11 @@ namespace Xeno.Core.Models
         public DateTime LastHeartbeatUtc { get; set; } = DateTime.UtcNow;
 
         /// <summary>
+        /// Provider sources advertised by this client.
+        /// </summary>
+        public List<XenoClientProvider> Providers { get; set; } = new List<XenoClientProvider>();
+
+        /// <summary>
         /// Models advertised by this client.
         /// </summary>
         public List<XenoClientModel> Models { get; set; } = new List<XenoClientModel>();

@@ -79,6 +79,60 @@ export default class ApiClient {
     return readJsonResponse(response, options);
   }
 
+  async postJsonLines(path, body, onLine, options = {}) {
+    const headers = {
+      ...this.headers(options),
+      Accept: 'application/x-ndjson'
+    };
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body ?? {})
+    });
+    if (isAuthenticationFailure(response)) {
+      const text = await response.text();
+      const parsed = parseBody(text);
+      throwAuthenticationFailure(response, parsed);
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      const parsed = parseResponseText(text, false);
+      throw new Error(parsed?.message || parsed?.error || response.statusText || `Request failed with HTTP ${response.status}`);
+    }
+
+    if (!response.body) return [];
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const items = [];
+    let buffer = '';
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        const parsed = parseBody(trimmed);
+        items.push(parsed);
+        onLine?.(parsed);
+      });
+    }
+
+    buffer += decoder.decode();
+    const trimmed = buffer.trim();
+    if (trimmed) {
+      const parsed = parseBody(trimmed);
+      items.push(parsed);
+      onLine?.(parsed);
+    }
+
+    return items;
+  }
+
   async put(path, body, options = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'PUT',

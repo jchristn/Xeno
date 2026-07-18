@@ -301,11 +301,31 @@ Global administrator email conflict:
 
 `GET /v1.0/api/clients`
 
-The clients response includes connection state, capacity fields, authenticated owner context, and each client's advertised `models` inventory. Owner fields are set when a WebSocket client registers: `ownerUserId`, `ownerCredentialId`, and `ownerPrincipalType`.
+The clients response includes connection state, capacity fields, authenticated owner context, each client's advertised `models` inventory, and advertised `providers`. Provider entries include `name`, `apiType`, `modelManagementAllowed`, and `lastAdvertisedUtc`. Model entries include `modelManagementAllowed` when the backing provider is an Ollama provider that permits server-initiated model management. Owner fields are set when a WebSocket client registers: `ownerUserId`, `ownerCredentialId`, and `ownerPrincipalType`.
 
 `DELETE /v1.0/api/clients/{id}`
 
+`POST /v1.0/api/client-models/pull`
+
+Pulls an Ollama model on a connected client that advertised an Ollama provider with `modelManagementAllowed: true`.
+
+Request:
+
+```json
+{
+  "clientId": "xcl_example",
+  "model": "gemma3:4b",
+  "source": "local-ollama",
+  "insecure": false,
+  "stream": true
+}
+```
+
+If `stream` is `true` or the request sends `Accept: application/x-ndjson`, the response is line-delimited JSON progress events with fields such as `eventType`, `status`, `message`, `completed`, `total`, `digest`, and final `result`. Without streaming, the response is the final `client.modelManagement.response` shape.
+
 `DELETE /v1.0/api/client-models`
+
+Deletes an Ollama model by sending a delete command to a connected client that advertised an Ollama provider with model management enabled. The request body uses `clientId`, `name`, and optional `source`. The response is the final `client.modelManagement.response` shape.
 
 `GET /v1.0/api/model-definitions`
 
@@ -815,7 +835,7 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `PUT /api/v1/settings`
 
-Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, and `clearCredential`. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry `latest` returns `{ snapshot, detail, status }`. Local telemetry search bodies use `metric`, `fromUtc`, `toUtc`, `limit`, `offset`, and optional GPU filters and return `{ total, samples }`. Local telemetry rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, and optional GPU filters and return an array of `{ startUtc, endUtc, label, count, average, minimum, maximum }` buckets. Local host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`; search returns `{ total, samples }` and rollups return the same bucket array shape. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, `clearCredential`, and `allowModelManagement`. `allowModelManagement` is valid only for Ollama providers and permits the Xeno server to issue pull/delete model commands through the client WebSocket. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry `latest` returns `{ snapshot, detail, status }`. Local telemetry search bodies use `metric`, `fromUtc`, `toUtc`, `limit`, `offset`, and optional GPU filters and return `{ total, samples }`. Local telemetry rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, and optional GPU filters and return an array of `{ startUtc, endUtc, label, count, average, minimum, maximum }` buckets. Local host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`; search returns `{ total, samples }` and rollups return the same bucket array shape. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
 
 ## WebSocket
 

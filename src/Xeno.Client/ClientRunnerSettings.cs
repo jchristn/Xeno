@@ -48,6 +48,11 @@ namespace Xeno.Client
         public string? Credential { get; set; } = null;
 
         /// <summary>
+        /// Whether the Xeno server is allowed to manage Ollama models for this provider endpoint.
+        /// </summary>
+        public bool AllowModelManagement { get; set; } = false;
+
+        /// <summary>
         /// Upstream request timeout in milliseconds.
         /// </summary>
         public int TimeoutMs { get; set; } = 300000;
