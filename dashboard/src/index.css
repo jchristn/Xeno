@@ -3846,6 +3846,11 @@ html[data-theme='dark'] .primitive-list-item {
   line-height: 1.35;
 }
 
+.model-performance-progress .model-performance-event-list li {
+  grid-template-columns: 142px minmax(0, 1fr);
+  column-gap: 12px;
+}
+
 .model-performance-event-list strong {
   min-width: 0;
   font-weight: 800;
@@ -4038,6 +4043,10 @@ html[data-theme='dark'] .primitive-list-item {
 
   .login-brand-panel {
     min-height: 360px;
+  }
+
+  .model-performance-progress .model-performance-event-list li {
+    grid-template-columns: 112px minmax(0, 1fr);
   }
 
   .performance-leg-grid,
