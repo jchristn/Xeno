@@ -3846,6 +3846,7 @@ html[data-theme='dark'] .primitive-list-item {
   line-height: 1.35;
 }
 
+.model-pull-progress .model-performance-event-list li,
 .model-performance-progress .model-performance-event-list li {
   grid-template-columns: 142px minmax(0, 1fr);
   column-gap: 12px;
@@ -4045,6 +4046,7 @@ html[data-theme='dark'] .primitive-list-item {
     min-height: 360px;
   }
 
+  .model-pull-progress .model-performance-event-list li,
   .model-performance-progress .model-performance-event-list li {
     grid-template-columns: 112px minmax(0, 1fr);
   }
