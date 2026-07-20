@@ -4,11 +4,9 @@ setlocal
 set "REMOVED=0"
 
 echo Removing xeno global tool...
-dotnet tool uninstall --global xeno >nul 2>nul
-if "%ERRORLEVEL%"=="0" set "REMOVED=1"
+call :uninstallIfInstalled xeno || exit /b 1
 
-dotnet tool uninstall --global Xeno.Client >nul 2>nul
-if "%ERRORLEVEL%"=="0" set "REMOVED=1"
+call :uninstallIfInstalled Xeno.Client || exit /b 1
 
 if "%REMOVED%"=="0" (
   echo xeno global tool was not installed.
@@ -17,3 +15,24 @@ if "%REMOVED%"=="0" (
 )
 
 endlocal
+exit /b 0
+
+:uninstallIfInstalled
+set "PACKAGE_ID=%~1"
+set "TOOL_INSTALLED="
+for /f "skip=2 tokens=1" %%I in ('dotnet tool list --global 2^>nul') do (
+  if /I "%%I"=="%PACKAGE_ID%" set "TOOL_INSTALLED=1"
+)
+if not defined TOOL_INSTALLED exit /b 0
+
+dotnet tool uninstall --global "%PACKAGE_ID%"
+if errorlevel 1 (
+  echo.
+  echo Failed to uninstall %PACKAGE_ID%.
+  echo If xeno is running, stop it before removing the tool:
+  echo   xeno stop
+  echo If xeno is not available on PATH, stop the ProcessId recorded in %USERPROFILE%\.xeno\state.json.
+  exit /b 1
+)
+set "REMOVED=1"
+exit /b 0
