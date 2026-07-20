@@ -1828,37 +1828,39 @@ namespace Xeno.Client
             int reconnectDelayMs = settings.Server.ReconnectInitialDelayMs;
             while (!token.IsCancellationRequested)
             {
+                ClientSettings connectionSettings = settings;
                 try
                 {
+                    connectionSettings = LoadRuntimeSettingsForConnectedSession(settings);
                     using (ClientWebSocket socket = new ClientWebSocket())
                     {
-                        ApplyServerAuthentication(socket, settings);
-                        await socket.ConnectAsync(new Uri(settings.Server.Url), token).ConfigureAwait(false);
-                        ClientConnectionState.MarkWebSocketConnected(settings);
-                        await SendMessageAsync(socket, new { type = "client.register", clientId = settings.ClientId, tenantId = settings.TenantId, name = settings.Name, inventory = settings.BuildInventoryMessage() }, token).ConfigureAwait(false);
-                        string? disconnectReason = await ReceiveLoopAsync(socket, settings, token).ConfigureAwait(false);
-                        ClientConnectionState.MarkDisconnected(settings, disconnectReason ?? "WebSocket closed.");
+                        ApplyServerAuthentication(socket, connectionSettings);
+                        await socket.ConnectAsync(new Uri(connectionSettings.Server.Url), token).ConfigureAwait(false);
+                        ClientConnectionState.MarkWebSocketConnected(connectionSettings);
+                        await SendMessageAsync(socket, new { type = "client.register", clientId = connectionSettings.ClientId, tenantId = connectionSettings.TenantId, name = connectionSettings.Name, inventory = connectionSettings.BuildInventoryMessage() }, token).ConfigureAwait(false);
+                        string? disconnectReason = await ReceiveLoopAsync(socket, connectionSettings, token).ConfigureAwait(false);
+                        ClientConnectionState.MarkDisconnected(connectionSettings, disconnectReason ?? "WebSocket closed.");
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
-                    ClientConnectionState.MarkDisconnected(settings, "Client stopped.");
+                    ClientConnectionState.MarkDisconnected(connectionSettings, "Client stopped.");
                     return;
                 }
                 catch (Exception ex)
                 {
-                    ClientConnectionState.MarkDisconnected(settings, ex.Message);
+                    ClientConnectionState.MarkDisconnected(connectionSettings, ex.Message);
                     WriteWarning("Disconnected from Xeno server: " + ex.Message);
                 }
 
                 if (ClientConnectionState.IsStopRequested())
                 {
-                    ClientConnectionState.MarkDisconnected(settings, "Client stopped.");
+                    ClientConnectionState.MarkDisconnected(connectionSettings, "Client stopped.");
                     return;
                 }
 
-                await DelayBeforeReconnectAsync(reconnectDelayMs, settings, token).ConfigureAwait(false);
-                reconnectDelayMs = NextReconnectDelayMs(reconnectDelayMs, settings);
+                await DelayBeforeReconnectAsync(reconnectDelayMs, connectionSettings, token).ConfigureAwait(false);
+                reconnectDelayMs = NextReconnectDelayMs(reconnectDelayMs, connectionSettings);
             }
         }
 
@@ -4595,7 +4597,8 @@ namespace Xeno.Client
                     apiType = runner.ApiType,
                     endpoint = runner.Endpoint,
                     timeoutMs = runner.TimeoutMs,
-                    allowModelManagement = IsOllamaApiType(runner.ApiType) && runner.AllowModelManagement,
+                    allowModelManagement = IsModelManagementAllowed(runner),
+                    modelManagementAllowed = IsModelManagementAllowed(runner),
                     credentialConfigured = !String.IsNullOrWhiteSpace(runner.Credential),
                     models = runner.Models.ConvertAll(model => new
                     {
@@ -4623,7 +4626,7 @@ namespace Xeno.Client
                 Console.WriteLine("    Endpoint:   " + runner.Endpoint);
                 Console.WriteLine("    Timeout:    " + runner.TimeoutMs + " ms");
                 Console.WriteLine("    Credential: " + (String.IsNullOrWhiteSpace(runner.Credential) ? "not configured" : "configured"));
-                Console.WriteLine("    Model mgmt: " + (IsOllamaApiType(runner.ApiType) ? FormatBool(runner.AllowModelManagement) : "not supported"));
+                Console.WriteLine("    Model management allowed: " + FormatBool(IsModelManagementAllowed(runner)));
                 Console.WriteLine("    Models:     " + runner.Models.Count);
                 if (includeModelDetails && runner.Models.Count > 0)
                 {
@@ -4651,7 +4654,7 @@ namespace Xeno.Client
                             name = model.Name,
                             providerName = runner.Name,
                             apiType = runner.ApiType,
-                            modelManagementAllowed = IsOllamaApiType(runner.ApiType) && runner.AllowModelManagement,
+                            modelManagementAllowed = IsModelManagementAllowed(runner),
                             supportsCompletions = model.SupportsCompletions,
                             supportsEmbeddings = model.SupportsEmbeddings
                         });
@@ -4841,6 +4844,11 @@ namespace Xeno.Client
         private static bool IsOllamaApiType(string? value)
         {
             return String.Equals(value, "Ollama", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsModelManagementAllowed(ClientRunnerSettings runner)
+        {
+            return runner != null && IsOllamaApiType(runner.ApiType) && runner.AllowModelManagement;
         }
 
         private static bool ParseBooleanLiteral(string value)

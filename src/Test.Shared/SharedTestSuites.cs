@@ -1731,10 +1731,15 @@ namespace Test.Shared
                                 if (modelAliasList.ExitCode != 0 || !modelAliasList.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Model ls alias failed: " + modelAliasList.StandardError + modelAliasList.StandardOutput);
                                 ClientCommandResult providerAliasList = await RunXenoClientAsync(new[] { "provider", "ls" }, clientHome).ConfigureAwait(false);
                                 if (providerAliasList.ExitCode != 0 || !providerAliasList.StandardOutput.Contains("local-ollama", StringComparison.Ordinal)) throw new InvalidOperationException("Provider ls alias failed: " + providerAliasList.StandardError + providerAliasList.StandardOutput);
+                                if (!providerAliasList.StandardOutput.Contains("Model management allowed: no", StringComparison.Ordinal)) throw new InvalidOperationException("Provider ls did not show default model-management permission: " + providerAliasList.StandardOutput);
+                                ClientCommandResult initialProviderList = await RunXenoClientAsync(new[] { "provider", "list" }, clientHome).ConfigureAwait(false);
+                                if (initialProviderList.ExitCode != 0 || !initialProviderList.StandardOutput.Contains("local-ollama", StringComparison.Ordinal)) throw new InvalidOperationException("Provider list failed: " + initialProviderList.StandardError + initialProviderList.StandardOutput);
+                                if (!initialProviderList.StandardOutput.Contains("Model management allowed: no", StringComparison.Ordinal)) throw new InvalidOperationException("Provider list did not show default model-management permission: " + initialProviderList.StandardOutput);
                                 ClientCommandResult configShow = await RunXenoClientAsync(new[] { "config", "show" }, clientHome).ConfigureAwait(false);
                                 if (configShow.ExitCode != 0) throw new InvalidOperationException("Config show failed: " + configShow.StandardError + configShow.StandardOutput);
                                 if (!configShow.StandardOutput.Contains("llama3.2:latest", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include configured models.");
                                 if (!configShow.StandardOutput.Contains("Completions:", StringComparison.Ordinal) || !configShow.StandardOutput.Contains("Embeddings:", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include model capabilities.");
+                                if (!configShow.StandardOutput.Contains("Model management allowed: no", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not include default provider model-management permission.");
                                 string clientSettingsFile = Path.Combine(clientHome, "client.json");
                                 ClientSettings disabledDashboardSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(clientSettingsFile));
                                 disabledDashboardSettings.LocalDashboard.Enabled = false;
@@ -1758,6 +1763,19 @@ namespace Test.Shared
                                 ClientSettings providerManagementSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(clientSettingsFile));
                                 ClientRunnerSettings? managedOllamaProvider = providerManagementSettings.Providers.FirstOrDefault(item => String.Equals(item.Name, "local-ollama", StringComparison.Ordinal));
                                 if (managedOllamaProvider == null || !managedOllamaProvider.AllowModelManagement) throw new InvalidOperationException("Provider model-management flag was not persisted by CLI update.");
+                                ClientCommandResult managedProviderList = await RunXenoClientAsync(new[] { "provider", "list" }, clientHome).ConfigureAwait(false);
+                                if (managedProviderList.ExitCode != 0) throw new InvalidOperationException("Managed provider list failed: " + managedProviderList.StandardError + managedProviderList.StandardOutput);
+                                if (!managedProviderList.StandardOutput.Contains("local-ollama", StringComparison.Ordinal) || !managedProviderList.StandardOutput.Contains("Model management allowed: yes", StringComparison.Ordinal)) throw new InvalidOperationException("Provider list did not show enabled model-management permission: " + managedProviderList.StandardOutput);
+                                if (!managedProviderList.StandardOutput.Contains("openai-compatible", StringComparison.Ordinal) || !managedProviderList.StandardOutput.Contains("Model management allowed: no", StringComparison.Ordinal)) throw new InvalidOperationException("Provider list did not show disabled model-management permission for non-Ollama provider: " + managedProviderList.StandardOutput);
+                                ClientCommandResult managedProviderAliasList = await RunXenoClientAsync(new[] { "provider", "ls" }, clientHome).ConfigureAwait(false);
+                                if (managedProviderAliasList.ExitCode != 0) throw new InvalidOperationException("Managed provider ls failed: " + managedProviderAliasList.StandardError + managedProviderAliasList.StandardOutput);
+                                if (!managedProviderAliasList.StandardOutput.Contains("local-ollama", StringComparison.Ordinal) || !managedProviderAliasList.StandardOutput.Contains("Model management allowed: yes", StringComparison.Ordinal)) throw new InvalidOperationException("Provider ls did not show enabled model-management permission: " + managedProviderAliasList.StandardOutput);
+                                ClientCommandResult managedProviderJsonList = await RunXenoClientAsync(new[] { "--json", "provider", "list" }, clientHome).ConfigureAwait(false);
+                                if (managedProviderJsonList.ExitCode != 0) throw new InvalidOperationException("Managed provider JSON list failed: " + managedProviderJsonList.StandardError + managedProviderJsonList.StandardOutput);
+                                if (!managedProviderJsonList.StandardOutput.Contains("\"modelManagementAllowed\": true", StringComparison.Ordinal)) throw new InvalidOperationException("Provider JSON list did not expose modelManagementAllowed: " + managedProviderJsonList.StandardOutput);
+                                ClientCommandResult managedConfigShow = await RunXenoClientAsync(new[] { "config", "show" }, clientHome).ConfigureAwait(false);
+                                if (managedConfigShow.ExitCode != 0) throw new InvalidOperationException("Managed config show failed: " + managedConfigShow.StandardError + managedConfigShow.StandardOutput);
+                                if (!managedConfigShow.StandardOutput.Contains("local-ollama", StringComparison.Ordinal) || !managedConfigShow.StandardOutput.Contains("Model management allowed: yes", StringComparison.Ordinal)) throw new InvalidOperationException("Config show did not show enabled provider model-management permission: " + managedConfigShow.StandardOutput);
                                 ClientCommandResult managedModelListResult = await RunXenoClientAsync(new[] { "--json", "model", "list" }, clientHome).ConfigureAwait(false);
                                 if (managedModelListResult.ExitCode != 0) throw new InvalidOperationException("Managed model list failed: " + managedModelListResult.StandardError + managedModelListResult.StandardOutput);
                                 List<TestCliModelRecord> managedModelList = DeserializeRequired<List<TestCliModelRecord>>(managedModelListResult.StandardOutput);
@@ -2353,6 +2371,14 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             await RunClientBackgroundConnectSmokeAsync().ConfigureAwait(false);
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
+                        "ClientReconnectReloadsProviderModelManagementSettings",
+                        "Client reconnect reloads provider model-management settings",
+                        executeAsync: async delegate
+                        {
+                            await RunClientReconnectReloadsProviderModelManagementSettingsAsync().ConfigureAwait(false);
                         }),
                     new TestCaseDescriptor(
                         "ClientCli",
@@ -6841,6 +6867,107 @@ namespace Test.Shared
             }
         }
 
+        private static async Task RunClientReconnectReloadsProviderModelManagementSettingsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-client-reconnect-inventory-" + Guid.NewGuid().ToString("N") + ".db");
+            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-reconnect-inventory-" + Guid.NewGuid().ToString("N"));
+            string clientName = "reconnect-inventory-touchstone";
+            string providerName = "local-ollama";
+            string modelName = "reconnect-inventory-model";
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                }
+            };
+
+            CancellationTokenSource? serverTokenSource = null;
+            XenoServer? server = null;
+            Task? serverTask = null;
+            string settingsFile = Path.Combine(clientHome, "client.json");
+
+            try
+            {
+                serverTokenSource = new CancellationTokenSource();
+                server = new XenoServer(settings);
+                serverTask = server.StartAsync(serverTokenSource.Token);
+                await WaitForHealthAsync(port).ConfigureAwait(false);
+
+                Directory.CreateDirectory(clientHome);
+                ClientSettings clientSettings = new ClientSettings
+                {
+                    TenantId = Constants.DefaultTenantId,
+                    Name = clientName
+                };
+                clientSettings.Server.Url = "ws://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture) + settings.WebSocket.Path;
+                clientSettings.Server.RestUrl = "http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture);
+                clientSettings.Server.AccessKey = "default";
+                clientSettings.Server.ReconnectInitialDelayMs = 0;
+                clientSettings.Server.ReconnectMaxDelayMs = 1000;
+                clientSettings.Server.ReconnectJitterMs = 0;
+                clientSettings.LocalDashboard.Enabled = false;
+                clientSettings.Providers.Add(new ClientRunnerSettings
+                {
+                    Name = providerName,
+                    ApiType = "Ollama",
+                    Endpoint = "http://127.0.0.1:11434",
+                    AllowModelManagement = false,
+                    Models = new List<ClientModelSettings>
+                    {
+                        new ClientModelSettings
+                        {
+                            Name = modelName,
+                            SupportsCompletions = true,
+                            SupportsEmbeddings = true
+                        }
+                    }
+                });
+                File.WriteAllText(settingsFile, JsonUtil.Serialize(clientSettings, true));
+
+                ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
+                await WaitForServerClientModelManagementAsync(port, clientName, providerName, modelName, false, "initial connection").ConfigureAwait(false);
+
+                await StopServerRuntimeAsync(server, serverTask, serverTokenSource).ConfigureAwait(false);
+                server = null;
+                serverTask = null;
+                serverTokenSource = null;
+                await WaitForClientDisconnectedAsync(clientHome).ConfigureAwait(false);
+
+                ClientSettings updatedSettings = DeserializeRequired<ClientSettings>(File.ReadAllText(settingsFile));
+                ClientRunnerSettings provider = updatedSettings.Providers.FirstOrDefault(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException("Reconnect test provider was not persisted.");
+                provider.AllowModelManagement = true;
+                File.WriteAllText(settingsFile, JsonUtil.Serialize(updatedSettings, true));
+
+                serverTokenSource = new CancellationTokenSource();
+                server = new XenoServer(settings);
+                serverTask = server.StartAsync(serverTokenSource.Token);
+                await WaitForHealthAsync(port).ConfigureAwait(false);
+                await WaitForServerClientModelManagementAsync(port, clientName, providerName, modelName, true, "reconnect after client.json model-management update").ConfigureAwait(false);
+            }
+            finally
+            {
+                await RunXenoClientAsync(new[] { "stop", "--force" }, clientHome).ConfigureAwait(false);
+                if (server != null && serverTask != null && serverTokenSource != null)
+                {
+                    await StopServerRuntimeAsync(server, serverTask, serverTokenSource).ConfigureAwait(false);
+                }
+
+                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+            }
+        }
+
         private static async Task RunClientModelPullPersistsModelAsync()
         {
             int port = GetFreePort();
@@ -8354,6 +8481,55 @@ namespace Test.Shared
             throw new InvalidOperationException("Client did not register: " + expectedText);
         }
 
+        private static async Task WaitForServerClientModelManagementAsync(int port, string clientName, string providerName, string modelName, bool expectedAllowed, string scenario)
+        {
+            using (HttpClient httpClient = new HttpClient())
+            {
+                string baseUrl = "http://127.0.0.1:" + port.ToString(CultureInfo.InvariantCulture);
+                await AuthenticateSeedAdminAsync(httpClient, baseUrl).ConfigureAwait(false);
+                string latestBody = String.Empty;
+                for (int i = 0; i < 80; i++)
+                {
+                    using (HttpResponseMessage response = await httpClient.GetAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false))
+                    {
+                        latestBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        if (response.IsSuccessStatusCode)
+                        {
+                            List<XenoClientRecord> clients = DeserializeRequired<List<XenoClientRecord>>(latestBody);
+                            XenoClientRecord? client = clients.FirstOrDefault(item => String.Equals(item.Name, clientName, StringComparison.OrdinalIgnoreCase));
+                            XenoClientProvider? provider = client?.Providers.FirstOrDefault(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase));
+                            XenoClientModel? model = client?.Models.FirstOrDefault(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase) && String.Equals(item.Source, providerName, StringComparison.OrdinalIgnoreCase));
+                            if (provider != null && model != null && provider.ModelManagementAllowed == expectedAllowed && model.ModelManagementAllowed == expectedAllowed)
+                            {
+                                return;
+                            }
+                        }
+                    }
+
+                    await Task.Delay(100).ConfigureAwait(false);
+                }
+
+                throw new InvalidOperationException("Server client model-management state did not match " + (expectedAllowed ? "true" : "false") + " during " + scenario + ": " + latestBody);
+            }
+        }
+
+        private static async Task WaitForClientDisconnectedAsync(string clientHome)
+        {
+            string stateFile = Path.Combine(clientHome, "state.json");
+            for (int i = 0; i < 50; i++)
+            {
+                if (File.Exists(stateFile))
+                {
+                    ClientConnectionState state = DeserializeRequired<ClientConnectionState>(File.ReadAllText(stateFile));
+                    if (!state.IsConnected && !state.IsRegistered) return;
+                }
+
+                await Task.Delay(100).ConfigureAwait(false);
+            }
+
+            throw new InvalidOperationException("Client did not record a disconnected state.");
+        }
+
         private static bool IsProcessRunningForTest(int processId)
         {
             try
@@ -9156,6 +9332,12 @@ namespace Test.Shared
 
         private static async Task StopServerAsync(XenoServer server, Task serverTask, CancellationTokenSource serverTokenSource, string dbFile)
         {
+            await StopServerRuntimeAsync(server, serverTask, serverTokenSource).ConfigureAwait(false);
+            await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+        }
+
+        private static async Task StopServerRuntimeAsync(XenoServer server, Task serverTask, CancellationTokenSource serverTokenSource)
+        {
             serverTokenSource.Cancel();
             server.Stop();
             try
@@ -9167,7 +9349,6 @@ namespace Test.Shared
             }
 
             server.Dispose();
-            await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
         }
 
         private static void AssertFactoryDefaultClientSettings(string settingsFile, string stateFile)
