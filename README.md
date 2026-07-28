@@ -42,6 +42,18 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 - Move between local Ollama, hosted APIs, and OpenAI-compatible model servers while keeping the same application integration point.
 - Debug agentic applications with request history that shows which node handled a request and why it was selected.
 
+## Hardware Fit
+
+Xeno is useful before every participant owns a large accelerator. The practical model is simple: bring what you have, borrow what you need. A CPU-only box, a gaming desktop, and a rack-mounted GPU host can all have different jobs in the same fleet.
+
+| If you have | What Xeno gives you | What you can contribute | Best fit |
+| --- | --- | --- | --- |
+| CPU-only machine | Access to GPU-powered models running on other trusted systems. | CPU embeddings, smaller local models, utility inference, routing support, and background jobs that do not need a large accelerator. | Laptops, small servers, edge boxes, classrooms, and users who need AI access before buying GPU hardware. |
+| Desktop or gaming-class GPU | Access to larger models on stronger systems when your local GPU is too small or busy. | Smaller chat models, embedding models, task-specific inference, and burst capacity for workloads that fit consumer hardware. | Workstations, home labs, developer desktops, and teams with uneven but useful local GPU capacity. |
+| Large GPU machine | Access to a fleet of other large GPU hosts and smaller nodes so one machine is not the whole platform. | High-end inference for large models while offloading embeddings, small models, and lower-priority jobs to cheaper machines. | Accelerator servers, research clusters, shared lab hardware, and production pools that need scale-out rather than a single queue. |
+
+The fleet gets more efficient when work lands on the right class of hardware. Expensive GPUs stay focused on GPU-worthy jobs. Smaller machines still count. Applications keep one endpoint instead of learning which machine has which model today.
+
 ## Platform Vision
 
 Xeno treats model-serving capacity as a fleet instead of a single box. The server is the controller: it owns identity, tenancy, routing policy, request history, telemetry, and the public API surface. The client is the agent: it runs beside the hardware and provider runtimes, advertises what the node can do, executes routed requests locally, and reports health and telemetry back to the controller.
