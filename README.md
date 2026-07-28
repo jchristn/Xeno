@@ -44,15 +44,15 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 
 ## Hardware Fit
 
-Xeno is useful before every participant owns a large accelerator. The practical model is simple: bring what you have, borrow what you need. A CPU-only box, a gaming desktop, and a rack-mounted GPU host can all have different jobs in the same fleet.
+Xeno is not only for machines that need help. The practical model is simple: every machine becomes addressable capacity. Smaller systems contribute right-sized work, and powerful GPU hosts can fan independent jobs out across a fleet instead of becoming the only queue.
 
-| If you have | What Xeno gives you | What you can contribute | Best fit |
+| If you have | What Xeno gives you | What you can contribute | Why it matters |
 | --- | --- | --- | --- |
-| CPU-only machine | Access to GPU-powered models running on other trusted systems. | CPU embeddings, smaller local models, utility inference, routing support, and background jobs that do not need a large accelerator. | Laptops, small servers, edge boxes, classrooms, and users who need AI access before buying GPU hardware. |
-| Desktop or gaming-class GPU | Access to larger models on stronger systems when your local GPU is too small or busy. | Smaller chat models, embedding models, task-specific inference, and burst capacity for workloads that fit consumer hardware. | Workstations, home labs, developer desktops, and teams with uneven but useful local GPU capacity. |
-| Large GPU machine | Access to a fleet of other large GPU hosts and smaller nodes so one machine is not the whole platform. | High-end inference for large models while offloading embeddings, small models, and lower-priority jobs to cheaper machines. | Accelerator servers, research clusters, shared lab hardware, and production pools that need scale-out rather than a single queue. |
+| CPU-only machine | Access to GPU-powered models running on other trusted systems. | CPU embeddings, smaller local models, utility inference, routing support, and background jobs that do not need a large accelerator. | You can use the fleet before buying GPU hardware, and your machine still does useful work. |
+| Desktop or gaming-class GPU | Access to larger models on stronger systems when your local GPU is too small or busy. | Smaller chat models, embedding models, task-specific inference, and burst capacity for workloads that fit consumer hardware. | Your desktop becomes useful shared capacity without pretending it is a data-center accelerator. |
+| Large GPU machine | A way to blast independent inference, embedding, evaluation, batch, and agent workloads across other eligible systems instead of serializing everything through one box. | High-end inference for large models while offloading embeddings, small models, and lower-priority jobs to cheaper machines. | Your GB10-class workstation, accelerator server, or multi-GPU host becomes an anchor node in a parallel fleet, not the bottleneck for every job. |
 
-The fleet gets more efficient when work lands on the right class of hardware. Expensive GPUs stay focused on GPU-worthy jobs. Smaller machines still count. Applications keep one endpoint instead of learning which machine has which model today.
+For powerful hosts, the win is parallelism. Keep the big local model where it belongs, then spread independent work across the rest of the fleet so agent runs, evals, embeddings, backfills, and batch jobs finish faster. Applications keep one endpoint instead of learning which machine has which model today.
 
 ## Platform Vision
 
