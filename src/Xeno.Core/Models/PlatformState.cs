@@ -68,11 +68,6 @@ namespace Xeno.Core.Models
         public List<RoutingPolicy> RoutingPolicies { get; set; } = new List<RoutingPolicy>();
 
         /// <summary>
-        /// Request history entries.
-        /// </summary>
-        public List<RequestHistoryEntry> RequestHistory { get; set; } = new List<RequestHistoryEntry>();
-
-        /// <summary>
         /// Ledger tenant links.
         /// </summary>
         public List<LedgerTenantLink> LedgerTenantLinks { get; set; } = new List<LedgerTenantLink>();

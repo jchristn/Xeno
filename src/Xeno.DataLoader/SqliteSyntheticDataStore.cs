@@ -4,6 +4,7 @@ namespace Xeno.DataLoader
     using System.Collections.Generic;
     using System.Globalization;
     using System.IO;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Data.Sqlite;
@@ -44,7 +45,7 @@ namespace Xeno.DataLoader
                 await using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
                     PlatformState state = await ReadPlatformStateAsync(connection, transaction, token).ConfigureAwait(false);
-                    ApplyPlatformState(state, clients, requestHistory);
+                    ApplyPlatformState(state, clients);
                     await WritePlatformStateAsync(connection, transaction, state, token).ConfigureAwait(false);
 
                     if (_Options.ReplaceSynthetic)
@@ -55,6 +56,7 @@ namespace Xeno.DataLoader
                     transaction.Commit();
                 }
 
+                await ApplyRequestHistoryAsync(connectionString, requestHistory, token).ConfigureAwait(false);
                 await InsertTelemetryInBatchesAsync(connection, telemetry, token).ConfigureAwait(false);
             }
 
@@ -99,6 +101,7 @@ VALUES ('0001', 'initial_platform_state', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             }
 
             await SqliteTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+            await SqliteRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
         }
 
         private static async Task<PlatformState> ReadPlatformStateAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken token)
@@ -138,23 +141,42 @@ ON CONFLICT(id) DO UPDATE SET
             }
         }
 
-        private void ApplyPlatformState(PlatformState state, List<SyntheticClientProfile> clients, List<RequestHistoryEntry> requestHistory)
+        private void ApplyPlatformState(PlatformState state, List<SyntheticClientProfile> clients)
         {
             if (_Options.ReplaceSynthetic)
             {
                 state.Clients.RemoveAll(item => item.Id.StartsWith(SyntheticConstants.ClientIdPrefix, StringComparison.OrdinalIgnoreCase));
-                state.RequestHistory.RemoveAll(item => item.Id.StartsWith(SyntheticConstants.RequestIdPrefix, StringComparison.OrdinalIgnoreCase)
-                    || (item.SelectedClientId != null && item.SelectedClientId.StartsWith(SyntheticConstants.ClientIdPrefix, StringComparison.OrdinalIgnoreCase))
-                    || (item.Telemetry.Metadata.TryGetValue(SyntheticConstants.SyntheticMetadataKey, out string? value) && String.Equals(value, SyntheticConstants.SyntheticMetadataValue, StringComparison.Ordinal)));
             }
 
             foreach (SyntheticClientProfile client in clients)
             {
                 state.Clients.Add(CreateClientRecord(client));
             }
+        }
 
-            state.RequestHistory.AddRange(requestHistory);
-            state.RequestHistory.Sort((left, right) => left.CreatedUtc.CompareTo(right.CreatedUtc));
+        private async Task ApplyRequestHistoryAsync(string connectionString, List<RequestHistoryEntry> requestHistory, CancellationToken token)
+        {
+            if (_Options.ReplaceSynthetic)
+            {
+                await using (SqliteConnection connection = new SqliteConnection(connectionString))
+                {
+                    await connection.OpenAsync(token).ConfigureAwait(false);
+                    await using (SqliteCommand command = connection.CreateCommand())
+                    {
+                        command.CommandText = "DELETE FROM request_history WHERE id LIKE $idPrefix OR selected_client_id LIKE $clientPrefix OR entry_json LIKE $metadata;";
+                        command.Parameters.AddWithValue("$idPrefix", SyntheticConstants.RequestIdPrefix + "%");
+                        command.Parameters.AddWithValue("$clientPrefix", SyntheticConstants.ClientIdPrefix + "%");
+                        command.Parameters.AddWithValue("$metadata", "%" + SyntheticConstants.SyntheticMetadataValue + "%");
+                        await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+                }
+            }
+
+            SqliteRequestHistoryMethods methods = new SqliteRequestHistoryMethods(connectionString);
+            foreach (RequestHistoryEntry entry in requestHistory.OrderBy(item => item.CreatedUtc))
+            {
+                await methods.InsertAsync(entry, token).ConfigureAwait(false);
+            }
         }
 
         private XenoClientRecord CreateClientRecord(SyntheticClientProfile profile)

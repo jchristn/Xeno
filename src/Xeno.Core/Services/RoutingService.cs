@@ -179,7 +179,6 @@ namespace Xeno.Core.Services
                 AuthScheme = context.AuthScheme,
                 RoutingDecision = decision
             };
-            _Platform.RequestHistory.Add(entry);
             return entry;
         }
 

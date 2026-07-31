@@ -27,6 +27,7 @@ namespace Test.Shared
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core;
     using Xeno.Core.Database;
+    using Xeno.Core.Database.Interfaces;
     using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
     using Xeno.Core.Models;
@@ -3592,11 +3593,10 @@ namespace Test.Shared
                     platform.ModelDefinitions.Add(new ModelDefinition { Id = "md_cascade", TenantId = tenantId, Name = "cascade-model" });
                     platform.ModelConfigurations.Add(new ModelConfiguration { Id = "mc_cascade", TenantId = tenantId, Name = "cascade-config" });
                     platform.RoutingPolicies.Add(new RoutingPolicy { Id = "rpol_cascade", TenantId = tenantId, Name = "cascade-routing", ModelName = "*", ClientName = "*" });
-                    platform.RequestHistory.Add(new RequestHistoryEntry { Id = "req_cascade", TenantId = tenantId, RequestorTenantId = tenantId });
 
                     int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
                     removed += platform.RemoveTenantScopedRecords(tenantId);
-                    if (removed < 13) throw new InvalidOperationException("Tenant cascade removed too few records.");
+                    if (removed < 12) throw new InvalidOperationException("Tenant cascade removed too few records.");
                     if (platform.Tenants.Any(item => item.Id == tenantId)) throw new InvalidOperationException("Tenant record remained after cascade.");
                     if (platform.ToState().Users.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant users remained after cascade.");
                     if (platform.ToState().Credentials.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant credentials remained after cascade.");
@@ -3609,7 +3609,6 @@ namespace Test.Shared
                     if (platform.ToState().ModelDefinitions.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant model definitions remained after cascade.");
                     if (platform.ToState().ModelConfigurations.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant model configurations remained after cascade.");
                     if (platform.ToState().RoutingPolicies.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant routing policies remained after cascade.");
-                    if (platform.ToState().RequestHistory.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant request history remained after cascade.");
                     if (!platform.Users.Any(item => item.TenantId == keepTenantId)) throw new InvalidOperationException("Cascade removed another tenant's user.");
                 }));
 
@@ -3967,12 +3966,12 @@ namespace Test.Shared
             {
                 first.Platform.Tenants.Add(new Tenant { Id = tenantId, Name = "Leaderboard " + marker });
                 first.Platform.Tenants.Add(new Tenant { Id = otherTenantId, Name = "Other Leaderboard " + marker });
-                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_a1_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-20), 40, 60, 100));
-                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_a2_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-10), 10, 20, 0));
-                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_b1_" + marker, tenantId, "leader-beta", nowUtc.AddMinutes(-5), 25, 35, 60));
-                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_old_" + marker, tenantId, "leader-older", nowUtc.AddDays(-5), 1, 1, 2));
-                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_other_" + marker, otherTenantId, "leader-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000));
-                first.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_leader_blank_" + marker, tenantId, null, nowUtc.AddMinutes(-5), 100, 100, 200));
+                await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_a1_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-20), 40, 60, 100), CancellationToken.None).ConfigureAwait(false);
+                await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_a2_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-10), 10, 20, 0), CancellationToken.None).ConfigureAwait(false);
+                await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_b1_" + marker, tenantId, "leader-beta", nowUtc.AddMinutes(-5), 25, 35, 60), CancellationToken.None).ConfigureAwait(false);
+                await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_old_" + marker, tenantId, "leader-older", nowUtc.AddDays(-5), 1, 1, 2), CancellationToken.None).ConfigureAwait(false);
+                await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_other_" + marker, otherTenantId, "leader-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000), CancellationToken.None).ConfigureAwait(false);
+                await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_blank_" + marker, tenantId, null, nowUtc.AddMinutes(-5), 100, 100, 200), CancellationToken.None).ConfigureAwait(false);
                 await first.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
@@ -4038,7 +4037,8 @@ namespace Test.Shared
                 if (emptyPage.Total != 1 || emptyPage.Models.Count != 0) throw new InvalidOperationException(settings.Type + " leaderboard pagination total should include skipped matching records.");
 
                 second.Platform.Tenants.RemoveAll(item => item.Id == tenantId || item.Id == otherTenantId);
-                second.Platform.RequestHistory.RemoveAll(item => item.Id.Contains(marker, StringComparison.Ordinal));
+                await second.RequestHistory!.DeleteAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, CancellationToken.None).ConfigureAwait(false);
+                await second.RequestHistory!.DeleteAsync(new RequestHistoryQuery { TenantId = otherTenantId, MatchRequestorTenant = true }, CancellationToken.None).ConfigureAwait(false);
                 await second.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
         }
@@ -4112,38 +4112,6 @@ namespace Test.Shared
             routingPolicy.TelemetryFilters.Add(new RoutingPolicyCondition { Metric = "telemetry.cpu.utilizationPercent", Operator = RoutingPolicyOperatorEnum.LessThanOrEqual, ValueType = RoutingPolicyMetricValueTypeEnum.Number, Value = "75" });
             routingPolicy.TelemetryRanking.Add(new RoutingPolicyRankingRule { Metric = "provider.queuedRequests", Direction = RoutingPolicyRankingDirectionEnum.Ascending, Weight = 2 });
             platform.RoutingPolicies.Add(routingPolicy);
-
-            RequestHistoryEntry request = new RequestHistoryEntry
-            {
-                Id = requestHistoryId,
-                TenantId = tenantId,
-                RequestorTenantId = tenantId,
-                Path = "/v1/chat/completions",
-                Method = "POST",
-                Model = "model_" + marker,
-                SelectedClientId = clientId,
-                StatusCode = 201,
-                DurationMs = 321,
-                SourceIp = "127.0.0.1",
-                UserId = userId,
-                CredentialId = credentialId,
-                SessionId = sessionId,
-                PrincipalType = PrincipalTypeEnum.User,
-                RequestorPrincipalType = PrincipalTypeEnum.User,
-                RequestorPrincipalId = userId,
-                AuthScheme = AuthSchemeEnum.Credential,
-                RequestBody = "{\"marker\":\"" + marker + "\"}",
-                ResponseBody = "{\"ok\":true}",
-                RequestBodyLength = 20,
-                ResponseBodyLength = 11
-            };
-            request.RequestHeaders["x-marker"] = marker;
-            request.ResponseHeaders["x-result"] = "ok";
-            request.Telemetry.TotalTimeMs = 321;
-            request.Telemetry.ProviderRequestId = "provider_" + marker;
-            request.Telemetry.Metadata["marker"] = marker;
-            request.Timeline.Add(new RequestHistoryTimelineEvent { Stage = RequestHistoryTimelineStageEnum.ClientSelection, Message = "selected", ElapsedMs = 5, Success = true });
-            platform.RequestHistory.Add(request);
         }
 
         private static void AssertPlatformStateRoundTrip(XenoPlatform platform, string tenantId, string userId, string credentialId, string sessionId, string permissionId, string roleId, string roleAssignmentId, string auditId, string clientId, string modelDefinitionId, string modelConfigurationId, string routingPolicyId, string requestHistoryId, string marker, DatabaseTypeEnum provider)
@@ -4165,8 +4133,6 @@ namespace Test.Shared
             if (!modelConfiguration.PinnedCompletionsProperties.ContainsKey("marker")) throw new InvalidOperationException(provider + " model configuration pinned properties did not round-trip.");
             RoutingPolicy routingPolicy = platform.RoutingPolicies.FirstOrDefault(item => item.Id == routingPolicyId) ?? throw new InvalidOperationException(provider + " routing policy did not round-trip.");
             if (routingPolicy.TelemetryFilters.Count != 1 || routingPolicy.TelemetryRanking.Count != 1 || routingPolicy.MaxTelemetryAgeMs != 45000) throw new InvalidOperationException(provider + " routing policy telemetry settings did not round-trip.");
-            RequestHistoryEntry request = platform.RequestHistory.FirstOrDefault(item => item.Id == requestHistoryId) ?? throw new InvalidOperationException(provider + " request history did not round-trip.");
-            if (request.Telemetry.ProviderRequestId != "provider_" + marker || !request.Telemetry.Metadata.ContainsKey("marker") || request.Timeline.Count != 1) throw new InvalidOperationException(provider + " request history detail did not round-trip.");
         }
 
         private static async Task RunServerTelemetryRoundTripAsync(DatabaseSettings settings, string suffix)
@@ -4673,12 +4639,10 @@ namespace Test.Shared
                             platform.EnsureTenantDefaults(otherTenant.Id);
                             platform.Clients.Add(new XenoClientRecord { TenantId = otherTenant.Id, Name = "other-tenant-client", Connected = true });
                             platform.Credentials.Add(new Credential { TenantId = otherTenant.Id, UserId = "usr_other", AccessKey = "other-access", Active = true });
-                            platform.RequestHistory.Add(new RequestHistoryEntry { TenantId = otherTenant.Id, Path = "/v1/chat/completions", Method = "POST", RequestorTenantId = otherTenant.Id });
                             platform.AuditRecords.Add(new AuditRecord { TenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Allowed = false, StatusCode = 403 });
 
                             if (platform.Clients.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.Name, "other-tenant-client", StringComparison.Ordinal))) throw new InvalidOperationException("Client inventory leaked across tenants.");
                             if (platform.Credentials.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.AccessKey, "other-access", StringComparison.Ordinal))) throw new InvalidOperationException("Credential leaked across tenants.");
-                            if (platform.RequestHistory.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.RequestorTenantId, otherTenant.Id, StringComparison.Ordinal))) throw new InvalidOperationException("Request history leaked across tenants.");
                             if (platform.AuditRecords.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.ResourceType, "Users", StringComparison.Ordinal) && item.StatusCode == 403)) throw new InvalidOperationException("Audit record leaked across tenants.");
                         })
                 });
@@ -5732,11 +5696,11 @@ namespace Test.Shared
             {
                 const string otherTenantId = "ten_public_leaderboard_other";
                 driver.Platform.Tenants.Add(new Tenant { Id = otherTenantId, Name = "Public Leaderboard Other" });
-                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_1", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-20), 40, 60, 100));
-                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_2", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-10), 10, 20, 30));
-                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_beta_1", Constants.DefaultTenantId, "public-beta", nowUtc.AddMinutes(-5), 25, 35, 60));
-                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_alpha_other", otherTenantId, "public-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000));
-                driver.Platform.RequestHistory.Add(CreateModelLeaderboardHistory("req_public_old", Constants.DefaultTenantId, "public-old", nowUtc.AddDays(-3), 1, 1, 2));
+                await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_alpha_1", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-20), 40, 60, 100), CancellationToken.None).ConfigureAwait(false);
+                await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_alpha_2", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-10), 10, 20, 30), CancellationToken.None).ConfigureAwait(false);
+                await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_beta_1", Constants.DefaultTenantId, "public-beta", nowUtc.AddMinutes(-5), 25, 35, 60), CancellationToken.None).ConfigureAwait(false);
+                await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_alpha_other", otherTenantId, "public-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000), CancellationToken.None).ConfigureAwait(false);
+                await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_old", Constants.DefaultTenantId, "public-old", nowUtc.AddDays(-3), 1, 1, 2), CancellationToken.None).ConfigureAwait(false);
                 await driver.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
 

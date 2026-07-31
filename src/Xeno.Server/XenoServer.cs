@@ -22,6 +22,7 @@ namespace Xeno.Server
     using WatsonWebserver.Core.WebSockets;
     using Xeno.Core;
     using Xeno.Core.Database;
+    using Xeno.Core.Database.Interfaces;
     using Xeno.Core.Enums;
     using Xeno.Core.Exceptions;
     using Xeno.Core.Helpers;
@@ -81,6 +82,8 @@ namespace Xeno.Server
         private Task? _TelemetryCollectionTask;
         private CancellationTokenSource? _WebSocketMaintenanceCancellation;
         private Task? _WebSocketMaintenanceTask;
+        private CancellationTokenSource? _RequestHistoryRetentionCancellation;
+        private Task? _RequestHistoryRetentionTask;
         private DateTime? _TelemetryLastCycleUtc;
         private DateTime? _TelemetryNextCycleUtc;
         private DateTime? _TelemetryNextPruneUtc;
@@ -186,6 +189,7 @@ namespace Xeno.Server
             _Ledger.Start();
             StartTelemetryCollectionLoop();
             StartWebSocketMaintenanceLoop();
+            StartRequestHistoryRetentionLoop();
 
             _Logging.Info(_Header + "started on " + (_Settings.Rest.Ssl ? "https://" : "http://") + _Settings.Rest.Hostname + ":" + _Settings.Rest.Port);
 
@@ -212,6 +216,7 @@ namespace Xeno.Server
         {
             _TelemetryCollectionCancellation?.Cancel();
             _WebSocketMaintenanceCancellation?.Cancel();
+            _RequestHistoryRetentionCancellation?.Cancel();
             _Ledger?.Stop();
             _NetLedgerTenantSubordinate?.Dispose();
             try
@@ -2392,7 +2397,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 string userId = ResolveContextUserId(requestContext);
-                await SendJsonAsync(context, BuildLedgerBalance(requestContext.TenantId, userId)).ConfigureAwait(false);
+                await SendJsonAsync(context, await BuildLedgerBalanceAsync(requestContext.TenantId, userId, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
@@ -2400,7 +2405,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 LedgerBalanceSearchRequest search = BuildLedgerBalanceSearchRequest(requestContext, context);
-                await SendJsonAsync(context, SearchLedgerBalances(requestContext, search)).ConfigureAwait(false);
+                await SendJsonAsync(context, await SearchLedgerBalancesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
@@ -2408,7 +2413,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 EnsureCanReadLedgerUser(requestContext, requestContext.TenantId, ledgerUserId);
-                await SendJsonAsync(context, BuildLedgerBalance(requestContext.TenantId, ledgerUserId)).ConfigureAwait(false);
+                await SendJsonAsync(context, await BuildLedgerBalanceAsync(requestContext.TenantId, ledgerUserId, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
@@ -2417,7 +2422,7 @@ namespace Xeno.Server
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 string userId = ResolveContextUserId(requestContext);
                 LedgerEntrySearchRequest search = new LedgerEntrySearchRequest { TenantId = requestContext.TenantId, UserId = userId };
-                await SendJsonAsync(context, SearchLedgerEntries(requestContext, search)).ConfigureAwait(false);
+                await SendJsonAsync(context, await SearchLedgerEntriesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
@@ -2425,7 +2430,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 LedgerEntrySearchRequest search = ReadJsonBody<LedgerEntrySearchRequest>(context);
-                await SendJsonAsync(context, SearchLedgerEntries(requestContext, search)).ConfigureAwait(false);
+                await SendJsonAsync(context, await SearchLedgerEntriesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
@@ -2451,21 +2456,21 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory", "/v1.0/api/request-history"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, ListRequestHistory(requestContext, context)).ConfigureAwait(false);
+                await SendJsonAsync(context, await ListRequestHistoryAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, SummarizeRequestHistory(requestContext, context)).ConfigureAwait(false);
+                await SendJsonAsync(context, await SummarizeRequestHistoryAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/requesthistory/analytics/overview", "/v1.0/api/request-history/analytics/overview", "/api/v1/analytics/overview", "/v1.0/api/analytics/overview"))
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, AnalyticsOverview(requestContext, context)).ConfigureAwait(false);
+                await SendJsonAsync(context, await AnalyticsOverviewAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
                 return;
             }
 
@@ -2473,8 +2478,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
                 RequestHistoryDeleteRequest body = ReadJsonBody<RequestHistoryDeleteRequest>(context);
-                int removed = DeleteRequestHistory(requestContext, body);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                int removed = await DeleteRequestHistoryAsync(requestContext, body, token).ConfigureAwait(false);
                 await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
                 return;
             }
@@ -2527,7 +2531,7 @@ namespace Xeno.Server
             if (method == "GET" && TryGetPathId(path, "/api/v1/requesthistory/", "/v1.0/api/request-history/") is string requestHistoryId)
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                RequestHistoryEntry? entry = RequirePlatform().RequestHistory.FirstOrDefault(item => item.Id == requestHistoryId && item.TenantId == requestContext.TenantId);
+                RequestHistoryEntry? entry = await RequireRequestHistory().GetAsync(requestContext.TenantId, requestHistoryId, token).ConfigureAwait(false);
                 if (entry == null) throw new KeyNotFoundException("Request history entry not found.");
                 await SendJsonAsync(context, entry).ConfigureAwait(false);
                 return;
@@ -2536,8 +2540,7 @@ namespace Xeno.Server
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/requesthistory/", "/v1.0/api/request-history/") is string deleteRequestHistoryId)
             {
                 await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = RequirePlatform().RequestHistory.RemoveAll(item => item.Id == deleteRequestHistoryId && item.TenantId == requestContext.TenantId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                await RequireRequestHistory().DeleteAsync(new RequestHistoryQuery { TenantId = requestContext.TenantId, Ids = new[] { deleteRequestHistoryId } }, token).ConfigureAwait(false);
                 await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
@@ -2886,7 +2889,7 @@ namespace Xeno.Server
                 }
             }
 
-            await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+            await InsertRequestHistoryAsync(history, CancellationToken.None).ConfigureAwait(false);
             await context.Response.SendChunk(Array.Empty<byte>(), true, context.Token).ConfigureAwait(false);
         }
 
@@ -3014,6 +3017,47 @@ namespace Xeno.Server
             if (!_Settings.WebSocket.Enabled) return;
             _WebSocketMaintenanceCancellation = new CancellationTokenSource();
             _WebSocketMaintenanceTask = Task.Run(async () => await WebSocketMaintenanceLoopAsync(_WebSocketMaintenanceCancellation.Token).ConfigureAwait(false));
+        }
+
+        private void StartRequestHistoryRetentionLoop()
+        {
+            if (!_Settings.RequestHistory.Enabled) return;
+            if (_Database?.RequestHistory == null) return;
+            _RequestHistoryRetentionCancellation = new CancellationTokenSource();
+            _RequestHistoryRetentionTask = Task.Run(async () => await RequestHistoryRetentionLoopAsync(_RequestHistoryRetentionCancellation.Token).ConfigureAwait(false));
+        }
+
+        private async Task RequestHistoryRetentionLoopAsync(CancellationToken token)
+        {
+            await PruneRequestHistoryAsync(token).ConfigureAwait(false);
+            using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromHours(1)))
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                        await PruneRequestHistoryAsync(token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        _Logging.Warn(_Header + "request history retention sweep failed: " + ex.Message);
+                    }
+                }
+            }
+        }
+
+        private async Task PruneRequestHistoryAsync(CancellationToken token)
+        {
+            if (_Database?.RequestHistory == null) return;
+            int retentionDays = Math.Max(1, _Settings.RequestHistory.RetentionDays);
+            DateTime cutoffUtc = DateTime.UtcNow.AddDays(-retentionDays);
+            int removed = await _Database.RequestHistory.PruneOlderThanAsync(cutoffUtc, token).ConfigureAwait(false);
+            if (removed > 0) _Logging.Debug(_Header + "pruned " + removed + " request history entries older than " + retentionDays + " days");
         }
 
         private async Task WebSocketMaintenanceLoopAsync(CancellationToken token)
@@ -5650,8 +5694,23 @@ namespace Xeno.Server
             RequestHistoryEntry entry = RequireRouting().RecordHistory(requestContext, path, method, decision);
             configure?.Invoke(entry);
             TryEnqueueLedgerEvent(entry);
-            await SavePlatformAsync(token).ConfigureAwait(false);
+            await InsertRequestHistoryAsync(entry, token).ConfigureAwait(false);
             return entry;
+        }
+
+        private async Task InsertRequestHistoryAsync(RequestHistoryEntry entry, CancellationToken token)
+        {
+            if (entry == null) return;
+            if (!_Settings.RequestHistory.Enabled) return;
+            if (_Database?.RequestHistory == null) return;
+            try
+            {
+                await _Database.RequestHistory.InsertAsync(entry, token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _Logging.Warn(_Header + "failed to persist request history " + entry.Id + ": " + ex.Message);
+            }
         }
 
         private static bool IsClientResponseStart(ClientResponseMessage message)
@@ -7087,6 +7146,11 @@ namespace Xeno.Server
 
             DateTime startedUtc = DateTime.UtcNow;
             AdminNukeCounts counts = platform.CountTenantScopedRecords(tenantId, body.IncludeAuditRecords, body.IncludeRequestHistory);
+            if (body.IncludeRequestHistory && _Database?.RequestHistory != null)
+            {
+                counts.RequestHistory = await _Database.RequestHistory.CountAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, token).ConfigureAwait(false);
+            }
+
             AdminNukeResponse response = new AdminNukeResponse
             {
                 Status = body.DryRun ? "dryRun" : "success",
@@ -7122,6 +7186,11 @@ namespace Xeno.Server
                     .Select(item => item.Id)
                     .ToList();
                 response.Deleted = platform.RemoveTenantScopedRecords(tenantId, body.IncludeAuditRecords, body.IncludeRequestHistory);
+                if (body.IncludeRequestHistory && _Database?.RequestHistory != null)
+                {
+                    response.Deleted.RequestHistory = await _Database.RequestHistory.DeleteAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, token).ConfigureAwait(false);
+                }
+
                 if (body.IncludeTelemetry && _Database != null)
                 {
                     response.Deleted.TelemetryRecords = await _Database.PurgeTenantDataAsync(tenantId, token).ConfigureAwait(false);
@@ -7177,7 +7246,20 @@ namespace Xeno.Server
             if (user.IsAdmin && platform.Users.Count(item => item.Active && item.IsAdmin) <= 1) throw new HttpStatusException(409, "LastSystemAdminProtected", "The last active system administrator cannot be nuked.");
 
             DateTime startedUtc = DateTime.UtcNow;
+            List<string> nukeCredentialIds = platform.Credentials
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Id)
+                .ToList();
+            List<string> nukeSessionIds = platform.AuthSessions
+                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && nukeCredentialIds.Contains(item.CredentialId))))
+                .Select(item => item.Id)
+                .ToList();
             AdminNukeResponse counted = platform.CountUserScopedRecords(tenantId, userId, body.IncludeAuditRecords, body.AnonymizeRequestHistory);
+            if (body.AnonymizeRequestHistory && _Database?.RequestHistory != null)
+            {
+                counted.Updated.RequestHistoryAnonymized = await _Database.RequestHistory.CountAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true, UserId = userId, CredentialIds = nukeCredentialIds, SessionIds = nukeSessionIds }, token).ConfigureAwait(false);
+            }
+
             AdminNukeResponse response = new AdminNukeResponse
             {
                 Status = body.DryRun ? "dryRun" : "success",
@@ -7218,6 +7300,11 @@ namespace Xeno.Server
                 AdminNukeResponse removed = platform.RemoveUserScopedRecords(tenantId, userId, body.IncludeAuditRecords, body.AnonymizeRequestHistory);
                 response.Deleted = removed.Deleted;
                 response.Updated = removed.Updated;
+                if (body.AnonymizeRequestHistory && _Database?.RequestHistory != null)
+                {
+                    response.Updated.RequestHistoryAnonymized = await _Database.RequestHistory.AnonymizeUserAsync(tenantId, userId, nukeCredentialIds, nukeSessionIds, token).ConfigureAwait(false);
+                }
+
                 if (body.AnonymizeRequestHistory && platform.CountUserRemnants(tenantId, userId) > 0)
                 {
                     throw new HttpStatusException(500, "UserNukeRemnantsDetected", "User nuke left user-scoped remnants.");
@@ -7665,7 +7752,7 @@ namespace Xeno.Server
             return request;
         }
 
-        private LedgerBalanceSearchResult SearchLedgerBalances(RequestContext requestContext, LedgerBalanceSearchRequest request)
+        private async Task<LedgerBalanceSearchResult> SearchLedgerBalancesAsync(RequestContext requestContext, LedgerBalanceSearchRequest request, CancellationToken token)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? requestContext.TenantId : request.TenantId;
@@ -7694,10 +7781,11 @@ namespace Xeno.Server
                     || item.Email.Contains(search, StringComparison.OrdinalIgnoreCase));
             }
 
-            List<LedgerBalanceResponse> balances = users
-                .OrderBy(item => item.Email, StringComparer.OrdinalIgnoreCase)
-                .Select(item => BuildLedgerBalance(tenantId, item.Id))
-                .ToList();
+            List<LedgerBalanceResponse> balances = new List<LedgerBalanceResponse>();
+            foreach (User user in users.OrderBy(item => item.Email, StringComparer.OrdinalIgnoreCase))
+            {
+                balances.Add(await BuildLedgerBalanceAsync(tenantId, user.Id, token).ConfigureAwait(false));
+            }
 
             return new LedgerBalanceSearchResult
             {
@@ -7708,7 +7796,7 @@ namespace Xeno.Server
             };
         }
 
-        private LedgerBalanceResponse BuildLedgerBalance(string tenantId, string userId)
+        private async Task<LedgerBalanceResponse> BuildLedgerBalanceAsync(string tenantId, string userId, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
             if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.", nameof(userId));
@@ -7723,7 +7811,7 @@ namespace Xeno.Server
                 NetLedgerAccountId = accountLink?.NetLedgerAccountId
             };
 
-            foreach (RequestHistoryEntry entry in LedgerEligibleHistory(tenantId))
+            foreach (RequestHistoryEntry entry in await LedgerEligibleHistoryAsync(tenantId, token).ConfigureAwait(false))
             {
                 int totalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);
                 if (totalTokens <= 0) continue;
@@ -7744,7 +7832,7 @@ namespace Xeno.Server
             return response;
         }
 
-        private LedgerEntrySearchResult SearchLedgerEntries(RequestContext requestContext, LedgerEntrySearchRequest request)
+        private async Task<LedgerEntrySearchResult> SearchLedgerEntriesAsync(RequestContext requestContext, LedgerEntrySearchRequest request, CancellationToken token)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? requestContext.TenantId : request.TenantId;
@@ -7752,7 +7840,7 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(request.UserId)) EnsureCanReadLedgerUser(requestContext, tenantId, request.UserId);
 
             List<LedgerEntryRecord> records = new List<LedgerEntryRecord>();
-            foreach (RequestHistoryEntry entry in LedgerEligibleHistory(tenantId))
+            foreach (RequestHistoryEntry entry in await LedgerEligibleHistoryAsync(tenantId, token).ConfigureAwait(false))
             {
                 if (request.FromUtc.HasValue && (entry.CompletedUtc ?? entry.CreatedUtc) < request.FromUtc.Value.ToUniversalTime()) continue;
                 if (request.ToUtc.HasValue && (entry.CompletedUtc ?? entry.CreatedUtc) > request.ToUtc.Value.ToUniversalTime()) continue;
@@ -7857,13 +7945,18 @@ namespace Xeno.Server
             return response;
         }
 
-        private IEnumerable<RequestHistoryEntry> LedgerEligibleHistory(string tenantId)
+        private async Task<List<RequestHistoryEntry>> LedgerEligibleHistoryAsync(string tenantId, CancellationToken token)
         {
-            return RequirePlatform().RequestHistory.Where(item =>
-                item.TenantId == tenantId
-                && item.StatusCode >= 200
-                && item.StatusCode < 300
-                && Math.Max(0, item.Telemetry?.TotalTokens ?? 0) > 0);
+            RequestHistoryPage page = await RequireRequestHistory().QueryAsync(new RequestHistoryQuery
+            {
+                TenantId = tenantId,
+                MinStatusCode = 200,
+                MaxStatusCode = 299,
+                RequireTokens = true,
+                IncludeBody = true,
+                Limit = 0
+            }, token).ConfigureAwait(false);
+            return page.Items;
         }
 
         private string ResolveContextUserId(RequestContext requestContext)
@@ -7921,21 +8014,20 @@ namespace Xeno.Server
             return Math.Clamp(parsed, 1, maximum);
         }
 
-        private int DeleteRequestHistory(RequestContext requestContext, RequestHistoryDeleteRequest body)
+        private async Task<int> DeleteRequestHistoryAsync(RequestContext requestContext, RequestHistoryDeleteRequest body, CancellationToken token)
         {
             HashSet<string> ids = GetStringSet(body.Ids);
-            string? singleId = body.Id;
-            if (!String.IsNullOrWhiteSpace(singleId)) ids.Add(singleId);
-            string? model = body.Model;
-            string? path = body.Path;
-            string? selectedClientId = body.SelectedClientId;
+            if (!String.IsNullOrWhiteSpace(body.Id)) ids.Add(body.Id);
 
-            return RequirePlatform().RequestHistory.RemoveAll(item =>
-                item.TenantId == requestContext.TenantId
-                && (ids.Count == 0 || ids.Contains(item.Id))
-                && MatchesOptionalFilter(item.Model, model)
-                && MatchesOptionalFilter(item.Path, path)
-                && MatchesOptionalFilter(item.SelectedClientId, selectedClientId));
+            RequestHistoryQuery query = new RequestHistoryQuery
+            {
+                TenantId = requestContext.TenantId,
+                Ids = ids.Count > 0 ? ids.ToList() : null,
+                Model = String.IsNullOrWhiteSpace(body.Model) ? null : body.Model,
+                Path = String.IsNullOrWhiteSpace(body.Path) ? null : body.Path,
+                SelectedClientId = String.IsNullOrWhiteSpace(body.SelectedClientId) ? null : body.SelectedClientId
+            };
+            return await RequireRequestHistory().DeleteAsync(query, token).ConfigureAwait(false);
         }
 
         private RequestContext CreateRequestContext(HttpContextBase context)
@@ -8166,8 +8258,14 @@ namespace Xeno.Server
             XenoPlatform platform = RequirePlatform();
             int connectedClients = platform.Clients.Count(item => item.Connected);
             int availableModels = platform.Clients.Where(item => item.Connected).SelectMany(item => item.Models).Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-            int requests = platform.RequestHistory.Count;
-            int failures = platform.RequestHistory.Count(item => item.StatusCode >= 400);
+            int requests = 0;
+            int failures = 0;
+            if (_Database?.RequestHistory != null)
+            {
+                requests = await _Database.RequestHistory.CountAsync(new RequestHistoryQuery(), context.Token).ConfigureAwait(false);
+                failures = await _Database.RequestHistory.CountAsync(new RequestHistoryQuery { MinStatusCode = 400 }, context.Token).ConfigureAwait(false);
+            }
+
             context.Response.ContentType = "text/plain";
             string metrics =
                 "# HELP xeno_connected_clients Connected Xeno clients\n" +
@@ -8293,11 +8391,11 @@ namespace Xeno.Server
                 .Replace("\n", "\\n", StringComparison.Ordinal);
         }
 
-        private object AnalyticsOverview(RequestContext requestContext, HttpContextBase context)
+        private async Task<object> AnalyticsOverviewAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
             DateTime? fromUtc = ParseDateQuery(context, "fromUtc");
             DateTime? toUtc = ParseDateQuery(context, "toUtc");
-            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext, fromUtc, toUtc);
+            List<RequestHistoryEntry> entries = await FilterRequestHistoryAsync(requestContext, fromUtc, toUtc, false, token).ConfigureAwait(false);
             int total = entries.Count;
             int failures = entries.Count(item => item.StatusCode >= 400);
             List<XenoClientRecord> clients = RequirePlatform().Clients
@@ -8307,8 +8405,8 @@ namespace Xeno.Server
                 .SelectMany(item => item.Models)
                 .ToList();
             List<object> byModel = entries
-                .Where(item => item.RoutingDecision != null && !String.IsNullOrWhiteSpace(item.RoutingDecision.EffectiveModel))
-                .GroupBy(item => item.RoutingDecision!.EffectiveModel)
+                .Where(item => !String.IsNullOrWhiteSpace(item.Model))
+                .GroupBy(item => item.Model!)
                 .Select(group => (object)new
                 {
                     name = group.Key,
@@ -8364,18 +8462,26 @@ namespace Xeno.Server
             };
         }
 
-        private RequestHistorySearchResult ListRequestHistory(RequestContext requestContext, HttpContextBase context)
+        private async Task<RequestHistorySearchResult> ListRequestHistoryAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
             DateTime? fromUtc = ParseDateQuery(context, "fromUtc");
             DateTime? toUtc = ParseDateQuery(context, "toUtc");
             int page = ParseIntegerQuery(context, "page", 1, 1, 100000);
             int pageSize = ParseIntegerQuery(context, "pageSize", 100, 1, 1000);
-            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext, fromUtc, toUtc);
-            int skip = Math.Min(Int32.MaxValue, (page - 1) * pageSize);
+            RequestHistoryPage result = await RequireRequestHistory().QueryAsync(new RequestHistoryQuery
+            {
+                TenantId = requestContext.TenantId,
+                FromUtc = fromUtc,
+                ToUtc = toUtc,
+                IncludeBody = true,
+                OrderDescending = true,
+                Offset = (page - 1) * pageSize,
+                Limit = pageSize
+            }, token).ConfigureAwait(false);
             return new RequestHistorySearchResult
             {
-                Items = entries.Skip(skip).Take(pageSize).ToList(),
-                Total = entries.Count,
+                Items = result.Items,
+                Total = result.Total,
                 Page = page,
                 PageSize = pageSize
             };
@@ -8406,16 +8512,21 @@ namespace Xeno.Server
             return request;
         }
 
-        private List<RequestHistoryEntry> FilterRequestHistory(RequestContext context, DateTime? fromUtc = null, DateTime? toUtc = null)
+        private async Task<List<RequestHistoryEntry>> FilterRequestHistoryAsync(RequestContext context, DateTime? fromUtc, DateTime? toUtc, bool includeBody, CancellationToken token)
         {
-            IEnumerable<RequestHistoryEntry> entries = RequirePlatform().RequestHistory
-                .Where(item => item.TenantId == context.TenantId);
-            if (fromUtc.HasValue) entries = entries.Where(item => item.CreatedUtc >= fromUtc.Value);
-            if (toUtc.HasValue) entries = entries.Where(item => item.CreatedUtc < toUtc.Value);
-            return entries.OrderByDescending(item => item.CreatedUtc).ToList();
+            RequestHistoryPage page = await RequireRequestHistory().QueryAsync(new RequestHistoryQuery
+            {
+                TenantId = context.TenantId,
+                FromUtc = fromUtc,
+                ToUtc = toUtc,
+                IncludeBody = includeBody,
+                OrderDescending = true,
+                Limit = 0
+            }, token).ConfigureAwait(false);
+            return page.Items;
         }
 
-        private object SummarizeRequestHistory(RequestContext requestContext, HttpContextBase context)
+        private async Task<object> SummarizeRequestHistoryAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
             DateTime toUtc = DateTime.UtcNow;
             DateTime fromUtc = toUtc.AddHours(-24);
@@ -8430,7 +8541,7 @@ namespace Xeno.Server
             bucketMinutes = DefaultRequestHistoryBucketMinutes(fromUtc, toUtc);
             if (Int32.TryParse(bucketValue, out int parsedBucket) && parsedBucket > 0) bucketMinutes = parsedBucket;
 
-            List<RequestHistoryEntry> entries = FilterRequestHistory(requestContext, fromUtc, toUtc);
+            List<RequestHistoryEntry> entries = await FilterRequestHistoryAsync(requestContext, fromUtc, toUtc, false, token).ConfigureAwait(false);
             List<object> buckets = new List<object>();
             DateTime cursor = fromUtc;
             while (cursor < toUtc)
@@ -8528,6 +8639,12 @@ namespace Xeno.Server
         {
             if (_Database == null) throw new InvalidOperationException("Database has not been initialized.");
             return _Database.Platform;
+        }
+
+        private IRequestHistoryMethods RequireRequestHistory()
+        {
+            if (_Database?.RequestHistory == null) throw new InvalidOperationException("Request history storage has not been initialized.");
+            return _Database.RequestHistory;
         }
 
         private RoutingService RequireRouting()

@@ -70,12 +70,14 @@ VALUES ('0001', 'initial_platform_state', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 }
 
                 await SqliteTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqliteRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
             SqliteTelemetryMethods telemetryMethods = new SqliteTelemetryMethods(_ConnectionString);
             ClientTelemetry = telemetryMethods;
             ClientProviderTelemetry = telemetryMethods;
             ClientTelemetryCollectionAttempts = telemetryMethods;
+            RequestHistory = new SqliteRequestHistoryMethods(_ConnectionString);
             return true;
         }
 

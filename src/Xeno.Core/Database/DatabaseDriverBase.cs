@@ -48,6 +48,12 @@ namespace Xeno.Core.Database
         public IClientTelemetryCollectionAttemptMethods? ClientTelemetryCollectionAttempts { get; protected set; } = null;
 
         /// <summary>
+        /// Persisted request history methods. Request history is stored in its own table, never in
+        /// the in-memory platform state.
+        /// </summary>
+        public IRequestHistoryMethods? RequestHistory { get; protected set; } = null;
+
+        /// <summary>
         /// Instantiate the database driver.
         /// </summary>
         /// <param name="settings">Database settings.</param>
@@ -111,31 +117,27 @@ namespace Xeno.Core.Database
         /// <param name="request">Leaderboard request.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Model token leaderboard.</returns>
-        public virtual Task<ModelTokenLeaderboardResponse> GetModelTokenLeaderboardAsync(ModelTokenLeaderboardRequest request, CancellationToken token = default)
+        public virtual async Task<ModelTokenLeaderboardResponse> GetModelTokenLeaderboardAsync(ModelTokenLeaderboardRequest request, CancellationToken token = default)
         {
             ArgumentNullException.ThrowIfNull(request);
             token.ThrowIfCancellationRequested();
 
             int limit = request.Limit.HasValue ? Math.Clamp(request.Limit.Value, 1, 1000) : 100;
             int offset = request.Offset.HasValue ? Math.Max(0, request.Offset.Value) : 0;
-            IEnumerable<RequestHistoryEntry> entries = Platform.RequestHistory
-                .Where(item => !String.IsNullOrWhiteSpace(item.Model));
-            if (!String.IsNullOrWhiteSpace(request.TenantId))
-            {
-                string tenantId = request.TenantId;
-                entries = entries.Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
-            }
 
-            if (request.FromUtc.HasValue)
+            List<RequestHistoryEntry> entries = new List<RequestHistoryEntry>();
+            if (RequestHistory != null)
             {
-                DateTime fromUtc = request.FromUtc.Value.ToUniversalTime();
-                entries = entries.Where(item => item.CreatedUtc >= fromUtc);
-            }
-
-            if (request.ToUtc.HasValue)
-            {
-                DateTime toUtc = request.ToUtc.Value.ToUniversalTime();
-                entries = entries.Where(item => item.CreatedUtc < toUtc);
+                RequestHistoryQuery query = new RequestHistoryQuery
+                {
+                    TenantId = String.IsNullOrWhiteSpace(request.TenantId) ? null : request.TenantId,
+                    FromUtc = request.FromUtc?.ToUniversalTime(),
+                    ToUtc = request.ToUtc?.ToUniversalTime(),
+                    IncludeBody = true,
+                    Limit = 0
+                };
+                RequestHistoryPage page = await RequestHistory.QueryAsync(query, token).ConfigureAwait(false);
+                entries = page.Items;
             }
 
             Dictionary<string, ModelTokenUsage> usageByModel = new Dictionary<string, ModelTokenUsage>(StringComparer.OrdinalIgnoreCase);
@@ -170,13 +172,13 @@ namespace Xeno.Core.Database
                 models[item.Key] = item.Value;
             }
 
-            return Task.FromResult(new ModelTokenLeaderboardResponse
+            return new ModelTokenLeaderboardResponse
             {
                 Models = models,
                 Total = ranked.Count,
                 Limit = limit,
                 Offset = offset
-            });
+            };
         }
 
         /// <summary>

@@ -75,11 +75,6 @@ namespace Xeno.Core.Services
         public List<RoutingPolicy> RoutingPolicies { get; } = new List<RoutingPolicy>();
 
         /// <summary>
-        /// Request history.
-        /// </summary>
-        public List<RequestHistoryEntry> RequestHistory { get; } = new List<RequestHistoryEntry>();
-
-        /// <summary>
         /// Ledger tenant links.
         /// </summary>
         public List<LedgerTenantLink> LedgerTenantLinks { get; } = new List<LedgerTenantLink>();
@@ -361,8 +356,7 @@ namespace Xeno.Core.Services
                 Clients = Clients.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                 ModelDefinitions = ModelDefinitions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                 ModelConfigurations = ModelConfigurations.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
-                RoutingPolicies = RoutingPolicies.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
-                RequestHistory = includeRequestHistory ? RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase)) : 0
+                RoutingPolicies = RoutingPolicies.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
             };
         }
 
@@ -400,11 +394,6 @@ namespace Xeno.Core.Services
                 counts.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             }
 
-            if (includeRequestHistory)
-            {
-                counts.RequestHistory = RequestHistory.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
-            }
-
             return counts;
         }
 
@@ -425,10 +414,8 @@ namespace Xeno.Core.Services
                 .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase))
                 .Select(item => item.Id)
                 .ToList();
-            List<string> sessionIds = AuthSessions
-                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && credentialIds.Contains(item.CredentialId))))
-                .Select(item => item.Id)
-                .ToList();
+            int sessionCount = AuthSessions
+                .Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && credentialIds.Contains(item.CredentialId))));
 
             AdminNukeResponse response = new AdminNukeResponse
             {
@@ -436,14 +423,11 @@ namespace Xeno.Core.Services
                 {
                     Users = Users.Count(item => String.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                     Credentials = credentialIds.Count,
-                    AuthSessions = sessionIds.Count,
+                    AuthSessions = sessionCount,
                     RoleAssignments = RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && ((item.PrincipalType == PrincipalTypeEnum.User && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase)) || (item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId)))),
                     AuditRecords = includeAuditRecords ? AuditRecords.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetResourceId, userId, StringComparison.OrdinalIgnoreCase))) : 0
                 },
-                Updated = new AdminNukeUpdatedCounts
-                {
-                    RequestHistoryAnonymized = anonymizeRequestHistory ? RequestHistory.Count(item => RequestHistoryReferencesUser(item, tenantId, userId, credentialIds, sessionIds)) : 0
-                }
+                Updated = new AdminNukeUpdatedCounts()
             };
             return response;
         }
@@ -465,10 +449,6 @@ namespace Xeno.Core.Services
                 .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase))
                 .Select(item => item.Id)
                 .ToList();
-            List<string> sessionIds = AuthSessions
-                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || (!String.IsNullOrWhiteSpace(item.CredentialId) && credentialIds.Contains(item.CredentialId))))
-                .Select(item => item.Id)
-                .ToList();
 
             AdminNukeResponse response = new AdminNukeResponse
             {
@@ -485,18 +465,6 @@ namespace Xeno.Core.Services
             if (includeAuditRecords)
             {
                 response.Deleted.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetResourceId, userId, StringComparison.OrdinalIgnoreCase)));
-            }
-
-            if (anonymizeRequestHistory)
-            {
-                foreach (RequestHistoryEntry entry in RequestHistory.Where(item => RequestHistoryReferencesUser(item, tenantId, userId, credentialIds, sessionIds)))
-                {
-                    if (String.Equals(entry.UserId, userId, StringComparison.OrdinalIgnoreCase)) entry.UserId = null;
-                    if (String.Equals(entry.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)) entry.RequestorPrincipalId = null;
-                    if (!String.IsNullOrWhiteSpace(entry.CredentialId) && credentialIds.Contains(entry.CredentialId)) entry.CredentialId = null;
-                    if (!String.IsNullOrWhiteSpace(entry.SessionId) && sessionIds.Contains(entry.SessionId)) entry.SessionId = null;
-                    response.Updated.RequestHistoryAnonymized++;
-                }
             }
 
             return response;
@@ -522,7 +490,6 @@ namespace Xeno.Core.Services
             count += ModelDefinitions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             count += ModelConfigurations.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             count += RoutingPolicies.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
-            count += RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             count += LedgerTenantLinks.Count(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             count += LedgerAccountLinks.Count(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             return count;
@@ -543,7 +510,6 @@ namespace Xeno.Core.Services
             count += Credentials.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase));
             count += AuthSessions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase));
             count += RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase));
-            count += RequestHistory.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)));
             count += LedgerAccountLinks.Count(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.XenoUserId, userId, StringComparison.OrdinalIgnoreCase));
             return count;
         }
@@ -568,7 +534,6 @@ namespace Xeno.Core.Services
                 ModelDefinitions = ModelDefinitions,
                 ModelConfigurations = ModelConfigurations,
                 RoutingPolicies = RoutingPolicies,
-                RequestHistory = RequestHistory,
                 LedgerTenantLinks = LedgerTenantLinks,
                 LedgerAccountLinks = LedgerAccountLinks
             };
@@ -617,9 +582,6 @@ namespace Xeno.Core.Services
 
             RoutingPolicies.Clear();
             RoutingPolicies.AddRange(state.RoutingPolicies);
-
-            RequestHistory.Clear();
-            RequestHistory.AddRange(state.RequestHistory);
 
             LedgerTenantLinks.Clear();
             LedgerTenantLinks.AddRange(state.LedgerTenantLinks);
@@ -824,16 +786,6 @@ namespace Xeno.Core.Services
             };
             Permissions.Add(permission);
             return permission;
-        }
-
-        private static bool RequestHistoryReferencesUser(RequestHistoryEntry entry, string tenantId, string userId, List<string> credentialIds, List<string> sessionIds)
-        {
-            if (!String.Equals(entry.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && !String.Equals(entry.RequestorTenantId, tenantId, StringComparison.OrdinalIgnoreCase)) return false;
-            if (String.Equals(entry.UserId, userId, StringComparison.OrdinalIgnoreCase)) return true;
-            if (String.Equals(entry.RequestorPrincipalId, userId, StringComparison.OrdinalIgnoreCase)) return true;
-            if (!String.IsNullOrWhiteSpace(entry.CredentialId) && credentialIds.Contains(entry.CredentialId)) return true;
-            if (!String.IsNullOrWhiteSpace(entry.SessionId) && sessionIds.Contains(entry.SessionId)) return true;
-            return false;
         }
 
         private Role EnsureRole(string tenantId, string name, List<string> permissionIds)

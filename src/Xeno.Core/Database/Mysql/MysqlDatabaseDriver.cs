@@ -63,12 +63,14 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
                 }
 
                 await MysqlTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
             MysqlTelemetryMethods telemetryMethods = new MysqlTelemetryMethods(_ConnectionString);
             ClientTelemetry = telemetryMethods;
             ClientProviderTelemetry = telemetryMethods;
             ClientTelemetryCollectionAttempts = telemetryMethods;
+            RequestHistory = new MysqlRequestHistoryMethods(_ConnectionString);
             return true;
         }
 
