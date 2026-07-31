@@ -25,6 +25,16 @@
     "Username": "xeno",
     "Password": "xeno"
   },
+  "Logging": {
+    "ConsoleLogging": true,
+    "EnableColors": false,
+    "MinimumSeverity": 0,
+    "FileLogging": true,
+    "LogDirectory": "./logs/",
+    "LogFilename": "xeno.log",
+    "IncludeDateInFilename": true,
+    "Servers": []
+  },
   "Ledger": {
     "Enabled": true,
     "BaseUrl": "http://netledger-server:8080",

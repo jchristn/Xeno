@@ -175,7 +175,7 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - ./xeno.json:/app/xeno.json:ro
+      - ./xeno.json:/app/xeno.json
       - ./logs:/app/logs
     environment:
       - XENO_LEDGER_API_KEY=${NETLEDGER_ACCESS_KEY:-default}

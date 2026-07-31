@@ -45,7 +45,26 @@ namespace Xeno.Server
             }
 
             string json = File.ReadAllText(filename);
-            return JsonUtil.Deserialize<XenoSettings>(json) ?? new XenoSettings();
+            XenoSettings settings = JsonUtil.Deserialize<XenoSettings>(json) ?? new XenoSettings();
+
+            // Persist an upgraded settings file when new sections or properties have been added to the
+            // schema since it was last written (for example, a file predating the Logging section gains
+            // it with default values). Written before environment overrides are applied so injected
+            // secrets are never baked into the file. A read-only settings file is tolerated with a warning.
+            string upgraded = JsonUtil.Serialize(settings, true);
+            if (!String.Equals(upgraded, json, StringComparison.Ordinal))
+            {
+                try
+                {
+                    File.WriteAllText(filename, upgraded);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Unable to persist upgraded settings file '" + filename + "': " + ex.Message);
+                }
+            }
+
+            return settings;
         }
     }
 }

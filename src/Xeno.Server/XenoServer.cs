@@ -15,6 +15,7 @@ namespace Xeno.Server
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using WatsonWebserver;
     using WatsonWebserver.Core;
     using WatsonWebserver.Core.OpenApi;
@@ -46,6 +47,8 @@ namespace Xeno.Server
 
         private readonly XenoSettings _Settings;
         private readonly string _SettingsFile;
+        private readonly string _Header = "[XenoServer] ";
+        private LoggingModule _Logging = null!;
         private readonly Webserver _Webserver;
         private readonly object _ClientConnectionsLock = new object();
         private readonly object _PendingResponsesLock = new object();
@@ -107,6 +110,7 @@ namespace Xeno.Server
                 : settingsFile;
             ApplyEnvironmentSettings(_Settings);
             AlignRoutingFreshnessWithWebSocketSettings(_Settings);
+            InitializeLogging();
 
             WatsonWebserver.Core.WebserverSettings webserverSettings = new WatsonWebserver.Core.WebserverSettings(
                 _Settings.Rest.Hostname,
@@ -117,6 +121,50 @@ namespace Xeno.Server
             _Webserver = new Webserver(webserverSettings, DefaultRouteAsync);
             _Email = new XenoEmailService(_Settings.Email, EmailProviderFactory.Create(_Settings.Email));
             ConfigureWatson();
+        }
+
+        /// <summary>
+        /// Initialize the logging module from configured logging settings.
+        /// </summary>
+        private void InitializeLogging()
+        {
+            List<SyslogLogging.SyslogServer> syslogServers = new List<SyslogLogging.SyslogServer>();
+            if (_Settings.Logging.Servers != null && _Settings.Logging.Servers.Count > 0)
+            {
+                foreach (Xeno.Core.Settings.SyslogServer server in _Settings.Logging.Servers)
+                {
+                    syslogServers.Add(new SyslogLogging.SyslogServer(server.Hostname, server.Port));
+                }
+            }
+
+            if (syslogServers.Count > 0)
+                _Logging = new LoggingModule(syslogServers);
+            else
+                _Logging = new LoggingModule();
+
+            _Logging.Settings.MinimumSeverity = (Severity)_Settings.Logging.MinimumSeverity;
+            _Logging.Settings.EnableConsole = _Settings.Logging.ConsoleLogging;
+            _Logging.Settings.EnableColors = _Settings.Logging.EnableColors;
+
+            // Ensure the log directory exists on startup when one is configured. When the directory
+            // is null or empty, file logging still works using the bare filename in the working directory.
+            if (!String.IsNullOrEmpty(_Settings.Logging.LogDirectory)
+                && !Directory.Exists(_Settings.Logging.LogDirectory))
+            {
+                Directory.CreateDirectory(_Settings.Logging.LogDirectory);
+            }
+
+            if (_Settings.Logging.FileLogging && !String.IsNullOrEmpty(_Settings.Logging.Filename))
+            {
+                _Logging.Settings.LogFilename = _Settings.Logging.Filename;
+
+                if (_Settings.Logging.IncludeDateInFilename)
+                    _Logging.Settings.FileLogging = FileLoggingMode.FileWithDate;
+                else
+                    _Logging.Settings.FileLogging = FileLoggingMode.SingleLogFile;
+            }
+
+            _Logging.Debug(_Header + "logging initialized");
         }
 
         /// <summary>
@@ -138,6 +186,8 @@ namespace Xeno.Server
             _Ledger.Start();
             StartTelemetryCollectionLoop();
             StartWebSocketMaintenanceLoop();
+
+            _Logging.Info(_Header + "started on " + (_Settings.Rest.Ssl ? "https://" : "http://") + _Settings.Rest.Hostname + ":" + _Settings.Rest.Port);
 
             try
             {
@@ -171,6 +221,8 @@ namespace Xeno.Server
             catch (InvalidOperationException ex) when (ex.Message.Contains("already stopped", StringComparison.OrdinalIgnoreCase))
             {
             }
+
+            _Logging?.Info(_Header + "stopped");
         }
 
         /// <summary>
@@ -185,6 +237,7 @@ namespace Xeno.Server
             _Ledger?.Dispose();
             _Database?.Dispose();
             _TelemetryLatestCache.Dispose();
+            _Logging?.Dispose();
             _Disposed = true;
         }
 
@@ -6002,7 +6055,7 @@ namespace Xeno.Server
             _Settings.Cors = incoming.Cors ?? new CorsSettings();
             _Settings.WebSocket = incoming.WebSocket ?? new WebSocketSettings();
             _Settings.Database = incoming.Database ?? new DatabaseSettings();
-            _Settings.Logging = incoming.Logging ?? new LoggingSettings();
+            _Settings.Logging = incoming.Logging ?? new Xeno.Core.Settings.LoggingSettings();
             _Settings.Auth = incoming.Auth ?? new AuthSettings();
             _Settings.RequestHistory = incoming.RequestHistory ?? new RequestHistorySettings();
             _Settings.Routing = incoming.Routing ?? new RoutingSettings();
