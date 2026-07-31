@@ -133,7 +133,10 @@ Default local endpoints:
 - Dashboard: `http://localhost:9100`
 - Server REST API: `http://localhost:9000`
 - NetLedger server: `http://localhost:8080`
+- NetLedger archive server: `http://localhost:8081`
 - NetLedger UI: `http://localhost:9200`
+- Less3 (S3-compatible archive store): `http://localhost:8000`
+- Less3 UI: `http://localhost:9300`
 - Health check: `http://localhost:9000/health`
 - Ping heartbeat: `http://localhost:9000/v1.0/api/ping`
 - OpenAPI JSON: `http://localhost:9000/openapi.json`
@@ -146,15 +149,23 @@ Seeded alpha credentials:
 - Password: `password`
 - Default client access key: `default`
 - NetLedger development access key and secret: `default` / `default` in the local Docker stack. Override Xeno's NetLedger credential with `NETLEDGER_ACCESS_KEY` and `NETLEDGER_SECRET_KEY`, or `XENO_LEDGER_API_KEY` and `XENO_LEDGER_SECRET_KEY`.
+- Less3 archive store: tenant/user `admin@less3`, password `password`, S3 credential `default` / `default`, bucket `default`. Less3 creates its schema and seeds this control-plane/auth material automatically on first start against its empty `less3` PostgreSQL database. Local development only.
 
 The Docker images are:
 
 - `jchristn77/xeno-server:v0.1.0`
 - `jchristn77/xeno-dashboard:v0.1.0`
-- `jchristn77/netledger:v3.0.0`
-- `jchristn77/netledger-ui:v3.0.0`
+- `jchristn77/netledger:v4.0.0`
+- `jchristn77/netledger-archive:v4.0.0`
+- `jchristn77/netledger-ui:v4.0.0`
+- `jchristn77/less3:v3.0.0`
+- `jchristn77/less3-ui:v3.0.0`
 
-The compose stack uses one PostgreSQL container and initializes both the `xeno` and `netledger` databases. Xeno ledger settings in [docker/xeno.json](docker/xeno.json) point at `http://netledger-server:8080`; NetLedger settings live in [docker/netledger/netledger.json](docker/netledger/netledger.json). Xeno reads `XENO_LEDGER_API_KEY`/`XENO_LEDGER_SECRET_KEY` or `NETLEDGER_ACCESS_KEY`/`NETLEDGER_SECRET_KEY` from the environment for NetLedger access-key authentication, with the documented local fallback used only for development. NetLedger image names and host ports can be overridden with `NETLEDGER_SERVER_IMAGE`, `NETLEDGER_UI_IMAGE`, `NETLEDGER_SERVER_PORT`, and `NETLEDGER_UI_PORT`.
+The compose stack uses one PostgreSQL container and initializes the `xeno`, `netledger`, and `less3` databases, each owned by a dedicated role of the same name (see [docker/postgres/init.sql](docker/postgres/init.sql)). Less3 stores its control-plane/tenant metadata in the `less3` database and keeps object payloads on the local `docker/less3/disk` volume. Xeno ledger settings in [docker/xeno.json](docker/xeno.json) point at `http://netledger-server:8080`; NetLedger active-server settings live in [docker/netledger/netledger.json](docker/netledger/netledger.json). Xeno reads `XENO_LEDGER_API_KEY`/`XENO_LEDGER_SECRET_KEY` or `NETLEDGER_ACCESS_KEY`/`NETLEDGER_SECRET_KEY` from the environment for NetLedger access-key authentication, with the documented local fallback used only for development. NetLedger image names and host ports can be overridden with `NETLEDGER_SERVER_IMAGE`, `NETLEDGER_ARCHIVE_IMAGE`, `NETLEDGER_UI_IMAGE`, `NETLEDGER_SERVER_PORT`, `NETLEDGER_ARCHIVE_PORT`, and `NETLEDGER_UI_PORT`; Less3 with `LESS3_IMAGE`, `LESS3_UI_IMAGE`, `LESS3_PORT`, and `LESS3_UI_PORT`.
+
+### Ledger archival
+
+NetLedger v4 can offload aged ledger entries to a separate archive server so the active ledgering database stays small. The compose stack pre-wires the full path: the **NetLedger archive server** ([docker/netledger-archive/netledger.json](docker/netledger-archive/netledger.json)) holds a SQLite catalog and writes archived payloads into **Less3**, an S3-compatible object store, using bucket `default` and the `default`/`default` development credential. Archive integration is enabled on the active server (`Archive.Enabled=true`) so the export APIs and archive dashboard views are live, while automatic background archival (`Archive.Automatic.Enabled`) is left off so no data moves or is deleted without an explicit operator action. Active data stays on `http://localhost:8080`; archived data is served from `http://localhost:8081`. See [NetLedger ARCHIVAL.md](https://github.com/jchristn/netledger) for the export APIs, per-account archival settings, and how to turn on automatic archival.
 
 To rebuild and push images:
 
@@ -490,7 +501,7 @@ Server email notifications are disabled by default. Set `Email.Enabled` to `true
 
 ## Ledgering
 
-Ledgering records successful completion and embedding requests that report `total_tokens`. Xeno debits the requesting user's NetLedger account and credits the owner of the selected serving client by the same raw token amount. NetLedger v3.0.0 or later is required because Xeno relies on tenant-scoped accounts and searchable labels/tags. No pricing, weighting, quotas, reservations, or enforcement are active in this release.
+Ledgering records successful completion and embedding requests that report `total_tokens`. Xeno debits the requesting user's NetLedger account and credits the owner of the selected serving client by the same raw token amount. NetLedger v4.0.0 or later is used in this stack; Xeno relies on tenant-scoped accounts and searchable labels/tags, and v4 adds the archive server that offloads aged entries to keep the active ledgering database small (see [Ledger archival](#ledger-archival)). No pricing, weighting, quotas, reservations, or enforcement are active in this release.
 
 Ledger writes run asynchronously after request history is captured. NetLedger outages do not block serving requests; failed ledger writes stay in an in-memory retry queue for the running process. A process crash can lose queued events that were not drained yet.
 
@@ -498,7 +509,7 @@ Tenant lifecycle changes cascade to NetLedger when ledgering is enabled. Tenant 
 
 The dashboard `Ledger` page shows the current user's balance, visible balances and entries, queue status, and NetLedger health. System administrators can see global ledger data, tenant administrators can see their tenant, and regular users can see only their own balance and entries. Admin drain and reconcile actions are available from the dashboard and REST API.
 
-Factory reset is destructive for ledger data. The Docker reset scripts remove compose volumes and restore both `docker/xeno.json` and `docker/netledger/netledger.json`, which deletes NetLedger balances and entries in the shared Postgres volume.
+Factory reset is destructive for ledger data. The Docker reset scripts remove compose volumes and restore `docker/xeno.json`, `docker/netledger/netledger.json`, `docker/netledger-archive/netledger.json`, and `docker/less3/system.json`. This deletes NetLedger balances and entries in the shared Postgres volume, the archive catalog, and all archived payloads and objects held in Less3.
 
 ## SDKs
 

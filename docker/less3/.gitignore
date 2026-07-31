@@ -1,0 +1,6 @@
+disk/*
+logs/*
+temp/*
+!disk/.gitkeep
+!logs/.gitkeep
+!temp/.gitkeep
