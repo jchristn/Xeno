@@ -2622,6 +2622,113 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-success);
 }
 
+.settings-console-intro {
+  margin: 0 0 14px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.service-console-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.service-console-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-panel-soft);
+  padding: 16px;
+}
+
+.service-console-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.service-console-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  color: var(--color-accent);
+}
+
+.service-console-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.service-console-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.service-console-url {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-console-description {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.service-console-credentials {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+}
+
+.service-console-credential {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.service-console-credential dt {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.service-console-credential dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.service-console-open {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.settings-console-note {
+  margin: 14px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
 .setting-impact.inline {
   margin-left: auto;
 }

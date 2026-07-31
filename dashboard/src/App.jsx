@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Cpu,
   Download,
+  ExternalLink,
   FileJson,
   Gauge,
   GitBranch,
@@ -4678,6 +4679,81 @@ function SettingsView() {
         <SettingImpactNote live={t('rawJsonLiveNote')} restart={t('rawJsonRestartNote')} />
         <textarea className="backup-editor config-editor" value={configText} onChange={(event) => setConfigText(event.target.value)} aria-label={t('rawConfigJson')} title={t('tooltipRawConfigJson')} />
       </Panel>
+      <Panel eyebrow={t('relatedConsolesEyebrow')} title={t('relatedConsoles')}>
+        <p className="settings-console-intro">{t('relatedConsolesDescription')}</p>
+        <div className="service-console-grid">
+          <ServiceConsoleCard
+            icon={<Server size={20} />}
+            name={t('netledgerConsole')}
+            description={t('netledgerConsoleDescription')}
+            url={serviceConsoleUrl(9200, 'netledgerUiUrl')}
+            credentials={[
+              { label: t('username'), value: 'admin@netledger' },
+              { label: t('password'), value: 'password' }
+            ]}
+          />
+          <ServiceConsoleCard
+            icon={<Layers3 size={20} />}
+            name={t('less3Console')}
+            description={t('less3ConsoleDescription')}
+            url={serviceConsoleUrl(9300, 'less3UiUrl')}
+            credentials={[
+              { label: t('username'), value: 'admin@less3' },
+              { label: t('password'), value: 'password' },
+              { label: t('s3Credential'), value: 'default / default' }
+            ]}
+          />
+        </div>
+        <p className="settings-console-note">{t('relatedConsolesNote')}</p>
+      </Panel>
+    </div>
+  );
+}
+
+function serviceConsoleUrl(defaultPort, configKey) {
+  const override = typeof window !== 'undefined' ? window.__XENO_CONFIG__?.[configKey] : null;
+  if (override) {
+    try {
+      return new URL(override, window.location.origin).toString().replace(/\/$/, '');
+    } catch {
+      // fall through to browser-derived URL
+    }
+  }
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const host = window.location.hostname || 'localhost';
+  return `${protocol}//${host}:${defaultPort}`;
+}
+
+function ServiceConsoleCard({ credentials = [], description, icon, name, url }) {
+  const { t } = useTranslation();
+  let displayUrl = url;
+  try {
+    displayUrl = new URL(url).host;
+  } catch {
+    displayUrl = url;
+  }
+  return (
+    <div className="service-console-card">
+      <div className="service-console-head">
+        <span className="service-console-icon">{icon}</span>
+        <div className="service-console-title">
+          <h3>{name}</h3>
+          <span className="service-console-url" title={url}>{displayUrl}</span>
+        </div>
+      </div>
+      <p className="service-console-description">{description}</p>
+      <dl className="service-console-credentials">
+        {credentials.map((credential) => (
+          <div className="service-console-credential" key={credential.label}>
+            <dt>{credential.label}</dt>
+            <dd><CopyableValue label={credential.label} value={credential.value} /></dd>
+          </div>
+        ))}
+      </dl>
+      <a className="action-button primary service-console-open" href={url} rel="noreferrer" target="_blank">
+        <ExternalLink size={16} />
+        <span>{t('openConsole')}</span>
+      </a>
     </div>
   );
 }
