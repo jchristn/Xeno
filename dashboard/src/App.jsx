@@ -2423,6 +2423,7 @@ function ClientsView() {
   const clientModels = flattenClientModels(clients.data);
   const connected = clients.data.filter((client) => value(client, 'connected') === true).length;
   const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
+  const clientModelCount = (client) => (Array.isArray(value(client, 'models')) ? value(client, 'models').length : 0);
 
   return (
     <div className="view-stack">
@@ -2432,7 +2433,7 @@ function ClientsView() {
         <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(clientModels.filter((model) => value(model, 'supportsCompletions') === true).length)} />
       </div>
       <DataTable
-        columns={['id', 'name', 'ownerPrincipalType', 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        columns={['id', 'name', { key: 'modelCount', render: clientModelCount, sortValue: clientModelCount, searchValue: clientModelCount }, 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
         onDelete={(row) => {
           if (recordId(selectedClient) === recordId(row)) setSelectedClient(null);
           return deleteRecord('/api/v1/clients', row);
