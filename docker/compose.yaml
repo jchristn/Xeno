@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
     environment:
       TERM: xterm-256color
-      LESS3_SERVER_URL: http://localhost:${LESS3_PORT:-8000}
+      LESS3_SERVER_URL: https://less3.xenocloud.ai:${LESS3_PORT:-8000}
       NEXT_PUBLIC_LESS3_SERVER_URL: http://localhost:${LESS3_PORT:-8000}
     ports:
       - "${LESS3_UI_PORT:-9300}:3000"
@@ -155,7 +155,7 @@ services:
     ports:
       - "${NETLEDGER_UI_PORT:-9200}:80"
     environment:
-      NETLEDGER_SERVER_URL: http://localhost:${NETLEDGER_SERVER_PORT:-8080}
+      NETLEDGER_SERVER_URL: https://netledger.xenocloud.ai:${NETLEDGER_SERVER_PORT:-8080}
       NETLEDGER_ARCHIVE_SERVER_URL: http://localhost:${NETLEDGER_ARCHIVE_PORT:-8081}
     depends_on:
       netledger-server:
