@@ -6,6 +6,7 @@ namespace Xeno.Core.Services
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
+    using Xeno.Core.Database.Interfaces;
     using Xeno.Core.Enums;
     using Xeno.Core.Models;
 
@@ -18,6 +19,7 @@ namespace Xeno.Core.Services
         private readonly LoggingModule? _Logging;
         private readonly string _Header = "[TenantLifecycle] ";
         private readonly List<ITenantSubordinateService> _SubordinateServices;
+        private readonly IAuditMethods? _Audit;
 
         /// <summary>
         /// Instantiate the service.
@@ -25,11 +27,13 @@ namespace Xeno.Core.Services
         /// <param name="platform">Platform state.</param>
         /// <param name="subordinateServices">Subordinate services.</param>
         /// <param name="logging">Optional logging module.</param>
-        public TenantLifecycleService(XenoPlatform platform, IEnumerable<ITenantSubordinateService> subordinateServices, LoggingModule? logging = null)
+        /// <param name="audit">Optional audit table methods for persisting lifecycle audit records.</param>
+        public TenantLifecycleService(XenoPlatform platform, IEnumerable<ITenantSubordinateService> subordinateServices, LoggingModule? logging = null, IAuditMethods? audit = null)
         {
             _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
             _Logging = logging;
             _SubordinateServices = subordinateServices == null ? new List<ITenantSubordinateService>() : subordinateServices.ToList();
+            _Audit = audit;
         }
 
         /// <summary>
@@ -123,7 +127,7 @@ namespace Xeno.Core.Services
                     _Logging?.Warn(_Header + "tenant " + tenant.Id + " " + operation + " subordinate " + service.ServiceName + " reported " + status.Status + (String.IsNullOrWhiteSpace(status.ErrorMessage) ? String.Empty : ": " + status.ErrorMessage));
                 }
 
-                AppendAudit(context, service.ServiceName, operation, tenant.Id, status);
+                await AppendAuditAsync(context, service.ServiceName, operation, tenant.Id, status, token).ConfigureAwait(false);
             }
 
             return result;
@@ -153,10 +157,11 @@ namespace Xeno.Core.Services
             existing.UpdatedUtc = status.UpdatedUtc;
         }
 
-        private void AppendAudit(RequestContext? context, string serviceName, string operation, string tenantId, TenantSubordinateServiceStatus status)
+        private async Task AppendAuditAsync(RequestContext? context, string serviceName, string operation, string tenantId, TenantSubordinateServiceStatus status, CancellationToken token)
         {
-            if (context == null) return;
-            _Platform.AuditRecords.Add(new AuditRecord
+            if (context == null || _Audit == null) return;
+
+            AuditRecord record = new AuditRecord
             {
                 TenantId = context.TenantId,
                 TargetTenantId = tenantId,
@@ -180,7 +185,16 @@ namespace Xeno.Core.Services
                 CorrelationId = context.CorrelationId,
                 StatusCode = IsFailure(status) ? 500 : 200,
                 CreatedUtc = status.UpdatedUtc
-            });
+            };
+
+            try
+            {
+                await _Audit.InsertAsync(record, token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _Logging?.Warn(_Header + "failed to persist tenant lifecycle audit record: " + ex.Message);
+            }
         }
     }
 }

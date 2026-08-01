@@ -75,6 +75,7 @@ END;
 
                 await SqlServerTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await SqlServerRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerAuditMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
             SqlServerTelemetryMethods telemetryMethods = new SqlServerTelemetryMethods(_ConnectionString);
@@ -82,6 +83,7 @@ END;
             ClientProviderTelemetry = telemetryMethods;
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new SqlServerRequestHistoryMethods(_ConnectionString);
+            Audit = new SqlServerAuditMethods(_ConnectionString);
             return true;
         }
 

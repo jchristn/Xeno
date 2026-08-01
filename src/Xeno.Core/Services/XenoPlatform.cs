@@ -50,9 +50,12 @@ namespace Xeno.Core.Services
         public List<RoleAssignment> RoleAssignments { get; } = new List<RoleAssignment>();
 
         /// <summary>
-        /// Audit records.
+        /// Audit records loaded from a legacy serialized state blob that still need to be migrated
+        /// into the dedicated audit table. Populated on <see cref="LoadState"/> and drained by the
+        /// database driver on startup. Audit records are not otherwise cached in memory or persisted
+        /// in the serialized platform state.
         /// </summary>
-        public List<AuditRecord> AuditRecords { get; } = new List<AuditRecord>();
+        public List<AuditRecord> PendingAuditMigration { get; } = new List<AuditRecord>();
 
         /// <summary>
         /// Clients.
@@ -352,7 +355,6 @@ namespace Xeno.Core.Services
                 Roles = Roles.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                 Permissions = Permissions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                 RoleAssignments = RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
-                AuditRecords = includeAuditRecords ? AuditRecords.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase)) : 0,
                 Clients = Clients.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                 ModelDefinitions = ModelDefinitions.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                 ModelConfigurations = ModelConfigurations.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
@@ -389,11 +391,6 @@ namespace Xeno.Core.Services
             LedgerTenantLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
             LedgerAccountLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
 
-            if (includeAuditRecords)
-            {
-                counts.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
-            }
-
             return counts;
         }
 
@@ -424,8 +421,7 @@ namespace Xeno.Core.Services
                     Users = Users.Count(item => String.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)),
                     Credentials = credentialIds.Count,
                     AuthSessions = sessionCount,
-                    RoleAssignments = RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && ((item.PrincipalType == PrincipalTypeEnum.User && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase)) || (item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId)))),
-                    AuditRecords = includeAuditRecords ? AuditRecords.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetResourceId, userId, StringComparison.OrdinalIgnoreCase))) : 0
+                    RoleAssignments = RoleAssignments.Count(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && ((item.PrincipalType == PrincipalTypeEnum.User && String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase)) || (item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId))))
                 },
                 Updated = new AdminNukeUpdatedCounts()
             };
@@ -461,11 +457,6 @@ namespace Xeno.Core.Services
                 }
             };
             LedgerAccountLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.XenoUserId, userId, StringComparison.OrdinalIgnoreCase));
-
-            if (includeAuditRecords)
-            {
-                response.Deleted.AuditRecords = AuditRecords.RemoveAll(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) && (String.Equals(item.PrincipalId, userId, StringComparison.OrdinalIgnoreCase) || String.Equals(item.TargetResourceId, userId, StringComparison.OrdinalIgnoreCase)));
-            }
 
             return response;
         }
@@ -515,6 +506,19 @@ namespace Xeno.Core.Services
         }
 
         /// <summary>
+        /// Remove and return audit records loaded from a legacy state blob so the database driver can
+        /// migrate them into the dedicated audit table. Returns an empty list when there is nothing to
+        /// migrate.
+        /// </summary>
+        /// <returns>Audit records pending migration.</returns>
+        public List<AuditRecord> DrainPendingAuditRecords()
+        {
+            List<AuditRecord> drained = new List<AuditRecord>(PendingAuditMigration);
+            PendingAuditMigration.Clear();
+            return drained;
+        }
+
+        /// <summary>
         /// Create a serializable snapshot of platform state.
         /// </summary>
         /// <returns>Platform state snapshot.</returns>
@@ -529,7 +533,6 @@ namespace Xeno.Core.Services
                 Roles = Roles,
                 Permissions = Permissions,
                 RoleAssignments = RoleAssignments,
-                AuditRecords = AuditRecords,
                 Clients = Clients,
                 ModelDefinitions = ModelDefinitions,
                 ModelConfigurations = ModelConfigurations,
@@ -568,8 +571,8 @@ namespace Xeno.Core.Services
             RoleAssignments.Clear();
             RoleAssignments.AddRange(state.RoleAssignments);
 
-            AuditRecords.Clear();
-            AuditRecords.AddRange(state.AuditRecords);
+            PendingAuditMigration.Clear();
+            if (state.AuditRecords != null) PendingAuditMigration.AddRange(state.AuditRecords);
 
             Clients.Clear();
             Clients.AddRange(state.Clients);

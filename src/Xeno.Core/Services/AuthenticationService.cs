@@ -313,9 +313,11 @@ namespace Xeno.Core.Services
         }
 
         /// <summary>
-        /// Append an audit record.
+        /// Construct an audit record for the supplied request context and outcome. Audit records are
+        /// persisted to the dedicated audit table by the caller and are never cached in the in-memory
+        /// platform state.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="platform">Platform state. Unused; retained for call-site compatibility.</param>
         /// <param name="context">Request context.</param>
         /// <param name="resourceType">Resource type.</param>
         /// <param name="operationType">Operation type.</param>
@@ -363,7 +365,6 @@ namespace Xeno.Core.Services
                 CorrelationId = context.CorrelationId,
                 StatusCode = statusCode
             };
-            platform.AuditRecords.Add(record);
 
             if (allowed && (operationType == OperationTypeEnum.Write || operationType == OperationTypeEnum.Delete))
             {

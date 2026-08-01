@@ -67,6 +67,7 @@ ON CONFLICT (id) DO NOTHING;
 
                 await PostgresqlTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await PostgresqlRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlAuditMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
             PostgresqlTelemetryMethods telemetryMethods = new PostgresqlTelemetryMethods(_ConnectionString);
@@ -74,6 +75,7 @@ ON CONFLICT (id) DO NOTHING;
             ClientProviderTelemetry = telemetryMethods;
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new PostgresqlRequestHistoryMethods(_ConnectionString);
+            Audit = new PostgresqlAuditMethods(_ConnectionString);
             return true;
         }
 

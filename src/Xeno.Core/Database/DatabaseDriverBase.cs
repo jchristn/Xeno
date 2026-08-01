@@ -55,6 +55,12 @@ namespace Xeno.Core.Database
         public IRequestHistoryMethods? RequestHistory { get; protected set; } = null;
 
         /// <summary>
+        /// Persisted audit record methods. Audit records are stored in their own table, never in
+        /// the in-memory platform state.
+        /// </summary>
+        public IAuditMethods? Audit { get; protected set; } = null;
+
+        /// <summary>
         /// Logging module. May be null when no logger is supplied.
         /// </summary>
         protected LoggingModule? _Logging { get; }
@@ -91,6 +97,7 @@ namespace Xeno.Core.Database
             {
                 PlatformState? state = JsonUtil.Deserialize<PlatformState>(stateJson);
                 if (state != null) Platform.LoadState(state);
+                if (storageAvailable) await MigrateLegacyAuditRecordsAsync(token).ConfigureAwait(false);
                 if (storageAvailable) await SaveAsync(token).ConfigureAwait(false);
             }
             else
@@ -100,6 +107,36 @@ namespace Xeno.Core.Database
             }
 
             _Logging?.Debug(_Header + "initialized " + DatabaseType + " database");
+        }
+
+        /// <summary>
+        /// One-time migration of audit records that were previously embedded in the serialized
+        /// platform state into the dedicated audit table. After this runs the state blob is saved
+        /// without audit records, so this is a no-op on subsequent startups.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        private async Task MigrateLegacyAuditRecordsAsync(CancellationToken token)
+        {
+            if (Audit == null) return;
+            List<AuditRecord> pending = Platform.DrainPendingAuditRecords();
+            if (pending.Count == 0) return;
+
+            int migrated = 0;
+            foreach (AuditRecord record in pending)
+            {
+                try
+                {
+                    await Audit.InsertAsync(record, token).ConfigureAwait(false);
+                    migrated++;
+                }
+                catch (Exception ex)
+                {
+                    _Logging?.Warn(_Header + "failed to migrate audit record " + record.Id + ": " + ex.Message);
+                }
+            }
+
+            _Logging?.Info(_Header + "migrated " + migrated + " legacy audit record(s) from platform state to the audit table");
         }
 
         /// <summary>

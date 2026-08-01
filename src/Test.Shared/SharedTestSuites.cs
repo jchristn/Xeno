@@ -74,6 +74,7 @@ namespace Test.Shared
                     AuthenticationSuite(),
                     TelemetrySuite(),
                     ObservabilitySuite(),
+                    AuditPersistenceSuite(),
                     LedgerSuite(),
                     RoutingSuite(),
                     TenantIsolationSuite(),
@@ -2581,9 +2582,10 @@ namespace Test.Shared
                             await platform.InitializeAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
                             RequestContext context = new RequestContext { TenantId = platform.GetDefaultTenant().Id, IsAuthenticated = false };
-                            auth.AppendAudit(platform, context, "Admin", OperationTypeEnum.Admin, false, "PermissionDenied", 403);
-                            if (platform.AuditRecords.Count != 1) throw new InvalidOperationException("Audit record was not persisted.");
-                            if (platform.AuditRecords[0].ReasonCode != "PermissionDenied") throw new InvalidOperationException("Audit reason mismatch.");
+                            AuditRecord denialRecord = auth.AppendAudit(platform, context, "Admin", OperationTypeEnum.Admin, false, "PermissionDenied", 403);
+                            if (denialRecord.ReasonCode != "PermissionDenied") throw new InvalidOperationException("Audit reason mismatch.");
+                            if (denialRecord.Allowed) throw new InvalidOperationException("Denial audit was marked allowed.");
+                            if (denialRecord.StatusCode != 403) throw new InvalidOperationException("Denial audit status mismatch.");
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
@@ -3011,7 +3013,8 @@ namespace Test.Shared
                             Tenant tenant = platform.GetDefaultTenant();
                             User admin = platform.Users.First(item => item.TenantId == tenant.Id && item.IsAdmin);
                             FakeTenantSubordinateService fakeService = new FakeTenantSubordinateService();
-                            TenantLifecycleService lifecycle = new TenantLifecycleService(platform, new ITenantSubordinateService[] { fakeService });
+                            InMemoryAuditMethods lifecycleAudit = new InMemoryAuditMethods();
+                            TenantLifecycleService lifecycle = new TenantLifecycleService(platform, new ITenantSubordinateService[] { fakeService }, null, lifecycleAudit);
                             RequestContext context = new RequestContext { TenantId = tenant.Id, UserId = admin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, RequestId = "req_lifecycle_test" };
 
                             TenantLifecycleResult createResult = await lifecycle.CreateAsync(tenant, new List<User> { admin }, false, context, CancellationToken.None).ConfigureAwait(false);
@@ -3019,7 +3022,7 @@ namespace Test.Shared
                             if (fakeService.CreateCalls != 1) throw new InvalidOperationException("Subordinate create was not called.");
                             TenantSubordinateServiceStatus? status = tenant.SubordinateServices.FirstOrDefault(item => item.ServiceName == fakeService.ServiceName);
                             if (status == null || !String.Equals(status.Status, "Provisioned", StringComparison.Ordinal)) throw new InvalidOperationException("Tenant status was not recorded.");
-                            if (!platform.AuditRecords.Any(item => item.RequestId == "req_lifecycle_test" && item.ResourceType == "TenantLifecycle.FakeLedger" && item.Allowed)) throw new InvalidOperationException("Lifecycle audit was not recorded.");
+                            if (!lifecycleAudit.Records.Any(item => item.RequestId == "req_lifecycle_test" && item.ResourceType == "TenantLifecycle.FakeLedger" && item.Allowed)) throw new InvalidOperationException("Lifecycle audit was not recorded.");
 
                             TenantLifecycleResult deleteResult = await lifecycle.DeleteAsync(tenant, true, context, CancellationToken.None).ConfigureAwait(false);
                             if (!deleteResult.Success) throw new InvalidOperationException("Lifecycle delete did not succeed.");
@@ -3757,6 +3760,117 @@ namespace Test.Shared
         }
 
         /// <summary>
+        /// Audit persistence suite. Verifies audit records live in the dedicated table, never in the
+        /// serialized platform state, and that tenant/user/id-scoped operations and legacy migration work.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor AuditPersistenceSuite()
+        {
+            return new TestSuiteDescriptor(
+                "Audit",
+                "Audit Persistence",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "Audit",
+                        "AuditRecordsAreNotSerializedInPlatformState",
+                        "Audit records loaded from a legacy blob migrate out and are never re-serialized",
+                        executeAsync: delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            PlatformState legacy = platform.ToState();
+                            legacy.AuditRecords.Add(new AuditRecord { Id = "aud_legacy1", TenantId = "t1" });
+                            legacy.AuditRecords.Add(new AuditRecord { Id = "aud_legacy2", TenantId = "t1" });
+                            platform.LoadState(legacy);
+
+                            List<AuditRecord> drained = platform.DrainPendingAuditRecords();
+                            if (drained.Count != 2) throw new InvalidOperationException("Legacy audit records were not exposed for migration.");
+                            if (platform.DrainPendingAuditRecords().Count != 0) throw new InvalidOperationException("Pending audit migration was not cleared after draining.");
+
+                            PlatformState roundTrip = platform.ToState();
+                            if (roundTrip.AuditRecords.Count != 0) throw new InvalidOperationException("Audit records must not be serialized into platform state.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Audit",
+                        "SqliteAuditTableRoundTripAndScopedDeletes",
+                        "SQLite audit table inserts, queries, and tenant/user/id-scoped deletes work",
+                        executeAsync: async delegate
+                        {
+                            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-audit-" + Guid.NewGuid().ToString("N") + ".db");
+                            try
+                            {
+                                using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(new DatabaseSettings { Type = DatabaseTypeEnum.Sqlite, Filename = dbFile }).ConfigureAwait(false))
+                                {
+                                    IAuditMethods audit = driver.Audit ?? throw new InvalidOperationException("Audit methods were not initialized.");
+
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_a1", TenantId = "tenant-a", PrincipalId = "user-1", ReasonCode = "One" }, CancellationToken.None).ConfigureAwait(false);
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_a2", TenantId = "tenant-a", PrincipalId = "user-2", ReasonCode = "Two" }, CancellationToken.None).ConfigureAwait(false);
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_a3", TenantId = "tenant-a", TargetResourceId = "user-1", ReasonCode = "Three" }, CancellationToken.None).ConfigureAwait(false);
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_b1", TenantId = "tenant-b", TargetTenantId = "tenant-a", ReasonCode = "Four" }, CancellationToken.None).ConfigureAwait(false);
+
+                                    AuditRecordPage tenantA = await audit.QueryAsync(new AuditQuery { TenantId = "tenant-a" }, CancellationToken.None).ConfigureAwait(false);
+                                    if (tenantA.Total != 3 || tenantA.Items.Count != 3) throw new InvalidOperationException("Tenant-scoped query returned the wrong count.");
+
+                                    int idempotentDup = 0;
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_a1", TenantId = "tenant-a", ReasonCode = "DupIgnored" }, CancellationToken.None).ConfigureAwait(false);
+                                    AuditRecordPage afterDup = await audit.QueryAsync(new AuditQuery { TenantId = "tenant-a" }, CancellationToken.None).ConfigureAwait(false);
+                                    idempotentDup = afterDup.Total;
+                                    if (idempotentDup != 3) throw new InvalidOperationException("Duplicate id insert was not ignored.");
+
+                                    int deletedById = await audit.DeleteAsync(new AuditQuery { TenantId = "tenant-a", Ids = new List<string> { "aud_a2" } }, CancellationToken.None).ConfigureAwait(false);
+                                    if (deletedById != 1) throw new InvalidOperationException("Delete-by-id removed the wrong number of rows.");
+
+                                    int userScoped = await audit.CountAsync(new AuditQuery { TenantId = "tenant-a", UserId = "user-1" }, CancellationToken.None).ConfigureAwait(false);
+                                    if (userScoped != 2) throw new InvalidOperationException("User-scoped count (principal OR target) was wrong.");
+
+                                    int tenantWithTarget = await audit.CountAsync(new AuditQuery { TenantId = "tenant-a", MatchTargetTenant = true }, CancellationToken.None).ConfigureAwait(false);
+                                    if (tenantWithTarget != 3) throw new InvalidOperationException("Tenant-with-target count was wrong.");
+
+                                    int deletedByUser = await audit.DeleteAsync(new AuditQuery { TenantId = "tenant-a", UserId = "user-1" }, CancellationToken.None).ConfigureAwait(false);
+                                    if (deletedByUser != 2) throw new InvalidOperationException("User-scoped delete removed the wrong number of rows (principal OR target).");
+
+                                    int remaining = await audit.CountAsync(new AuditQuery { TenantId = "tenant-a" }, CancellationToken.None).ConfigureAwait(false);
+                                    if (remaining != 0) throw new InvalidOperationException("Unexpected remaining tenant-a audit count after scoped deletes.");
+                                }
+                            }
+                            finally
+                            {
+                                await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "Audit",
+                        "SqliteAuditPruneOlderThan",
+                        "SQLite audit prune removes only records older than the cutoff",
+                        executeAsync: async delegate
+                        {
+                            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-audit-prune-" + Guid.NewGuid().ToString("N") + ".db");
+                            try
+                            {
+                                using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(new DatabaseSettings { Type = DatabaseTypeEnum.Sqlite, Filename = dbFile }).ConfigureAwait(false))
+                                {
+                                    IAuditMethods audit = driver.Audit ?? throw new InvalidOperationException("Audit methods were not initialized.");
+                                    DateTime now = DateTime.UtcNow;
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_old", TenantId = "tenant-a", CreatedUtc = now.AddDays(-40) }, CancellationToken.None).ConfigureAwait(false);
+                                    await audit.InsertAsync(new AuditRecord { Id = "aud_new", TenantId = "tenant-a", CreatedUtc = now }, CancellationToken.None).ConfigureAwait(false);
+
+                                    int pruned = await audit.PruneOlderThanAsync(now.AddDays(-30), CancellationToken.None).ConfigureAwait(false);
+                                    if (pruned != 1) throw new InvalidOperationException("Prune removed the wrong number of rows.");
+
+                                    int remaining = await audit.CountAsync(new AuditQuery { TenantId = "tenant-a" }, CancellationToken.None).ConfigureAwait(false);
+                                    if (remaining != 1) throw new InvalidOperationException("Prune did not retain the recent record.");
+                                }
+                            }
+                            finally
+                            {
+                                await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                            }
+                        })
+                });
+        }
+
+        /// <summary>
         /// Database provider suite.
         /// </summary>
         /// <returns>Suite descriptor.</returns>
@@ -3984,7 +4098,6 @@ namespace Test.Shared
                     platform.Roles.Add(new Role { Id = "role_cascade", TenantId = tenantId, Name = "CascadeRole" });
                     platform.Permissions.Add(new Permission { Id = "perm_cascade", TenantId = tenantId, ResourceType = "Cascade", OperationType = OperationTypeEnum.Read });
                     platform.RoleAssignments.Add(new RoleAssignment { Id = "rmap_cascade", TenantId = tenantId, RoleId = "role_cascade", PrincipalType = PrincipalTypeEnum.User, PrincipalId = "usr_cascade" });
-                    platform.AuditRecords.Add(new AuditRecord { Id = "aud_cascade", TenantId = tenantId, ResourceType = "Cascade" });
                     platform.Clients.Add(new XenoClientRecord { Id = "xcl_cascade", TenantId = tenantId, Name = "cascade-client" });
                     platform.ModelDefinitions.Add(new ModelDefinition { Id = "md_cascade", TenantId = tenantId, Name = "cascade-model" });
                     platform.ModelConfigurations.Add(new ModelConfiguration { Id = "mc_cascade", TenantId = tenantId, Name = "cascade-config" });
@@ -3992,7 +4105,7 @@ namespace Test.Shared
 
                     int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
                     removed += platform.RemoveTenantScopedRecords(tenantId);
-                    if (removed < 12) throw new InvalidOperationException("Tenant cascade removed too few records.");
+                    if (removed < 11) throw new InvalidOperationException("Tenant cascade removed too few records.");
                     if (platform.Tenants.Any(item => item.Id == tenantId)) throw new InvalidOperationException("Tenant record remained after cascade.");
                     if (platform.ToState().Users.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant users remained after cascade.");
                     if (platform.ToState().Credentials.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant credentials remained after cascade.");
@@ -4000,7 +4113,6 @@ namespace Test.Shared
                     if (platform.ToState().Roles.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant roles remained after cascade.");
                     if (platform.ToState().Permissions.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant permissions remained after cascade.");
                     if (platform.ToState().RoleAssignments.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant role assignments remained after cascade.");
-                    if (platform.ToState().AuditRecords.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant audit records remained after cascade.");
                     if (platform.ToState().Clients.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant clients remained after cascade.");
                     if (platform.ToState().ModelDefinitions.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant model definitions remained after cascade.");
                     if (platform.ToState().ModelConfigurations.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException("Tenant model configurations remained after cascade.");
@@ -4468,7 +4580,6 @@ namespace Test.Shared
             platform.Permissions.Add(new Permission { Id = permissionId, TenantId = tenantId, ResourceType = "StateRoundTrip", OperationType = OperationTypeEnum.Write, Permit = true, BuiltIn = false, Active = true });
             platform.Roles.Add(new Role { Id = roleId, TenantId = tenantId, Name = "StateRole_" + marker, PermissionIds = new List<string> { permissionId }, Active = true });
             platform.RoleAssignments.Add(new RoleAssignment { Id = roleAssignmentId, TenantId = tenantId, RoleId = roleId, PrincipalType = PrincipalTypeEnum.User, PrincipalId = userId, Active = true });
-            platform.AuditRecords.Add(new AuditRecord { Id = auditId, TenantId = tenantId, TargetTenantId = tenantId, TargetResourceId = roleId, RequestId = "audit_request_" + marker, PrincipalType = PrincipalTypeEnum.User, PrincipalId = userId, AuthScheme = AuthSchemeEnum.Credential, ResourceType = "StateRoundTrip", OperationType = OperationTypeEnum.Write, Allowed = true, ReasonCode = "RoundTrip", StatusCode = 202 });
 
             XenoClientRecord client = new XenoClientRecord
             {
@@ -4519,7 +4630,6 @@ namespace Test.Shared
             if (!platform.Permissions.Any(item => item.Id == permissionId && item.ResourceType == "StateRoundTrip" && item.OperationType == OperationTypeEnum.Write)) throw new InvalidOperationException(provider + " permission did not round-trip.");
             if (!platform.Roles.Any(item => item.Id == roleId && item.PermissionIds.Contains(permissionId))) throw new InvalidOperationException(provider + " role did not round-trip.");
             if (!platform.RoleAssignments.Any(item => item.Id == roleAssignmentId && item.RoleId == roleId && item.PrincipalId == userId)) throw new InvalidOperationException(provider + " role assignment did not round-trip.");
-            if (!platform.AuditRecords.Any(item => item.Id == auditId && item.RequestId == "audit_request_" + marker && item.StatusCode == 202)) throw new InvalidOperationException(provider + " audit record did not round-trip.");
 
             XenoClientRecord client = platform.Clients.FirstOrDefault(item => item.Id == clientId) ?? throw new InvalidOperationException(provider + " client did not round-trip.");
             if (client.OwnerUserId != userId || client.Weight != 77 || !client.Models.Any(item => item.Name == "model_" + marker && item.SupportsEmbeddings)) throw new InvalidOperationException(provider + " client details did not round-trip.");
@@ -5035,11 +5145,8 @@ namespace Test.Shared
                             platform.EnsureTenantDefaults(otherTenant.Id);
                             platform.Clients.Add(new XenoClientRecord { TenantId = otherTenant.Id, Name = "other-tenant-client", Connected = true });
                             platform.Credentials.Add(new Credential { TenantId = otherTenant.Id, UserId = "usr_other", AccessKey = "other-access", Active = true });
-                            platform.AuditRecords.Add(new AuditRecord { TenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Allowed = false, StatusCode = 403 });
-
                             if (platform.Clients.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.Name, "other-tenant-client", StringComparison.Ordinal))) throw new InvalidOperationException("Client inventory leaked across tenants.");
                             if (platform.Credentials.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.AccessKey, "other-access", StringComparison.Ordinal))) throw new InvalidOperationException("Credential leaked across tenants.");
-                            if (platform.AuditRecords.Any(item => item.TenantId == Constants.DefaultTenantId && String.Equals(item.ResourceType, "Users", StringComparison.Ordinal) && item.StatusCode == 403)) throw new InvalidOperationException("Audit record leaked across tenants.");
                         })
                 });
         }

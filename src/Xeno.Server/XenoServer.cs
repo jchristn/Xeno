@@ -303,7 +303,7 @@ namespace Xeno.Server
                 _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
                 _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, _Logging, SavePlatformAsync);
                 _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
-                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging);
+                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging, _Database.Audit);
 
                 StartTelemetry();
 
@@ -1705,6 +1705,7 @@ namespace Xeno.Server
             double elapsedMs = context.Timestamp.TotalMs ?? 0;
             string method = context.Request.Method.ToString().ToUpperInvariant();
             _Logging.Info(_Header
+                + ResolveClientIp(context) + " "
                 + method + " "
                 + (context.Request.Url.RawWithQuery ?? "/") + ": "
                 + context.Response.StatusCode + " "
@@ -1717,6 +1718,25 @@ namespace Xeno.Server
                 elapsedMs / 1000.0);
 
             await Task.CompletedTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Resolve the client IP for logging, preferring the first hop of the X-Forwarded-For
+        /// header when present and falling back to the transport source address.
+        /// </summary>
+        /// <param name="context">HTTP context.</param>
+        /// <returns>Client IP, or "unknown" when unavailable.</returns>
+        private static string ResolveClientIp(HttpContextBase context)
+        {
+            string forwardedFor = FirstNonEmpty(context.Request.Headers.Get("X-Forwarded-For"), context.Request.Headers.Get("x-forwarded-for"));
+            if (!String.IsNullOrWhiteSpace(forwardedFor))
+            {
+                string firstHop = forwardedFor.Split(',')[0].Trim();
+                if (!String.IsNullOrWhiteSpace(firstHop)) return firstHop;
+            }
+
+            string sourceIp = context.Request.Source.IpAddress;
+            return String.IsNullOrWhiteSpace(sourceIp) ? "unknown" : sourceIp;
         }
 
         /// <summary>
@@ -1804,8 +1824,10 @@ namespace Xeno.Server
             }
             catch (AuthorizationDeniedException ex)
             {
+                // The audit record (when one applies) is appended and persisted at the denial site
+                // in the authorization gate; re-saving the whole platform here is redundant and, on
+                // the request's cancellation token, throws out of this catch as an unhandled 500.
                 RecordAuthorizationDenialInternal();
-                if (_Database != null) await SavePlatformAsync(context.Token).ConfigureAwait(false);
                 context.Response.StatusCode = ex.StatusCode;
                 _Logging.Debug(_Header + "authorization denied for " + method + " " + path + ": " + ex.ReasonCode);
                 await SendJsonAsync(context, new { error = ex.ReasonCode, message = ex.Message }).ConfigureAwait(false);
@@ -2253,15 +2275,25 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/audit", "/v1.0/api/audit"))
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().AuditRecords.Where(item => item.TenantId == requestContext.TenantId).OrderByDescending(item => item.CreatedUtc).ToList()).ConfigureAwait(false);
+                List<AuditRecord> auditRecords = new List<AuditRecord>();
+                if (_Database?.Audit != null)
+                {
+                    AuditRecordPage auditPage = await _Database.Audit.QueryAsync(new AuditQuery { TenantId = requestContext.TenantId, OrderDescending = true }, token).ConfigureAwait(false);
+                    auditRecords = auditPage.Items;
+                }
+
+                await SendJsonAsync(context, auditRecords).ConfigureAwait(false);
                 return;
             }
 
             if (method == "DELETE" && TryGetPathId(path, "/api/v1/audit/", "/v1.0/api/audit/") is string deleteAuditId)
             {
                 await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                int removed = RequirePlatform().AuditRecords.RemoveAll(item => item.Id == deleteAuditId && item.TenantId == requestContext.TenantId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
+                if (_Database?.Audit != null)
+                {
+                    await _Database.Audit.DeleteAsync(new AuditQuery { TenantId = requestContext.TenantId, Ids = new List<string> { deleteAuditId } }, token).ConfigureAwait(false);
+                }
+
                 await SendNoContentAsync(context).ConfigureAwait(false);
                 return;
             }
@@ -2642,7 +2674,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Admin, token).ConfigureAwait(false);
                 LedgerDrainResponse response = _Ledger == null ? new LedgerDrainResponse() : await _Ledger.DrainOnceAsync(token).ConfigureAwait(false);
-                _Authentication.AppendAudit(RequirePlatform(), requestContext, "Ledger.Drain", OperationTypeEnum.Admin, true, "LedgerDrainTriggered", 200, requestContext.TenantId, null);
+                await RecordAuditAsync(requestContext, "Ledger.Drain", OperationTypeEnum.Admin, true, "LedgerDrainTriggered", 200, requestContext.TenantId, null);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, response).ConfigureAwait(false);
                 return;
@@ -2651,7 +2683,7 @@ namespace Xeno.Server
             if (method == "POST" && IsPath(path, "/v1.0/api/ledger/reconcile"))
             {
                 await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                _Authentication.AppendAudit(RequirePlatform(), requestContext, "Ledger.Reconcile", OperationTypeEnum.Admin, true, "LedgerReconcileTriggered", 200, requestContext.TenantId, null);
+                await RecordAuditAsync(requestContext, "Ledger.Reconcile", OperationTypeEnum.Admin, true, "LedgerReconcileTriggered", 200, requestContext.TenantId, null);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, BuildLedgerReconcileResponse(requestContext)).ConfigureAwait(false);
                 return;
@@ -6403,6 +6435,59 @@ namespace Xeno.Server
             await _Database.SaveAsync(token).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Construct an audit record and persist it to the dedicated audit table as a best-effort
+        /// side effect. Uses <see cref="CancellationToken.None"/> so a disconnected caller cannot
+        /// cancel the write, and swallows persistence errors after logging. Audit records are never
+        /// cached in the in-memory platform state.
+        /// </summary>
+        /// <param name="context">Request context.</param>
+        /// <param name="resourceType">Resource type.</param>
+        /// <param name="operationType">Operation type.</param>
+        /// <param name="allowed">Whether access was allowed.</param>
+        /// <param name="reasonCode">Reason code.</param>
+        /// <param name="statusCode">HTTP status code.</param>
+        /// <param name="targetTenantId">Optional target tenant ID.</param>
+        /// <param name="targetResourceId">Optional target resource ID.</param>
+        /// <returns>Task.</returns>
+        private async Task RecordAuditAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, bool allowed, string reasonCode, int statusCode, string? targetTenantId = null, string? targetResourceId = null)
+        {
+            AuditRecord record = _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, allowed, reasonCode, statusCode, targetTenantId, targetResourceId);
+            await PersistAuditRecordAsync(record).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Build and persist an audit record without awaiting, for synchronous authorization guards
+        /// that throw immediately after. The record is constructed on the calling thread and written
+        /// to the audit table on a best-effort background task with cancellation and errors swallowed.
+        /// </summary>
+        /// <param name="context">Request context.</param>
+        /// <param name="resourceType">Resource type.</param>
+        /// <param name="operationType">Operation type.</param>
+        /// <param name="allowed">Whether access was allowed.</param>
+        /// <param name="reasonCode">Reason code.</param>
+        /// <param name="statusCode">HTTP status code.</param>
+        /// <param name="targetTenantId">Optional target tenant ID.</param>
+        /// <param name="targetResourceId">Optional target resource ID.</param>
+        private void RecordAuditFireAndForget(RequestContext context, string resourceType, OperationTypeEnum operationType, bool allowed, string reasonCode, int statusCode, string? targetTenantId = null, string? targetResourceId = null)
+        {
+            AuditRecord record = _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, allowed, reasonCode, statusCode, targetTenantId, targetResourceId);
+            _ = PersistAuditRecordAsync(record);
+        }
+
+        private async Task PersistAuditRecordAsync(AuditRecord record)
+        {
+            if (_Database?.Audit == null) return;
+            try
+            {
+                await _Database.Audit.InsertAsync(record, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _Logging.Warn(_Header + "failed to persist audit record: " + ex.Message);
+            }
+        }
+
         private async Task SaveSettingsAsync(CancellationToken token)
         {
             string fullPath = System.IO.Path.GetFullPath(_SettingsFile);
@@ -6437,7 +6522,7 @@ namespace Xeno.Server
                 _Ledger.Start();
                 _NetLedgerTenantSubordinate?.Dispose();
                 _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
-                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging);
+                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging, _Database.Audit);
             }
         }
 
@@ -6468,8 +6553,7 @@ namespace Xeno.Server
             Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey);
             if (credential == null)
             {
-                _Authentication.AppendAudit(platform, requestContext, "Authentication", OperationTypeEnum.Read, false, "InvalidCredential", 401);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await RecordAuditAsync(requestContext, "Authentication", OperationTypeEnum.Read, false, "InvalidCredential", 401);
                 throw new UnauthorizedAccessException("Invalid credential.");
             }
 
@@ -6510,8 +6594,7 @@ namespace Xeno.Server
 
             if (user == null)
             {
-                _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Read, false, "InvalidUserPassword", 401);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Read, false, "InvalidUserPassword", 401);
                 throw new UnauthorizedAccessException("Invalid username or password.");
             }
 
@@ -6524,7 +6607,7 @@ namespace Xeno.Server
                 Active = true
             };
             platform.Credentials.Add(credential);
-            _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Write, true, "ClientCredentialIssued", 200);
+            await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Write, true, "ClientCredentialIssued", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
             await SendJsonAsync(context, new
             {
@@ -6595,8 +6678,7 @@ namespace Xeno.Server
 
             if (user == null)
             {
-                _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Read, false, "InvalidDashboardLogin", 401);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Read, false, "InvalidDashboardLogin", 401);
                 throw new UnauthorizedAccessException("Invalid email, tenant, or password.");
             }
 
@@ -6609,7 +6691,7 @@ namespace Xeno.Server
                 null,
                 AuthSchemeEnum.Bearer);
             Tenant? tenant = platform.Tenants.FirstOrDefault(item => item.Id == tenantId);
-            _Authentication.AppendAudit(platform, loginContext, "Authentication", OperationTypeEnum.Read, true, "DashboardLogin", 200);
+            await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Read, true, "DashboardLogin", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
 
             AuthDashboardLoginResponse response = new AuthDashboardLoginResponse
@@ -6789,7 +6871,7 @@ namespace Xeno.Server
             }
 
             AuthTokenResult tokenResult = _Authentication.IssueToken(platform, _Settings.Auth, tenant.Id, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Bearer);
-            _Authentication.AppendAudit(platform, signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
+            await RecordAuditAsync(signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
             await SavePlatformAsync(token).ConfigureAwait(false);
 
             AuthOnboardingResponse response = new AuthOnboardingResponse
@@ -6928,7 +7010,7 @@ namespace Xeno.Server
                     {
                         RecordEmailResult(result);
                         string reasonCode = result.Skipped ? "EmailSkipped" : "EmailAccepted";
-                        _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, result.Skipped ? 202 : 200, emailContext.TenantId, emailContext.UserId);
+                        await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, result.Skipped ? 202 : 200, emailContext.TenantId, emailContext.UserId);
                     }
                 }
 
@@ -6937,25 +7019,25 @@ namespace Xeno.Server
             catch (OperationCanceledException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailCanceled", 499, emailContext.TenantId, emailContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailCanceled", 499, emailContext.TenantId, emailContext.UserId);
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (EmailDeliveryException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailDeliveryFailed", 502, emailContext.TenantId, emailContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailDeliveryFailed", 502, emailContext.TenantId, emailContext.UserId);
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (InvalidOperationException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailInvalidOperation", 500, emailContext.TenantId, emailContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailInvalidOperation", 500, emailContext.TenantId, emailContext.UserId);
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (ArgumentException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "EmailConfigurationInvalid", 500, emailContext.TenantId, emailContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailConfigurationInvalid", 500, emailContext.TenantId, emailContext.UserId);
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
         }
@@ -7003,7 +7085,7 @@ namespace Xeno.Server
                 RecordEmailResult(result);
                 string reasonCode = result.Skipped ? "TestEmailSkipped" : "TestEmailAccepted";
                 int statusCode = result.Skipped ? 202 : 200;
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, statusCode, auditContext.TenantId, auditContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, statusCode, auditContext.TenantId, auditContext.UserId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 return new EmailTestResponse
                 {
@@ -7021,14 +7103,14 @@ namespace Xeno.Server
             catch (EmailDeliveryException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), template.TemplateId);
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailDeliveryFailed", 502, auditContext.TenantId, auditContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailDeliveryFailed", 502, auditContext.TenantId, auditContext.UserId);
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
                 throw new HttpStatusException(502, "EmailDeliveryFailed", "Test email delivery failed.");
             }
             catch (InvalidOperationException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), template.TemplateId);
-                _Authentication.AppendAudit(RequirePlatform(), auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailInvalidOperation", 500, auditContext.TenantId, auditContext.UserId);
+                await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailInvalidOperation", 500, auditContext.TenantId, auditContext.UserId);
                 await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
@@ -7057,8 +7139,16 @@ namespace Xeno.Server
                 string message = String.Equals(reasonCode, "OpenAiPermissionDenied", StringComparison.Ordinal)
                     ? "OpenAI-compatible API permission denied."
                     : decision.Message;
-                _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, false, reasonCode, decision.StatusCode, targetTenantId, null);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+
+                // Only durably audit denials for authenticated callers. Unauthenticated (anonymous)
+                // requests — for example unauthenticated scanners hitting the OpenAI-compatible API —
+                // have no principal worth auditing, and skipping them prevents anonymous traffic from
+                // writing unbounded rows to the audit store.
+                if (context.IsAuthenticated)
+                {
+                    await RecordAuditAsync(context, resourceType, operationType, false, reasonCode, decision.StatusCode, targetTenantId, null);
+                }
+
                 throw new AuthorizationDeniedException(decision.StatusCode, reasonCode, message);
             }
 
@@ -7067,8 +7157,7 @@ namespace Xeno.Server
                 RecordPrivilegedBypassInternal();
                 if (operationType != OperationTypeEnum.Read)
                 {
-                    _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, true, decision.MatchedSource ?? "PrivilegedBypass", 200, targetTenantId, null);
-                    await SavePlatformAsync(token).ConfigureAwait(false);
+                    await RecordAuditAsync(context, resourceType, operationType, true, decision.MatchedSource ?? "PrivilegedBypass", 200, targetTenantId, null);
                 }
             }
         }
@@ -7089,8 +7178,7 @@ namespace Xeno.Server
                 if (self != null) return;
             }
 
-            _Authentication.AppendAudit(RequirePlatform(), context, "Users", OperationTypeEnum.Write, false, decision.ReasonCode, decision.StatusCode, context.TenantId, userId);
-            await SavePlatformAsync(token).ConfigureAwait(false);
+            await RecordAuditAsync(context, "Users", OperationTypeEnum.Write, false, decision.ReasonCode, decision.StatusCode, context.TenantId, userId);
             throw new AuthorizationDeniedException(decision.StatusCode, decision.ReasonCode, decision.Message);
         }
 
@@ -7356,7 +7444,7 @@ namespace Xeno.Server
                 OperationType = operationType
             });
             if (decision.Allowed) return;
-            _Authentication.AppendAudit(RequirePlatform(), requestContext, resourceType, operationType, false, "GrantExceedsAuthority", 403, tenantId, null);
+            RecordAuditFireAndForget(requestContext, resourceType, operationType, false, "GrantExceedsAuthority", 403, tenantId, null);
             throw new AuthorizationDeniedException(403, "GrantExceedsAuthority", "Permission grant exceeds the grantor's authority.");
         }
 
@@ -7467,6 +7555,11 @@ namespace Xeno.Server
                 counts.RequestHistory = await _Database.RequestHistory.CountAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, token).ConfigureAwait(false);
             }
 
+            if (body.IncludeAuditRecords && _Database?.Audit != null)
+            {
+                counts.AuditRecords = await _Database.Audit.CountAsync(new AuditQuery { TenantId = tenantId, MatchTargetTenant = true }, token).ConfigureAwait(false);
+            }
+
             AdminNukeResponse response = new AdminNukeResponse
             {
                 Status = body.DryRun ? "dryRun" : "success",
@@ -7487,8 +7580,7 @@ namespace Xeno.Server
             if (body.DryRun)
             {
                 response.Warnings.Add("Dry run only. No data was deleted.");
-                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeDryRun", 200, tenantId, tenantId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await RecordAuditAsync(requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeDryRun", 200, tenantId, tenantId);
                 response.CompletedUtc = DateTime.UtcNow;
                 return response;
             }
@@ -7507,6 +7599,11 @@ namespace Xeno.Server
                     response.Deleted.RequestHistory = await _Database.RequestHistory.DeleteAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, token).ConfigureAwait(false);
                 }
 
+                if (body.IncludeAuditRecords && _Database?.Audit != null)
+                {
+                    response.Deleted.AuditRecords = await _Database.Audit.DeleteAsync(new AuditQuery { TenantId = tenantId, MatchTargetTenant = true }, token).ConfigureAwait(false);
+                }
+
                 if (body.IncludeTelemetry && _Database != null)
                 {
                     response.Deleted.TelemetryRecords = await _Database.PurgeTenantDataAsync(tenantId, token).ConfigureAwait(false);
@@ -7519,7 +7616,7 @@ namespace Xeno.Server
                     throw new HttpStatusException(500, "TenantNukeRemnantsDetected", "Tenant nuke left tenant-scoped remnants.");
                 }
 
-                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeExecuted", 200, tenantId, tenantId);
+                await RecordAuditAsync(requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeExecuted", 200, tenantId, tenantId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 response.CompletedUtc = DateTime.UtcNow;
                 return response;
@@ -7548,7 +7645,7 @@ namespace Xeno.Server
             if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
             if (!isSystemAdmin && !isTenantAdmin)
             {
-                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, userId);
+                await RecordAuditAsync(requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, userId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 throw new AuthorizationDeniedException(403, "TenantAdminRequired", "Only a system administrator or same-tenant tenant administrator can nuke a user.");
             }
@@ -7574,6 +7671,11 @@ namespace Xeno.Server
             if (body.AnonymizeRequestHistory && _Database?.RequestHistory != null)
             {
                 counted.Updated.RequestHistoryAnonymized = await _Database.RequestHistory.CountAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true, UserId = userId, CredentialIds = nukeCredentialIds, SessionIds = nukeSessionIds }, token).ConfigureAwait(false);
+            }
+
+            if (body.IncludeAuditRecords && _Database?.Audit != null)
+            {
+                counted.Deleted.AuditRecords = await _Database.Audit.CountAsync(new AuditQuery { TenantId = tenantId, UserId = userId }, token).ConfigureAwait(false);
             }
 
             AdminNukeResponse response = new AdminNukeResponse
@@ -7603,8 +7705,7 @@ namespace Xeno.Server
             if (body.DryRun)
             {
                 response.Warnings.Add("Dry run only. No data was deleted.");
-                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeDryRun", 200, tenantId, userId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await RecordAuditAsync(requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeDryRun", 200, tenantId, userId);
                 response.CompletedUtc = DateTime.UtcNow;
                 return response;
             }
@@ -7621,12 +7722,17 @@ namespace Xeno.Server
                     response.Updated.RequestHistoryAnonymized = await _Database.RequestHistory.AnonymizeUserAsync(tenantId, userId, nukeCredentialIds, nukeSessionIds, token).ConfigureAwait(false);
                 }
 
+                if (body.IncludeAuditRecords && _Database?.Audit != null)
+                {
+                    response.Deleted.AuditRecords = await _Database.Audit.DeleteAsync(new AuditQuery { TenantId = tenantId, UserId = userId }, token).ConfigureAwait(false);
+                }
+
                 if (body.AnonymizeRequestHistory && platform.CountUserRemnants(tenantId, userId) > 0)
                 {
                     throw new HttpStatusException(500, "UserNukeRemnantsDetected", "User nuke left user-scoped remnants.");
                 }
 
-                _Authentication.AppendAudit(platform, requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeExecuted", 200, tenantId, userId);
+                await RecordAuditAsync(requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeExecuted", 200, tenantId, userId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
                 response.CompletedUtc = DateTime.UtcNow;
                 return response;
@@ -7793,7 +7899,7 @@ namespace Xeno.Server
         private void EnsureCanChangeSystemAdminFlag(RequestContext requestContext)
         {
             if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
-            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, requestContext.TenantId, null);
+            RecordAuditFireAndForget(requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, requestContext.TenantId, null);
             throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can change the system administrator flag.");
         }
 
@@ -7806,7 +7912,7 @@ namespace Xeno.Server
             int activeSystemAdminCount = RequirePlatform().Users.Count(item => item.Active && item.IsAdmin);
             if (activeSystemAdminCount > 1) return;
 
-            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "LastSystemAdminProtected", 403, user.TenantId, user.Id);
+            RecordAuditFireAndForget(requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "LastSystemAdminProtected", 403, user.TenantId, user.Id);
             throw new AuthorizationDeniedException(403, "LastSystemAdminProtected", "The last active system administrator cannot remove their own system administrator flag.");
         }
 
@@ -7814,7 +7920,7 @@ namespace Xeno.Server
         {
             if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
             if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
-            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Admin.Nuke", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, targetTenantId, targetResourceId);
+            RecordAuditFireAndForget(requestContext, "Admin.Nuke", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, targetTenantId, targetResourceId);
             throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can perform this operation.");
         }
 
@@ -7850,7 +7956,7 @@ namespace Xeno.Server
         {
             if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
             if (_Authorization.IsTenantAdmin(RequirePlatform(), requestContext, tenantId)) return;
-            _Authentication.AppendAudit(RequirePlatform(), requestContext, "Users.TenantAdmin", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, null);
+            RecordAuditFireAndForget(requestContext, "Users.TenantAdmin", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, null);
             throw new AuthorizationDeniedException(403, "TenantAdminRequired", "Only a system administrator or same-tenant tenant administrator can change the tenant administrator flag.");
         }
 
