@@ -350,6 +350,17 @@ object. `GET` returns the settings object directly. `POST` accepts the settings
 object directly and returns the saved settings object directly. The response is
 not wrapped in `settings`, `settingsFile`, or `restartRequired` metadata.
 
+The server settings payload includes a `Telemetry` section that configures
+OpenTelemetry export. `Telemetry.Enable` is the master switch; `Telemetry.Metrics`,
+`Telemetry.Traces`, and `Telemetry.Logs` toggle each signal; and `Telemetry.Otlp`
+holds the Collector `Endpoint`, `Protocol` (`grpc` or `httpprotobuf`), `TimeoutMs`,
+and optional sensitive `Headers`. `Telemetry.Metrics.IncludeTenantLabel` is off by
+default so tenant is not a metric label. Telemetry values are validated and clamped
+on assignment, and changes take effect after a server restart. The Prometheus scrape
+surface is the OpenTelemetry Collector (`:8889`), not a Xeno endpoint; the legacy
+`/metrics` text endpoint is retained as a Collector-less fallback. See
+[OBSERVABILITY.md](OBSERVABILITY.md).
+
 The server settings payload includes an `Email` section for administrative
 notification workflows. `Email.Provider` supports `Disabled`, `File`, and
 `Mailgun`. `Disabled` is the default. `File` writes rendered `.json`, `.html`,

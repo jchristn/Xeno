@@ -511,6 +511,48 @@ The dashboard `Ledger` page shows the current user's balance, visible balances a
 
 Factory reset is destructive for ledger data. The Docker reset scripts remove compose volumes and restore `docker/xeno.json`, `docker/netledger/netledger.json`, `docker/netledger-archive/netledger.json`, and `docker/less3/system.json`. This deletes NetLedger balances and entries in the shared Postgres volume, the archive catalog, and all archived payloads and objects held in Less3.
 
+## Observability
+
+Xeno instruments the server with OpenTelemetry and exports metrics, distributed traces, and logs over OTLP to an OpenTelemetry Collector. The Collector fans the three signals out to Prometheus (metrics), Tempo (traces), and Loki (logs), and Grafana reads all three. The application never opens a second scrape listener; Prometheus scrapes the Collector.
+
+```
+xeno-server ──OTLP 4317 (metrics + traces)──▶ otel-collector
+xeno-server ──file logs (./logs/*.log*)─────▶ otel-collector (filelog receiver)
+   otel-collector ──prometheus :8889──▶ prometheus (:9090) ─┐
+   otel-collector ──OTLP──────────────▶ tempo      (:3200) ─┼─▶ grafana (:9400)
+   otel-collector ──OTLP──────────────▶ loki       (:3100) ─┘
+```
+
+The full stack ships in `docker/compose.yaml` and comes up with `docker compose up -d`. Service URLs:
+
+| Service | URL | Purpose |
+| --- | --- | --- |
+| Grafana | http://localhost:9400 | Dashboards (anonymous access, no login) |
+| Prometheus | http://localhost:9090 | Metrics query and scrape status |
+| OTLP Collector | localhost:4317 (gRPC), 4318 (HTTP) | Telemetry ingest from xeno-server |
+| Collector metrics | http://localhost:8889/metrics | Prometheus exposition surface |
+
+Grafana is provisioned with the Prometheus, Tempo, and Loki datasources and eight pre-built dashboards, all in the top-level Dashboards list: **Overview** (request rate, latency, relay throughput, tokens), **Relay & LLM** (per-model/provider throughput, time-to-first-token, streaming and upstream latency, payload sizes), **Tokens** (prompt/completion/total rates, tokens per request), **Connections & Fleet Health** (connect/disconnect/eviction, collection cycles, ledger queue), **Fleet** (per-client host CPU/memory/disk/GPU and per-provider model counts and reachability), **Auth, RBAC & Email** (auth outcomes, denials, mutations, email), **Runtime (.NET)** (process CPU/memory/threads, GC, thread pool, exceptions), and **Logs** (a Loki view over the server logs). Open Grafana at http://localhost:9400 — no login is required in the local stack. There is also a **Grafana** card at the bottom of the dashboard Settings page that links to it.
+
+Telemetry is configured under the `Telemetry` block in `xeno.json`:
+
+```json
+"Telemetry": {
+  "Enable": true,
+  "ServiceName": "xeno-server",
+  "Metrics": { "Enable": true, "ExportIntervalMs": 15000, "IncludeTenantLabel": false, "ExportFleetTelemetry": true },
+  "Traces": { "Enable": true, "SamplingRatio": 1.0, "PropagateToClient": true },
+  "Logs": { "Enable": true },
+  "Otlp": { "Endpoint": "http://otel-collector:4317", "Protocol": "grpc", "TimeoutMs": 10000, "Headers": null }
+}
+```
+
+`Metrics.IncludeTenantLabel` is off by default: tenant is a trace-span tag and a log field, but not a metric label, because tenant count is unbounded and would inflate metric cardinality. Environment overrides are honored, including `XENO_TELEMETRY_ENABLED`, `XENO_TELEMETRY_OTLP_ENDPOINT`, `XENO_TELEMETRY_OTLP_PROTOCOL`, `XENO_TELEMETRY_METRICS_ENABLED`, `XENO_TELEMETRY_TRACES_ENABLED`, and `XENO_TELEMETRY_TRACES_SAMPLING_RATIO`.
+
+The full metric catalog (instrument names, Prometheus names, types, units, labels, and recording sites) and a usage/troubleshooting walkthrough are in [OBSERVABILITY.md](OBSERVABILITY.md). The legacy `/metrics` text endpoint is retained as a Collector-less fallback and is fed from the same recording call sites as the OTLP instruments.
+
+**Production hardening.** The stack ships for local development: Grafana runs anonymous-Admin with no login, nothing uses TLS, the backends have no durable volumes, and every port binds to the host. Before exposing any of it beyond a trusted local network, enable real Grafana authentication (remove `GF_AUTH_ANONYMOUS_ENABLED`), terminate TLS in front of Grafana/Prometheus, restrict the Collector and backend ports to the internal network, and add durable storage and retention policies for Prometheus/Tempo/Loki.
+
 ## SDKs
 
 SDKs live under `src/sdk/`:
@@ -536,6 +578,7 @@ Developer documentation:
 - [getting-started/](getting-started/)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
 - [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md)
+- [OBSERVABILITY.md](OBSERVABILITY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [AGENTS.md](AGENTS.md)
 - [Xeno.postman_collection.json](Xeno.postman_collection.json)

@@ -169,6 +169,84 @@ services:
       retries: 3
       start_period: 5s
 
+  # ---------------------------------------------------------------------------
+  # Observability stack — OpenTelemetry Collector, Prometheus, Tempo, Loki, and
+  # Grafana. xeno-server emits OTLP (metrics + traces) to the Collector and writes
+  # rolling logs to the shared ./logs volume, which the Collector's filelog
+  # receiver ships to Loki. Grafana is provisioned with datasources and pre-built
+  # dashboards and runs anonymous-Admin for turnkey local use on host port 9400.
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    container_name: xeno-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./telemetry/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ./logs/:/app/logs:ro
+    ports:
+      - "${XENO_OTLP_GRPC_PORT:-4317}:4317"
+      - "${XENO_OTLP_HTTP_PORT:-4318}:4318"
+      - "${XENO_OTEL_PROM_PORT:-8889}:8889"
+    depends_on:
+      - tempo
+      - loki
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: xeno-prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yaml"]
+    volumes:
+      - ./telemetry/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+    ports:
+      - "${XENO_PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: xeno-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./telemetry/tempo.yaml:/etc/tempo.yaml:ro
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: xeno-loki
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - ./telemetry/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: xeno-grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_USERS_DEFAULT_THEME=dark
+    volumes:
+      - ./telemetry/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./telemetry/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${XENO_GRAFANA_PORT:-9400}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    restart: unless-stopped
+
   xeno-server:
     image: ${XENO_SERVER_IMAGE:-jchristn77/xeno-server:v0.1.0}
     container_name: xeno-server
@@ -180,11 +258,15 @@ services:
     environment:
       - XENO_LEDGER_API_KEY=${NETLEDGER_ACCESS_KEY:-default}
       - XENO_LEDGER_SECRET_KEY=${NETLEDGER_SECRET_KEY:-default}
+      - XENO_TELEMETRY_OTLP_ENDPOINT=http://otel-collector:4317
+      - XENO_TELEMETRY_OTLP_PROTOCOL=grpc
     depends_on:
       xeno-postgres:
         condition: service_healthy
       xeno-postgres-init:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 5s

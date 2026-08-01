@@ -99,6 +99,40 @@ namespace Xeno.Server.Services
         }
 
         /// <summary>
+        /// Read the latest host telemetry samples across all tenants and clients.
+        /// </summary>
+        /// <returns>All cached latest host samples.</returns>
+        public IReadOnlyList<ServerClientTelemetrySampleRecord> GetAllHost()
+        {
+            _Lock.EnterReadLock();
+            try
+            {
+                return _HostSamples.Values.ToList();
+            }
+            finally
+            {
+                _Lock.ExitReadLock();
+            }
+        }
+
+        /// <summary>
+        /// Read the latest provider telemetry samples across all tenants and clients.
+        /// </summary>
+        /// <returns>All cached latest provider samples.</returns>
+        public IReadOnlyList<ServerProviderTelemetrySampleRecord> GetAllProviders()
+        {
+            _Lock.EnterReadLock();
+            try
+            {
+                return _ProviderSamples.Values.ToList();
+            }
+            finally
+            {
+                _Lock.ExitReadLock();
+            }
+        }
+
+        /// <summary>
         /// Remove all cached samples for a tenant.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>

@@ -66,5 +66,10 @@ namespace Xeno.Core.Settings
         /// Ledger integration settings.
         /// </summary>
         public LedgerSettings Ledger { get; set; } = new LedgerSettings();
+
+        /// <summary>
+        /// OpenTelemetry (metrics, traces, logs) settings.
+        /// </summary>
+        public TelemetrySettings Telemetry { get; set; } = new TelemetrySettings();
     }
 }

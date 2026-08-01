@@ -3,6 +3,7 @@ namespace Test.Shared
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Diagnostics.Metrics;
     using System.Globalization;
     using System.IO;
     using System.Linq;
@@ -34,6 +35,7 @@ namespace Test.Shared
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
     using Xeno.Core.Settings;
+    using Xeno.Core.Telemetry;
     using Xeno.Email;
     using Xeno.Email.Providers;
     using Xeno.Email.Templates;
@@ -71,6 +73,7 @@ namespace Test.Shared
                     DatabaseProviderSuite(),
                     AuthenticationSuite(),
                     TelemetrySuite(),
+                    ObservabilitySuite(),
                     LedgerSuite(),
                     RoutingSuite(),
                     TenantIsolationSuite(),
@@ -3367,6 +3370,391 @@ namespace Test.Shared
             }
         }
 
+
+        /// <summary>
+        /// OpenTelemetry observability suite covering telemetry settings validation,
+        /// the instrument catalog, and the recording pipeline.
+        /// </summary>
+        /// <returns>Suite descriptor.</returns>
+        public static TestSuiteDescriptor ObservabilitySuite()
+        {
+            return new TestSuiteDescriptor(
+                "Observability",
+                "Observability (OpenTelemetry)",
+                new List<TestCaseDescriptor>
+                {
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "OtlpExporterSettingsDefaultsAndValidation",
+                        "OTLP exporter settings default, clamp, and reject invalid protocols",
+                        executeAsync: delegate
+                        {
+                            OtlpExporterSettings settings = new OtlpExporterSettings();
+                            if (settings.Endpoint != "http://localhost:4317") throw new InvalidOperationException("Unexpected OTLP endpoint default.");
+                            if (settings.Protocol != "grpc") throw new InvalidOperationException("Unexpected OTLP protocol default.");
+                            if (settings.TimeoutMs != 10000) throw new InvalidOperationException("Unexpected OTLP timeout default.");
+                            if (settings.Headers != null) throw new InvalidOperationException("OTLP headers should default to null.");
+
+                            settings.Protocol = "HttpProtobuf";
+                            if (settings.Protocol != "httpprotobuf") throw new InvalidOperationException("OTLP protocol was not normalized.");
+                            settings.Protocol = "grpc";
+
+                            settings.TimeoutMs = 10;
+                            if (settings.TimeoutMs != 1000) throw new InvalidOperationException("OTLP timeout minimum clamp failed.");
+                            settings.TimeoutMs = 999999;
+                            if (settings.TimeoutMs != 120000) throw new InvalidOperationException("OTLP timeout maximum clamp failed.");
+
+                            bool rejectedInvalid = false;
+                            try
+                            {
+                                settings.Protocol = "carrier-pigeon";
+                            }
+                            catch (ArgumentException)
+                            {
+                                rejectedInvalid = true;
+                            }
+                            if (!rejectedInvalid) throw new InvalidOperationException("Invalid OTLP protocol was not rejected.");
+
+                            bool rejectedNull = false;
+                            try
+                            {
+                                settings.Protocol = "   ";
+                            }
+                            catch (ArgumentException)
+                            {
+                                rejectedNull = true;
+                            }
+                            if (!rejectedNull) throw new InvalidOperationException("Blank OTLP protocol was not rejected.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "TelemetryMetricsAndTracesSettingsClamp",
+                        "Telemetry metrics and traces settings default and clamp",
+                        executeAsync: delegate
+                        {
+                            TelemetryMetricsSettings metrics = new TelemetryMetricsSettings();
+                            if (!metrics.Enable) throw new InvalidOperationException("Metrics should default to enabled.");
+                            if (metrics.ExportIntervalMs != 15000) throw new InvalidOperationException("Unexpected metrics export interval default.");
+                            if (metrics.IncludeTenantLabel) throw new InvalidOperationException("Tenant label should default to disabled.");
+                            if (!metrics.ExportFleetTelemetry) throw new InvalidOperationException("Fleet telemetry export should default to enabled.");
+
+                            metrics.ExportIntervalMs = 10;
+                            if (metrics.ExportIntervalMs != 1000) throw new InvalidOperationException("Metrics export interval minimum clamp failed.");
+                            metrics.ExportIntervalMs = 999999;
+                            if (metrics.ExportIntervalMs != 300000) throw new InvalidOperationException("Metrics export interval maximum clamp failed.");
+
+                            TelemetryTracesSettings traces = new TelemetryTracesSettings();
+                            if (Math.Abs(traces.SamplingRatio - 1.0) > 0.0001) throw new InvalidOperationException("Unexpected sampling ratio default.");
+                            if (!traces.PropagateToClient) throw new InvalidOperationException("Trace propagation should default to enabled.");
+
+                            traces.SamplingRatio = -0.5;
+                            if (Math.Abs(traces.SamplingRatio) > 0.0001) throw new InvalidOperationException("Sampling ratio minimum clamp failed.");
+                            traces.SamplingRatio = 5.0;
+                            if (Math.Abs(traces.SamplingRatio - 1.0) > 0.0001) throw new InvalidOperationException("Sampling ratio maximum clamp failed.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "TelemetrySettingsNestedDefaultsAndNullFallback",
+                        "Telemetry settings expose nested defaults and reject null nested sections",
+                        executeAsync: delegate
+                        {
+                            TelemetrySettings settings = new TelemetrySettings();
+                            if (!settings.Enable) throw new InvalidOperationException("Telemetry should default to enabled.");
+                            if (settings.ServiceName != "xeno-server") throw new InvalidOperationException("Unexpected service name default.");
+                            if (settings.Metrics == null || settings.Traces == null || settings.Logs == null || settings.Otlp == null) throw new InvalidOperationException("Telemetry nested sections must be non-null by default.");
+
+                            settings.Metrics = null!;
+                            settings.Traces = null!;
+                            settings.Logs = null!;
+                            settings.Otlp = null!;
+                            if (settings.Metrics == null || settings.Traces == null || settings.Logs == null || settings.Otlp == null) throw new InvalidOperationException("Null nested telemetry sections were not replaced with defaults.");
+
+                            XenoSettings root = new XenoSettings();
+                            if (root.Telemetry == null) throw new InvalidOperationException("Root settings must expose a Telemetry section.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "InstrumentCatalogIsPublished",
+                        "The Xeno meter publishes the documented instrument catalog",
+                        executeAsync: delegate
+                        {
+                            _ = XenoTelemetry.ActivitySource;
+
+                            HashSet<string> published = new HashSet<string>(StringComparer.Ordinal);
+                            using (MeterListener listener = new MeterListener())
+                            {
+                                listener.InstrumentPublished = delegate(Instrument instrument, MeterListener state)
+                                {
+                                    if (String.Equals(instrument.Meter.Name, XenoTelemetry.MeterName, StringComparison.Ordinal)) published.Add(instrument.Name);
+                                };
+                                listener.Start();
+
+                                string[] expected = new string[]
+                                {
+                                    "xeno.http.requests", "xeno.http.request.duration",
+                                    "xeno.relay.requests", "xeno.relay.failures",
+                                    "xeno.relay.time_to_first_token", "xeno.relay.streaming.duration",
+                                    "xeno.tokens.prompt", "xeno.tokens.completion", "xeno.tokens.all",
+                                    "xeno.tokens.per_request", "xeno.relay.stream.chunks",
+                                    "xeno.client.connections", "xeno.client.disconnections",
+                                    "xeno.client.registrations", "xeno.client.evictions",
+                                    "xeno.auth.attempts", "xeno.auth.denials", "xeno.auth.privileged_bypasses",
+                                    "xeno.data.mutations", "xeno.email.results", "xeno.ledger.events",
+                                    "xeno.fleet.collection.cycles", "xeno.request_history.pruned",
+                                    "xeno.build.info", "xeno.process.uptime", "xeno.process.memory.working_set",
+                                    "xeno.clients.connected", "xeno.models.available", "xeno.relay.inflight",
+                                    "xeno.ledger.queue.depth", "xeno.fleet.host.cpu", "xeno.fleet.provider.up"
+                                };
+
+                                foreach (string name in expected)
+                                {
+                                    if (!published.Contains(name)) throw new InvalidOperationException("Expected instrument was not published: " + name + ".");
+                                }
+                            }
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "RelayRecordingIsResilientAndFlows",
+                        "Relay recording tolerates a null sample and flows measurements to a listener",
+                        executeAsync: delegate
+                        {
+                            XenoTelemetry.RecordRelay(null!);
+
+                            long relayCount = 0;
+                            long tokenCount = 0;
+                            using (MeterListener listener = new MeterListener())
+                            {
+                                listener.InstrumentPublished = delegate(Instrument instrument, MeterListener state)
+                                {
+                                    if (String.Equals(instrument.Meter.Name, XenoTelemetry.MeterName, StringComparison.Ordinal)) state.EnableMeasurementEvents(instrument);
+                                };
+                                listener.SetMeasurementEventCallback<long>(delegate(Instrument instrument, long measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+                                {
+                                    if (instrument.Name == "xeno.relay.requests") Interlocked.Add(ref relayCount, measurement);
+                                    if (instrument.Name == "xeno.tokens.all") Interlocked.Add(ref tokenCount, measurement);
+                                });
+                                listener.Start();
+
+                                RelayMetricSample sample = new RelayMetricSample
+                                {
+                                    Model = "llama3",
+                                    ClientId = "client-1",
+                                    Provider = "ollama",
+                                    Outcome = "success",
+                                    StatusCode = 200,
+                                    Streamed = true,
+                                    RoundTripSeconds = 0.42,
+                                    TimeToFirstTokenSeconds = 0.05,
+                                    PromptTokens = 100,
+                                    CompletionTokens = 50,
+                                    TotalTokens = 150
+                                };
+                                XenoTelemetry.RecordRelay(sample);
+                            }
+
+                            if (relayCount != 1) throw new InvalidOperationException("Relay request measurement did not flow to the listener.");
+                            if (tokenCount != 150) throw new InvalidOperationException("Total-token measurement did not flow to the listener.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "ObservableGaugesReportRegisteredState",
+                        "Observable gauges report values from the registered platform state",
+                        executeAsync: delegate
+                        {
+                            _ = XenoTelemetry.ActivitySource;
+                            try
+                            {
+                                XenoTelemetry.RegisterState(
+                                    delegate
+                                    {
+                                        return new PlatformGaugeSnapshot { ConnectedClients = 7, AvailableModels = 3, InflightRequests = 2, LedgerQueueDepth = 5 };
+                                    },
+                                    delegate
+                                    {
+                                        TelemetryFleetSnapshot fleet = new TelemetryFleetSnapshot();
+                                        fleet.Hosts = new List<FleetHostGauge> { new FleetHostGauge { ClientId = "client-1", CpuPercent = 12.5, MemoryPercent = 40.0 } };
+                                        fleet.Providers = new List<FleetProviderGauge> { new FleetProviderGauge { ClientId = "client-1", Provider = "ollama", AvailableModels = 3, LoadedModels = 1, Up = true } };
+                                        return fleet;
+                                    },
+                                    false);
+
+                                double connected = -1;
+                                double cpu = -1;
+                                using (MeterListener listener = new MeterListener())
+                                {
+                                    listener.InstrumentPublished = delegate(Instrument instrument, MeterListener state)
+                                    {
+                                        if (String.Equals(instrument.Meter.Name, XenoTelemetry.MeterName, StringComparison.Ordinal)) state.EnableMeasurementEvents(instrument);
+                                    };
+                                    listener.SetMeasurementEventCallback<int>(delegate(Instrument instrument, int measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+                                    {
+                                        if (instrument.Name == "xeno.clients.connected") connected = measurement;
+                                    });
+                                    listener.SetMeasurementEventCallback<double>(delegate(Instrument instrument, double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+                                    {
+                                        if (instrument.Name == "xeno.fleet.host.cpu") cpu = measurement;
+                                    });
+                                    listener.Start();
+                                    listener.RecordObservableInstruments();
+                                }
+
+                                if (connected != 7) throw new InvalidOperationException("Connected-clients gauge did not report the registered value.");
+                                if (Math.Abs(cpu - 12.5) > 0.0001) throw new InvalidOperationException("Fleet CPU gauge did not report the registered value.");
+                            }
+                            finally
+                            {
+                                XenoTelemetry.ClearState();
+                            }
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "TenantLabelOptInControlsCardinality",
+                        "Tenant appears as a relay label only when the opt-in is enabled",
+                        executeAsync: delegate
+                        {
+                            _ = XenoTelemetry.ActivitySource;
+                            try
+                            {
+                                RelayMetricSample sample = new RelayMetricSample { Model = "m", ClientId = "c", Provider = "p", Outcome = "success", StatusCode = 200, Tenant = "acme" };
+
+                                bool tenantSeenWhenOn = RecordAndProbeTenantTag(sample, true);
+                                if (!tenantSeenWhenOn) throw new InvalidOperationException("Tenant label was not emitted when the opt-in was enabled.");
+
+                                bool tenantSeenWhenOff = RecordAndProbeTenantTag(sample, false);
+                                if (tenantSeenWhenOff) throw new InvalidOperationException("Tenant label leaked when the opt-in was disabled.");
+                            }
+                            finally
+                            {
+                                XenoTelemetry.ClearState();
+                            }
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "ActivitySourceIsNamedXenoAndCarriesTags",
+                        "The Xeno activity source is named and started spans carry tags",
+                        executeAsync: delegate
+                        {
+                            if (XenoTelemetry.ActivitySource.Name != "Xeno") throw new InvalidOperationException("Activity source name was not 'Xeno'.");
+
+                            using (ActivityListener activityListener = new ActivityListener())
+                            {
+                                activityListener.ShouldListenTo = delegate(ActivitySource source) { return source.Name == "Xeno"; };
+                                activityListener.Sample = delegate(ref ActivityCreationOptions<ActivityContext> options) { return ActivitySamplingResult.AllDataAndRecorded; };
+                                ActivitySource.AddActivityListener(activityListener);
+
+                                using (Activity? activity = XenoTelemetry.ActivitySource.StartActivity("GET /v1.0/api/tenants/{id}", ActivityKind.Server))
+                                {
+                                    if (activity == null) throw new InvalidOperationException("A recorded activity was not started.");
+                                    activity.SetTag("http.route", "/v1.0/api/tenants/{id}");
+                                    if (activity.GetTagItem("http.route") == null) throw new InvalidOperationException("Activity tag was not recorded.");
+                                }
+                            }
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "FleetGaugesEmitNothingForEmptySnapshot",
+                        "Fleet gauges emit no series when the fleet snapshot is empty",
+                        executeAsync: delegate
+                        {
+                            _ = XenoTelemetry.ActivitySource;
+                            try
+                            {
+                                XenoTelemetry.RegisterState(
+                                    delegate { return new PlatformGaugeSnapshot(); },
+                                    delegate { return new TelemetryFleetSnapshot(); },
+                                    false);
+
+                                int fleetMeasurements = 0;
+                                using (MeterListener listener = new MeterListener())
+                                {
+                                    listener.InstrumentPublished = delegate(Instrument instrument, MeterListener state)
+                                    {
+                                        if (String.Equals(instrument.Meter.Name, XenoTelemetry.MeterName, StringComparison.Ordinal) && instrument.Name.StartsWith("xeno.fleet.", StringComparison.Ordinal)) state.EnableMeasurementEvents(instrument);
+                                    };
+                                    listener.SetMeasurementEventCallback<double>(delegate(Instrument instrument, double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+                                    {
+                                        Interlocked.Increment(ref fleetMeasurements);
+                                    });
+                                    listener.SetMeasurementEventCallback<int>(delegate(Instrument instrument, int measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+                                    {
+                                        Interlocked.Increment(ref fleetMeasurements);
+                                    });
+                                    listener.Start();
+                                    listener.RecordObservableInstruments();
+                                }
+
+                                if (fleetMeasurements != 0) throw new InvalidOperationException("Fleet gauges emitted series for an empty snapshot.");
+                            }
+                            finally
+                            {
+                                XenoTelemetry.ClearState();
+                            }
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Observability",
+                        "TelemetryServiceToleratesUnreachableEndpoint",
+                        "TelemetryService constructs and disposes cleanly against an unreachable OTLP endpoint",
+                        executeAsync: delegate
+                        {
+                            TelemetrySettings telemetry = new TelemetrySettings();
+                            telemetry.Enable = true;
+                            telemetry.Otlp.Endpoint = "http://127.0.0.1:1";
+                            telemetry.Otlp.Protocol = "grpc";
+                            telemetry.Metrics.ExportIntervalMs = 1000;
+
+                            using (TelemetryService service = new TelemetryService(telemetry, null))
+                            {
+                                if (!service.Active) throw new InvalidOperationException("Telemetry service should be active when enabled.");
+                                XenoTelemetry.RecordRelay(new RelayMetricSample { Model = "m", ClientId = "c", Provider = "p", Outcome = "success", StatusCode = 200, TotalTokens = 5 });
+                            }
+
+                            TelemetrySettings disabled = new TelemetrySettings();
+                            disabled.Enable = false;
+                            using (TelemetryService service = new TelemetryService(disabled, null))
+                            {
+                                if (service.Active) throw new InvalidOperationException("Telemetry service should be inactive when disabled.");
+                            }
+                            return Task.CompletedTask;
+                        })
+                });
+        }
+
+        private static bool RecordAndProbeTenantTag(RelayMetricSample sample, bool includeTenantLabel)
+        {
+            XenoTelemetry.RegisterState(
+                delegate { return new PlatformGaugeSnapshot(); },
+                delegate { return new TelemetryFleetSnapshot(); },
+                includeTenantLabel);
+
+            bool tenantSeen = false;
+            using (MeterListener listener = new MeterListener())
+            {
+                listener.InstrumentPublished = delegate(Instrument instrument, MeterListener state)
+                {
+                    if (String.Equals(instrument.Meter.Name, XenoTelemetry.MeterName, StringComparison.Ordinal) && instrument.Name == "xeno.relay.requests") state.EnableMeasurementEvents(instrument);
+                };
+                listener.SetMeasurementEventCallback<long>(delegate(Instrument instrument, long measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+                {
+                    for (int i = 0; i < tags.Length; i++)
+                    {
+                        if (tags[i].Key == "tenant") tenantSeen = true;
+                    }
+                });
+                listener.Start();
+                XenoTelemetry.RecordRelay(sample);
+            }
+
+            return tenantSeen;
+        }
 
         /// <summary>
         /// Database provider suite.

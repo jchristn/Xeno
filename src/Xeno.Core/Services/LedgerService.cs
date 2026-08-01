@@ -14,6 +14,18 @@ namespace Xeno.Core.Services
     /// </summary>
     public class LedgerService : IDisposable
     {
+        #region Public-Members
+
+        /// <summary>
+        /// Current ledger queue depth.
+        /// </summary>
+        public int QueueDepth
+        {
+            get => _Queue.Count;
+        }
+
+        #endregion
+
         #region Private-Members
 
         private readonly XenoPlatform _Platform;

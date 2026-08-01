@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added full OpenTelemetry observability for the Xeno server: metrics, distributed traces, and logs exported over OTLP to an OpenTelemetry Collector, fanned out to Prometheus, Tempo, and Loki, and visualized in Grafana. Instrumentation covers HTTP requests, LLM relay (time to first token, streaming duration, tokens, round-trip and upstream timing, payload sizes), client connections/registrations/evictions, auth and RBAC mutations, email, ledger events, fleet host/provider telemetry, and .NET runtime/process metrics. Ships a pre-provisioned Docker stack (Collector, Prometheus, Tempo, Loki, Grafana on port 9400 with anonymous access), eight pre-built Grafana dashboards, a `Telemetry` settings block with environment overrides, a Grafana link card on the dashboard Settings page, an `OBSERVABILITY.md` guide, and a positive/negative Touchstone `Observability` test suite. The legacy `/metrics` endpoint is retained and now shares the same recording call sites.
 - Added an optional Xeno Client local inference listener with loopback-only OpenAI/Ollama-compatible APIs, websocket proxying, streaming support, dashboard explorer, Postman coverage, documentation, and Touchstone tests.
 - Changed server settings GET/POST responses to return the `XenoSettings` JSON object directly, matching the POST request body shape.
 - Added NetLedger-backed token ledgering with tenant lifecycle cascade, metadata-based duplicate detection, dashboard summaries, SDK/CLI/Postman coverage, Docker wiring, and raw-token balance/entry APIs.

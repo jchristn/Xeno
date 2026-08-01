@@ -364,6 +364,12 @@ namespace Xeno.Core.Services
                 StatusCode = statusCode
             };
             platform.AuditRecords.Add(record);
+
+            if (allowed && (operationType == OperationTypeEnum.Write || operationType == OperationTypeEnum.Delete))
+            {
+                Telemetry.XenoTelemetry.RecordMutation(resourceType, operationType.ToString().ToLowerInvariant());
+            }
+
             return record;
         }
 

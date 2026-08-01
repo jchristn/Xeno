@@ -1,0 +1,68 @@
+receivers:
+
+  # OTLP from xeno-server (metrics + traces) over gRPC and HTTP.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Tail xeno-server's rolling log files from the shared /app/logs volume.
+  filelog:
+    include:
+      - /app/logs/*.log*
+    include_file_path: true
+    start_at: beginning
+
+processors:
+
+  batch: {}
+
+  # Stamp a service.name so Loki can group logs by source alongside the
+  # OTLP-native metrics/traces resource.
+  resource:
+    attributes:
+      - key: service.name
+        value: xeno-server
+        action: insert
+
+exporters:
+
+  # Prometheus scrape surface. Prometheus scrapes otel-collector:8889.
+  # add_metric_suffixes:true lets the exporter apply the standard OpenTelemetry
+  # conversions to the dotted instrument names xeno-server emits — appending
+  # _total to monotonic counters and unit suffixes (_seconds, _bytes, _percent) —
+  # producing the underscore names documented in the metrics catalog and used by
+  # the provisioned dashboards (e.g. xeno_http_requests_total,
+  # xeno_relay_roundtrip_duration_seconds, xeno_fleet_host_cpu_percent).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    add_metric_suffixes: true
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Traces to Tempo over OTLP gRPC.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Logs to Loki via its native OTLP ingest endpoint (Loki 3.x).
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [filelog]
+      processors: [resource, batch]
+      exporters: [otlphttp/loki]

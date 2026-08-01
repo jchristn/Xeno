@@ -4703,6 +4703,15 @@ function SettingsView() {
               { label: t('s3Credential'), value: 'default / default' }
             ]}
           />
+          <ServiceConsoleCard
+            icon={<BarChart3 size={20} />}
+            name={t('grafanaConsole')}
+            description={t('grafanaConsoleDescription')}
+            url={serviceConsoleUrl(9400, 'grafanaUrl')}
+            credentials={[
+              { label: t('access'), value: t('grafanaAnonymousAccess') }
+            ]}
+          />
         </div>
         <p className="settings-console-note">{t('relatedConsolesNote')}</p>
       </Panel>
@@ -4901,6 +4910,14 @@ function defaultServerSettings() {
       CommitEntriesImmediately: true
     },
     Logging: { ConsoleLogging: true, FileLogging: true, LogDirectory: 'logs', LogFilename: 'xeno.log' },
+    Telemetry: {
+      Enable: true,
+      ServiceName: 'xeno-server',
+      Metrics: { Enable: true, ExportIntervalMs: 15000, IncludeTenantLabel: false, ExportFleetTelemetry: true },
+      Traces: { Enable: true, SamplingRatio: 1.0, PropagateToClient: true },
+      Logs: { Enable: true },
+      Otlp: { Endpoint: 'http://localhost:4317', Protocol: 'grpc', TimeoutMs: 10000, Headers: null }
+    },
     Email: {
       Enabled: false,
       Provider: 'Disabled',
@@ -4944,6 +4961,14 @@ function normalizeSettings(input) {
     TelemetryCollection: {
       ...defaults.TelemetryCollection,
       ...(source.TelemetryCollection || source.telemetryCollection || {})
+    },
+    Telemetry: {
+      ...defaults.Telemetry,
+      ...(source.Telemetry || source.telemetry || {}),
+      Metrics: { ...defaults.Telemetry.Metrics, ...((source.Telemetry || source.telemetry || {}).Metrics || (source.Telemetry || source.telemetry || {}).metrics || {}) },
+      Traces: { ...defaults.Telemetry.Traces, ...((source.Telemetry || source.telemetry || {}).Traces || (source.Telemetry || source.telemetry || {}).traces || {}) },
+      Logs: { ...defaults.Telemetry.Logs, ...((source.Telemetry || source.telemetry || {}).Logs || (source.Telemetry || source.telemetry || {}).logs || {}) },
+      Otlp: { ...defaults.Telemetry.Otlp, ...((source.Telemetry || source.telemetry || {}).Otlp || (source.Telemetry || source.telemetry || {}).otlp || {}) }
     },
     Ledger: { ...defaults.Ledger, ...(source.Ledger || source.ledger || {}) },
     Database: { ...defaults.Database, ...(source.Database || source.database || {}) },

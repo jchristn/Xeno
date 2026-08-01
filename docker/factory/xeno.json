@@ -105,5 +105,29 @@
       "ClientWeight": 15,
       "HeartbeatWeight": 10
     }
+  },
+  "Telemetry": {
+    "Enable": true,
+    "ServiceName": "xeno-server",
+    "Metrics": {
+      "Enable": true,
+      "ExportIntervalMs": 15000,
+      "IncludeTenantLabel": false,
+      "ExportFleetTelemetry": true
+    },
+    "Traces": {
+      "Enable": true,
+      "SamplingRatio": 1.0,
+      "PropagateToClient": true
+    },
+    "Logs": {
+      "Enable": true
+    },
+    "Otlp": {
+      "Endpoint": "http://otel-collector:4317",
+      "Protocol": "grpc",
+      "TimeoutMs": 10000,
+      "Headers": null
+    }
   }
 }

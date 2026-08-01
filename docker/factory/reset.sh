@@ -17,6 +17,8 @@ if [ "$CONFIRM" != "RESET" ]; then
   exit 1
 fi
 
+# Telemetry backends (Prometheus, Grafana, Tempo, Loki) keep no named volumes,
+# so their data is discarded with the containers here; nothing extra to purge.
 docker compose -f compose.yaml down --volumes --remove-orphans
 
 rm -rf data logs netledger netledger-archive

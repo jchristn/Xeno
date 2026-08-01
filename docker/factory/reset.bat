@@ -19,6 +19,8 @@ if not "%CONFIRM%"=="RESET" (
   exit /b 1
 )
 
+REM Telemetry backends (Prometheus, Grafana, Tempo, Loki) keep no named volumes,
+REM so their data is discarded with the containers here; nothing extra to purge.
 docker compose -f compose.yaml down --volumes --remove-orphans
 
 if exist data rmdir /S /Q data

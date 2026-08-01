@@ -31,6 +31,7 @@ namespace Xeno.Server
     using Xeno.Core.Serialization;
     using Xeno.Core.Services;
     using Xeno.Core.Settings;
+    using Xeno.Core.Telemetry;
     using Xeno.Email;
     using Xeno.Email.Providers;
     using Xeno.Email.Templates;
@@ -54,6 +55,7 @@ namespace Xeno.Server
         private readonly string _WebSocketMaintenanceHeader = "[WebSocketMaintenance] ";
         private readonly string _RequestHistoryRetentionHeader = "[RequestHistoryRetention] ";
         private readonly string _EmailHeader = "[Email] ";
+        private readonly string _TelemetryHeader = "[Telemetry] ";
         private LoggingModule _Logging = null!;
         private readonly Webserver _Webserver;
         private readonly object _ClientConnectionsLock = new object();
@@ -83,6 +85,7 @@ namespace Xeno.Server
         private LedgerService? _Ledger;
         private TenantLifecycleService? _TenantLifecycle;
         private NetLedgerTenantSubordinateService? _NetLedgerTenantSubordinate;
+        private TelemetryService? _TelemetryService;
         private CancellationTokenSource? _TelemetryCollectionCancellation;
         private Task? _TelemetryCollectionTask;
         private CancellationTokenSource? _WebSocketMaintenanceCancellation;
@@ -176,6 +179,116 @@ namespace Xeno.Server
         }
 
         /// <summary>
+        /// Build the OpenTelemetry provider and register the live observable-gauge state accessors.
+        /// </summary>
+        private void StartTelemetry()
+        {
+            _Logging.Debug(_TelemetryHeader + "starting");
+
+            if (_Settings.Telemetry.Enable)
+            {
+                XenoTelemetry.RegisterState(
+                    BuildPlatformGaugeSnapshot,
+                    BuildFleetGaugeSnapshot,
+                    _Settings.Telemetry.Metrics.IncludeTenantLabel);
+            }
+
+            _TelemetryService = new TelemetryService(_Settings.Telemetry, _Logging);
+
+            if (_TelemetryService.Active)
+                _Logging.Info(_TelemetryHeader + "exporting to " + _Settings.Telemetry.Otlp.Endpoint + " via " + _Settings.Telemetry.Otlp.Protocol);
+            else
+                _Logging.Debug(_TelemetryHeader + "telemetry export disabled");
+        }
+
+        /// <summary>
+        /// Build a point-in-time platform snapshot for observable gauges.
+        /// </summary>
+        /// <returns>Platform gauge snapshot.</returns>
+        private PlatformGaugeSnapshot BuildPlatformGaugeSnapshot()
+        {
+            PlatformGaugeSnapshot snapshot = new PlatformGaugeSnapshot();
+
+            try
+            {
+                XenoPlatform? platform = _Database?.Platform;
+                if (platform != null)
+                {
+                    snapshot.ConnectedClients = platform.Clients.Count(item => item.Connected);
+                    snapshot.AvailableModels = platform.Clients
+                        .Where(item => item.Connected)
+                        .SelectMany(item => item.Models)
+                        .Select(item => item.Name)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Count();
+                }
+
+                lock (_PendingResponsesLock)
+                {
+                    snapshot.InflightRequests = _PendingClientResponses.Count;
+                }
+
+                if (_Ledger != null) snapshot.LedgerQueueDepth = _Ledger.QueueDepth;
+            }
+            catch (Exception ex)
+            {
+                _Logging.Debug(_TelemetryHeader + "platform snapshot failed: " + ex.Message);
+            }
+
+            return snapshot;
+        }
+
+        /// <summary>
+        /// Build a point-in-time fleet snapshot for observable gauges from the latest telemetry cache.
+        /// </summary>
+        /// <returns>Fleet gauge snapshot.</returns>
+        private TelemetryFleetSnapshot BuildFleetGaugeSnapshot()
+        {
+            TelemetryFleetSnapshot snapshot = new TelemetryFleetSnapshot();
+
+            if (!_Settings.Telemetry.Metrics.ExportFleetTelemetry) return snapshot;
+
+            try
+            {
+                List<FleetHostGauge> hosts = new List<FleetHostGauge>();
+                foreach (ServerClientTelemetrySampleRecord host in _TelemetryLatestCache.GetAllHost())
+                {
+                    hosts.Add(new FleetHostGauge
+                    {
+                        ClientId = host.ClientId ?? host.MachineName,
+                        CpuPercent = host.CpuUtilizationPercent,
+                        MemoryPercent = host.MemoryUtilizationPercent,
+                        DiskPercent = host.DiskUtilizationPercent,
+                        GpuPercent = host.GpuAverageUtilizationPercent
+                    });
+                }
+
+                List<FleetProviderGauge> providers = new List<FleetProviderGauge>();
+                foreach (ServerProviderTelemetrySampleRecord provider in _TelemetryLatestCache.GetAllProviders())
+                {
+                    providers.Add(new FleetProviderGauge
+                    {
+                        ClientId = provider.ClientId ?? "unknown",
+                        Provider = String.IsNullOrEmpty(provider.ProviderName) ? "unknown" : provider.ProviderName,
+                        AvailableModels = provider.AvailableModelCount,
+                        LoadedModels = provider.LoadedModelCount,
+                        Up = provider.Status == ClientProviderTelemetryStatusEnum.Available
+                            || provider.Status == ClientProviderTelemetryStatusEnum.Partial
+                    });
+                }
+
+                snapshot.Hosts = hosts;
+                snapshot.Providers = providers;
+            }
+            catch (Exception ex)
+            {
+                _Logging.Debug(_TelemetryHeader + "fleet snapshot failed: " + ex.Message);
+            }
+
+            return snapshot;
+        }
+
+        /// <summary>
         /// Start the server and run until cancellation.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
@@ -191,6 +304,8 @@ namespace Xeno.Server
                 _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, _Logging, SavePlatformAsync);
                 _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
                 _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging);
+
+                StartTelemetry();
 
                 _Webserver.Start();
                 _Ledger.Start();
@@ -258,6 +373,7 @@ namespace Xeno.Server
             disposable?.Dispose();
             _Ledger?.Dispose();
             _Database?.Dispose();
+            _TelemetryService?.Dispose();
             _TelemetryLatestCache.Dispose();
             _Logging?.Dispose();
             _Disposed = true;
@@ -1587,12 +1703,62 @@ namespace Xeno.Server
             ApplyCors(context);
             context.Timestamp.End = DateTime.UtcNow;
             double elapsedMs = context.Timestamp.TotalMs ?? 0;
+            string method = context.Request.Method.ToString().ToUpperInvariant();
             _Logging.Info(_Header
-                + context.Request.Method.ToString().ToUpperInvariant() + " "
+                + method + " "
                 + (context.Request.Url.RawWithQuery ?? "/") + ": "
                 + context.Response.StatusCode + " "
                 + elapsedMs.ToString("F2", CultureInfo.InvariantCulture) + "ms");
+
+            XenoTelemetry.RecordHttpRequest(
+                method,
+                NormalizeRoute(context.Request.Url.RawWithoutQuery),
+                context.Response.StatusCode,
+                elapsedMs / 1000.0);
+
             await Task.CompletedTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reduce a raw request path to a bounded, low-cardinality route template by collapsing
+        /// identifier-like path segments. Keeps metric label cardinality bounded.
+        /// </summary>
+        /// <param name="rawPath">Raw path without query string.</param>
+        /// <returns>Bounded route template.</returns>
+        private static string NormalizeRoute(string? rawPath)
+        {
+            if (String.IsNullOrEmpty(rawPath) || rawPath == "/") return "/";
+
+            string[] segments = rawPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0) return "/";
+
+            StringBuilder builder = new StringBuilder(rawPath.Length + 8);
+            for (int i = 0; i < segments.Length; i++)
+            {
+                builder.Append('/');
+                builder.Append(IsIdentifierSegment(segments[i]) ? "{id}" : segments[i].ToLowerInvariant());
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool IsIdentifierSegment(string segment)
+        {
+            if (String.IsNullOrEmpty(segment)) return false;
+
+            bool hasDigit = false;
+            bool hasNonRoutey = false;
+            for (int i = 0; i < segment.Length; i++)
+            {
+                char c = segment[i];
+                if (Char.IsDigit(c)) hasDigit = true;
+                else if (c == '-' || c == '_' || c == '.') hasNonRoutey = true;
+            }
+
+            if (segment.Length >= 20) return true;
+            if (hasDigit && segment.Length >= 8) return true;
+            if (hasDigit && hasNonRoutey) return true;
+            return false;
         }
 
         private async Task OpenApiRouteAsync(HttpContextBase context)
@@ -1621,14 +1787,24 @@ namespace Xeno.Server
             string path = context.Request.Url.RawWithoutQuery ?? "/";
             string method = context.Request.Method.ToString().ToUpperInvariant();
 
+            string route = NormalizeRoute(path);
+            using Activity? activity = XenoTelemetry.ActivitySource.StartActivity(method + " " + route, ActivityKind.Server);
+            if (activity != null)
+            {
+                activity.SetTag("http.request.method", method);
+                activity.SetTag("http.route", route);
+                activity.SetTag("url.path", path);
+            }
+
             try
             {
                 ApplyCors(context);
                 await HandleRestAsync(context, method, path, context.Token).ConfigureAwait(false);
+                if (activity != null) activity.SetTag("http.response.status_code", context.Response.StatusCode);
             }
             catch (AuthorizationDeniedException ex)
             {
-                Interlocked.Increment(ref _AuthorizationDenialCount);
+                RecordAuthorizationDenialInternal();
                 if (_Database != null) await SavePlatformAsync(context.Token).ConfigureAwait(false);
                 context.Response.StatusCode = ex.StatusCode;
                 _Logging.Debug(_Header + "authorization denied for " + method + " " + path + ": " + ex.ReasonCode);
@@ -1636,7 +1812,7 @@ namespace Xeno.Server
             }
             catch (UnauthorizedAccessException ex)
             {
-                Interlocked.Increment(ref _AuthFailureCount);
+                RecordAuthFailureInternal();
                 context.Response.StatusCode = 401;
                 _Logging.Debug(_Header + "unauthorized " + method + " " + path + ": " + ex.Message);
                 await SendJsonAsync(context, new { error = "Unauthorized", message = ex.Message }).ConfigureAwait(false);
@@ -3094,6 +3270,7 @@ namespace Xeno.Server
             int retentionDays = Math.Max(1, _Settings.RequestHistory.RetentionDays);
             DateTime cutoffUtc = DateTime.UtcNow.AddDays(-retentionDays);
             int removed = await _Database.RequestHistory.PruneOlderThanAsync(cutoffUtc, token).ConfigureAwait(false);
+            XenoTelemetry.RecordRequestHistoryPruned(removed);
             if (removed > 0) _Logging.Debug(_RequestHistoryRetentionHeader + "pruned " + removed + " request history entries older than " + retentionDays + " days");
         }
 
@@ -3149,6 +3326,8 @@ namespace Xeno.Server
                 await CloseStaleSessionAsync(connection, token).ConfigureAwait(false);
             }
 
+            XenoTelemetry.RecordClientEvictions(staleConnections.Count);
+            XenoTelemetry.RecordClientDisconnection("evicted");
             await SavePlatformAsync(token).ConfigureAwait(false);
         }
 
@@ -3201,6 +3380,7 @@ namespace Xeno.Server
                             await PruneTelemetryIfDueAsync(token).ConfigureAwait(false);
                             _TelemetryLastCycleUtc = DateTime.UtcNow;
                             _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
+                            XenoTelemetry.RecordTelemetryCollectionCycle(true);
                         }
                         catch (OperationCanceledException) when (token.IsCancellationRequested)
                         {
@@ -3209,6 +3389,7 @@ namespace Xeno.Server
                         catch (Exception ex)
                         {
                             _TelemetryRecentFailureCount++;
+                            XenoTelemetry.RecordTelemetryCollectionCycle(false);
                             _Logging.Warn(_TelemetryCollectionHeader + "collection cycle failed: " + ex.Message);
                         }
                     }
@@ -3713,6 +3894,7 @@ namespace Xeno.Server
                 ? requestContext.UserId
                 : (!String.IsNullOrWhiteSpace(requestContext.PrincipalId) ? requestContext.PrincipalId : "unknown");
             _Logging.Debug(_WebSocketHeader + "websocket connection accepted from " + (requestContext.SourceIp ?? "unknown") + ": " + wsUser);
+            XenoTelemetry.RecordClientConnection(null);
 
             await session.SendTextAsync(JsonUtil.Serialize(new
             {
@@ -3765,6 +3947,7 @@ namespace Xeno.Server
                 }
 
                 _Logging.Debug(_WebSocketHeader + "websocket connection closed from " + (requestContext.SourceIp ?? "unknown") + ": " + wsUser);
+                XenoTelemetry.RecordClientDisconnection("closed");
             }
 
             await session.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", context.Token).ConfigureAwait(false);
@@ -5443,6 +5626,7 @@ namespace Xeno.Server
             if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
 
             _Logging.Debug(_WebSocketHeader + "client " + clientId + " registered (" + name + ")");
+            XenoTelemetry.RecordClientRegistration();
             return clientId;
         }
 
@@ -5754,9 +5938,68 @@ namespace Xeno.Server
         {
             RequestHistoryEntry entry = RequireRouting().RecordHistory(requestContext, path, method, decision);
             configure?.Invoke(entry);
+            RecordRelayMetric(entry, decision);
             TryEnqueueLedgerEvent(entry);
             await InsertRequestHistoryAsync(entry, token).ConfigureAwait(false);
             return entry;
+        }
+
+        /// <summary>
+        /// Record a relayed-request telemetry sample from a completed request-history entry.
+        /// </summary>
+        /// <param name="entry">Request history entry.</param>
+        /// <param name="decision">Routing decision.</param>
+        private void RecordRelayMetric(RequestHistoryEntry entry, RoutingDecision decision)
+        {
+            if (entry == null) return;
+
+            try
+            {
+                RequestHistoryTelemetry? telemetry = entry.Telemetry;
+                RelayMetricSample sample = new RelayMetricSample
+                {
+                    Model = FirstNonEmpty(entry.Model, decision?.EffectiveModel, "unknown"),
+                    ClientId = FirstNonEmpty(entry.SelectedClientId, decision?.SelectedClientId, "unknown"),
+                    Provider = FirstNonEmpty(decision?.SelectedProvider, "unknown"),
+                    Outcome = ClassifyRelayOutcome(entry.StatusCode),
+                    StatusCode = entry.StatusCode,
+                    Streamed = telemetry?.TransferMode == RequestTransferModeEnum.Stream,
+                    Tenant = _Settings.Telemetry.Metrics.IncludeTenantLabel ? entry.RequestorTenantId : null,
+                    RoundTripSeconds = MsToSeconds(telemetry?.TotalTimeMs),
+                    UpstreamSeconds = MsToSeconds(telemetry?.UpstreamTotalMs),
+                    TimeToFirstTokenSeconds = MsToSeconds(telemetry?.TimeToFirstTokenMs),
+                    StreamingSeconds = MsToSeconds(telemetry?.TotalStreamingTimeMs),
+                    PromptTokens = telemetry?.PromptTokens,
+                    CompletionTokens = telemetry?.CompletionTokens,
+                    TotalTokens = telemetry?.TotalTokens,
+                    StreamChunks = telemetry?.StreamChunkCount,
+                    StreamEvents = telemetry?.StreamEventCount,
+                    RequestBytes = telemetry?.RequestBytes ?? entry.RequestBodyLength,
+                    ResponseBytes = telemetry?.ResponseBytes ?? entry.ResponseBodyLength
+                };
+
+                XenoTelemetry.RecordRelay(sample);
+            }
+            catch (Exception ex)
+            {
+                _Logging.Debug(_TelemetryHeader + "relay metric record failed: " + ex.Message);
+            }
+        }
+
+        private static double? MsToSeconds(long? milliseconds)
+        {
+            return milliseconds.HasValue ? milliseconds.Value / 1000.0 : (double?)null;
+        }
+
+        private static string ClassifyRelayOutcome(int statusCode)
+        {
+            if (statusCode >= 200 && statusCode < 300) return "success";
+            if (statusCode == 499) return "canceled";
+            if (statusCode == 408 || statusCode == 504) return "timeout";
+            if (statusCode == 429 || statusCode == 503) return "no_capacity";
+            if (statusCode >= 400 && statusCode < 500) return "client_error";
+            if (statusCode >= 500) return "upstream_error";
+            return "other";
         }
 
         private async Task InsertRequestHistoryAsync(RequestHistoryEntry entry, CancellationToken token)
@@ -5784,13 +6027,16 @@ namespace Xeno.Server
             if (_Ledger == null) return;
             try
             {
-                _Ledger.TryEnqueueFromHistory(entry, out string? _);
+                bool enqueued = _Ledger.TryEnqueueFromHistory(entry, out string? _);
+                XenoTelemetry.RecordLedgerEvent(enqueued ? "recorded" : "skipped");
             }
             catch (ArgumentException)
             {
+                XenoTelemetry.RecordLedgerEvent("failed");
             }
             catch (InvalidOperationException)
             {
+                XenoTelemetry.RecordLedgerEvent("failed");
             }
         }
 
@@ -6818,7 +7064,7 @@ namespace Xeno.Server
 
             if (String.Equals(decision.MatchedSource, "SystemAdmin", StringComparison.Ordinal) || String.Equals(decision.MatchedSource, "TenantAdmin", StringComparison.Ordinal))
             {
-                Interlocked.Increment(ref _PrivilegedBypassCount);
+                RecordPrivilegedBypassInternal();
                 if (operationType != OperationTypeEnum.Read)
                 {
                     _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, true, decision.MatchedSource ?? "PrivilegedBypass", 200, targetTenantId, null);
@@ -6912,7 +7158,7 @@ namespace Xeno.Server
             }
 
             if (!limited) return false;
-            Interlocked.Increment(ref _AuthFailureCount);
+            RecordAuthFailureInternal();
             context.Response.Headers.Add("Retry-After", "60");
             await SendStatusJsonAsync(context, 429, new { error = "RateLimited", message = "Too many authentication attempts. Try again later." }).ConfigureAwait(false);
             return true;
@@ -8153,7 +8399,7 @@ namespace Xeno.Server
                     requestContext.CredentialId = session.CredentialId;
                     requestContext.PrincipalType = session.PrincipalType;
                     requestContext.AuthScheme = AuthSchemeEnum.Bearer;
-                    Interlocked.Increment(ref _AuthSuccessCount);
+                    RecordAuthSuccessInternal();
                     return requestContext;
                 }
 
@@ -8166,7 +8412,7 @@ namespace Xeno.Server
                 requestContext.UserId = bearerCredential.UserId;
                 requestContext.PrincipalType = PrincipalTypeEnum.Credential;
                 requestContext.AuthScheme = AuthSchemeEnum.Bearer;
-                Interlocked.Increment(ref _AuthSuccessCount);
+                RecordAuthSuccessInternal();
                 return requestContext;
             }
 
@@ -8179,7 +8425,7 @@ namespace Xeno.Server
                 requestContext.UserId = credential.UserId;
                 requestContext.PrincipalType = PrincipalTypeEnum.Credential;
                 requestContext.AuthScheme = AuthSchemeEnum.Credential;
-                Interlocked.Increment(ref _AuthSuccessCount);
+                RecordAuthSuccessInternal();
                 return requestContext;
             }
 
@@ -8395,6 +8641,30 @@ namespace Xeno.Server
             await context.Response.Send(metrics, context.Token).ConfigureAwait(false);
         }
 
+        private void RecordAuthSuccessInternal()
+        {
+            Interlocked.Increment(ref _AuthSuccessCount);
+            XenoTelemetry.RecordAuthAttempt(true);
+        }
+
+        private void RecordAuthFailureInternal()
+        {
+            Interlocked.Increment(ref _AuthFailureCount);
+            XenoTelemetry.RecordAuthAttempt(false);
+        }
+
+        private void RecordAuthorizationDenialInternal()
+        {
+            Interlocked.Increment(ref _AuthorizationDenialCount);
+            XenoTelemetry.RecordAuthorizationDenial();
+        }
+
+        private void RecordPrivilegedBypassInternal()
+        {
+            Interlocked.Increment(ref _PrivilegedBypassCount);
+            XenoTelemetry.RecordPrivilegedBypass();
+        }
+
         private void RecordEmailResult(EmailSendResult result)
         {
             if (result == null) return;
@@ -8402,6 +8672,7 @@ namespace Xeno.Server
             {
                 Interlocked.Increment(ref _EmailSkippedCount);
                 IncrementEmailSeries(_EmailSkippedByProviderTemplate, result.Provider, result.TemplateId);
+                XenoTelemetry.RecordEmail("skipped");
                 _Logging.Debug(_EmailHeader + "skipped " + result.TemplateId + " email via " + result.Provider);
                 return;
             }
@@ -8410,6 +8681,7 @@ namespace Xeno.Server
             {
                 Interlocked.Increment(ref _EmailSentCount);
                 IncrementEmailSeries(_EmailSentByProviderTemplate, result.Provider, result.TemplateId);
+                XenoTelemetry.RecordEmail("sent");
                 _Logging.Info(_EmailHeader + "sent " + result.TemplateId + " email via " + result.Provider);
             }
             else
@@ -8423,6 +8695,7 @@ namespace Xeno.Server
             Interlocked.Increment(ref _EmailFailureCount);
             Interlocked.Exchange(ref _EmailLastFailureTicks, DateTime.UtcNow.Ticks);
             IncrementEmailSeries(_EmailFailedByProviderTemplate, provider, templateId);
+            XenoTelemetry.RecordEmail("failed");
             _Logging.Warn(_EmailHeader + "failed to send " + templateId + " email via " + provider);
         }
 
@@ -8802,6 +9075,23 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(ledgerApiKey)) settings.Ledger.ApiKey = ledgerApiKey;
             string ledgerSecretKey = FirstNonEmpty(Environment.GetEnvironmentVariable("XENO_LEDGER_SECRET_KEY"), Environment.GetEnvironmentVariable("NETLEDGER_SECRET_KEY"));
             if (!String.IsNullOrWhiteSpace(ledgerSecretKey)) settings.Ledger.SecretKey = ledgerSecretKey;
+
+            string? telemetryEnabled = Environment.GetEnvironmentVariable("XENO_TELEMETRY_ENABLED");
+            if (Boolean.TryParse(telemetryEnabled, out bool telemetryEnabledValue)) settings.Telemetry.Enable = telemetryEnabledValue;
+            string? telemetryServiceName = Environment.GetEnvironmentVariable("XENO_TELEMETRY_SERVICE_NAME");
+            if (!String.IsNullOrWhiteSpace(telemetryServiceName)) settings.Telemetry.ServiceName = telemetryServiceName;
+            string otlpEndpoint = FirstNonEmpty(Environment.GetEnvironmentVariable("XENO_TELEMETRY_OTLP_ENDPOINT"), Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT"));
+            if (!String.IsNullOrWhiteSpace(otlpEndpoint)) settings.Telemetry.Otlp.Endpoint = otlpEndpoint;
+            string otlpProtocol = FirstNonEmpty(Environment.GetEnvironmentVariable("XENO_TELEMETRY_OTLP_PROTOCOL"), Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL"));
+            if (!String.IsNullOrWhiteSpace(otlpProtocol)) settings.Telemetry.Otlp.Protocol = otlpProtocol;
+            string? metricsEnabled = Environment.GetEnvironmentVariable("XENO_TELEMETRY_METRICS_ENABLED");
+            if (Boolean.TryParse(metricsEnabled, out bool metricsEnabledValue)) settings.Telemetry.Metrics.Enable = metricsEnabledValue;
+            string? tracesEnabled = Environment.GetEnvironmentVariable("XENO_TELEMETRY_TRACES_ENABLED");
+            if (Boolean.TryParse(tracesEnabled, out bool tracesEnabledValue)) settings.Telemetry.Traces.Enable = tracesEnabledValue;
+            string? samplingRatio = Environment.GetEnvironmentVariable("XENO_TELEMETRY_TRACES_SAMPLING_RATIO");
+            if (Double.TryParse(samplingRatio, NumberStyles.Float, CultureInfo.InvariantCulture, out double samplingRatioValue)) settings.Telemetry.Traces.SamplingRatio = samplingRatioValue;
+            string? tenantLabel = Environment.GetEnvironmentVariable("XENO_TELEMETRY_INCLUDE_TENANT_LABEL");
+            if (Boolean.TryParse(tenantLabel, out bool tenantLabelValue)) settings.Telemetry.Metrics.IncludeTenantLabel = tenantLabelValue;
         }
 
         private static bool IsValidEmailAddress(string email)
