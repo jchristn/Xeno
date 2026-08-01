@@ -76,7 +76,7 @@ services:
     environment:
       TERM: xterm-256color
       LESS3_SERVER_URL: https://less3.xenocloud.ai:${LESS3_PORT:-8000}
-      NEXT_PUBLIC_LESS3_SERVER_URL: http://localhost:${LESS3_PORT:-8000}
+      NEXT_PUBLIC_LESS3_SERVER_URL: https://less3.xenocloud.ai:${LESS3_PORT:-8000}
     ports:
       - "${LESS3_UI_PORT:-9300}:3000"
     depends_on:
