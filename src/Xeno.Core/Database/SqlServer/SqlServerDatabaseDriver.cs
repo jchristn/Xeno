@@ -3,6 +3,7 @@ namespace Xeno.Core.Database.SqlServer
     using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using Microsoft.Data.SqlClient;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
@@ -20,7 +21,8 @@ namespace Xeno.Core.Database.SqlServer
         /// Instantiate the SQL Server database driver.
         /// </summary>
         /// <param name="settings">Database settings.</param>
-        public SqlServerDatabaseDriver(DatabaseSettings settings) : base(settings)
+        /// <param name="logging">Optional logging module.</param>
+        public SqlServerDatabaseDriver(DatabaseSettings settings, LoggingModule? logging = null) : base(settings, logging)
         {
         }
 

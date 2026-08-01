@@ -9,6 +9,7 @@ namespace Xeno.Core.Services
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using Xeno.Core.Enums;
     using Xeno.Core.Models;
     using Xeno.Core.Serialization;
@@ -22,6 +23,8 @@ namespace Xeno.Core.Services
         #region Private-Members
 
         private readonly LedgerSettings _Settings;
+        private readonly LoggingModule? _Logging;
+        private readonly string _Header = "[NetLedgerClient] ";
         private readonly HttpClient _HttpClient;
         private readonly bool _OwnsHttpClient;
         private bool _Disposed;
@@ -34,10 +37,12 @@ namespace Xeno.Core.Services
         /// Instantiate the NetLedger client.
         /// </summary>
         /// <param name="settings">Ledger settings.</param>
+        /// <param name="logging">Optional logging module.</param>
         /// <param name="httpClient">Optional HTTP client.</param>
-        public NetLedgerClient(LedgerSettings settings, HttpClient? httpClient = null)
+        public NetLedgerClient(LedgerSettings settings, LoggingModule? logging = null, HttpClient? httpClient = null)
         {
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _Logging = logging;
             _HttpClient = httpClient ?? new HttpClient();
             _OwnsHttpClient = httpClient == null;
             _HttpClient.Timeout = TimeSpan.FromMilliseconds(_Settings.RequestTimeoutMs);
@@ -243,11 +248,13 @@ namespace Xeno.Core.Services
 
         private async Task<T> SendJsonAsync<T>(HttpRequestMessage request, CancellationToken token)
         {
+            _Logging?.Debug(_Header + request.Method + " " + request.RequestUri);
             using (HttpResponseMessage response = await _HttpClient.SendAsync(request, token).ConfigureAwait(false))
             {
                 string json = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
+                    _Logging?.Warn(_Header + request.Method + " " + request.RequestUri + " returned HTTP " + (int)response.StatusCode);
                     throw new InvalidOperationException("NetLedger returned HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + ": " + json);
                 }
 
@@ -259,6 +266,7 @@ namespace Xeno.Core.Services
 
         private async Task SendNoBodyAsync(HttpRequestMessage request, CancellationToken token, bool ignoreNotFound = false)
         {
+            _Logging?.Debug(_Header + request.Method + " " + request.RequestUri);
             using (HttpResponseMessage response = await _HttpClient.SendAsync(request, token).ConfigureAwait(false))
             {
                 if (ignoreNotFound && response.StatusCode == HttpStatusCode.NotFound)
@@ -269,6 +277,7 @@ namespace Xeno.Core.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     string json = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    _Logging?.Warn(_Header + request.Method + " " + request.RequestUri + " returned HTTP " + (int)response.StatusCode);
                     throw new InvalidOperationException("NetLedger returned HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + ": " + json);
                 }
             }

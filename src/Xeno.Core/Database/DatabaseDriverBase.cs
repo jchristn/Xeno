@@ -5,6 +5,7 @@ namespace Xeno.Core.Database
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using Xeno.Core.Enums;
     using Xeno.Core.Database.Interfaces;
     using Xeno.Core.Models;
@@ -54,12 +55,24 @@ namespace Xeno.Core.Database
         public IRequestHistoryMethods? RequestHistory { get; protected set; } = null;
 
         /// <summary>
+        /// Logging module. May be null when no logger is supplied.
+        /// </summary>
+        protected LoggingModule? _Logging { get; }
+
+        /// <summary>
+        /// Log message header.
+        /// </summary>
+        protected string _Header = "[Database] ";
+
+        /// <summary>
         /// Instantiate the database driver.
         /// </summary>
         /// <param name="settings">Database settings.</param>
-        protected DatabaseDriverBase(DatabaseSettings settings)
+        /// <param name="logging">Optional logging module.</param>
+        protected DatabaseDriverBase(DatabaseSettings settings, LoggingModule? logging = null)
         {
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _Logging = logging;
         }
 
         /// <summary>
@@ -70,6 +83,7 @@ namespace Xeno.Core.Database
         public virtual async Task InitializeAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
+            _Logging?.Debug(_Header + "initializing " + DatabaseType + " database");
 
             bool storageAvailable = await InitializeStorageAsync(token).ConfigureAwait(false);
             string? stateJson = storageAvailable ? await LoadStateJsonAsync(token).ConfigureAwait(false) : null;
@@ -84,6 +98,8 @@ namespace Xeno.Core.Database
                 await Platform.InitializeAsync(token).ConfigureAwait(false);
                 if (storageAvailable) await SaveAsync(token).ConfigureAwait(false);
             }
+
+            _Logging?.Debug(_Header + "initialized " + DatabaseType + " database");
         }
 
         /// <summary>

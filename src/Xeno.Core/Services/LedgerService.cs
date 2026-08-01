@@ -5,6 +5,7 @@ namespace Xeno.Core.Services
     using System.Net.Http;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
 
@@ -17,6 +18,8 @@ namespace Xeno.Core.Services
 
         private readonly XenoPlatform _Platform;
         private readonly LedgerSettings _Settings;
+        private readonly LoggingModule _Logging;
+        private readonly string _Header = "[LedgerService] ";
         private readonly LedgerQueue _Queue;
         private readonly NetLedgerClient _Client;
         private readonly LedgerDrainService _DrainService;
@@ -35,14 +38,16 @@ namespace Xeno.Core.Services
         /// </summary>
         /// <param name="platform">Platform state.</param>
         /// <param name="settings">Ledger settings.</param>
+        /// <param name="logging">Logging module.</param>
         /// <param name="savePlatformAsync">Platform persistence callback.</param>
-        public LedgerService(XenoPlatform platform, LedgerSettings settings, Func<CancellationToken, Task> savePlatformAsync)
+        public LedgerService(XenoPlatform platform, LedgerSettings settings, LoggingModule logging, Func<CancellationToken, Task> savePlatformAsync)
         {
             _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _Logging = logging ?? throw new ArgumentNullException(nameof(logging));
             _SavePlatformAsync = savePlatformAsync ?? throw new ArgumentNullException(nameof(savePlatformAsync));
             _Queue = new LedgerQueue(_Settings.MaxQueueDepth);
-            _Client = new NetLedgerClient(_Settings);
+            _Client = new NetLedgerClient(_Settings, _Logging);
             LedgerAccountResolver resolver = new LedgerAccountResolver(_Platform, _Settings, _Client);
             _DrainService = new LedgerDrainService(_Settings, _Client, resolver);
             _Status.Enabled = _Settings.Enabled;
@@ -57,7 +62,14 @@ namespace Xeno.Core.Services
         /// </summary>
         public void Start()
         {
-            if (!_Settings.Enabled || _DrainTask != null) return;
+            if (!_Settings.Enabled)
+            {
+                _Logging.Debug(_Header + "ledgering disabled, not starting");
+                return;
+            }
+
+            if (_DrainTask != null) return;
+            _Logging.Debug(_Header + "starting");
             _Cancellation = new CancellationTokenSource();
             _DrainTask = Task.Run(async () => await DrainLoopAsync(_Cancellation.Token).ConfigureAwait(false));
         }
@@ -67,6 +79,7 @@ namespace Xeno.Core.Services
         /// </summary>
         public void Stop()
         {
+            _Logging.Debug(_Header + "stopping");
             _Cancellation?.Cancel();
         }
 
@@ -131,6 +144,7 @@ namespace Xeno.Core.Services
                 {
                     response.TerminalFailures++;
                     RecordFailure(ex.Message, true);
+                    _Logging.Warn(_Header + "dropping ledger event " + ledgerEvent.Id + " after terminal failure: " + ex.Message);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is HttpRequestException || ex is TaskCanceledException)
                 {
@@ -139,6 +153,7 @@ namespace Xeno.Core.Services
                     _Queue.Requeue(ledgerEvent);
                     response.Retried++;
                     _Status.RetryCount++;
+                    _Logging.Warn(_Header + "retrying ledger event " + ledgerEvent.Id + " (attempt " + ledgerEvent.RetryCount + "): " + ex.Message);
                     RecordFailure(ex.Message, false);
                 }
             }
@@ -202,20 +217,28 @@ namespace Xeno.Core.Services
 
         private async Task DrainLoopAsync(CancellationToken token)
         {
-            using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_Settings.DrainIntervalMs)))
+            _Logging.Debug(_Header + "drain loop starting");
+            try
             {
-                while (!token.IsCancellationRequested)
+                using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_Settings.DrainIntervalMs)))
                 {
-                    try
+                    while (!token.IsCancellationRequested)
                     {
-                        await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
-                        await DrainOnceAsync(token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested)
-                    {
-                        return;
+                        try
+                        {
+                            await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                            await DrainOnceAsync(token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            break;
+                        }
                     }
                 }
+            }
+            finally
+            {
+                _Logging.Debug(_Header + "drain loop stopping");
             }
         }
 

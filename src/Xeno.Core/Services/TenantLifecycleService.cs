@@ -5,6 +5,7 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using Xeno.Core.Enums;
     using Xeno.Core.Models;
 
@@ -14,6 +15,8 @@ namespace Xeno.Core.Services
     public class TenantLifecycleService
     {
         private readonly XenoPlatform _Platform;
+        private readonly LoggingModule? _Logging;
+        private readonly string _Header = "[TenantLifecycle] ";
         private readonly List<ITenantSubordinateService> _SubordinateServices;
 
         /// <summary>
@@ -21,9 +24,11 @@ namespace Xeno.Core.Services
         /// </summary>
         /// <param name="platform">Platform state.</param>
         /// <param name="subordinateServices">Subordinate services.</param>
-        public TenantLifecycleService(XenoPlatform platform, IEnumerable<ITenantSubordinateService> subordinateServices)
+        /// <param name="logging">Optional logging module.</param>
+        public TenantLifecycleService(XenoPlatform platform, IEnumerable<ITenantSubordinateService> subordinateServices, LoggingModule? logging = null)
         {
             _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _Logging = logging;
             _SubordinateServices = subordinateServices == null ? new List<ITenantSubordinateService>() : subordinateServices.ToList();
         }
 
@@ -112,7 +117,12 @@ namespace Xeno.Core.Services
                 TenantSubordinateServiceStatus status = await execute(service).ConfigureAwait(false);
                 UpsertStatus(tenant, status);
                 result.SubordinateServices.Add(status);
-                if (IsFailure(status)) result.Success = false;
+                if (IsFailure(status))
+                {
+                    result.Success = false;
+                    _Logging?.Warn(_Header + "tenant " + tenant.Id + " " + operation + " subordinate " + service.ServiceName + " reported " + status.Status + (String.IsNullOrWhiteSpace(status.ErrorMessage) ? String.Empty : ": " + status.ErrorMessage));
+                }
+
                 AppendAudit(context, service.ServiceName, operation, tenant.Id, status);
             }
 

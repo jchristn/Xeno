@@ -5,6 +5,7 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
 
@@ -15,6 +16,8 @@ namespace Xeno.Core.Services
     {
         private readonly XenoPlatform _Platform;
         private readonly LedgerSettings _Settings;
+        private readonly LoggingModule _Logging;
+        private readonly string _Header = "[NetLedgerTenantSubordinate] ";
         private readonly NetLedgerClient _Client;
         private readonly LedgerAccountResolver _Resolver;
         private bool _Disposed;
@@ -24,11 +27,13 @@ namespace Xeno.Core.Services
         /// </summary>
         /// <param name="platform">Platform state.</param>
         /// <param name="settings">Ledger settings.</param>
-        public NetLedgerTenantSubordinateService(XenoPlatform platform, LedgerSettings settings)
+        /// <param name="logging">Logging module.</param>
+        public NetLedgerTenantSubordinateService(XenoPlatform platform, LedgerSettings settings, LoggingModule logging)
         {
             _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
-            _Client = new NetLedgerClient(_Settings);
+            _Logging = logging ?? throw new ArgumentNullException(nameof(logging));
+            _Client = new NetLedgerClient(_Settings, _Logging);
             _Resolver = new LedgerAccountResolver(_Platform, _Settings, _Client);
         }
 
@@ -49,6 +54,7 @@ namespace Xeno.Core.Services
                     await _Resolver.ResolveAccountAsync(tenant.Id, user.Id, link, token).ConfigureAwait(false);
                 }
 
+                _Logging.Info(_Header + "provisioned netledger tenant " + link.NetLedgerTenantId + " for tenant " + tenant.Id);
                 return BuildStatus("create", tenant, "Provisioned", null, link.NetLedgerTenantId);
             }
             catch (Exception ex) when (allowDeferredProvisioning && IsProvisioningFailure(ex))
@@ -130,6 +136,7 @@ namespace Xeno.Core.Services
             }
 
             await _Client.DeleteTenantAsync(link.NetLedgerTenantId, token).ConfigureAwait(false);
+            _Logging.Info(_Header + "deleted netledger tenant " + link.NetLedgerTenantId + " for tenant " + tenant.Id);
             _Platform.LedgerTenantLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenant.Id, StringComparison.OrdinalIgnoreCase));
             _Platform.LedgerAccountLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenant.Id, StringComparison.OrdinalIgnoreCase));
             return BuildStatus("delete", tenant, "Deleted", null, link.NetLedgerTenantId);

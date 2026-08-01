@@ -3,6 +3,7 @@ namespace Xeno.Core.Database.Mysql
     using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using SyslogLogging;
     using MySql.Data.MySqlClient;
     using Xeno.Core.Database;
     using Xeno.Core.Enums;
@@ -20,7 +21,8 @@ namespace Xeno.Core.Database.Mysql
         /// Instantiate the MySQL database driver.
         /// </summary>
         /// <param name="settings">Database settings.</param>
-        public MysqlDatabaseDriver(DatabaseSettings settings) : base(settings)
+        /// <param name="logging">Optional logging module.</param>
+        public MysqlDatabaseDriver(DatabaseSettings settings, LoggingModule? logging = null) : base(settings, logging)
         {
         }
 

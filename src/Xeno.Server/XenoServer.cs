@@ -49,6 +49,11 @@ namespace Xeno.Server
         private readonly XenoSettings _Settings;
         private readonly string _SettingsFile;
         private readonly string _Header = "[XenoServer] ";
+        private readonly string _WebSocketHeader = "[WebSocketServer] ";
+        private readonly string _TelemetryCollectionHeader = "[TelemetryCollection] ";
+        private readonly string _WebSocketMaintenanceHeader = "[WebSocketMaintenance] ";
+        private readonly string _RequestHistoryRetentionHeader = "[RequestHistoryRetention] ";
+        private readonly string _EmailHeader = "[Email] ";
         private LoggingModule _Logging = null!;
         private readonly Webserver _Webserver;
         private readonly object _ClientConnectionsLock = new object();
@@ -178,20 +183,32 @@ namespace Xeno.Server
         public async Task StartAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
-            _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, token).ConfigureAwait(false);
-            MarkClientsDisconnected();
-            _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
-            _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, SavePlatformAsync);
-            _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger);
-            _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate });
+            try
+            {
+                _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, _Logging, token).ConfigureAwait(false);
+                MarkClientsDisconnected();
+                _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
+                _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, _Logging, SavePlatformAsync);
+                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
+                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging);
 
-            _Webserver.Start();
-            _Ledger.Start();
-            StartTelemetryCollectionLoop();
-            StartWebSocketMaintenanceLoop();
-            StartRequestHistoryRetentionLoop();
+                _Webserver.Start();
+                _Ledger.Start();
+                StartTelemetryCollectionLoop();
+                StartWebSocketMaintenanceLoop();
+                StartRequestHistoryRetentionLoop();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _Logging.Error(_Header + "startup failed: " + ex.ToString());
+                throw;
+            }
 
             _Logging.Info(_Header + "started on " + (_Settings.Rest.Ssl ? "https://" : "http://") + _Settings.Rest.Hostname + ":" + _Settings.Rest.Port);
+            if (_Settings.WebSocket.Enabled)
+            {
+                _Logging.Info(_WebSocketHeader + "started on " + (_Settings.Rest.Ssl ? "wss://" : "ws://") + _Settings.Rest.Hostname + ":" + _Settings.Rest.Port + _Settings.WebSocket.Path);
+            }
 
             try
             {
@@ -1568,6 +1585,13 @@ namespace Xeno.Server
         private async Task PostRoutingRouteAsync(HttpContextBase context)
         {
             ApplyCors(context);
+            context.Timestamp.End = DateTime.UtcNow;
+            double elapsedMs = context.Timestamp.TotalMs ?? 0;
+            _Logging.Info(_Header
+                + context.Request.Method.ToString().ToUpperInvariant() + " "
+                + (context.Request.Url.RawWithQuery ?? "/") + ": "
+                + context.Response.StatusCode + " "
+                + elapsedMs.ToString("F2", CultureInfo.InvariantCulture) + "ms");
             await Task.CompletedTask.ConfigureAwait(false);
         }
 
@@ -1588,6 +1612,7 @@ namespace Xeno.Server
         {
             ApplyCors(context);
             context.Response.StatusCode = 500;
+            _Logging.Error(_Header + "unhandled exception on " + context.Request.Method.ToString().ToUpperInvariant() + " " + (context.Request.Url.RawWithoutQuery ?? "/") + ": " + exception.ToString());
             await SendJsonAsync(context, new { error = "InternalServerError", message = exception.Message }).ConfigureAwait(false);
         }
 
@@ -1606,12 +1631,14 @@ namespace Xeno.Server
                 Interlocked.Increment(ref _AuthorizationDenialCount);
                 if (_Database != null) await SavePlatformAsync(context.Token).ConfigureAwait(false);
                 context.Response.StatusCode = ex.StatusCode;
+                _Logging.Debug(_Header + "authorization denied for " + method + " " + path + ": " + ex.ReasonCode);
                 await SendJsonAsync(context, new { error = ex.ReasonCode, message = ex.Message }).ConfigureAwait(false);
             }
             catch (UnauthorizedAccessException ex)
             {
                 Interlocked.Increment(ref _AuthFailureCount);
                 context.Response.StatusCode = 401;
+                _Logging.Debug(_Header + "unauthorized " + method + " " + path + ": " + ex.Message);
                 await SendJsonAsync(context, new { error = "Unauthorized", message = ex.Message }).ConfigureAwait(false);
             }
             catch (HttpStatusException ex)
@@ -1642,6 +1669,7 @@ namespace Xeno.Server
             catch (Exception ex)
             {
                 context.Response.StatusCode = 500;
+                _Logging.Error(_Header + "unhandled exception handling " + method + " " + path + ": " + ex.ToString());
                 await SendJsonAsync(context, new { error = "InternalServerError", message = ex.Message }).ConfigureAwait(false);
             }
         }
@@ -2497,6 +2525,7 @@ namespace Xeno.Server
                 if (incoming == null) throw new ArgumentException("Settings payload is invalid.");
                 ApplySettings(incoming);
                 await SaveSettingsAsync(token).ConfigureAwait(false);
+                _Logging.Info(_Header + "updated server settings");
                 await SendJsonAsync(context, _Settings).ConfigureAwait(false);
                 return;
             }
@@ -3029,25 +3058,33 @@ namespace Xeno.Server
 
         private async Task RequestHistoryRetentionLoopAsync(CancellationToken token)
         {
-            await PruneRequestHistoryAsync(token).ConfigureAwait(false);
-            using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromHours(1)))
+            _Logging.Debug(_RequestHistoryRetentionHeader + "starting");
+            try
             {
-                while (!token.IsCancellationRequested)
+                await PruneRequestHistoryAsync(token).ConfigureAwait(false);
+                using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromHours(1)))
                 {
-                    try
+                    while (!token.IsCancellationRequested)
                     {
-                        await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
-                        await PruneRequestHistoryAsync(token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    catch (Exception ex)
-                    {
-                        _Logging.Warn(_Header + "request history retention sweep failed: " + ex.Message);
+                        try
+                        {
+                            await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                            await PruneRequestHistoryAsync(token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            _Logging.Warn(_RequestHistoryRetentionHeader + "retention sweep failed: " + ex.Message);
+                        }
                     }
                 }
+            }
+            finally
+            {
+                _Logging.Debug(_RequestHistoryRetentionHeader + "stopping");
             }
         }
 
@@ -3057,11 +3094,12 @@ namespace Xeno.Server
             int retentionDays = Math.Max(1, _Settings.RequestHistory.RetentionDays);
             DateTime cutoffUtc = DateTime.UtcNow.AddDays(-retentionDays);
             int removed = await _Database.RequestHistory.PruneOlderThanAsync(cutoffUtc, token).ConfigureAwait(false);
-            if (removed > 0) _Logging.Debug(_Header + "pruned " + removed + " request history entries older than " + retentionDays + " days");
+            if (removed > 0) _Logging.Debug(_RequestHistoryRetentionHeader + "pruned " + removed + " request history entries older than " + retentionDays + " days");
         }
 
         private async Task WebSocketMaintenanceLoopAsync(CancellationToken token)
         {
+            _Logging.Debug(_WebSocketMaintenanceHeader + "starting");
             try
             {
                 TimeSpan interval = TimeSpan.FromMilliseconds(_Settings.WebSocket.StaleConnectionScanIntervalMs);
@@ -3075,6 +3113,10 @@ namespace Xeno.Server
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
+            }
+            finally
+            {
+                _Logging.Debug(_WebSocketMaintenanceHeader + "stopping");
             }
         }
 
@@ -3103,6 +3145,7 @@ namespace Xeno.Server
                     client.ServiceState = ClientServiceStateEnum.Quarantined;
                 }
 
+                _Logging.Debug(_WebSocketMaintenanceHeader + "evicted stale client " + connection.ClientId);
                 await CloseStaleSessionAsync(connection, token).ConfigureAwait(false);
             }
 
@@ -3142,29 +3185,38 @@ namespace Xeno.Server
 
         private async Task TelemetryCollectionLoopAsync(CancellationToken token)
         {
-            TimeSpan interval = TimeSpan.FromSeconds(_Settings.TelemetryCollection.CollectionIntervalSeconds);
-            using (PeriodicTimer timer = new PeriodicTimer(interval))
+            _Logging.Debug(_TelemetryCollectionHeader + "starting");
+            try
             {
-                _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
-                while (!token.IsCancellationRequested)
+                TimeSpan interval = TimeSpan.FromSeconds(_Settings.TelemetryCollection.CollectionIntervalSeconds);
+                using (PeriodicTimer timer = new PeriodicTimer(interval))
                 {
-                    try
+                    _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
+                    while (!token.IsCancellationRequested)
                     {
-                        await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
-                        await CollectTelemetryForConnectedClientsAsync(null, _Settings.TelemetryCollection.CollectHostTelemetry, _Settings.TelemetryCollection.CollectProviderTelemetry, token).ConfigureAwait(false);
-                        await PruneTelemetryIfDueAsync(token).ConfigureAwait(false);
-                        _TelemetryLastCycleUtc = DateTime.UtcNow;
-                        _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
-                    }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    catch (Exception)
-                    {
-                        _TelemetryRecentFailureCount++;
+                        try
+                        {
+                            await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                            await CollectTelemetryForConnectedClientsAsync(null, _Settings.TelemetryCollection.CollectHostTelemetry, _Settings.TelemetryCollection.CollectProviderTelemetry, token).ConfigureAwait(false);
+                            await PruneTelemetryIfDueAsync(token).ConfigureAwait(false);
+                            _TelemetryLastCycleUtc = DateTime.UtcNow;
+                            _TelemetryNextCycleUtc = DateTime.UtcNow.Add(interval);
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            _TelemetryRecentFailureCount++;
+                            _Logging.Warn(_TelemetryCollectionHeader + "collection cycle failed: " + ex.Message);
+                        }
                     }
                 }
+            }
+            finally
+            {
+                _Logging.Debug(_TelemetryCollectionHeader + "stopping");
             }
         }
 
@@ -3657,6 +3709,11 @@ namespace Xeno.Server
                 return;
             }
 
+            string wsUser = !String.IsNullOrWhiteSpace(requestContext.UserId)
+                ? requestContext.UserId
+                : (!String.IsNullOrWhiteSpace(requestContext.PrincipalId) ? requestContext.PrincipalId : "unknown");
+            _Logging.Debug(_WebSocketHeader + "websocket connection accepted from " + (requestContext.SourceIp ?? "unknown") + ": " + wsUser);
+
             await session.SendTextAsync(JsonUtil.Serialize(new
             {
                 type = "server.connected",
@@ -3706,6 +3763,8 @@ namespace Xeno.Server
                 {
                     await UnregisterClientConnectionAsync(registeredClientId, session, CancellationToken.None).ConfigureAwait(false);
                 }
+
+                _Logging.Debug(_WebSocketHeader + "websocket connection closed from " + (requestContext.SourceIp ?? "unknown") + ": " + wsUser);
             }
 
             await session.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", context.Token).ConfigureAwait(false);
@@ -5383,6 +5442,7 @@ namespace Xeno.Server
 
             if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
 
+            _Logging.Debug(_WebSocketHeader + "client " + clientId + " registered (" + name + ")");
             return clientId;
         }
 
@@ -5660,6 +5720,7 @@ namespace Xeno.Server
             }
 
             if (!disconnected) return;
+            _Logging.Debug(_WebSocketHeader + "client " + clientId + " deregistered");
             XenoPlatform platform = RequirePlatform();
             XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
             if (client != null)
@@ -6126,11 +6187,11 @@ namespace Xeno.Server
             {
                 _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
                 _Ledger?.Dispose();
-                _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, SavePlatformAsync);
+                _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, _Logging, SavePlatformAsync);
                 _Ledger.Start();
                 _NetLedgerTenantSubordinate?.Dispose();
-                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger);
-                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate });
+                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
+                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging);
             }
         }
 
@@ -6874,6 +6935,7 @@ namespace Xeno.Server
                 LastUpdateUtc = DateTime.UtcNow
             };
             if (body.Active.HasValue) tenant.Active = body.Active.Value;
+            _Logging.Info(_Header + "created tenant " + tenant.Id);
             return tenant;
         }
 
@@ -6915,6 +6977,7 @@ namespace Xeno.Server
 
             if (body.Active.HasValue) user.Active = body.Active.Value;
             _Authentication.SetUserPassword(user, password);
+            _Logging.Info(_Header + "created user " + user.Id);
             return user;
         }
 
@@ -6950,6 +7013,7 @@ namespace Xeno.Server
                 Active = true
             };
             if (body.Active.HasValue) credential.Active = body.Active.Value;
+            _Logging.Info(_Header + "created credential " + credential.Id);
             return credential;
         }
 
@@ -6972,6 +7036,7 @@ namespace Xeno.Server
                 Active = true
             };
             if (body.Active.HasValue) role.Active = body.Active.Value;
+            _Logging.Info(_Header + "created role " + role.Id);
             return role;
         }
 
@@ -6998,6 +7063,7 @@ namespace Xeno.Server
             };
             if (body.Permit.HasValue) permission.Permit = body.Permit.Value;
             if (body.Active.HasValue) permission.Active = body.Active.Value;
+            _Logging.Info(_Header + "created permission " + permission.Id);
             return permission;
         }
 
@@ -7079,6 +7145,7 @@ namespace Xeno.Server
             };
 
             EnsureRoutingPolicyUnique(policy, null);
+            _Logging.Info(_Header + "created routing policy " + policy.Id);
             return policy;
         }
 
@@ -7117,6 +7184,7 @@ namespace Xeno.Server
             if (body.TelemetryFallbackMode.HasValue) policy.TelemetryFallbackMode = body.TelemetryFallbackMode.Value;
             policy.LastUpdateUtc = DateTime.UtcNow;
             EnsureRoutingPolicyUnique(policy, policy.Id);
+            _Logging.Info(_Header + "updated routing policy " + policy.Id);
             return policy;
         }
 
@@ -7125,7 +7193,9 @@ namespace Xeno.Server
             RoutingPolicy? policy = RequirePlatform().RoutingPolicies.FirstOrDefault(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
             if (policy == null) return 0;
             if (policy.IsDefault) throw new InvalidOperationException("The default routing policy cannot be deleted.");
-            return RequirePlatform().RoutingPolicies.RemoveAll(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            int removed = RequirePlatform().RoutingPolicies.RemoveAll(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            if (removed > 0) _Logging.Info(_Header + "deleted routing policy " + policyId);
+            return removed;
         }
 
         private async Task<AdminNukeResponse> HandleNukeTenantAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
@@ -7334,6 +7404,7 @@ namespace Xeno.Server
             {
                 removed += platform.RemoveTenantScopedRecords(tenantId);
                 await SavePlatformAsync(token).ConfigureAwait(false);
+                _Logging.Info(_Header + "deleted tenant " + tenantId);
             }
 
             if (_Database != null) removed += await _Database.PurgeTenantDataAsync(tenantId, token).ConfigureAwait(false);
@@ -7381,6 +7452,7 @@ namespace Xeno.Server
 
             if (body.Active.HasValue) tenant.Active = body.Active.Value;
             tenant.LastUpdateUtc = DateTime.UtcNow;
+            _Logging.Info(_Header + "updated tenant " + tenant.Id);
             return tenant;
         }
 
@@ -7401,6 +7473,7 @@ namespace Xeno.Server
             removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == userId);
             removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId));
             platform.LedgerAccountLinks.RemoveAll(item => item.XenoTenantId == user.TenantId && item.XenoUserId == userId);
+            _Logging.Info(_Header + "deleted user " + userId);
             return removed;
         }
 
@@ -7467,6 +7540,7 @@ namespace Xeno.Server
             string? password = body.Password;
             if (!String.IsNullOrWhiteSpace(password)) _Authentication.SetUserPassword(user, password);
 
+            _Logging.Info(_Header + "updated user " + user.Id);
             return user;
         }
 
@@ -7566,6 +7640,7 @@ namespace Xeno.Server
 
             if (!String.IsNullOrWhiteSpace(body.SecretKey)) throw new ArgumentException("Secret keys are not accepted for credential updates.");
             if (body.Active.HasValue) credential.Active = body.Active.Value;
+            _Logging.Info(_Header + "updated credential " + credential.Id);
             return credential;
         }
 
@@ -7578,6 +7653,7 @@ namespace Xeno.Server
             int removed = platform.Credentials.RemoveAll(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
             removed += platform.AuthSessions.RemoveAll(item => item.CredentialId == credentialId && item.TenantId == requestContext.TenantId);
             removed += platform.RoleAssignments.RemoveAll(item => item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credentialId && item.TenantId == requestContext.TenantId);
+            _Logging.Info(_Header + "deleted credential " + credentialId);
             return removed;
         }
 
@@ -7598,6 +7674,7 @@ namespace Xeno.Server
             if (body.PermissionIds != null) role.PermissionIds = GetGrantablePermissionIds(requestContext, GetStringSet(body.PermissionIds)).ToList();
             if (body.Active.HasValue) role.Active = body.Active.Value;
             role.LastUpdateUtc = DateTime.UtcNow;
+            _Logging.Info(_Header + "updated role " + role.Id);
             return role;
         }
 
@@ -7608,6 +7685,7 @@ namespace Xeno.Server
             if (role != null && role.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInRoleProtected", "Built-in roles cannot be deleted through the management API.");
             int removed = platform.Roles.RemoveAll(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
             removed += platform.RoleAssignments.RemoveAll(item => item.RoleId == roleId && item.TenantId == requestContext.TenantId);
+            if (removed > 0) _Logging.Info(_Header + "deleted role " + roleId);
             return removed;
         }
 
@@ -7637,6 +7715,7 @@ namespace Xeno.Server
             if (body.Permit.HasValue) permission.Permit = body.Permit.Value;
             if (body.Active.HasValue) permission.Active = body.Active.Value;
             permission.LastUpdateUtc = DateTime.UtcNow;
+            _Logging.Info(_Header + "updated permission " + permission.Id);
             return permission;
         }
 
@@ -7651,6 +7730,7 @@ namespace Xeno.Server
                 role.PermissionIds.RemoveAll(item => String.Equals(item, permissionId, StringComparison.OrdinalIgnoreCase));
             }
 
+            if (removed > 0) _Logging.Info(_Header + "deleted permission " + permissionId);
             return removed;
         }
 
@@ -7701,6 +7781,7 @@ namespace Xeno.Server
                 CreatedUtc = DateTime.UtcNow,
                 LastUpdateUtc = DateTime.UtcNow
             };
+            _Logging.Info(_Header + "created role assignment " + assignment.Id);
             return assignment;
         }
 
@@ -7720,7 +7801,9 @@ namespace Xeno.Server
                 }
             }
 
-            return platform.RoleAssignments.RemoveAll(item => item.Id == assignmentId && item.TenantId == assignment.TenantId);
+            int removed = platform.RoleAssignments.RemoveAll(item => item.Id == assignmentId && item.TenantId == assignment.TenantId);
+            if (removed > 0) _Logging.Info(_Header + "deleted role assignment " + assignmentId);
+            return removed;
         }
 
         private int DeleteClient(RequestContext requestContext, string clientId)
@@ -7733,6 +7816,8 @@ namespace Xeno.Server
                 {
                     _ClientConnections.Remove(clientId);
                 }
+
+                _Logging.Info(_Header + "deleted client " + clientId);
             }
 
             return removed;
@@ -8317,6 +8402,7 @@ namespace Xeno.Server
             {
                 Interlocked.Increment(ref _EmailSkippedCount);
                 IncrementEmailSeries(_EmailSkippedByProviderTemplate, result.Provider, result.TemplateId);
+                _Logging.Debug(_EmailHeader + "skipped " + result.TemplateId + " email via " + result.Provider);
                 return;
             }
 
@@ -8324,6 +8410,7 @@ namespace Xeno.Server
             {
                 Interlocked.Increment(ref _EmailSentCount);
                 IncrementEmailSeries(_EmailSentByProviderTemplate, result.Provider, result.TemplateId);
+                _Logging.Info(_EmailHeader + "sent " + result.TemplateId + " email via " + result.Provider);
             }
             else
             {
@@ -8336,6 +8423,7 @@ namespace Xeno.Server
             Interlocked.Increment(ref _EmailFailureCount);
             Interlocked.Exchange(ref _EmailLastFailureTicks, DateTime.UtcNow.Ticks);
             IncrementEmailSeries(_EmailFailedByProviderTemplate, provider, templateId);
+            _Logging.Warn(_EmailHeader + "failed to send " + templateId + " email via " + provider);
         }
 
         private static void IncrementEmailSeries(ConcurrentDictionary<string, long> series, string provider, string templateId)

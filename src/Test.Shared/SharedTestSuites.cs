@@ -49,6 +49,14 @@ namespace Test.Shared
     {
         private const string _DockerUnavailableSkipReason = "Docker is not available on this machine.";
         private static readonly Lazy<bool> _DockerAvailable = new Lazy<bool>(CheckDockerAvailable);
+        private static readonly SyslogLogging.LoggingModule _TestLogging = CreateQuietLogging();
+
+        private static SyslogLogging.LoggingModule CreateQuietLogging()
+        {
+            SyslogLogging.LoggingModule logging = new SyslogLogging.LoggingModule();
+            logging.Settings.EnableConsole = false;
+            return logging;
+        }
 
         /// <summary>
         /// All shared suites.
@@ -1239,7 +1247,7 @@ namespace Test.Shared
                                     SecretKey = netLedger.RequiredSecretKey,
                                     CommitEntriesImmediately = true
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
                                 {
                                     if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 123, "/v1/chat/completions"), out string? reason))
                                     {
@@ -1300,7 +1308,7 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
                                 {
                                     if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 22, "/v1/embeddings"), out string? reason))
                                     {
@@ -1381,7 +1389,7 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
                                 {
                                     if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, clientRecord.Id, 55, "/v1/chat/completions"), out string? reason))
                                     {
@@ -1414,7 +1422,7 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
                                 {
                                     LedgerStatusResponse status = await ledger.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
                                     if (status.NetLedgerHealthy) throw new InvalidOperationException("Ledger status should report unhealthy NetLedger.");
@@ -1448,7 +1456,7 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (NetLedgerTenantSubordinateService subordinate = new NetLedgerTenantSubordinateService(platform, settings))
+                                using (NetLedgerTenantSubordinateService subordinate = new NetLedgerTenantSubordinateService(platform, settings, _TestLogging))
                                 {
                                     TenantSubordinateServiceStatus status = await subordinate.DeleteAsync(tenant, true, CancellationToken.None).ConfigureAwait(false);
                                     if (!String.Equals(status.Status, "Deleted", StringComparison.Ordinal)) throw new InvalidOperationException("Subordinate delete status mismatch.");
@@ -2932,7 +2940,7 @@ namespace Test.Shared
                             User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
                             Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
                             XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
-                            using (LedgerService service = new LedgerService(platform, new LedgerSettings { Enabled = false }, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                            using (LedgerService service = new LedgerService(platform, new LedgerSettings { Enabled = false }, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
                             {
                                 if (service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions"), out string? disabledReason)) throw new InvalidOperationException("Disabled ledgering enqueued an event.");
                                 if (!String.Equals(disabledReason, "Ledgering is disabled.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected disabled reason: " + disabledReason);
@@ -3025,7 +3033,7 @@ namespace Test.Shared
                             Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
                             XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
                             LedgerSettings settings = new LedgerSettings { Enabled = true, MaxQueueDepth = 1, BaseUrl = "http://127.0.0.1:1" };
-                            using (LedgerService service = new LedgerService(platform, settings, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                            using (LedgerService service = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
                             {
                                 bool first = service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions"), out string? firstReason);
                                 bool second = service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 11, "/v1/embeddings"), out string? secondReason);
@@ -9160,7 +9168,7 @@ namespace Test.Shared
                 CommitEntriesImmediately = true
             };
 
-            using (LedgerService ledger = new LedgerService(platform, settings, delegate(CancellationToken saveToken) { return Task.CompletedTask; }))
+            using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken saveToken) { return Task.CompletedTask; }))
             {
                 if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 77, "/v1/chat/completions"), out string? reason))
                 {
