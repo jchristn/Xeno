@@ -153,19 +153,27 @@ To have the client start automatically, use **Start On Login** (when you sign in
 
 Start the client automatically when your user session starts, using a systemd user service. It runs as your user, with access to your home directory and GPU, and stops when your last session ends.
 
-1. Publish the client to a stable path.
+1. Stop any client you started interactively, so that two workers do not register under the same client ID.
+
+```bash
+$XENO stop
+```
+
+2. Publish the client to a stable path.
 
 ```bash
 dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o "$HOME/.xeno/bin"
 ```
 
-2. Create the systemd user directory.
+The local dashboard is embedded into the binary from `dashboard/dist-local` at build time. If that directory is missing, the publish still succeeds but the dashboard serves `404`, so run `npm run build:local` first if you have not already.
+
+3. Create the systemd user directory.
 
 ```bash
 mkdir -p "$HOME/.config/systemd/user"
 ```
 
-3. Create `~/.config/systemd/user/xeno-client.service`.
+4. Create `~/.config/systemd/user/xeno-client.service`.
 
 ```ini
 [Unit]
@@ -178,46 +186,59 @@ Type=simple
 ExecStart=%h/.xeno/bin/xeno start --foreground --worker
 Restart=always
 RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
 
 [Install]
 WantedBy=default.target
 ```
 
-4. Enable and start the service.
+`KillSignal=SIGINT` lets the client run its shutdown path. The client handles `SIGINT`; on the default `SIGTERM` it exits without clearing its state, which leaves `~/.xeno/state.json` reporting a connection that no longer exists.
+
+5. Enable and start the service.
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now xeno-client.service
 ```
 
-5. Monitor the service.
+6. Monitor the service.
 
 ```bash
 systemctl --user status xeno-client.service
 journalctl --user -u xeno-client.service -f
 ```
 
-6. Restart after configuration or binary changes, or disable it.
+7. Restart after configuration or binary changes, or disable it.
 
 ```bash
 systemctl --user restart xeno-client.service
 systemctl --user disable --now xeno-client.service
 ```
 
-The service starts when you log in and stops when your last session ends. To keep it running with no one logged in, use **Start On Boot**.
+The service starts when you log in and stops when your last session ends. To keep it running with no one logged in, use **Start On Boot**. Once a service is installed, manage the client with `systemctl` rather than `$XENO stop` and `$XENO restart` — see **Manage the Client**.
 
 ## Start On Boot
 
 Start the client at machine boot with no interactive login — the right choice for a dedicated, headless GPU host.
 
-1. Publish the client to a system path.
+1. Stop any client you started interactively, so that two workers do not register under the same client ID.
 
 ```bash
-sudo mkdir -p /opt/xeno/bin
-sudo dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /opt/xeno/bin
+$XENO stop
 ```
 
-2. Create `/etc/systemd/system/xeno-client.service`. Run it as the account whose `~/.xeno/client.json` holds your configured providers and server credentials, and set `HOME` so the client finds that file. Replace `YOUR_USER` with that account.
+2. Publish the client as your normal user, then copy it to a system path.
+
+```bash
+dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /tmp/xeno-publish
+sudo install -d -m 755 /opt/xeno/bin
+sudo cp -a /tmp/xeno-publish/. /opt/xeno/bin/
+```
+
+Do not run `dotnet publish` under `sudo` from the repository. It writes root-owned `obj/` and `bin/` directories into your working tree, and your next unprivileged build fails. As with **Start On Login**, run `npm run build:local` first if you have not already, or the published binary serves no local dashboard.
+
+3. Create `/etc/systemd/system/xeno-client.service`. Run it as the account whose `~/.xeno/client.json` holds your configured providers and server credentials, and set `HOME` so the client finds that file. Replace `YOUR_USER` with that account.
 
 ```ini
 [Unit]
@@ -232,31 +253,37 @@ Environment=HOME=/home/YOUR_USER
 ExecStart=/opt/xeno/bin/xeno start --foreground --worker
 Restart=always
 RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-3. Enable and start it at boot.
+If your provider runtime runs as a systemd service on the same host, order the client after it so the client does not advertise models before the runtime accepts requests — for example `After=network-online.target ollama.service`.
+
+4. Enable and start it at boot.
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now xeno-client.service
 ```
 
-4. Monitor it.
+5. Monitor it.
 
 ```bash
 systemctl status xeno-client.service
 journalctl -u xeno-client.service -f
 ```
 
-5. Restart after configuration or binary changes, or disable it.
+6. Restart after configuration or binary changes, or disable it.
 
 ```bash
 sudo systemctl restart xeno-client.service
 sudo systemctl disable --now xeno-client.service
 ```
+
+To pick up new client code later, repeat step 2 and then `sudo systemctl restart xeno-client.service`.
 
 Alternative: keep the per-user service from **Start On Login** and let it run without a login by enabling lingering, which starts your user services at boot: `loginctl enable-linger YOUR_USER`.
 
@@ -281,5 +308,7 @@ $XENO logs --tail 100
 $XENO stop
 $XENO reset
 ```
+
+If you installed a service from **Start On Login** or **Start On Boot**, use `systemctl` for the client lifecycle instead of `$XENO stop` and `$XENO restart`. `$XENO stop` asks the running worker to exit; systemd then restarts it after `RestartSec`, and the replacement clears the stop request on startup, so the client comes back a few seconds later. `$XENO restart` stops the worker and also starts its own detached client, which can leave two workers running under one client ID. Use `systemctl --user restart xeno-client.service` for a login service, or `sudo systemctl restart xeno-client.service` for a boot service. The remaining commands are safe under a service: the read-only ones above, and `$XENO reload`, which flags the running worker to re-advertise its inventory without touching the process.
 
 Use the local dashboard to create, update, and delete provider endpoints and advertised models, inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `~/.xeno/client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `$XENO reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory.
