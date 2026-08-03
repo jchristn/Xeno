@@ -333,6 +333,15 @@ namespace Xeno.Client.LocalInference
                 Headers = CaptureRequestHeaders(context),
                 Body = String.IsNullOrWhiteSpace(body) ? "{}" : body
             };
+
+            Console.WriteLine(
+                "Proxying local " + providerFamily + " inference request " + method + " " + path
+                + " to Xeno server (model=" + (String.IsNullOrWhiteSpace(model) ? "unspecified" : model)
+                + ", stream=" + (stream ? "true" : "false")
+                + ", embeddings=" + (embeddings ? "true" : "false")
+                + ", payloadBytes=" + Encoding.UTF8.GetByteCount(request.Body).ToString(CultureInfo.InvariantCulture)
+                + ", requestId=" + request.RequestId + ").");
+
             LocalInferencePendingResponse pending = await LocalInferenceTunnelBridge.SendRequestAsync(request, context.Token).ConfigureAwait(false);
             using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(context.Token))
             {
