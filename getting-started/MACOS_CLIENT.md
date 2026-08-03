@@ -153,19 +153,27 @@ To have the client start automatically, use **Start On Login** (when you sign in
 
 Start the client automatically when you log in, using a launchd LaunchAgent. It runs in your GUI login session, with access to your home directory and GPU, and stops when you log out.
 
-1. Publish the client to a stable path.
+1. Stop any client you started interactively, so that two workers do not register under the same client ID.
+
+```bash
+$XENO stop
+```
+
+2. Publish the client to a stable path.
 
 ```bash
 dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o "$HOME/.xeno/bin"
 ```
 
-2. Create the LaunchAgents directory.
+The local dashboard is embedded into the binary from `dashboard/dist-local` at build time. If that directory is missing, the publish still succeeds but the dashboard serves `404`, so run `npm run build:local` first if you have not already.
+
+3. Create the LaunchAgents directory.
 
 ```bash
 mkdir -p "$HOME/Library/LaunchAgents"
 ```
 
-3. Create `~/Library/LaunchAgents/ai.xenocloud.client.plist`. Replace `/Users/YOUR_USER` with your actual home directory.
+4. Create `~/Library/LaunchAgents/ai.xenocloud.client.plist`. Replace `/Users/YOUR_USER` with your actual home directory.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -193,14 +201,16 @@ mkdir -p "$HOME/Library/LaunchAgents"
 </plist>
 ```
 
-4. Load and start the LaunchAgent.
+`KeepAlive` relaunches the client whenever it exits, including when you exit it yourself with `$XENO stop`. Manage a loaded LaunchAgent with `launchctl`, not with `$XENO stop` and `$XENO restart` — see **Manage the Client**.
+
+5. Load and start the LaunchAgent.
 
 ```bash
 launchctl load "$HOME/Library/LaunchAgents/ai.xenocloud.client.plist"
 launchctl start ai.xenocloud.client
 ```
 
-5. Monitor the client.
+6. Monitor the client.
 
 ```bash
 $HOME/.xeno/bin/xeno status
@@ -209,13 +219,13 @@ $HOME/.xeno/bin/xeno logs --tail 100
 tail -f "$HOME/.xeno/logs/launchd.out.log"
 ```
 
-6. Restart the loaded LaunchAgent after configuration or binary changes.
+7. Restart the loaded LaunchAgent after configuration or binary changes.
 
 ```bash
 launchctl kickstart -k "gui/$(id -u)/ai.xenocloud.client"
 ```
 
-7. Stop or remove it if needed.
+8. Stop or remove it if needed.
 
 ```bash
 launchctl stop ai.xenocloud.client
@@ -228,14 +238,23 @@ The LaunchAgent runs in your login session and stops at logout. To keep it runni
 
 Start the client at machine boot with no interactive login, using a launchd LaunchDaemon — the right choice for a dedicated, headless GPU host.
 
-1. Publish the client to a system path.
+1. Stop any client you started interactively, so that two workers do not register under the same client ID.
 
 ```bash
-sudo mkdir -p /opt/xeno/bin
-sudo dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /opt/xeno/bin
+$XENO stop
 ```
 
-2. Create `/Library/LaunchDaemons/ai.xenocloud.client.plist` (owned by root). Set `UserName` to the account whose `~/.xeno/client.json` holds your configuration, and set `HOME` so the client finds that file. Replace `YOUR_USER` with that account.
+2. Publish the client as your normal user, then copy it to a system path.
+
+```bash
+dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /tmp/xeno-publish
+sudo mkdir -p /opt/xeno/bin
+sudo cp -a /tmp/xeno-publish/. /opt/xeno/bin/
+```
+
+Do not run `dotnet publish` under `sudo` from the repository. It writes root-owned `obj/` and `bin/` directories into your working tree, and your next unprivileged build fails. As with **Start On Login**, run `npm run build:local` first if you have not already, or the published binary serves no local dashboard.
+
+3. Create `/Library/LaunchDaemons/ai.xenocloud.client.plist` (owned by root). Set `UserName` to the account whose `~/.xeno/client.json` holds your configuration, and set `HOME` so the client finds that file. Replace `YOUR_USER` with that account.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -270,31 +289,33 @@ sudo dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /opt/xeno/b
 </plist>
 ```
 
-3. Set ownership and load it.
+4. Set ownership and load it.
 
 ```bash
 sudo chown root:wheel /Library/LaunchDaemons/ai.xenocloud.client.plist
 sudo launchctl load /Library/LaunchDaemons/ai.xenocloud.client.plist
 ```
 
-4. Monitor it.
+5. Monitor it.
 
 ```bash
 /opt/xeno/bin/xeno status
 tail -f /Users/YOUR_USER/.xeno/logs/launchd.out.log
 ```
 
-5. Restart it after configuration or binary changes.
+6. Restart it after configuration or binary changes.
 
 ```bash
 sudo launchctl kickstart -k system/ai.xenocloud.client
 ```
 
-6. Stop or remove it if needed.
+7. Stop or remove it if needed.
 
 ```bash
 sudo launchctl bootout system /Library/LaunchDaemons/ai.xenocloud.client.plist
 ```
+
+To pick up new client code later, repeat step 2 and then `sudo launchctl kickstart -k system/ai.xenocloud.client`.
 
 GPU note: a LaunchDaemon starts before login and runs in a non-interactive context. Confirm your GPU/provider runtime (for example Ollama) is reachable from that context — set `UserName` to an account with access and verify with `tail -f /Users/YOUR_USER/.xeno/logs/launchd.out.log` after a reboot.
 
@@ -316,5 +337,7 @@ $XENO logs --tail 100
 $XENO stop
 $XENO reset
 ```
+
+If you loaded a LaunchAgent or LaunchDaemon from **Start On Login** or **Start On Boot**, use `launchctl` for the client lifecycle instead of `$XENO stop` and `$XENO restart`. Both plists set `KeepAlive`, so `$XENO stop` asks the worker to exit and launchd immediately relaunches it, and the replacement clears the stop request on startup. `$XENO restart` stops the worker and also starts its own detached client, which can leave two workers running under one client ID. Use `launchctl kickstart -k "gui/$(id -u)/ai.xenocloud.client"` for the agent, or `sudo launchctl kickstart -k system/ai.xenocloud.client` for the daemon, and `launchctl unload`/`bootout` to stop it for good. Note that launchd stops the client with `SIGTERM`, which the client does not handle, so `~/.xeno/state.json` can describe a connection that no longer exists until the client next starts. The remaining commands are safe under launchd: the read-only ones above, and `$XENO reload`, which flags the running worker to re-advertise its inventory without touching the process.
 
 Use the local dashboard to create, update, and delete provider endpoints and advertised models, inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `~/.xeno/client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `$XENO reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory.

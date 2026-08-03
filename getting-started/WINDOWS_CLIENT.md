@@ -187,10 +187,11 @@ The statistics window uses the normal Windows title bar close button. If you reb
 
 Start the client automatically when you sign in, using a scheduled task with an at-logon trigger. It runs in your interactive session, with access to your profile and GPU, and stops when you sign out. The task supervises the long-running foreground worker directly.
 
-1. Confirm `xeno` works from a new PowerShell window.
+1. Confirm `xeno` works from a new PowerShell window, and stop any client you started interactively so that two workers do not register under the same client ID.
 
 ```powershell
 xeno status
+xeno stop
 ```
 
 2. Create the scheduled task.
@@ -237,7 +238,14 @@ Start the client at machine boot with no interactive sign-in, using a scheduled 
 
 Because the task runs outside your interactive session, it must run as an account that has your Xeno configuration and GPU access. Run it as your own account with stored credentials (recommended, so it uses your `%USERPROFILE%\.xeno\client.json`), or as `SYSTEM`.
 
-1. Create the task to run at startup as your account, whether or not you are signed in. Replace `YOUR_PASSWORD`.
+1. Stop any client you started interactively, and any task from **Start On Login**, so that two workers do not register under the same client ID.
+
+```powershell
+xeno stop
+Stop-ScheduledTask -TaskName "Xeno Client" -ErrorAction SilentlyContinue
+```
+
+2. Create the task to run at startup as your account, whether or not you are signed in. Replace `YOUR_PASSWORD`.
 
 ```powershell
 $xenoPath = (Get-Command xeno).Source
@@ -254,14 +262,14 @@ $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 Register-ScheduledTask -TaskName "Xeno Client (Boot)" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Start Xeno Client at boot"
 ```
 
-2. Start it immediately and confirm.
+3. Start it immediately and confirm.
 
 ```powershell
 Start-ScheduledTask -TaskName "Xeno Client (Boot)"
 xeno status
 ```
 
-3. Remove the task if needed.
+4. Remove the task if needed.
 
 ```powershell
 Unregister-ScheduledTask -TaskName "Xeno Client (Boot)" -Confirm:$false
@@ -290,5 +298,7 @@ xeno restart
 xeno stop
 xeno reset
 ```
+
+If you registered a scheduled task from **Start On Login** or **Start On Boot**, do not use `xeno restart` to cycle it. `xeno restart` stops the worker the task launched and then starts its own detached client, which the task does not supervise, so you can end up with two workers under one client ID and a task that reports itself idle while a client is still connected. Use `Stop-ScheduledTask` and `Start-ScheduledTask` instead. `xeno stop` is the graceful shutdown — it asks the worker to exit and lets it clean up — but the task will not run again until its next trigger or a manual `Start-ScheduledTask`, while `Stop-ScheduledTask` terminates the worker outright and can leave `%USERPROFILE%\.xeno\state.json` describing a connection that no longer exists. The remaining commands are safe under a task: the read-only ones above, and `xeno reload`, which flags the running worker to re-advertise its inventory without touching the process.
 
 Use the local dashboard to create, update, and delete provider endpoints and advertised models, inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `%USERPROFILE%\.xeno\client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `xeno reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory.
