@@ -56,6 +56,7 @@ import EmptyState from './components/EmptyState.jsx';
 import LanguageSelector from './components/LanguageSelector.jsx';
 import ActivityChart from './components/ActivityChart.jsx';
 import Modal from './components/Modal.jsx';
+import { ToastContainer, showToast } from './components/Toast.jsx';
 import Pagination from './components/Pagination.jsx';
 
 const api = new ApiClient();
@@ -336,9 +337,84 @@ function dashboardLinkVisible(link, actor, session) {
   return true;
 }
 
+function buildClientSnapshot(clients) {
+  const snapshot = new Map();
+  (Array.isArray(clients) ? clients : []).forEach((client) => {
+    const id = recordId(client) || value(client, 'id') || value(client, 'name');
+    if (!id) return;
+    const models = new Set(
+      (Array.isArray(value(client, 'models')) ? value(client, 'models') : [])
+        .map((model) => value(model, 'name'))
+        .filter(Boolean)
+    );
+    snapshot.set(id, { name: value(client, 'name') || id, connected: value(client, 'connected') === true, models });
+  });
+  return snapshot;
+}
+
+function reportClientActivity(previous, next, t) {
+  next.forEach((current, id) => {
+    const before = previous.get(id);
+    if (current.connected && (!before || !before.connected)) {
+      showToast(t('toastClientConnected', { client: current.name }), { type: 'success' });
+    } else if (!current.connected && before && before.connected) {
+      showToast(t('toastClientDisconnected', { client: current.name }), { type: 'warning' });
+    }
+  });
+
+  previous.forEach((before, id) => {
+    if (before.connected && !next.has(id)) {
+      showToast(t('toastClientDisconnected', { client: before.name }), { type: 'warning' });
+    }
+  });
+
+  // Only diff models for clients that were connected in both snapshots, so a client
+  // connecting or disconnecting does not also emit a toast for every model it carries.
+  next.forEach((current, id) => {
+    const before = previous.get(id);
+    if (!before || !before.connected || !current.connected) return;
+    current.models.forEach((model) => {
+      if (!before.models.has(model)) showToast(t('toastModelAdded', { model, client: current.name }), { type: 'success' });
+    });
+    before.models.forEach((model) => {
+      if (!current.models.has(model)) showToast(t('toastModelRemoved', { model, client: current.name }), { type: 'warning' });
+    });
+  });
+}
+
+function useClientActivityToasts() {
+  const { t } = useTranslation();
+  const previousRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function poll() {
+      let result;
+      try {
+        result = await api.get('/api/v1/clients');
+      } catch {
+        return;
+      }
+      if (!alive || !Array.isArray(result)) return;
+      const snapshot = buildClientSnapshot(result);
+      if (previousRef.current) reportClientActivity(previousRef.current, snapshot, t);
+      previousRef.current = snapshot;
+    }
+
+    poll();
+    const interval = window.setInterval(poll, 10000);
+    return () => {
+      alive = false;
+      window.clearInterval(interval);
+    };
+  }, [t]);
+}
+
 function Shell({ onLogout, onToggleTheme, session, theme }) {
   const { t } = useTranslation();
   const location = useLocation();
+  useClientActivityToasts();
   const users = useResource('/api/v1/users', []);
   const actor = users.data.find((item) => recordId(item) === session?.userId);
   const isGlobalAdmin = isGlobalAdminUser(actor);
@@ -432,6 +508,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
           </Routes>
         </main>
       </div>
+      <ToastContainer />
     </div>
   );
 }
