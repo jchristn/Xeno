@@ -48,7 +48,9 @@ xeno help
 .\remove-tool.bat
 ```
 
-## Easy Path: Build, Configure, Start, Monitor
+## Build and Configure
+
+Do this once before choosing how the client should start.
 
 1. Build the solution.
 
@@ -105,32 +107,7 @@ xeno config show
 xeno inventory
 ```
 
-9. Start the client in the background.
-
-```powershell
-xeno start
-```
-
-Restart the background client after configuration or binary changes:
-
-```powershell
-xeno restart
-```
-
-10. Check status.
-
-```powershell
-xeno status
-xeno ping
-```
-
-11. Open the local Xeno Client dashboard.
-
-```powershell
-xeno dashboard open
-```
-
-12. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
+9. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
 
 Edit `%USERPROFILE%\.xeno\client.json` and add:
 
@@ -144,32 +121,51 @@ Edit `%USERPROFILE%\.xeno\client.json` and add:
 }
 ```
 
-Restart the client, then test local model listing:
-
-```powershell
-xeno restart
-curl http://127.0.0.1:11434/v1/models
-curl http://127.0.0.1:11434/api/tags
-```
-
 The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 
-13. Watch logs.
+## Start Interactively
+
+Run the client yourself. This is the simplest way and is best for first-run validation, configuration changes, and development.
+
+1. Start the client in the background. It runs until you stop it or the session ends.
+
+```powershell
+xeno start
+```
+
+Or run it attached to the terminal (press `Ctrl+C` to stop):
+
+```powershell
+xeno start --foreground --worker
+```
+
+2. Check status and open the local dashboard.
+
+```powershell
+xeno status
+xeno ping
+xeno dashboard open
+```
+
+3. Watch logs.
 
 ```powershell
 xeno logs --tail 100
 xeno logs -f
 ```
 
-14. Stop the client.
+4. Restart after configuration or binary changes, or stop the client.
 
 ```powershell
+xeno restart
 xeno stop
 ```
 
-## Optional: Run the Windows Tray App
+To have the client start automatically, use **Start On Login** (when you sign in) or **Start On Boot** (headless, no sign-in).
 
-The tray app is useful on a Windows workstation where the client should be easy to start, stop, inspect, and reopen without keeping a terminal nearby. It uses the `xeno.exe` built beside it, so build the solution before launching the tray from source.
+### Run the Windows tray app
+
+The tray app is a convenient interactive option on a Windows workstation, letting you start, stop, inspect, and reopen the client without keeping a terminal nearby. It uses the `xeno.exe` built beside it, so build the solution first.
 
 1. Build the tray app and its sibling client executable.
 
@@ -183,15 +179,13 @@ dotnet build .\src\Xeno.sln
 Start-Process .\src\Xeno.Tray\bin\Debug\net10.0\xeno-tray.exe
 ```
 
-3. Use the tray icon menu to start or stop the Xeno client, open the local dashboard, show client statistics, or quit the tray app.
-
-To restart a tray-managed client after configuration changes, select **Stop Client**, then select **Start Client** from the tray icon menu.
+3. Use the tray icon menu to start or stop the Xeno client, open the local dashboard, show client statistics, or quit the tray app. To restart a tray-managed client after configuration changes, select **Stop Client**, then select **Start Client**.
 
 The statistics window uses the normal Windows title bar close button. If you rebuild while the tray app or the client it started is still running from `src\Xeno.Tray\bin\Debug\net10.0`, stop both processes first so the build can replace `xeno-tray.exe`, `xeno.exe`, and their referenced assemblies.
 
-## Better Path: Start on Boot
+## Start On Login
 
-Use a scheduled task to run the foreground worker when you log in. This lets Task Scheduler supervise the long-running client process directly instead of supervising a short `xeno start` command that exits after spawning a child process.
+Start the client automatically when you sign in, using a scheduled task with an at-logon trigger. It runs in your interactive session, with access to your profile and GPU, and stops when you sign out. The task supervises the long-running foreground worker directly.
 
 1. Confirm `xeno` works from a new PowerShell window.
 
@@ -234,6 +228,48 @@ Start-ScheduledTask -TaskName "Xeno Client"
 ```powershell
 Unregister-ScheduledTask -TaskName "Xeno Client" -Confirm:$false
 ```
+
+This task runs in your interactive session when you sign in. To keep it running with no one signed in, use **Start On Boot**.
+
+## Start On Boot
+
+Start the client at machine boot with no interactive sign-in, using a scheduled task with an at-startup trigger set to run whether or not a user is logged on — the right choice for a dedicated, headless GPU host. Run PowerShell as Administrator.
+
+Because the task runs outside your interactive session, it must run as an account that has your Xeno configuration and GPU access. Run it as your own account with stored credentials (recommended, so it uses your `%USERPROFILE%\.xeno\client.json`), or as `SYSTEM`.
+
+1. Create the task to run at startup as your account, whether or not you are signed in. Replace `YOUR_PASSWORD`.
+
+```powershell
+$xenoPath = (Get-Command xeno).Source
+$action = New-ScheduledTaskAction -Execute $xenoPath -Argument "start --foreground --worker"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "Xeno Client (Boot)" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -User "$env:USERDOMAIN\$env:USERNAME" -Password "YOUR_PASSWORD" -Description "Start Xeno Client at boot"
+```
+
+To run as `SYSTEM` instead (no password), replace the `-User`/`-Password` arguments with a principal:
+
+```powershell
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName "Xeno Client (Boot)" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Start Xeno Client at boot"
+```
+
+2. Start it immediately and confirm.
+
+```powershell
+Start-ScheduledTask -TaskName "Xeno Client (Boot)"
+xeno status
+```
+
+3. Remove the task if needed.
+
+```powershell
+Unregister-ScheduledTask -TaskName "Xeno Client (Boot)" -Confirm:$false
+```
+
+Config note: `SYSTEM` has its own profile, so its `client.json` is under `C:\Windows\System32\config\systemprofile\.xeno\client.json`, not your user profile. Either run the task as your own account (as above) so it uses `%USERPROFILE%\.xeno\client.json`, or copy your configured `client.json` into the `SYSTEM` profile path.
+
+GPU note: a task that starts at boot runs in a non-interactive session (session 0). GPU access from `SYSTEM`/session 0 can be restricted by the driver. If the client cannot reach the GPU, run the task as a real user account with GPU access and "run whether user is logged on or not," and verify with `xeno status` and `xeno logs --tail 50` after a reboot.
 
 ## Manage the Client
 

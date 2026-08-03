@@ -28,7 +28,9 @@ git clone https://github.com/jchristn/Xeno.git
 cd Xeno
 ```
 
-## Easy Path: Build, Configure, Start, Monitor
+## Build and Configure
+
+Do this once before choosing how the client should start.
 
 1. Build the solution.
 
@@ -91,33 +93,7 @@ $XENO config show
 $XENO inventory
 ```
 
-10. Start the client in the background.
-
-```bash
-$XENO start
-```
-
-Restart the background client after configuration or binary changes:
-
-```bash
-$XENO stop
-$XENO start
-```
-
-11. Check status.
-
-```bash
-$XENO status
-```
-
-12. Open or print the local dashboard URL.
-
-```bash
-$XENO dashboard
-$XENO dashboard open
-```
-
-13. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
+10. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
 
 Edit `~/.xeno/client.json` and add:
 
@@ -131,32 +107,51 @@ Edit `~/.xeno/client.json` and add:
 }
 ```
 
-Restart the client, then test local model listing:
-
-```bash
-$XENO restart
-curl http://127.0.0.1:11434/v1/models
-curl http://127.0.0.1:11434/api/tags
-```
-
 The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 
-14. Watch logs.
+## Start Interactively
+
+Run the client yourself from a terminal. This is the simplest way and is best for first-run validation, configuration changes, and development.
+
+1. Start the client in the background. It runs until you stop it or the session ends.
+
+```bash
+$XENO start
+```
+
+Or run it attached to the terminal (press `Ctrl+C` to stop):
+
+```bash
+$XENO start --foreground --worker
+```
+
+2. Check status and open the local dashboard.
+
+```bash
+$XENO status
+$XENO dashboard
+$XENO dashboard open
+```
+
+3. Watch logs.
 
 ```bash
 $XENO logs --tail 100
 $XENO logs -f
 ```
 
-15. Stop the client.
+4. Restart after configuration or binary changes, or stop the client.
 
 ```bash
+$XENO restart
 $XENO stop
 ```
 
-## Better Path: Start on Boot with launchd
+To have the client start automatically, use **Start On Login** (when you sign in) or **Start On Boot** (headless, no sign-in).
 
-Use a LaunchAgent when the client should start when you log in.
+## Start On Login
+
+Start the client automatically when you log in, using a launchd LaunchAgent. It runs in your GUI login session, with access to your home directory and GPU, and stops when you log out.
 
 1. Publish the client to a stable path.
 
@@ -170,7 +165,7 @@ dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o "$HOME/.xeno/bin
 mkdir -p "$HOME/Library/LaunchAgents"
 ```
 
-3. Create `~/Library/LaunchAgents/ai.xenocloud.client.plist`.
+3. Create `~/Library/LaunchAgents/ai.xenocloud.client.plist`. Replace `/Users/YOUR_USER` with your actual home directory.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -197,8 +192,6 @@ mkdir -p "$HOME/Library/LaunchAgents"
 </dict>
 </plist>
 ```
-
-Replace `/Users/YOUR_USER` with your actual home directory.
 
 4. Load and start the LaunchAgent.
 
@@ -228,6 +221,82 @@ launchctl kickstart -k "gui/$(id -u)/ai.xenocloud.client"
 launchctl stop ai.xenocloud.client
 launchctl unload "$HOME/Library/LaunchAgents/ai.xenocloud.client.plist"
 ```
+
+The LaunchAgent runs in your login session and stops at logout. To keep it running with no one logged in, use **Start On Boot**.
+
+## Start On Boot
+
+Start the client at machine boot with no interactive login, using a launchd LaunchDaemon — the right choice for a dedicated, headless GPU host.
+
+1. Publish the client to a system path.
+
+```bash
+sudo mkdir -p /opt/xeno/bin
+sudo dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /opt/xeno/bin
+```
+
+2. Create `/Library/LaunchDaemons/ai.xenocloud.client.plist` (owned by root). Set `UserName` to the account whose `~/.xeno/client.json` holds your configuration, and set `HOME` so the client finds that file. Replace `YOUR_USER` with that account.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.xenocloud.client</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/xeno/bin/xeno</string>
+    <string>start</string>
+    <string>--foreground</string>
+    <string>--worker</string>
+  </array>
+  <key>UserName</key>
+  <string>YOUR_USER</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/YOUR_USER</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USER/.xeno/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USER/.xeno/logs/launchd.err.log</string>
+</dict>
+</plist>
+```
+
+3. Set ownership and load it.
+
+```bash
+sudo chown root:wheel /Library/LaunchDaemons/ai.xenocloud.client.plist
+sudo launchctl load /Library/LaunchDaemons/ai.xenocloud.client.plist
+```
+
+4. Monitor it.
+
+```bash
+/opt/xeno/bin/xeno status
+tail -f /Users/YOUR_USER/.xeno/logs/launchd.out.log
+```
+
+5. Restart it after configuration or binary changes.
+
+```bash
+sudo launchctl kickstart -k system/ai.xenocloud.client
+```
+
+6. Stop or remove it if needed.
+
+```bash
+sudo launchctl bootout system /Library/LaunchDaemons/ai.xenocloud.client.plist
+```
+
+GPU note: a LaunchDaemon starts before login and runs in a non-interactive context. Confirm your GPU/provider runtime (for example Ollama) is reachable from that context — set `UserName` to an account with access and verify with `tail -f /Users/YOUR_USER/.xeno/logs/launchd.out.log` after a reboot.
 
 ## Manage the Client
 

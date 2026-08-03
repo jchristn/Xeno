@@ -28,7 +28,9 @@ git clone https://github.com/jchristn/Xeno.git
 cd Xeno
 ```
 
-## Easy Path: Build, Configure, Start, Monitor
+## Build and Configure
+
+Do this once before choosing how the client should start.
 
 1. Build the solution.
 
@@ -91,33 +93,7 @@ $XENO config show
 $XENO inventory
 ```
 
-10. Start the client in the background.
-
-```bash
-$XENO start
-```
-
-Restart the background client after configuration or binary changes:
-
-```bash
-$XENO stop
-$XENO start
-```
-
-11. Check status.
-
-```bash
-$XENO status
-```
-
-12. Open or print the local dashboard URL.
-
-```bash
-$XENO dashboard
-$XENO dashboard open
-```
-
-13. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
+10. Optionally enable the localhost OpenAI/Ollama-compatible inference listener.
 
 Edit `~/.xeno/client.json` and add:
 
@@ -131,32 +107,51 @@ Edit `~/.xeno/client.json` and add:
 }
 ```
 
-Restart the client, then test local model listing:
-
-```bash
-$XENO restart
-curl http://127.0.0.1:11434/v1/models
-curl http://127.0.0.1:11434/api/tags
-```
-
 The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 
-14. Watch logs.
+## Start Interactively
+
+Run the client yourself from a terminal. This is the simplest way and is best for first-run validation, configuration changes, and development.
+
+1. Start the client in the background. It runs until you stop it or the session ends.
+
+```bash
+$XENO start
+```
+
+Or run it attached to the terminal (press `Ctrl+C` to stop):
+
+```bash
+$XENO start --foreground --worker
+```
+
+2. Check status and open the local dashboard.
+
+```bash
+$XENO status
+$XENO dashboard
+$XENO dashboard open
+```
+
+3. Watch logs.
 
 ```bash
 $XENO logs --tail 100
 $XENO logs -f
 ```
 
-15. Stop the client.
+4. Restart after configuration or binary changes, or stop the client.
 
 ```bash
+$XENO restart
 $XENO stop
 ```
 
-## Better Path: Start on Boot with systemd
+To have the client start automatically, use **Start On Login** (when you sign in) or **Start On Boot** (headless, no sign-in).
 
-Use a user service when the client should start when your user session starts.
+## Start On Login
+
+Start the client automatically when your user session starts, using a systemd user service. It runs as your user, with access to your home directory and GPU, and stops when your last session ends.
 
 1. Publish the client to a stable path.
 
@@ -176,6 +171,7 @@ mkdir -p "$HOME/.config/systemd/user"
 [Unit]
 Description=Xeno Client
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -194,30 +190,77 @@ systemctl --user daemon-reload
 systemctl --user enable --now xeno-client.service
 ```
 
-5. Allow user services to start at boot without an interactive login if your distribution supports lingering.
-
-```bash
-loginctl enable-linger "$USER"
-```
-
-6. Monitor the service.
+5. Monitor the service.
 
 ```bash
 systemctl --user status xeno-client.service
 journalctl --user -u xeno-client.service -f
 ```
 
-7. Restart the service after configuration or binary changes.
+6. Restart after configuration or binary changes, or disable it.
 
 ```bash
 systemctl --user restart xeno-client.service
-```
-
-8. Stop or remove it if needed.
-
-```bash
 systemctl --user disable --now xeno-client.service
 ```
+
+The service starts when you log in and stops when your last session ends. To keep it running with no one logged in, use **Start On Boot**.
+
+## Start On Boot
+
+Start the client at machine boot with no interactive login — the right choice for a dedicated, headless GPU host.
+
+1. Publish the client to a system path.
+
+```bash
+sudo mkdir -p /opt/xeno/bin
+sudo dotnet publish src/Xeno.Client/Xeno.Client.csproj -c Release -o /opt/xeno/bin
+```
+
+2. Create `/etc/systemd/system/xeno-client.service`. Run it as the account whose `~/.xeno/client.json` holds your configured providers and server credentials, and set `HOME` so the client finds that file. Replace `YOUR_USER` with that account.
+
+```ini
+[Unit]
+Description=Xeno Client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Environment=HOME=/home/YOUR_USER
+ExecStart=/opt/xeno/bin/xeno start --foreground --worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+3. Enable and start it at boot.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now xeno-client.service
+```
+
+4. Monitor it.
+
+```bash
+systemctl status xeno-client.service
+journalctl -u xeno-client.service -f
+```
+
+5. Restart after configuration or binary changes, or disable it.
+
+```bash
+sudo systemctl restart xeno-client.service
+sudo systemctl disable --now xeno-client.service
+```
+
+Alternative: keep the per-user service from **Start On Login** and let it run without a login by enabling lingering, which starts your user services at boot: `loginctl enable-linger YOUR_USER`.
+
+GPU note: a service that starts before login runs in a non-interactive session. Confirm your GPU runtime (for example the NVIDIA driver and Ollama) is reachable from that context — run the service as an account with GPU access and verify with `journalctl -u xeno-client.service -f` after a reboot.
 
 ## Manage the Client
 
