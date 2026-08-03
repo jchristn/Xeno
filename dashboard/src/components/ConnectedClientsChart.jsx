@@ -20,6 +20,7 @@ export default function ConnectedClientsChart({ connected, loading = false, onRa
   const [localRange, setLocalRange] = useState('lastDay');
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const [samples, setSamples] = useState(loadSamples);
+  const latestRef = useRef({ connected, total });
   const activeRange = range || localRange;
   const selectedRange = ranges.find((item) => item.key === activeRange) || ranges[1];
   const now = Date.now();
@@ -67,6 +68,35 @@ export default function ConnectedClientsChart({ connected, loading = false, onRa
       return next;
     });
   }, [connected, sampleVersion, total]);
+
+  useEffect(() => {
+    latestRef.current = { connected, total };
+  }, [connected, total]);
+
+  // Capture the current connected/total once per bucket interval so every chart
+  // bucket accumulates a data point over time. The parent resource only fetches on
+  // mount and manual refresh, so without this the chart would only ever hold the
+  // couple of samples produced by those fetches.
+  useEffect(() => {
+    const bucketMs = selectedRange.durationMs / selectedRange.buckets;
+    const intervalMs = Math.max(10000, bucketMs);
+
+    function capture() {
+      const latest = latestRef.current;
+      setSamples((current) => {
+        const next = pruneSamples([
+          ...current,
+          { connected: Number(latest.connected || 0), total: Number(latest.total || 0), ts: Date.now() }
+        ]);
+        saveSamples(next);
+        return next;
+      });
+    }
+
+    capture();
+    const id = window.setInterval(capture, intervalMs);
+    return () => window.clearInterval(id);
+  }, [selectedRange]);
 
   const chart = {
     height: 525,
@@ -223,20 +253,25 @@ function buildBuckets(samples, connected, total, selectedRange, now) {
   const source = pruneSamples([
     ...samples,
     { connected: Number(connected || 0), total: Number(total || 0), ts: now }
-  ]).filter((sample) => sample.ts >= rangeStart && sample.ts <= now);
+  ]).sort((left, right) => left.ts - right.ts);
 
+  // Walk the samples once in time order, holding the most recent value so buckets
+  // with no sample of their own carry the last known value forward instead of
+  // dropping to zero. Samples before the range seed the first bucket.
+  let carry = null;
+  let cursor = 0;
   return Array.from({ length: selectedRange.buckets }, (_, index) => {
     const start = rangeStart + index * bucketMs;
     const end = index === selectedRange.buckets - 1 ? now + 1 : start + bucketMs;
-    const bucketSamples = source
-      .filter((sample) => sample.ts >= start && sample.ts < end)
-      .sort((left, right) => left.ts - right.ts);
-    const latest = bucketSamples[bucketSamples.length - 1];
+    while (cursor < source.length && source[cursor].ts < end) {
+      carry = source[cursor];
+      cursor += 1;
+    }
     return {
-      connected: latest ? latest.connected : 0,
+      connected: carry ? carry.connected : 0,
       label: formatTime(start, selectedRange.key),
       start,
-      total: latest ? latest.total : Number(total || 0)
+      total: carry ? carry.total : Number(total || 0)
     };
   });
 }
