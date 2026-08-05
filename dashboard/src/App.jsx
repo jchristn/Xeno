@@ -2142,6 +2142,20 @@ function TenantsView({ session }) {
     tenants.refresh();
   }
 
+  async function approveTenant(row) {
+    const tenantId = recordId(row);
+    if (!tenantId) return;
+    try {
+      const result = await api.post('/api/v1/onboarding/approve', { tenantId });
+      if (result?.error) throw new Error(result.message || result.error);
+      showToast(t('toastTenantApproved', { tenant: value(row, 'name') || tenantId }), { type: 'success' });
+      tenants.refresh();
+      users.refresh();
+    } catch (error) {
+      showToast(error?.message || t('onboardTenantFailed'), { type: 'danger' });
+    }
+  }
+
   return (
     <div className="view-stack">
       <DataTable
@@ -2152,15 +2166,29 @@ function TenantsView({ session }) {
         } : null}
         onRowClick={isGlobalAdmin ? setSelected : setDetails}
         onRefresh={tenants.refresh}
-        getRowActions={(row) => isGlobalAdmin ? [{
-          destructive: true,
-          disabled: recordId(row) === 'ten_default',
-          icon: <Trash2 size={14} />,
-          key: 'nuke-tenant',
-          label: t('nukeTenant'),
-          tooltip: recordId(row) === 'ten_default' ? t('protectedTenantNukeUnavailable') : t('tooltipNukeTenant'),
-          onSelect: () => setNukeTenant(row)
-        }] : []}
+        getRowActions={(row) => {
+          if (!isGlobalAdmin) return [];
+          const actions = [];
+          if (value(row, 'active') === false) {
+            actions.push({
+              icon: <CheckCircle2 size={14} />,
+              key: 'onboard-tenant',
+              label: t('onboardTenant'),
+              tooltip: t('tooltipOnboardTenant'),
+              onSelect: () => approveTenant(row)
+            });
+          }
+          actions.push({
+            destructive: true,
+            disabled: recordId(row) === 'ten_default',
+            icon: <Trash2 size={14} />,
+            key: 'nuke-tenant',
+            label: t('nukeTenant'),
+            tooltip: recordId(row) === 'ten_default' ? t('protectedTenantNukeUnavailable') : t('tooltipNukeTenant'),
+            onSelect: () => setNukeTenant(row)
+          });
+          return actions;
+        }}
         loading={tenants.loading}
         rows={tenants.data}
         rowActionLabel={isGlobalAdmin ? t('edit') : t('viewDetails')}
@@ -4594,6 +4622,35 @@ function SettingsView() {
             </label>
           </div>
         </Panel>
+        <Panel actions={<SettingImpactBadge type="restart" />} title={t('onboardingSettings')}>
+          <SettingImpactNote restart={t('onboardingRestartNote')} />
+          <div className="form-grid two">
+            <label className="form-field" title={t('tooltipSettingsOnboardingMode')}>
+              <span>{t('onboardingMode')}</span>
+              <select value={draft.Onboarding.Mode} onChange={(event) => updateSetting('Onboarding', 'Mode', event.target.value)} title={t('tooltipSettingsOnboardingMode')}>
+                {['Open', 'VerifyAndApprove', 'Disabled'].map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsOnboardingLinkBase')}>
+              <span>{t('onboardingLinkBaseUrl')}</span>
+              <input value={draft.Onboarding.LinkBaseUrl || ''} onChange={(event) => updateSetting('Onboarding', 'LinkBaseUrl', event.target.value || null)} placeholder="https://app.xenocloud.ai" title={t('tooltipSettingsOnboardingLinkBase')} />
+            </label>
+            <label className="form-field" title={t('tooltipSettingsCaptchaProvider')}>
+              <span>{t('captchaProvider')}</span>
+              <select value={draft.Onboarding.Captcha.Provider} onChange={(event) => updateNestedSetting('Onboarding', 'Captcha', 'Provider', event.target.value)} title={t('tooltipSettingsCaptchaProvider')}>
+                {['None', 'CloudflareTurnstile', 'GoogleReCaptcha'].map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="form-field" title={t('tooltipSettingsCaptchaSiteKey')}>
+              <span>{t('captchaSiteKey')}</span>
+              <input value={draft.Onboarding.Captcha.SiteKey || ''} onChange={(event) => updateNestedSetting('Onboarding', 'Captcha', 'SiteKey', event.target.value || null)} title={t('tooltipSettingsCaptchaSiteKey')} />
+            </label>
+            <label className="form-field" title={t('tooltipSettingsCaptchaSecretKey')}>
+              <span>{t('captchaSecretKey')}</span>
+              <input type="password" autoComplete="off" value={draft.Onboarding.Captcha.SecretKey || ''} onChange={(event) => updateNestedSetting('Onboarding', 'Captcha', 'SecretKey', event.target.value || null)} title={t('tooltipSettingsCaptchaSecretKey')} />
+            </label>
+          </div>
+        </Panel>
         <Panel actions={<SettingImpactBadge type="mixed" />} title={t('emailSettings')}>
           <SettingImpactNote live={t('emailLiveNote')} restart={t('emailRestartNote')} />
           <div className="form-grid two">
@@ -5016,6 +5073,11 @@ function defaultServerSettings() {
         NotifyNewTenantMember: false,
         PlatformAdministratorRecipients: []
       }
+    },
+    Onboarding: {
+      Mode: 'Open',
+      LinkBaseUrl: null,
+      Captcha: { Provider: 'None', SiteKey: null, SecretKey: null }
     }
   };
 }
@@ -5047,6 +5109,14 @@ function normalizeSettings(input) {
       Traces: { ...defaults.Telemetry.Traces, ...((source.Telemetry || source.telemetry || {}).Traces || (source.Telemetry || source.telemetry || {}).traces || {}) },
       Logs: { ...defaults.Telemetry.Logs, ...((source.Telemetry || source.telemetry || {}).Logs || (source.Telemetry || source.telemetry || {}).logs || {}) },
       Otlp: { ...defaults.Telemetry.Otlp, ...((source.Telemetry || source.telemetry || {}).Otlp || (source.Telemetry || source.telemetry || {}).otlp || {}) }
+    },
+    Onboarding: {
+      ...defaults.Onboarding,
+      ...(source.Onboarding || source.onboarding || {}),
+      Captcha: {
+        ...defaults.Onboarding.Captcha,
+        ...((source.Onboarding || source.onboarding || {}).Captcha || (source.Onboarding || source.onboarding || {}).captcha || {})
+      }
     },
     Ledger: { ...defaults.Ledger, ...(source.Ledger || source.ledger || {}) },
     Database: { ...defaults.Database, ...(source.Database || source.database || {}) },
@@ -8032,6 +8102,218 @@ function RegisterRoute({ onComplete, onSessionClear, onToggleTheme, theme }) {
   return <RegisterView onComplete={onComplete} onToggleTheme={onToggleTheme} theme={theme} />;
 }
 
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === 'true') resolve();
+      else {
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('script load failed')));
+      }
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener('load', () => { script.dataset.loaded = 'true'; resolve(); });
+    script.addEventListener('error', () => reject(new Error('script load failed')));
+    document.head.appendChild(script);
+  });
+}
+
+function CaptchaWidget({ provider, siteKey, onToken }) {
+  const containerRef = useRef(null);
+  useEffect(() => {
+    if (!provider || provider === 'None' || !siteKey || !containerRef.current) return undefined;
+    let cancelled = false;
+    async function render() {
+      try {
+        if (provider === 'CloudflareTurnstile') {
+          await loadExternalScript('https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit');
+          if (cancelled || !window.turnstile || !containerRef.current) return;
+          window.turnstile.render(containerRef.current, { sitekey: siteKey, callback: (tok) => onToken(tok || ''), 'error-callback': () => onToken('') });
+        } else if (provider === 'GoogleReCaptcha') {
+          await loadExternalScript('https://www.google.com/recaptcha/api.js?render=explicit');
+          if (cancelled || !window.grecaptcha || !window.grecaptcha.render || !containerRef.current) return;
+          window.grecaptcha.render(containerRef.current, { sitekey: siteKey, callback: (tok) => onToken(tok || ''), 'expired-callback': () => onToken('') });
+        }
+      } catch {
+        // Widget failed to load; the server rejects missing tokens when it enforces captcha.
+      }
+    }
+    render();
+    return () => { cancelled = true; };
+  }, [provider, siteKey, onToken]);
+
+  if (!provider || provider === 'None' || !siteKey) return null;
+  return <div className="captcha-widget" ref={containerRef} />;
+}
+
+function OnboardingView({ onToggleTheme, theme }) {
+  const { t } = useTranslation();
+  const [config, setConfig] = useState({ signupEnabled: true, captchaProvider: 'None', captchaSiteKey: '' });
+  const [organization, setOrganization] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const handleToken = useCallback((tok) => setCaptchaToken(tok || ''), []);
+
+  useEffect(() => {
+    let alive = true;
+    api.get('/v1.0/api/onboarding/config', { skipAuth: true })
+      .then((result) => { if (alive && result && !result.error) setConfig(result); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  async function submit(event) {
+    event.preventDefault();
+    const next = {};
+    if (!organization.trim()) next.organization = t('onboardingOrgRequired');
+    if (!name.trim()) next.name = t('onboardingNameRequired');
+    if (!email.trim()) next.email = t('onboardingEmailRequired');
+    if (!password) next.password = t('onboardingPasswordRequired');
+    else if (password.length < 8) next.password = t('registerPasswordLength');
+    const captchaOn = config.captchaProvider && config.captchaProvider !== 'None' && config.captchaSiteKey;
+    if (captchaOn && !captchaToken) next.captcha = t('onboardingCaptchaRequired');
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
+
+    setLoading(true);
+    try {
+      const result = await api.post('/v1.0/api/onboarding/signup', {
+        tenantName: organization.trim(),
+        username: name.trim(),
+        email: email.trim(),
+        password,
+        captchaToken: captchaToken || undefined
+      }, { skipAuth: true });
+      if (result?.error) throw new Error(result.message || result.error);
+      setSubmitted(true);
+    } catch (error) {
+      setErrors({ form: error?.message || t('onboardingFailed') });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="login-view register-view">
+      <div className="login-shell register-shell">
+        <section className="login-brand-panel register-brand-panel">
+          <img className="login-brand-logo" src="/logo.png" alt={t('appTitle')} />
+          <h1>{t('onboardingHeroTitle')}</h1>
+          <p>{t('onboardingHeroSubtitle')}</p>
+        </section>
+        <section className="login-card register-card">
+          <div className="login-card-actions">
+            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('tooltipToggleTheme')} type="button">
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+          </div>
+          {submitted ? (
+            <div className="login-card-header">
+              <h2>{t('onboardingCheckEmailTitle')}</h2>
+              <p>{t('onboardingCheckEmailBody')}</p>
+            </div>
+          ) : config.signupEnabled === false ? (
+            <div className="login-card-header">
+              <h2>{t('onboardingDisabledTitle')}</h2>
+              <p>{t('onboardingDisabledBody')}</p>
+            </div>
+          ) : (
+            <>
+              <div className="login-card-header">
+                <h2>{t('onboardingFormTitle')}</h2>
+                <p>{t('onboardingFormSubtitle')}</p>
+              </div>
+              <form className="login-form" onSubmit={submit}>
+                <label className="form-field">
+                  <span>{t('onboardingOrganization')}</span>
+                  <input value={organization} onChange={(event) => setOrganization(event.target.value)} />
+                  {errors.organization ? <span className="register-field-error">{errors.organization}</span> : null}
+                </label>
+                <label className="form-field">
+                  <span>{t('onboardingName')}</span>
+                  <input value={name} onChange={(event) => setName(event.target.value)} />
+                  {errors.name ? <span className="register-field-error">{errors.name}</span> : null}
+                </label>
+                <label className="form-field">
+                  <span>{t('onboardingEmail')}</span>
+                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+                  {errors.email ? <span className="register-field-error">{errors.email}</span> : null}
+                </label>
+                <label className="form-field">
+                  <span>{t('onboardingPassword')}</span>
+                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                  {errors.password ? <span className="register-field-error">{errors.password}</span> : null}
+                </label>
+                <CaptchaWidget provider={config.captchaProvider} siteKey={config.captchaSiteKey} onToken={handleToken} />
+                {errors.captcha ? <span className="register-field-error">{errors.captcha}</span> : null}
+                {errors.form ? <span className="register-field-error">{errors.form}</span> : null}
+                <button className="action-button primary" type="submit" disabled={loading}>{loading ? t('onboardingSubmitting') : t('onboardingSubmit')}</button>
+              </form>
+            </>
+          )}
+          <div className="login-secondary-action">
+            <span>{t('onboardingHaveAccount')}</span>
+            <NavLink className="action-button secondary" to="/">{t('login')}</NavLink>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingVerifyView({ onToggleTheme, theme }) {
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') || '';
+  const [state, setState] = useState('loading');
+
+  useEffect(() => {
+    if (!token) { setState('error'); return undefined; }
+    let alive = true;
+    api.post('/v1.0/api/onboarding/verify', { token }, { skipAuth: true })
+      .then((result) => { if (alive) setState(result && !result.error ? 'done' : 'error'); })
+      .catch(() => { if (alive) setState('error'); });
+    return () => { alive = false; };
+  }, [token]);
+
+  return (
+    <div className="login-view register-view">
+      <div className="login-shell register-shell">
+        <section className="login-brand-panel register-brand-panel">
+          <img className="login-brand-logo" src="/logo.png" alt={t('appTitle')} />
+          <h1>{t('onboardingHeroTitle')}</h1>
+          <p>{t('onboardingHeroSubtitle')}</p>
+        </section>
+        <section className="login-card register-card">
+          <div className="login-card-actions">
+            <button aria-label={t('toggleTheme')} className="icon-button" onClick={onToggleTheme} title={t('tooltipToggleTheme')} type="button">
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+          </div>
+          <div className="login-card-header">
+            {state === 'loading' ? <h2>{t('onboardingVerifying')}</h2> : null}
+            {state === 'done' ? (<><h2>{t('onboardingVerifiedTitle')}</h2><p>{t('onboardingVerifiedBody')}</p></>) : null}
+            {state === 'error' ? (<><h2>{t('onboardingVerifyErrorTitle')}</h2><p>{t('onboardingVerifyErrorBody')}</p></>) : null}
+          </div>
+          <div className="login-secondary-action">
+            <NavLink className="action-button secondary" to="/">{t('login')}</NavLink>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function AppRoutes() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('xeno.theme') || 'light');
   const [loggingOut, setLoggingOut] = useState(false);
@@ -8112,6 +8394,8 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={session ? <Navigate replace to="/dashboard/home" /> : <LoginView onLogin={login} onToggleTheme={toggleTheme} theme={theme} />} />
         <Route path="/register" element={<RegisterRoute onComplete={login} onSessionClear={clearSessionForRegistration} onToggleTheme={toggleTheme} theme={theme} />} />
+        <Route path="/onboarding" element={<OnboardingView onToggleTheme={toggleTheme} theme={theme} />} />
+        <Route path="/onboarding/verify" element={<OnboardingVerifyView onToggleTheme={toggleTheme} theme={theme} />} />
         <Route path="/leaderboard/models" element={<ModelLeaderboardView publicMode />} />
         <Route path="/dashboard/*" element={session ? <Shell onLogout={logout} onToggleTheme={toggleTheme} session={session} theme={theme} /> : <Navigate replace to="/" />} />
         <Route path="*" element={<NotFoundView publicMode />} />
