@@ -145,7 +145,9 @@ startup):
 - [x] `HandleOnboardingVerifyAsync` (public) — mark verified.
 - [x] `HandleOnboardingApproveAsync` (global admin) — activate tenant + user,
   mark approved, send approval email. Register routes + OpenAPI.
-- [ ] Optional captcha verification helper (Turnstile) gated by settings.
+- [x] Captcha verification helper (`OnboardingCaptchaVerifier`) for Turnstile +
+  reCAPTCHA, gated by `Onboarding.Captcha` settings; public `config` endpoint
+  exposes provider + site key to the web app; enforced in the cloud signup path.
 - [ ] Onboarding rows deleted on tenant nuke (`DeleteByTenantAsync`).
 
 ## Workstream C — Email templates
@@ -166,29 +168,41 @@ startup):
 
 ## Workstream E — Dashboard
 
-- [ ] `/onboarding` page: organization, name, email, captcha widget; POST signup;
-  on success show "check your email".
-- [ ] `/onboarding/verify` landing: reads `?token`, POSTs verify, shows "Thanks
+> **Status (2026-08-05):** complete; committed as `7b7d448` (local, unpushed).
+> Settings **Onboarding** panel (Mode + Captcha provider/site/secret) and the
+> Tenants **Onboard** row action were completed earlier in the same session.
+> Public onboarding/verify pages call `/v1.0/api/onboarding/{config,signup,verify}`.
+> `verify-i18n` passes (1157 keys × 6 locales); `npm run build` clean.
+
+- [x] `/onboarding` page: organization, name, email, password, captcha widget;
+  POST signup; on success show "check your email".
+- [x] `/onboarding/verify` landing: reads `?token`, POSTs verify, shows "Thanks
   for signing up! We'll notify you when your account is approved."
-- [ ] Tenants page: **Onboard** row action visible for inactive tenants → calls
+- [x] `CaptchaWidget` (Turnstile / reCAPTCHA) driven by the public config endpoint.
+- [x] Tenants page: **Onboard** row action visible for inactive tenants → calls
   approve → toast + refresh.
-- [ ] Routing (public `/onboarding`, `/onboarding/verify`), i18n keys, build,
+- [x] Routing (public `/onboarding`, `/onboarding/verify`), i18n keys, build,
   `verify-i18n`.
 
 ## Workstream F — Marketing website (`xenocloud.github.io`)
 
-- [ ] Hero: "Start with Docker" → **"Deploy On-Premises"**; add **"Cloud Early
+> **Status (2026-08-05):** complete; committed as `7866b5f` (local, unpushed —
+> pushing publishes the live GitHub Pages site).
+
+- [x] Hero: "Start with Docker" → **"Deploy On-Premises"**; added **"Cloud Early
   Access"** button linking to `app.xenocloud.ai/onboarding`.
-- [ ] "How it works": cover on-prem + SaaS ("Deploy securely in your environment,
-  or, use our SaaS platform." + the provided subtext). Move the DEPLOYMENT
-  OPTIONS images beneath the 01–04 cards; remove the DEPLOYMENT OPTIONS header
-  and its text.
-- [ ] "GETTING STARTED" → **"On-Premises Quickstart"**.
-- [ ] Add **"Cloud Quickstart"** section (global-network benefits + "Cloud Early
-  Access" CTA).
-- [ ] Header + footer **"Cloud Early Access"** buttons.
-- [ ] Header: GitHub icon (top far right) + light/dark toggle.
-- [ ] Footer: GitHub icon.
+- [x] "How it works": covers on-prem + SaaS ("Deploy securely in your environment,
+  or, use our SaaS platform." + the provided subtext). Deployment images moved
+  beneath the 01–04 cards (retaining `id="deploy"` for the nav anchor); the
+  standalone DEPLOYMENT OPTIONS header/section is removed.
+- [x] "GETTING STARTED" → **"On-Premises Quickstart"**.
+- [x] Added **"Cloud Quickstart"** section (global-network benefits + "Cloud Early
+  Access" CTA + benefits card).
+- [x] Header + footer **"Cloud Early Access"** buttons (mobile CTA lives in the nav
+  dropdown).
+- [x] Header: GitHub icon + light/dark toggle (persisted, system-default, full
+  light palette).
+- [x] Footer: GitHub icon.
 
 ## Open questions / follow-ups
 
