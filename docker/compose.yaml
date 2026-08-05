@@ -4,6 +4,8 @@ services:
   xeno-postgres:
     image: postgres:16-alpine
     container_name: xeno-postgres
+    ports:
+      - "${XENO_POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
