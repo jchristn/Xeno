@@ -22,10 +22,15 @@ namespace Xeno.Core.Settings
         public string? LinkBaseUrl { get; set; } = null;
 
         /// <summary>
-        /// Cloudflare Turnstile secret key for server-side captcha verification. When empty, captcha
-        /// is enforced by the web app only and the server does not verify the token.
+        /// Captcha settings for public sign-up. When the provider is None, captcha is not enforced.
         /// </summary>
-        public string? CaptchaSecretKey { get; set; } = null;
+        public CaptchaSettings Captcha
+        {
+            get => _Captcha;
+            set => _Captcha = value ?? new CaptchaSettings();
+        }
+
+        private CaptchaSettings _Captcha = new CaptchaSettings();
 
         /// <summary>
         /// Instantiate.

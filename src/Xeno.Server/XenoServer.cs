@@ -1953,6 +1953,18 @@ namespace Xeno.Server
                 return;
             }
 
+            if (method == "GET" && IsPath(path, "/api/v1/onboarding/config", "/v1.0/api/onboarding/config"))
+            {
+                await SendJsonAsync(context, new
+                {
+                    mode = _Settings.Onboarding.Mode.ToString(),
+                    signupEnabled = _Settings.Onboarding.Mode != OnboardingModeEnum.Disabled,
+                    captchaProvider = _Settings.Onboarding.Captcha.Provider.ToString(),
+                    captchaSiteKey = _Settings.Onboarding.Captcha.SiteKey ?? String.Empty
+                }).ConfigureAwait(false);
+                return;
+            }
+
             if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
             {
                 ModelTokenLeaderboardRequest body = method == "POST"
@@ -6752,7 +6764,7 @@ namespace Xeno.Server
 
             if (creatingTenant && _Settings.Onboarding.Mode == OnboardingModeEnum.VerifyAndApprove)
             {
-                await HandleOnboardingCloudSignupAsync(context, tenantName, username, email, password, token).ConfigureAwait(false);
+                await HandleOnboardingCloudSignupAsync(context, tenantName, username, email, password, body.CaptchaToken, token).ConfigureAwait(false);
                 return;
             }
 
@@ -6946,9 +6958,12 @@ namespace Xeno.Server
             await SendJsonAsync(context, response).ConfigureAwait(false);
         }
 
-        private async Task HandleOnboardingCloudSignupAsync(HttpContextBase context, string tenantName, string username, string email, string password, CancellationToken token)
+        private async Task HandleOnboardingCloudSignupAsync(HttpContextBase context, string tenantName, string username, string email, string password, string? captchaToken, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(tenantName)) throw new ArgumentException("Organization name is required.");
+
+            bool captchaValid = await OnboardingCaptchaVerifier.VerifyAsync(_Settings.Onboarding.Captcha, captchaToken, ResolveClientIp(context), token).ConfigureAwait(false);
+            if (!captchaValid) throw new HttpStatusException(400, "CaptchaFailed", "Captcha verification failed. Please try again.");
 
             XenoPlatform platform = RequirePlatform();
             if (platform.Users.Any(item => item.IsAdmin && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase)))
@@ -9456,8 +9471,12 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(onboardingMode) && Enum.TryParse(onboardingMode, true, out OnboardingModeEnum onboardingModeValue)) settings.Onboarding.Mode = onboardingModeValue;
             string? onboardingLinkBase = Environment.GetEnvironmentVariable("XENO_ONBOARDING_LINK_BASE_URL");
             if (!String.IsNullOrWhiteSpace(onboardingLinkBase)) settings.Onboarding.LinkBaseUrl = onboardingLinkBase;
-            string? onboardingCaptcha = Environment.GetEnvironmentVariable("XENO_ONBOARDING_CAPTCHA_SECRET");
-            if (!String.IsNullOrWhiteSpace(onboardingCaptcha)) settings.Onboarding.CaptchaSecretKey = onboardingCaptcha;
+            string? captchaProvider = Environment.GetEnvironmentVariable("XENO_ONBOARDING_CAPTCHA_PROVIDER");
+            if (!String.IsNullOrWhiteSpace(captchaProvider) && Enum.TryParse(captchaProvider, true, out CaptchaProviderEnum captchaProviderValue)) settings.Onboarding.Captcha.Provider = captchaProviderValue;
+            string? captchaSiteKey = Environment.GetEnvironmentVariable("XENO_ONBOARDING_CAPTCHA_SITE_KEY");
+            if (!String.IsNullOrWhiteSpace(captchaSiteKey)) settings.Onboarding.Captcha.SiteKey = captchaSiteKey;
+            string? captchaSecretKey = Environment.GetEnvironmentVariable("XENO_ONBOARDING_CAPTCHA_SECRET_KEY");
+            if (!String.IsNullOrWhiteSpace(captchaSecretKey)) settings.Onboarding.Captcha.SecretKey = captchaSecretKey;
         }
 
         private static bool IsValidEmailAddress(string email)

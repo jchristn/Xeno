@@ -42,5 +42,12 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("deferSubordinateProvisioning")]
         public bool? DeferSubordinateProvisioning { get; set; } = null;
+
+        /// <summary>
+        /// Captcha response token from the web app widget, verified server-side when a captcha
+        /// provider is configured.
+        /// </summary>
+        [JsonPropertyName("captchaToken")]
+        public string? CaptchaToken { get; set; } = null;
     }
 }
