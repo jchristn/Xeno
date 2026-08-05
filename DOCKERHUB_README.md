@@ -19,6 +19,7 @@ Reach for Xeno when you have more than one machine serving models and want one a
 
 - OpenAI-compatible API (`/v1/models`, chat/completions, embeddings) with tenant-scoped inference permissions
 - Model-aware routing and load balancing (round-robin and adaptive) across health-checked clients
+- Opt-in cross-tenant shared clients: a node owned by one tenant can serve others, with owner-set sharing, provenance labels, redacted foreign views, and a per-tenant consume switch
 - Multi-tenant identity: tenants, users, credentials, roles, permissions, and role assignments with grantor-ceiling RBAC
 - Fleet client channel over WebSocket with heartbeats, inventory advertisement, and stale-connection eviction
 - Server-collected client host and provider telemetry (CPU/memory/disk/GPU, model counts, health)

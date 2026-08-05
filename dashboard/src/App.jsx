@@ -37,6 +37,7 @@ import {
   Search,
   Server,
   Settings as SettingsIcon,
+  Share2,
   Shield,
   ShieldCheck,
   Square,
@@ -2535,6 +2536,20 @@ function ClientsView() {
   const advertisedModelCount = new Set(clientModels.map((model) => String(value(model, 'name') || '').toLowerCase()).filter(Boolean)).size;
   const clientModelCount = (client) => (Array.isArray(value(client, 'models')) ? value(client, 'models').length : 0);
 
+  async function toggleSharing(row) {
+    const clientId = recordId(row);
+    if (!clientId) return;
+    const nextShared = value(row, 'shared') !== true;
+    try {
+      const result = await api.post(`/api/v1/clients/${encodeURIComponent(clientId)}/sharing`, { shared: nextShared });
+      if (result?.error) throw new Error(result.message || result.error);
+      showToast(t(nextShared ? 'toastClientShared' : 'toastClientUnshared', { client: value(row, 'name') || clientId }), { type: 'success' });
+      clients.refresh();
+    } catch (error) {
+      showToast(error?.message || t('saveFailed'), { type: 'danger' });
+    }
+  }
+
   return (
     <div className="view-stack">
       <div className="metric-grid compact">
@@ -2543,7 +2558,8 @@ function ClientsView() {
         <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(clientModels.filter((model) => value(model, 'supportsCompletions') === true).length)} />
       </div>
       <DataTable
-        columns={['id', 'name', { key: 'modelCount', render: clientModelCount, sortValue: clientModelCount, searchValue: clientModelCount }, 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        columns={['id', 'name', { key: 'origin', render: (row) => sharedOriginBadge(row, t), sortValue: (row) => clientOrigin(row), searchValue: (row) => clientOrigin(row) }, { key: 'modelCount', render: clientModelCount, sortValue: clientModelCount, searchValue: clientModelCount }, 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        canDelete={(row) => !isForeignClient(row)}
         onDelete={(row) => {
           if (recordId(selectedClient) === recordId(row)) setSelectedClient(null);
           return deleteRecord('/api/v1/clients', row);
@@ -2552,33 +2568,47 @@ function ClientsView() {
         onRowClick={setSelectedClient}
         getRowActions={(row) => {
           const clientId = recordId(row);
-          const canPull = clientAllowsOllamaModelManagement(row) && performanceClientConnected(row);
-          return [
-            {
+          const foreign = isForeignClient(row);
+          const actions = [];
+          if (!foreign) {
+            actions.push({
               disabled: !clientId,
               icon: <LineChart size={14} />,
               key: 'view-telemetry',
               label: t('viewTelemetry', 'View Telemetry'),
               tooltip: t('tooltipViewClientTelemetry', 'Open client telemetry filtered to this client.'),
               onSelect: () => navigate(`/dashboard/client-telemetry?clientId=${encodeURIComponent(clientId)}`)
-            },
-            {
-              disabled: !clientId,
-              icon: <BrainCircuit size={14} />,
-              key: 'view-models',
-              label: t('viewModels', 'View Models'),
-              tooltip: t('tooltipViewClientModels', 'Open Models filtered to this client.'),
-              onSelect: () => navigate(`/dashboard/clients/advertised-models?clientId=${encodeURIComponent(clientId)}`)
-            },
-            {
+            });
+          }
+          actions.push({
+            disabled: !clientId,
+            icon: <BrainCircuit size={14} />,
+            key: 'view-models',
+            label: t('viewModels', 'View Models'),
+            tooltip: t('tooltipViewClientModels', 'Open Models filtered to this client.'),
+            onSelect: () => navigate(`/dashboard/clients/advertised-models?clientId=${encodeURIComponent(clientId)}`)
+          });
+          if (!foreign) {
+            const canPull = clientAllowsOllamaModelManagement(row) && performanceClientConnected(row);
+            const shared = value(row, 'shared') === true;
+            actions.push({
               disabled: !canPull,
               icon: <Download size={14} />,
               key: 'pull-model',
               label: t('pullModel', 'Pull Model'),
               tooltip: canPull ? t('tooltipPullModel', 'Pull an Ollama model on this client.') : t('tooltipPullModelUnavailable', 'Requires a connected Ollama client with model management enabled.'),
               onSelect: () => setPullClient(row)
-            }
-          ];
+            });
+            actions.push({
+              disabled: !clientId,
+              icon: <Share2 size={14} />,
+              key: 'toggle-sharing',
+              label: shared ? t('unshareClient', 'Stop Sharing') : t('shareClient', 'Share Client'),
+              tooltip: shared ? t('tooltipUnshareClient', 'Stop sharing this client with other tenants.') : t('tooltipShareClient', 'Share this client with other tenants.'),
+              onSelect: () => toggleSharing(row)
+            });
+          }
+          return actions;
         }}
         loading={clients.loading}
         rows={clients.data}
@@ -2678,6 +2708,7 @@ function AdvertisedModelsView() {
             searchable: false
           },
           { key: 'clientId', searchable: false },
+          { key: 'origin', render: (row) => sharedOriginBadge(row, t), sortValue: (row) => clientOrigin(row), searchValue: (row) => clientOrigin(row) },
           { key: 'clientConnected', label: 'connected', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'clientConnected')), searchable: false },
           { key: 'name', label: 'modelName', searchValue: (row) => value(row, 'name'), sortValue: (row) => value(row, 'name') },
           { key: 'apiType', searchable: false },
@@ -5870,7 +5901,9 @@ function TenantEditModal({ data, mode = 'edit', onClose, onSave }) {
   const isCreate = mode === 'create';
   const [draft, setDraft] = useState(() => ({
     name: value(data, 'name') || '',
-    active: value(data, 'active') !== false
+    active: value(data, 'active') !== false,
+    defaultClientShared: value(data, 'defaultClientShared') === true,
+    consumeShared: value(data, 'consumeShared') !== false
   }));
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
@@ -5887,7 +5920,12 @@ function TenantEditModal({ data, mode = 'edit', onClose, onSave }) {
     setSaving(true);
     setStatus('');
     try {
-      await onSave(isCreate ? null : tenantId, { name: draft.name, active: draft.active });
+      await onSave(isCreate ? null : tenantId, {
+        name: draft.name,
+        active: draft.active,
+        defaultClientShared: draft.defaultClientShared,
+        consumeShared: draft.consumeShared
+      });
       setStatusTone('success');
       setStatus(t('tenantSaved'));
     } catch (error) {
@@ -5924,6 +5962,15 @@ function TenantEditModal({ data, mode = 'edit', onClose, onSave }) {
           <input checked={draft.active} onChange={(event) => updateField('active', event.target.checked)} type="checkbox" />
           <span>{t('active')}</span>
         </label>
+        <label className="toggle-field">
+          <input checked={draft.defaultClientShared} onChange={(event) => updateField('defaultClientShared', event.target.checked)} type="checkbox" />
+          <span>{t('defaultClientShared')}</span>
+        </label>
+        <label className="toggle-field">
+          <input checked={draft.consumeShared} onChange={(event) => updateField('consumeShared', event.target.checked)} type="checkbox" />
+          <span>{t('consumeShared')}</span>
+        </label>
+        {!draft.consumeShared ? <p className="form-status warning">{t('consumeSharedWarning')}</p> : null}
         {status ? <p className={`form-status ${statusTone}`}>{status}</p> : null}
       </div>
     </Modal>
@@ -7654,6 +7701,22 @@ function groupByCount(rows, key) {
   return [...groups.values()].sort((left, right) => right.count - left.count);
 }
 
+function clientOrigin(row) {
+  return String(value(row, 'origin') || 'tenant').toLowerCase();
+}
+
+function isForeignClient(row) {
+  return clientOrigin(row) !== 'tenant';
+}
+
+function sharedOriginBadge(row, t) {
+  const origin = clientOrigin(row);
+  if (origin === 'operator') return <StatusChip tone="info" value={t('operatorOrigin')} />;
+  if (origin === 'third-party') return <StatusChip tone="info" value={t('thirdPartyOrigin')} />;
+  if (value(row, 'shared') === true) return <StatusChip tone="success" value={t('shared')} />;
+  return <span className="muted-cell">-</span>;
+}
+
 function flattenClientModels(clients) {
   return (Array.isArray(clients) ? clients : []).flatMap((client, clientIndex) => {
     const clientId = advertisedModelClientId(client);
@@ -7665,6 +7728,8 @@ function flattenClientModels(clients) {
       clientKey,
       clientId,
       clientName,
+      origin: clientOrigin(client),
+      shared: value(client, 'shared') === true,
       clientConnected: value(client, 'connected'),
       clientLastHeartbeatUtc: value(client, 'lastHeartbeatUtc'),
       clientServiceState: value(client, 'serviceState'),

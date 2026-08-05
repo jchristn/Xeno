@@ -372,6 +372,9 @@ class XenoClient:
     def delete_client(self, client_id: str) -> None:
         return self._request("DELETE", f"/v1.0/api/clients/{client_id}")
 
+    def set_client_sharing(self, client_id: str, shared: bool) -> dict[str, Any]:
+        return self._request("POST", f"/v1.0/api/clients/{client_id}/sharing", {"shared": shared})
+
     def delete_client_model(self, model: dict[str, Any]) -> dict[str, Any]:
         return self._request("DELETE", "/v1.0/api/client-models", model)
 

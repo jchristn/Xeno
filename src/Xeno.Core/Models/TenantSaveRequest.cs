@@ -26,6 +26,20 @@ namespace Xeno.Core.Models
         public bool? Active { get; set; } = null;
 
         /// <summary>
+        /// Initial shared value applied to this tenant's clients when they first connect. When null the tenant's
+        /// current value is left unchanged.
+        /// </summary>
+        [JsonPropertyName("defaultClientShared")]
+        public bool? DefaultClientShared { get; set; } = null;
+
+        /// <summary>
+        /// Whether this tenant consumes shared clients owned by other tenants. When null the tenant's current
+        /// value is left unchanged.
+        /// </summary>
+        [JsonPropertyName("consumeShared")]
+        public bool? ConsumeShared { get; set; } = null;
+
+        /// <summary>
         /// Whether subordinate service provisioning can be deferred when a service is unavailable.
         /// </summary>
         [JsonPropertyName("deferSubordinateProvisioning")]

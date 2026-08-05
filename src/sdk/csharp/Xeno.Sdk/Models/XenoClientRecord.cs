@@ -44,6 +44,16 @@
         public bool Connected { get; set; }
 
         /// <summary>
+        /// Gets or sets the shared.
+        /// </summary>
+        public bool Shared { get; set; }
+
+        /// <summary>
+        /// Gets or sets the origin.
+        /// </summary>
+        public string? Origin { get; set; } = null;
+
+        /// <summary>
         /// Gets or sets the models.
         /// </summary>
         public List<XenoClientModel> Models { get; set; } = new List<XenoClientModel>();

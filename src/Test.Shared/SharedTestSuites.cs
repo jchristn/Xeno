@@ -4850,6 +4850,71 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Routing",
+                        "LegacyStateBlobDefaultsSharingFields",
+                        "Legacy serialized client and tenant records load sharing fields with safe defaults",
+                        executeAsync: delegate
+                        {
+                            XenoClientRecord client = JsonUtil.Deserialize<XenoClientRecord>("{\"id\":\"xcl_legacy\",\"tenantId\":\"ten_default\",\"name\":\"legacy\"}")
+                                ?? throw new InvalidOperationException("Legacy client did not deserialize.");
+                            if (client.Shared) throw new InvalidOperationException("Legacy client should default Shared to false.");
+
+                            Tenant tenant = JsonUtil.Deserialize<Tenant>("{\"id\":\"ten_legacy\",\"name\":\"Legacy\",\"active\":true}")
+                                ?? throw new InvalidOperationException("Legacy tenant did not deserialize.");
+                            if (tenant.DefaultClientShared) throw new InvalidOperationException("Legacy tenant should default DefaultClientShared to false.");
+                            if (!tenant.ConsumeShared) throw new InvalidOperationException("Legacy tenant should default ConsumeShared to true.");
+                            return Task.CompletedTask;
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "SharedClientRoutesToConsumingTenant",
+                        "A shared client is routable by another tenant that consumes shared clients",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.Clients[0].Shared = true;
+                            // Second tenant with the default ConsumeShared value (true) and no clients of its own.
+                            platform.Tenants.Add(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true });
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_consumer", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!decision.Success) throw new InvalidOperationException("Shared client did not route to consuming tenant: " + decision.Message);
+                            if (decision.SelectedClientId != platform.Clients[0].Id) throw new InvalidOperationException("Consuming tenant did not select the shared client.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "NonSharedClientDoesNotRouteCrossTenant",
+                        "A client that is not shared is invisible to other tenants",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.Clients[0].Shared = false;
+                            platform.Tenants.Add(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true });
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_consumer", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (decision.Success) throw new InvalidOperationException("Non-shared client was unexpectedly routable cross-tenant.");
+                            if (decision.OutcomeCode != "ModelNotFound") throw new InvalidOperationException("Unexpected cross-tenant outcome " + decision.OutcomeCode + ".");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
+                        "ConsumeSharedDisabledIsolatesTenant",
+                        "A tenant that does not consume shared clients ignores shared clients",
+                        executeAsync: async delegate
+                        {
+                            XenoPlatform platform = new XenoPlatform();
+                            await platform.InitializeAsync().ConfigureAwait(false);
+                            platform.Clients[0].Connected = true;
+                            platform.Clients[0].Shared = true;
+                            platform.Tenants.Add(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true, ConsumeShared = false });
+                            RoutingService routing = new RoutingService(platform);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_consumer", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (decision.Success) throw new InvalidOperationException("Shared client routed to a tenant that does not consume shared clients.");
+                            if (decision.OutcomeCode != "ModelNotFound") throw new InvalidOperationException("Unexpected isolation outcome " + decision.OutcomeCode + ".");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
                         "AdaptiveSelectsLowerLoad",
                         "Adaptive routing selects the lower-load client",
                         executeAsync: async delegate

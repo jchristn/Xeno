@@ -53,6 +53,12 @@ namespace Xeno.Core.Models.Telemetry
         public int EligibleClientCount { get; set; } = 0;
 
         /// <summary>
+        /// Number of connected, active, shared clients owned by other tenants that are visible to this tenant
+        /// for routing. Zero when the tenant does not consume shared clients.
+        /// </summary>
+        public int SharedEligibleClientCount { get; set; } = 0;
+
+        /// <summary>
         /// Recent collection failure count.
         /// </summary>
         public int RecentFailureCount { get; set; } = 0;

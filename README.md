@@ -20,6 +20,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Connects remote machines through the cross-platform `xeno` client.
 - Lets clients advertise hardware, provider endpoints, and available models.
 - Routes requests to connected clients through tenant-scoped routing policies with model/client match rules and load balancing modes: `RoundRobin`, `Random`, `FirstAvailable`, `LeastRecentlyUsed`, and `Adaptive`.
+- Supports opt-in cross-tenant shared clients so a node owned by one tenant can be an eligible routing target for others, with owner-set sharing, provenance labels, redacted foreign views, and a per-tenant consume switch.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, client-side request history, and machine telemetry.
 - Can expose an optional localhost-only OpenAI-compatible and Ollama-compatible inference listener from the client for local apps. It is disabled by default, uses the client's configured Xeno identity, and proxies requests through the authenticated WebSocket tunnel.

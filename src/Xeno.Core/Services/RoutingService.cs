@@ -71,7 +71,10 @@ namespace Xeno.Core.Services
                 Message = "Routing started."
             };
 
-            string effectiveModel = ResolveModel(context.TenantId, model, isEmbedding, provider);
+            Tenant? consumerTenant = _Platform.Tenants.FirstOrDefault(item => item.Id == context.TenantId);
+            bool consumeShared = consumerTenant?.ConsumeShared ?? false;
+
+            string effectiveModel = ResolveModel(context.TenantId, consumeShared, model, isEmbedding, provider);
             decision.Timeline.Add("ModelResolution");
             if (String.IsNullOrWhiteSpace(effectiveModel))
             {
@@ -84,16 +87,16 @@ namespace Xeno.Core.Services
 
             DateTime utcNow = DateTime.UtcNow;
             DateTime freshnessCutoffUtc = utcNow.AddMilliseconds(-_Settings.ClientFreshnessTimeoutMs);
-            List<XenoClientRecord> tenantClients = _Platform.Clients
-                .Where(item => item.TenantId == context.TenantId)
+            List<XenoClientRecord> visibleClients = _Platform.Clients
+                .Where(item => VisibleToTenant(item, context.TenantId, consumeShared))
                 .ToList();
-            List<XenoClientRecord> candidates = tenantClients
+            List<XenoClientRecord> candidates = visibleClients
                 .Where(item => IsEligibleClient(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
                 .OrderBy(item => item.Name)
                 .ThenByDescending(item => item.Weight)
                 .ThenBy(item => item.Id)
                 .ToList();
-            decision.ExcludedClientReasons = tenantClients
+            decision.ExcludedClientReasons = visibleClients
                 .Select(item => BuildClientExclusionReason(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
                 .Where(item => !String.IsNullOrWhiteSpace(item))
                 .ToList();
@@ -182,7 +185,7 @@ namespace Xeno.Core.Services
             return entry;
         }
 
-        private string ResolveModel(string tenantId, string? requestedModel, bool isEmbedding, ApiProviderTypeEnum? provider)
+        private string ResolveModel(string tenantId, bool consumeShared, string? requestedModel, bool isEmbedding, ApiProviderTypeEnum? provider)
         {
             List<ModelDefinition> definitions = _Platform.ModelDefinitions
                 .Where(item => item.TenantId == tenantId)
@@ -195,7 +198,7 @@ namespace Xeno.Core.Services
                 if (requested != null) return requested.Name;
 
                 bool clientAdvertisesRequestedModel = _Platform.Clients
-                    .Where(item => item.TenantId == tenantId)
+                    .Where(item => VisibleToTenant(item, tenantId, consumeShared))
                     .Any(item => item.Models.Any(model => ModelMatches(model, requestedModel, isEmbedding, provider)));
                 return clientAdvertisesRequestedModel ? requestedModel : String.Empty;
             }
@@ -204,11 +207,27 @@ namespace Xeno.Core.Services
             if (!String.IsNullOrWhiteSpace(definedModel)) return definedModel;
 
             return _Platform.Clients
-                .Where(item => item.TenantId == tenantId)
+                .Where(item => VisibleToTenant(item, tenantId, consumeShared))
                 .SelectMany(item => item.Models)
                 .Where(item => ModelMatches(item, item.Name, isEmbedding, provider))
                 .Select(item => item.Name)
                 .FirstOrDefault() ?? String.Empty;
+        }
+
+        /// <summary>
+        /// Determine whether a client is visible to a tenant for routing. A tenant always sees its own clients;
+        /// clients owned by other tenants are visible only when the consumer consumes shared clients and the
+        /// client is both shared and active.
+        /// </summary>
+        /// <param name="client">Candidate client.</param>
+        /// <param name="consumerTenantId">Consuming tenant identifier.</param>
+        /// <param name="consumeShared">Whether the consuming tenant consumes shared clients.</param>
+        /// <returns>True when the client is visible to the consuming tenant.</returns>
+        private static bool VisibleToTenant(XenoClientRecord client, string consumerTenantId, bool consumeShared)
+        {
+            if (String.Equals(client.TenantId, consumerTenantId, StringComparison.Ordinal)) return true;
+            if (!consumeShared) return false;
+            return client.Shared && client.Active;
         }
 
         private static bool ModelMatches(XenoClientModel model, string? name, bool isEmbedding, ApiProviderTypeEnum? provider)

@@ -207,6 +207,22 @@ A few rules keep multi-tenant deployments sane:
 - Audit role and permission changes after onboarding or incident response.
 - Test tenant-bound credentials by attempting reads against a different tenant and confirming they fail.
 
+## Cross-Tenant Shared Clients
+
+Cross-tenant shared clients are a deliberate, documented exception to the invariant stated throughout this document that every operation is bound to a tenant. Normally a client, its advertised models, and the requests routed to it stay inside one tenant. A shared client relaxes that fence on the routing path so a model-serving node owned by one tenant can process inference requests originating in other tenants.
+
+Understand the data-plane reality before enabling it. A shared node processes foreign prompts and completions in plaintext. There is no technical mechanism that prevents the node's operator from observing or logging the traffic it serves. When a shared node is operated by another customer-tenant rather than the platform operator, consuming it exposes the consumer's prompt and response content to a peer customer. Authorization logic does not remove that exposure; it only makes it visible and controllable.
+
+The trust surface is intentionally lightweight rather than a heavyweight consent workflow, and rests on three controls:
+
+- **Owner-set, server-authoritative sharing.** Sharing is a single owner-side decision. Only the owner tenant can mark a client shared, and only through the management API (`POST /api/v1/clients/{id}/sharing`). The connecting node never declares its own sharing in its WebSocket register or inventory frames, and the per-client value is preserved across reconnects, so a node cannot self-promote into the shared pool.
+- **Provenance is surfaced.** Every shared client carries an `origin` label — `operator` (platform-owned infrastructure) or `third-party` (another customer-tenant) — shown to consumers and operators. The label gates nothing; it exists so the consume-or-not decision is an informed one. Consuming a `third-party` node means a peer customer can see the traffic.
+- **A consumer off switch.** The per-tenant `ConsumeShared` setting (default `true`) lets a consumer opt out of receiving any foreign-owned capacity. When it is off, routing never considers a client the tenant does not own. For arms-length or compliance-sensitive tenants that must never send data to another customer's hardware, operators should consider defaulting `ConsumeShared` off at the tenant level.
+
+Redaction prevents owner-identity leakage. When a foreign shared client is rendered to a consuming tenant, the server applies a redacted projection: the owning tenant's ID, owner user/credential identifiers, weights, in-flight counts, and max-parallel capacity are omitted, and advertised models are reduced to names and capability flags. A consumer learns only the node's operational id/name, availability, `origin`, and advertised model names — enough to route, and no more. The owning tenant's identity is never revealed to a consumer, and relayed inference payloads to a shared node carry no consumer tenant identity. The platform (system) administrator still sees the full mapping of shared nodes to consumers.
+
+Sharing grants compute, not control. A shared client is visible to consumers as a routing target, but management operations — delete, model pull, model delete, telemetry configuration — remain owner-fenced and reject non-owner callers even for a visible shared node. Toggling a client's `Shared` value writes an audit record.
+
 ## RBAC Design Guidance
 
 Start with small roles. Large catch-all roles are easier to create and harder to audit.

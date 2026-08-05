@@ -78,6 +78,29 @@ For each routed request:
 
 After policy matching, an exact `clientName` policy narrows the candidate list to that client name. If that client is disconnected, unhealthy, overloaded, or does not advertise the model, the request fails with `NoEligibleClients`.
 
+## Shared Clients
+
+By default every client is fenced to its owner tenant: a request in tenant B is only ever routed to clients whose owner tenant is B. Cross-tenant shared clients widen that fence so a model-serving node owned by one tenant can back requests from other tenants.
+
+Eligibility rule. When Xeno builds the candidate client list for a request, a client owned by a *different* tenant is included only when all of the following hold:
+
+- The client's `Shared` flag is `true`.
+- The client is `Active` (connected and healthy per the usual eligibility checks).
+- The consuming tenant's `ConsumeShared` setting is `true`.
+
+A client's own owner tenant always sees it regardless of `Shared`. Foreign shared clients are added to the consumer's candidate pool and then flow through the same policy matching, eligibility, and load-balancing steps as any own-tenant client; no cross-tenant routing policy is introduced, and the consumer's own policy decides load balancing across the combined pool.
+
+`Shared` is a per-client value (default `false`). It is server-authoritative and set only by the owner tenant through the management API; the connecting node never declares its own sharing. A tenant's `DefaultClientShared` setting (default `false`) seeds the initial `Shared` value of that tenant's clients when they first register, after which the per-client value is preserved across reconnects.
+
+`ConsumeShared` (per tenant, default `true`) is the consumer-side off switch. It defaults on, so shared capacity is available out of the box. Setting it to `false` isolates the tenant from all foreign-owned capacity: routing then never considers any client the tenant does not own, even if that client is shared.
+
+### Capacity and fairness limitation
+
+A shared client is represented by a single client record with one real `MaxParallelRequests` budget, and capacity across that budget is first-come-first-served across all consuming tenants. This has two consequences to plan around in the current release:
+
+- A noisy consumer can transiently monopolize a shared node's parallel-request budget.
+- Under FCFS, an owner's own requests compete with borrowers on the owner's own node. There is no owner-priority scheduling in v1; owner-priority reservation and per-tenant fairness caps are deferred to a later phase.
+
 ## Load Balancing
 
 Policies support the same load-balancing modes exposed by Xeno routing settings:

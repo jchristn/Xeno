@@ -130,7 +130,7 @@ The SDK includes methods for:
 
 - authentication, onboarding, administrative nuke APIs, and token helpers;
 - tenants, users, credentials, roles, permissions, grantable permissions, role assignments, effective permissions, and audit;
-- clients and advertised client models;
+- clients and advertised client models, including per-client cross-tenant sharing through `SetClientSharingAsync`;
 - model definitions, configurations, and routing policies;
 - OpenAI-compatible models, chat completions, completions, and embeddings;
 - Ollama-compatible model listing, chat, generation, and embeddings;

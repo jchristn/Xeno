@@ -24,6 +24,20 @@ namespace Xeno.Core.Models
         public bool Active { get; set; } = true;
 
         /// <summary>
+        /// Initial shared value applied to this tenant's clients when they first connect. Changing it affects
+        /// only clients that connect after the change, never clients that are already registered.
+        /// Default: false.
+        /// </summary>
+        public bool DefaultClientShared { get; set; } = false;
+
+        /// <summary>
+        /// Whether this tenant consumes shared clients owned by other tenants. When false, routing never
+        /// considers any client the tenant does not own, regardless of that client's shared state.
+        /// Default: true.
+        /// </summary>
+        public bool ConsumeShared { get; set; } = true;
+
+        /// <summary>
         /// Source IP address that created the tenant during onboarding, when known.
         /// </summary>
         public string? CreationIpAddress { get; set; } = null;

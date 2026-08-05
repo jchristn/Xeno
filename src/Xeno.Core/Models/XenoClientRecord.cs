@@ -41,6 +41,14 @@ namespace Xeno.Core.Models
         public PrincipalTypeEnum OwnerPrincipalType { get; set; } = PrincipalTypeEnum.None;
 
         /// <summary>
+        /// Whether this client is an eligible routing target for tenants other than its owner.
+        /// Initialized at first registration from the owner tenant's default sharing setting, then adjustable
+        /// per-client by the owner. Server-authoritative: never set by the connecting node itself.
+        /// Default: false (the client is private to its owner tenant).
+        /// </summary>
+        public bool Shared { get; set; } = false;
+
+        /// <summary>
         /// Whether the client is connected.
         /// </summary>
         public bool Connected { get; set; } = true;

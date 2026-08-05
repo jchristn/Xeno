@@ -253,6 +253,10 @@ export class XenoClient {
     return this.#request('DELETE', `/v1.0/api/clients/${encodeURIComponent(id)}`);
   }
 
+  async setClientSharing(clientId, shared) {
+    return this.#request('POST', `/v1.0/api/clients/${encodeURIComponent(clientId)}/sharing`, { shared });
+  }
+
   async deleteClientModel(model = {}) {
     return this.#request('DELETE', '/v1.0/api/client-models', model);
   }

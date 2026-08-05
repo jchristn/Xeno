@@ -72,7 +72,7 @@ Server-collected telemetry is stored in the database engine selected by the serv
 - `GET /v1.0/api/client-telemetry/collection-attempts`
 - `GET /v1.0/api/client-telemetry/metrics`
 
-`status` returns telemetry settings state, service running state, last/next collection timestamps, connected client count, eligible client count, and recent failure count. `latest` returns `{ hostTelemetry, providerTelemetry }`, where each property is an array of the most recent persisted samples. `collect` triggers immediate server-requested collection for all connected clients or for a supplied `clientId`. Search endpoints accept `clientId`, `metric`, `fromUtc`, `toUtc`, `limit`, and `offset`; they return `{ total, items }`. Rollup endpoints accept `clientId`, `metric`, `fromUtc`, `toUtc`, and `bucketMinutes`; they return an array of buckets shaped as `{ startUtc, endUtc, label, count, average, minimum, maximum }`. Host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Detail routes return normalized rows and bounded raw snapshot JSON when persisted. Delete routes are tenant-scoped.
+`status` returns telemetry settings state, service running state, last/next collection timestamps, connected client count, eligible client count, `sharedEligibleClientCount` (the number of foreign shared clients eligible for the tenant), and recent failure count. `latest` returns `{ hostTelemetry, providerTelemetry }`, where each property is an array of the most recent persisted samples. `collect` triggers immediate server-requested collection for all connected clients or for a supplied `clientId`. Search endpoints accept `clientId`, `metric`, `fromUtc`, `toUtc`, `limit`, and `offset`; they return `{ total, items }`. Rollup endpoints accept `clientId`, `metric`, `fromUtc`, `toUtc`, and `bucketMinutes`; they return an array of buckets shaped as `{ startUtc, endUtc, label, count, average, minimum, maximum }`. Host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Detail routes return normalized rows and bounded raw snapshot JSON when persisted. Delete routes are tenant-scoped.
 
 ## Authentication
 
@@ -303,6 +303,22 @@ Global administrator email conflict:
 
 The clients response includes connection state, capacity fields, authenticated owner context, each client's advertised `models` inventory, and advertised `providers`. Provider entries include `name`, `apiType`, `modelManagementAllowed`, and `lastAdvertisedUtc`. Model entries include `modelManagementAllowed` when the backing provider is an Ollama provider that permits server-initiated model management. Owner fields are set when a WebSocket client registers: `ownerUserId`, `ownerCredentialId`, and `ownerPrincipalType`.
 
+The clients list also includes foreign clients that are shared into the caller's tenant, subject to the caller tenant's `consumeShared` setting (see [MODEL_ROUTING.md](MODEL_ROUTING.md)). Own-tenant clients are returned in full. A client owned by a different tenant is returned as a redacted `ClientView` projection: the owning tenant's `tenantId`, owner user/credential fields, `weight`, `inFlightRequests`, and `maxParallelRequests` are omitted; advertised models are reduced to model name plus capability flags. Each client carries an `origin` field describing its provenance: `tenant` for the caller's own clients, `operator` for platform-operator infrastructure, and `third-party` for a client owned by another customer tenant.
+
+`POST /api/v1/clients/{id}/sharing`
+
+Sets whether a client is shared as a cross-tenant routing target. Only the owner tenant may call this route; requests from a non-owner tenant are rejected. Sharing is server-authoritative and set only through this route — a connecting node never declares its own sharing, and the per-client value is preserved across reconnects. Toggling the value writes an audit record. The request body is:
+
+```json
+{
+  "shared": true
+}
+```
+
+`GET /v1.0/api/admin/shared-clients`
+
+Returns all shared clients across every tenant. This route requires a system administrator. It is the cross-tenant view of the shared pool, including each shared node's origin and its consuming tenants.
+
 `DELETE /v1.0/api/clients/{id}`
 
 `POST /v1.0/api/client-models/pull`
@@ -420,7 +436,7 @@ Response:
 
 Create and update request bodies:
 
-- Tenant create/update: `name`, `active`. Create may also include `id`; if omitted, the server generates a compact PrettyId with `ten_` prefix.
+- Tenant create/update: `name`, `active`, `defaultClientShared`, and `consumeShared`. Create may also include `id`; if omitted, the server generates a compact PrettyId with `ten_` prefix. `defaultClientShared` (default `false`) seeds the initial `shared` value of the tenant's clients when they first register and affects only future connections, not existing clients. `consumeShared` (default `true`) controls whether the tenant routes to other tenants' shared clients; when `false`, routing never considers a client the tenant does not own.
 - User create/update: `username`, `email`, `isAdmin`, `isTenantAdmin`, `active`, and `password`. Password is required on create and optional on update. User responses are redacted and do not expose password material.
 - Credential create/update: `userId`, `accessKey`, and `active`. Create generates an access key when omitted. Secret keys are not accepted for credential authentication or credential updates.
 - Role create/update: `name`, `permissionIds`, and `active`.
@@ -580,6 +596,8 @@ Returns an OpenAI-compatible model list:
   ]
 }
 ```
+
+The model list aggregates the caller's own models and any models advertised by foreign clients shared into the caller's tenant. Entries backed by a shared-origin client are marked `"owned_by": "shared"` as a provenance hint; own-tenant entries keep `"owned_by": "xeno"`. The marker leaks no owner tenant identity. The Ollama-compatible `GET /api/tags` list includes shared models over the same widened set.
 
 `POST /v1/chat/completions`
 

@@ -522,6 +522,18 @@
         }
 
         /// <summary>
+        /// Sets the sharing state of a client owned by the current tenant.
+        /// </summary>
+        /// <param name="clientId">Client identifier.</param>
+        /// <param name="shared">Whether the client is shared.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Updated client JSON.</returns>
+        public async Task<XenoClientRecord> SetClientSharingAsync(string clientId, bool shared, CancellationToken token = default)
+        {
+            return await PostJsonAsync<XenoClientRecord>("/v1.0/api/clients/" + Escape(clientId) + "/sharing", new { shared }, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Deletes one model advertised by a client.
         /// </summary>
         /// <param name="model">Client model delete payload.</param>

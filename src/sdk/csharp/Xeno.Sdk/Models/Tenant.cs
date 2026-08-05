@@ -23,6 +23,16 @@
         public bool Active { get; set; }
 
         /// <summary>
+        /// Gets or sets the default client shared.
+        /// </summary>
+        public bool DefaultClientShared { get; set; }
+
+        /// <summary>
+        /// Gets or sets the consume shared.
+        /// </summary>
+        public bool ConsumeShared { get; set; }
+
+        /// <summary>
         /// Gets or sets the created utc.
         /// </summary>
         public DateTime? CreatedUtc { get; set; }

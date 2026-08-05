@@ -541,6 +541,17 @@ Server behavior:
   current inventory, including the `modelManagementAllowed` capability.
 - Model definitions are created or refreshed for newly advertised model names.
 
+Cross-tenant sharing is not declared by the client. Neither `client.register`
+nor `client.inventory.update` carries a sharing field, and the server ignores
+any such field if one is sent. Whether a client is a shared cross-tenant routing
+target is server-authoritative: on first registration the server seeds the
+client's `Shared` value from the owner tenant's `DefaultClientShared` setting,
+and on every reconnect or inventory update it preserves the existing per-client
+value. The only way to change a client's sharing is the owner-tenant REST route
+`POST /api/v1/clients/{id}/sharing` (see [REST_API.md](REST_API.md)). This
+prevents a node from self-promoting into the shared pool. See
+[MODEL_ROUTING.md](MODEL_ROUTING.md) for the routing eligibility rule.
+
 ### `client.heartbeat`
 
 Keeps a registered client marked as alive.
@@ -1411,6 +1422,9 @@ instead of streamed.
   authenticated tenant.
 - The server rejects registration, heartbeat, and inventory update frames when
   the referenced client ID is already bound to a different user.
+- Cross-tenant sharing is never set from a WebSocket frame. The server ignores
+  any sharing field in `client.register` or `client.inventory.update`; sharing is
+  owner-set through REST only.
 - Request and response history redacts sensitive headers before persistence.
 - Client implementations should not log upstream secrets.
 - Operators should use `wss://` in production.

@@ -640,6 +640,10 @@ namespace Xeno.Server
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/clients/{id}", "Delete client", "Clients");
+            RegisterParameterizedRoute(HttpMethod.POST, "/api/v1/clients/{id}/sharing", "Set client sharing", "Clients");
+            RegisterParameterizedRoute(HttpMethod.POST, "/v1.0/api/clients/{id}/sharing", "Set client sharing", "Clients");
+            RegisterStaticRoute(HttpMethod.GET, "/api/v1/admin/shared-clients", "List shared clients", "Clients");
+            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/admin/shared-clients", "List shared clients", "Clients");
             RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/history/{id}", "Get client telemetry detail", "Client Telemetry");
             RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/history/{id}", "Delete client telemetry detail", "Client Telemetry");
             RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/providers/history/{id}", "Get provider telemetry detail", "Client Telemetry");
@@ -2325,7 +2329,25 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/v1/clients", "/v1.0/api/clients"))
             {
                 await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Clients.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
+                List<ClientView> clientViews = VisibleClientsForTenant(requestContext.TenantId)
+                    .Select(item => BuildClientView(item, requestContext.TenantId))
+                    .ToList();
+                await SendJsonAsync(context, clientViews).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && (TryGetPathIdBetween(path, "/api/v1/clients/", "/sharing") ?? TryGetPathIdBetween(path, "/v1.0/api/clients/", "/sharing")) is string sharingClientId)
+            {
+                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Write, token).ConfigureAwait(false);
+                ClientView updatedClient = await SetClientSharingAsync(requestContext, sharingClientId, ReadJsonBody<ClientSharingRequest>(context), token).ConfigureAwait(false);
+                await SendJsonAsync(context, updatedClient).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && IsPath(path, "/api/v1/admin/shared-clients", "/v1.0/api/admin/shared-clients"))
+            {
+                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
+                await SendJsonAsync(context, BuildSharedClientsAdminView()).ConfigureAwait(false);
                 return;
             }
 
@@ -2543,12 +2565,14 @@ namespace Xeno.Server
 
             if (method == "GET" && IsPath(path, "/api/v1/modeldefinitions", "/v1.0/api/model-definitions"))
             {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().ModelDefinitions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/v1/modelconfigurations", "/v1.0/api/model-configurations"))
             {
+                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 await SendJsonAsync(context, RequirePlatform().ModelConfigurations.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
                 return;
             }
@@ -2600,11 +2624,17 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/v1/models", "/api/v1/openai/v1/models"))
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                List<object> models = RequirePlatform().Clients
-                    .Where(item => item.TenantId == requestContext.TenantId)
-                    .SelectMany(item => item.Models)
-                    .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(group => (object)new { id = group.Key, @object = "model", created = ToUnixTimeSeconds(group.Max(item => item.LastAdvertisedUtc)), owned_by = "xeno" })
+                string modelsViewerTenantId = requestContext.TenantId;
+                List<object> models = VisibleClientsForTenant(modelsViewerTenantId)
+                    .SelectMany(item => item.Models.Select(model => new { OwnerTenantId = item.TenantId, Model = model }))
+                    .GroupBy(item => item.Model.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => (object)new
+                    {
+                        id = group.Key,
+                        @object = "model",
+                        created = ToUnixTimeSeconds(group.Max(item => item.Model.LastAdvertisedUtc)),
+                        owned_by = group.Any(item => String.Equals(item.OwnerTenantId, modelsViewerTenantId, StringComparison.Ordinal)) ? "xeno" : "shared"
+                    })
                     .ToList();
                 await SendJsonAsync(context, new { @object = "list", data = models }).ConfigureAwait(false);
                 return;
@@ -2892,7 +2922,7 @@ namespace Xeno.Server
             bool stream,
             CancellationToken token)
         {
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && item.TenantId == requestContext.TenantId);
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && (item.TenantId == requestContext.TenantId || (item.Shared && item.Active)));
             if (client == null)
             {
                 decision.Success = false;
@@ -3207,8 +3237,7 @@ namespace Xeno.Server
 
         private object BuildOllamaTagsResponse(RequestContext requestContext)
         {
-            List<object> models = RequirePlatform().Clients
-                .Where(item => item.TenantId == requestContext.TenantId)
+            List<object> models = VisibleClientsForTenant(requestContext.TenantId)
                 .SelectMany(item => item.Models)
                 .Where(item => item.Provider == ApiProviderTypeEnum.Ollama)
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -3559,9 +3588,131 @@ namespace Xeno.Server
             return targets;
         }
 
+        private bool TenantConsumesShared(string tenantId)
+        {
+            return RequirePlatform().Tenants
+                .FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.Ordinal))?.ConsumeShared ?? false;
+        }
+
+        private static bool ClientVisibleToTenant(XenoClientRecord client, string tenantId, bool consumeShared)
+        {
+            if (String.Equals(client.TenantId, tenantId, StringComparison.Ordinal)) return true;
+            if (!consumeShared) return false;
+            return client.Shared && client.Active;
+        }
+
+        private List<XenoClientRecord> VisibleClientsForTenant(string tenantId)
+        {
+            bool consumeShared = TenantConsumesShared(tenantId);
+            return RequirePlatform().Clients
+                .Where(item => ClientVisibleToTenant(item, tenantId, consumeShared))
+                .ToList();
+        }
+
+        private static string ClientOrigin(XenoClientRecord client, string viewerTenantId)
+        {
+            if (String.Equals(client.TenantId, viewerTenantId, StringComparison.Ordinal)) return "tenant";
+            if (String.Equals(client.TenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase)) return "operator";
+            return "third-party";
+        }
+
+        private static ClientView BuildClientView(XenoClientRecord client, string viewerTenantId)
+        {
+            bool own = String.Equals(client.TenantId, viewerTenantId, StringComparison.Ordinal);
+            ClientView view = new ClientView
+            {
+                Id = client.Id,
+                Name = client.Name,
+                Origin = ClientOrigin(client, viewerTenantId),
+                Shared = client.Shared,
+                Connected = client.Connected,
+                Active = client.Active,
+                ServiceState = client.ServiceState,
+                LastHeartbeatUtc = client.LastHeartbeatUtc
+            };
+
+            if (own)
+            {
+                view.TenantId = client.TenantId;
+                view.OwnerUserId = client.OwnerUserId;
+                view.OwnerCredentialId = client.OwnerCredentialId;
+                view.OwnerPrincipalType = client.OwnerPrincipalType;
+                view.MaxParallelRequests = client.MaxParallelRequests;
+                view.Weight = client.Weight;
+                view.InFlightRequests = client.InFlightRequests;
+                view.Providers = client.Providers;
+                view.Models = client.Models;
+                return view;
+            }
+
+            // Shared client owned by another tenant: expose model names and capabilities only; omit owner
+            // identity, weighting, live load, provider sources, and management flags.
+            view.Models = client.Models
+                .Select(item => new XenoClientModel
+                {
+                    Name = item.Name,
+                    Provider = item.Provider,
+                    Source = String.Empty,
+                    SupportsCompletions = item.SupportsCompletions,
+                    SupportsEmbeddings = item.SupportsEmbeddings,
+                    ModelManagementAllowed = false,
+                    LastAdvertisedUtc = item.LastAdvertisedUtc
+                })
+                .ToList();
+            return view;
+        }
+
+        private async Task<ClientView> SetClientSharingAsync(RequestContext requestContext, string clientId, ClientSharingRequest body, CancellationToken token)
+        {
+            if (body == null || !body.Shared.HasValue) throw new ArgumentException("A 'shared' value is required.");
+
+            XenoPlatform platform = RequirePlatform();
+            XenoClientRecord? client = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, clientId, StringComparison.Ordinal));
+            if (client == null) throw new KeyNotFoundException("Client not found.");
+            if (!String.Equals(client.TenantId, requestContext.TenantId, StringComparison.Ordinal))
+            {
+                RecordAuditFireAndForget(requestContext, "Clients", OperationTypeEnum.Write, false, "CrossTenantSharingDenied", 403, client.TenantId, client.Id);
+                throw new AuthorizationDeniedException(403, "CrossTenantSharingDenied", "Only the owning tenant can change a client's sharing state.");
+            }
+
+            client.Shared = body.Shared.Value;
+            await SavePlatformAsync(token).ConfigureAwait(false);
+            await RecordAuditAsync(requestContext, "Clients", OperationTypeEnum.Write, true, client.Shared ? "ClientShared" : "ClientUnshared", 200, client.TenantId, client.Id).ConfigureAwait(false);
+            return BuildClientView(client, requestContext.TenantId);
+        }
+
+        private List<object> BuildSharedClientsAdminView()
+        {
+            return RequirePlatform().Clients
+                .Where(item => item.Shared)
+                .OrderBy(item => item.TenantId, StringComparer.Ordinal)
+                .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(item => (object)new
+                {
+                    id = item.Id,
+                    name = item.Name,
+                    tenantId = item.TenantId,
+                    origin = String.Equals(item.TenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase) ? "operator" : "third-party",
+                    connected = item.Connected,
+                    active = item.Active,
+                    serviceState = item.ServiceState.ToString(),
+                    maxParallelRequests = item.MaxParallelRequests,
+                    inFlightRequests = item.InFlightRequests,
+                    modelCount = item.Models.Count,
+                    lastHeartbeatUtc = item.LastHeartbeatUtc
+                })
+                .ToList();
+        }
+
         private ServerClientTelemetryCollectionStatusResponse BuildTelemetryStatus(RequestContext requestContext)
         {
             List<ClientTelemetryCollectionTarget> targets = SnapshotTelemetryTargets(null);
+            bool consumeShared = TenantConsumesShared(requestContext.TenantId);
+            int sharedEligible = consumeShared
+                ? RequirePlatform().Clients.Count(item =>
+                    !String.Equals(item.TenantId, requestContext.TenantId, StringComparison.Ordinal)
+                    && item.Shared && item.Active && item.Connected)
+                : 0;
             return new ServerClientTelemetryCollectionStatusResponse
             {
                 Enabled = _Settings.TelemetryCollection.Enabled,
@@ -3573,6 +3724,7 @@ namespace Xeno.Server
                 NextCycleUtc = _TelemetryNextCycleUtc,
                 ConnectedClientCount = RequirePlatform().Clients.Count(item => item.TenantId == requestContext.TenantId && item.Connected),
                 EligibleClientCount = targets.Count(item => item.TenantId == requestContext.TenantId),
+                SharedEligibleClientCount = sharedEligible,
                 RecentFailureCount = _TelemetryRecentFailureCount
             };
         }
@@ -4249,7 +4401,7 @@ namespace Xeno.Server
                 return;
             }
 
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && item.TenantId == requestContext.TenantId);
+            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && (item.TenantId == requestContext.TenantId || (item.Shared && item.Active)));
             if (client == null)
             {
                 decision.Success = false;
@@ -5660,11 +5812,14 @@ namespace Xeno.Server
 
             if (client == null)
             {
+                bool defaultShared = platform.Tenants
+                    .FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase))?.DefaultClientShared ?? false;
                 client = new XenoClientRecord
                 {
                     Id = clientId,
                     TenantId = tenantId,
-                    Name = name
+                    Name = name,
+                    Shared = defaultShared
                 };
                 platform.Clients.Add(client);
             }
@@ -7537,6 +7692,8 @@ namespace Xeno.Server
                 LastUpdateUtc = DateTime.UtcNow
             };
             if (body.Active.HasValue) tenant.Active = body.Active.Value;
+            if (body.DefaultClientShared.HasValue) tenant.DefaultClientShared = body.DefaultClientShared.Value;
+            if (body.ConsumeShared.HasValue) tenant.ConsumeShared = body.ConsumeShared.Value;
             _Logging.Info(_Header + "created tenant " + tenant.Id);
             return tenant;
         }
@@ -8071,6 +8228,8 @@ namespace Xeno.Server
             }
 
             if (body.Active.HasValue) tenant.Active = body.Active.Value;
+            if (body.DefaultClientShared.HasValue) tenant.DefaultClientShared = body.DefaultClientShared.Value;
+            if (body.ConsumeShared.HasValue) tenant.ConsumeShared = body.ConsumeShared.Value;
             tenant.LastUpdateUtc = DateTime.UtcNow;
             _Logging.Info(_Header + "updated tenant " + tenant.Id);
             return tenant;
@@ -9425,6 +9584,17 @@ namespace Xeno.Server
             }
 
             return null;
+        }
+
+        private static string? TryGetPathIdBetween(string path, string prefix, string suffix)
+        {
+            if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+            if (!path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return null;
+            int idLength = path.Length - prefix.Length - suffix.Length;
+            if (idLength <= 0) return null;
+            string id = path.Substring(prefix.Length, idLength);
+            if (String.IsNullOrWhiteSpace(id) || id.Contains('/')) return null;
+            return Uri.UnescapeDataString(id);
         }
 
         private static string DecodeQueryValue(string? value)
