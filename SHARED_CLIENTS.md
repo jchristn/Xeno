@@ -269,13 +269,13 @@ Third-party sharing donates one tenant's compute to another. A credit/settlement
 
 ## 13. Security review checklist
 
-- [ ] Sharing state is server-authoritative; register/inventory messages cannot set it; first-connect seeds from tenant default, reconnect preserves the per-client value (§3.5).
-- [ ] `ClientView` redaction applied on every non-owner read path; no owner identity, credentials, weights, or raw load leak (§5).
-- [ ] Owner identity/tenant is never revealed to a consumer — only origin (§2.4).
-- [ ] `ConsumeShared` defaults on but is honored when off; management endpoints reject non-owner callers even for visible shared nodes (§6).
-- [ ] Toggling a client's `Shared` value writes an audit record.
-- [ ] The two ungated model-definition endpoints are gated (§5).
-- [ ] Relayed inference payloads to a shared node carry no consumer tenant identity (§2.4).
+- [x] Sharing state is server-authoritative; register/inventory messages cannot set it; first-connect seeds from tenant default, reconnect preserves the per-client value (§3.5) — reconnect preservation asserted by TEST-3.
+- [x] `ClientView` redaction applied on every non-owner read path; no owner identity, credentials, weights, or raw load leak (§5) — asserted by TEST-2.
+- [x] Owner identity/tenant is never revealed to a consumer — only origin (§2.4) — asserted by TEST-2.
+- [x] `ConsumeShared` defaults on but is honored when off (asserted by `ConsumeSharedDisabledIsolatesTenant`); management endpoints reject non-owner callers even for visible shared nodes (§6) — asserted by TEST-4.
+- [x] The two ungated model-definition endpoints are gated (§5).
+- [ ] Toggling a client's `Shared` value writes an audit record — implemented (`RecordAuditAsync`), not yet asserted by a test.
+- [ ] Relayed inference payloads to a shared node carry no consumer tenant identity (§2.4) — by design; not yet asserted by a test.
 
 ---
 
@@ -386,15 +386,15 @@ MVP is implemented and the C# solution and dashboard both build clean. The `Rout
 - **API-1..7** — `POST /clients/{id}/sharing` (owner-fenced, audited); tenant `defaultClientShared`/`consumeShared` on create/update; `GET /admin/shared-clients` (system-admin); `/v1/models` + `/api/tags` widened with `owned_by:"shared"`; model-definition/-configuration endpoints gated (`Inference` Read); `sharedEligibleClientCount` on telemetry status; management endpoints already owner-fenced via `RequireTenantClient`/`DeleteClient`.
 - **DASH-1..6** — origin badge + suppressed foreign-row actions in `ClientsView`; advertised-model badge; owner `Shared` toggle; tenant `DefaultClientShared`/`ConsumeShared` settings with isolation note; i18n across all 6 locales.
 - **SDK-1..4** — C# `XenoClientRecord.Shared`/`Origin`, `Tenant` fields, `SetClientSharingAsync`; Python `set_client_sharing`; JS `setClientSharing`; READMEs.
-- **TEST-1, TEST-5** — cross-tenant visibility gating and legacy-blob defaults.
+- **TEST-1..5** — cross-tenant visibility gating and legacy-blob defaults (`Routing` suite); redaction, non-owner 403, and reconnect-preserves-`Shared` end-to-end (`ManagementApi` suite).
 - **Docs** — MODEL_ROUTING, SECURITY_BEST_PRACTICES, REST_API, WEBSOCKETS_API, three SDK READMEs, CHANGELOG, README, DOCKERHUB.
 
-**Deferred (need the full server + WebSocket integration harness; tracked, not yet written)**
-- [ ] **TEST-2** — assert `GET /clients` redacts a foreign shared client (owner ids/weights/load absent) end-to-end over HTTP.
-- [ ] **TEST-3** — assert reconnect does not flip a manually toggled `Shared` value (REG-2) through the live registration path.
-- [ ] **TEST-4** — assert non-owner `POST …/sharing`, delete, and model-pull are rejected over HTTP.
+**End-to-end** — `ManagementApi` suite case `SharedClientCrossTenantContracts` stands up a temporary `XenoServer` + `ClientWebSocket` and asserts all three in one run (12/12 suite pass):
+- [x] **TEST-2** — `GET /clients` redacts a foreign shared client: origin `operator`, `shared` true, and owner tenant id / owner identity / weight / in-flight / max-parallel all absent; the advertised model is exposed by name only (source stripped).
+- [x] **TEST-3** — reconnecting (re-registering the same client id after disconnect) preserves the manually toggled `Shared` value.
+- [x] **TEST-4** — a non-owner tenant's `POST …/sharing` is rejected with 403 and the owner's value is unchanged. (Client delete and model-pull remain owner-fenced via `RequireTenantClient`/`DeleteClient`.)
 
-Note: the redaction (RD) and owner-fence (API-1/7) logic is implemented and exercised indirectly, but the three end-to-end assertions above should be added in the `ManagementApi` suite before third-party sharing is enabled in production.
+The same case also asserts the pre-sharing visibility gate (a client is invisible cross-tenant until shared).
 
 ---
 

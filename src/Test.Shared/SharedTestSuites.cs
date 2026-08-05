@@ -5325,8 +5325,177 @@ namespace Test.Shared
                         "ManagementApi",
                         "PascalCaseClientInventoryModelsAreRegistered",
                         "PascalCase client inventory registers advertised models",
-                        executeAsync: delegate { return RunPascalCaseClientInventorySmokeAsync(); })
+                        executeAsync: delegate { return RunPascalCaseClientInventorySmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
+                        "SharedClientCrossTenantContracts",
+                        "Shared clients are visible and redacted cross-tenant, owner-fenced for mutation, and preserved across reconnect",
+                        executeAsync: delegate { return RunSharedClientContractsAsync(); })
                 });
+        }
+
+        private static async Task RunSharedClientContractsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-shared-clients-" + Guid.NewGuid().ToString("N") + ".db");
+            string clientId = "xcl_shared_contract";
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = new DatabaseSettings
+                {
+                    Type = DatabaseTypeEnum.Sqlite,
+                    Filename = dbFile
+                },
+                TelemetryCollection = new TelemetryCollectionSettings
+                {
+                    Enabled = false
+                }
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                ClientWebSocket socket = new ClientWebSocket();
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    await RegisterSharedContractClientAsync(socket, port, settings.WebSocket.Path, clientId, clientTokenSource.Token).ConfigureAwait(false);
+
+                    using (HttpClient ownerClient = new HttpClient())
+                    using (HttpClient consumerClient = new HttpClient())
+                    {
+                        await AuthenticateSeedAdminAsync(ownerClient, baseUrl).ConfigureAwait(false);
+
+                        // Second tenant with a tenant admin. ConsumeShared defaults to true.
+                        string tenantBId = await CreateTenantViaApiAsync(ownerClient, baseUrl, "Shared Consumer").ConfigureAwait(false);
+                        await CreateUserViaApiAsync(ownerClient, baseUrl, tenantBId, "consumer-admin@shared.test", "password", false, true).ConfigureAwait(false);
+                        await AuthenticateUserAsync(consumerClient, baseUrl, tenantBId, "consumer-admin@shared.test", "password").ConfigureAwait(false);
+
+                        // Gate: before sharing, the consuming tenant cannot see the owner's client.
+                        if (FindClientView(await consumerClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false), clientId) != null)
+                        {
+                            throw new InvalidOperationException("An unshared client was visible to another tenant.");
+                        }
+
+                        // Owner shares the client.
+                        using (HttpResponseMessage shareResponse = await PostJsonAsync(ownerClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(clientId) + "/sharing", JsonUtil.Serialize(new { shared = true })).ConfigureAwait(false))
+                        {
+                            string shareJson = await shareResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!shareResponse.IsSuccessStatusCode) throw new InvalidOperationException("Owner could not share client: " + shareJson);
+                            ClientView shared = DeserializeRequired<ClientView>(shareJson);
+                            if (!shared.Shared) throw new InvalidOperationException("Share response did not report shared=true.");
+                            if (!String.Equals(shared.Origin, "tenant", StringComparison.Ordinal)) throw new InvalidOperationException("Owner share response origin should be 'tenant'.");
+                        }
+
+                        // Redaction: the consuming tenant now sees the client with owner detail stripped.
+                        ClientView consumerView = FindClientView(await consumerClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false), clientId)
+                            ?? throw new InvalidOperationException("Shared client was not visible to the consuming tenant.");
+                        if (!consumerView.Shared) throw new InvalidOperationException("Consumer view did not report the client as shared.");
+                        if (!String.Equals(consumerView.Origin, "operator", StringComparison.Ordinal)) throw new InvalidOperationException("Shared operator client origin should be 'operator', was '" + consumerView.Origin + "'.");
+                        if (consumerView.TenantId != null) throw new InvalidOperationException("Consumer view leaked the owning tenant id.");
+                        if (consumerView.OwnerUserId != null || consumerView.OwnerCredentialId != null || consumerView.OwnerPrincipalType != null) throw new InvalidOperationException("Consumer view leaked owner identity.");
+                        if (consumerView.MaxParallelRequests != null || consumerView.Weight != null || consumerView.InFlightRequests != null) throw new InvalidOperationException("Consumer view leaked weighting or live load.");
+                        XenoClientModel consumerModel = consumerView.Models.FirstOrDefault(item => String.Equals(item.Name, "llama3.2:latest", StringComparison.OrdinalIgnoreCase))
+                            ?? throw new InvalidOperationException("Consumer view did not expose the advertised model name.");
+                        if (!String.IsNullOrEmpty(consumerModel.Source)) throw new InvalidOperationException("Consumer view leaked the model source.");
+
+                        // Owner fence: the consuming tenant cannot change sharing on a client it does not own.
+                        using (HttpResponseMessage foreignShare = await PostJsonAsync(consumerClient, baseUrl + "/v1.0/api/clients/" + Uri.EscapeDataString(clientId) + "/sharing", JsonUtil.Serialize(new { shared = false })).ConfigureAwait(false))
+                        {
+                            if ((int)foreignShare.StatusCode != 403) throw new InvalidOperationException("Non-owner sharing mutation should be rejected with 403, got " + (int)foreignShare.StatusCode + ".");
+                        }
+
+                        ClientView ownerAfter = FindClientView(await ownerClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false), clientId)
+                            ?? throw new InvalidOperationException("Owner could not see its own client.");
+                        if (!ownerAfter.Shared) throw new InvalidOperationException("Owner sharing state changed after a rejected non-owner attempt.");
+
+                        // Reconnect preserves the per-client shared flag.
+                        socket = await ReconnectSharedContractClientAsync(socket, port, settings.WebSocket.Path, clientId, clientTokenSource.Token).ConfigureAwait(false);
+                        ClientView afterReconnect = FindClientView(await ownerClient.GetStringAsync(baseUrl + "/v1.0/api/clients").ConfigureAwait(false), clientId)
+                            ?? throw new InvalidOperationException("Owner could not see its client after reconnect.");
+                        if (!afterReconnect.Shared) throw new InvalidOperationException("Reconnect did not preserve the shared flag.");
+                    }
+                }
+                finally
+                {
+                    if (socket.State == WebSocketState.Open)
+                    {
+                        try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None).ConfigureAwait(false); } catch (WebSocketException) { }
+                    }
+                    socket.Dispose();
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RegisterSharedContractClientAsync(ClientWebSocket socket, int port, string wsPath, string clientId, CancellationToken token)
+        {
+            ApplySeedCredentialHeaders(socket);
+            await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + wsPath), token).ConfigureAwait(false);
+            string? connected = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+            if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Shared-contract client did not connect: " + connected);
+
+            await SendWebSocketJsonAsync(socket, new
+            {
+                type = "client.register",
+                clientId,
+                tenantId = Constants.DefaultTenantId,
+                name = "shared-contract-client",
+                inventory = new { models = new[] { new { name = "llama3.2:latest", supportsCompletions = true, supportsEmbeddings = false } } }
+            }, token).ConfigureAwait(false);
+            string? registered = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+            if (String.IsNullOrWhiteSpace(registered) || !registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Shared-contract client did not register: " + registered);
+        }
+
+        private static async Task<ClientWebSocket> ReconnectSharedContractClientAsync(ClientWebSocket existing, int port, string wsPath, string clientId, CancellationToken token)
+        {
+            if (existing.State == WebSocketState.Open)
+            {
+                try { await existing.CloseAsync(WebSocketCloseStatus.NormalClosure, "reconnect", CancellationToken.None).ConfigureAwait(false); } catch (WebSocketException) { }
+            }
+            existing.Dispose();
+
+            // The prior connection may not be reaped immediately; retry registration until it succeeds.
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                ClientWebSocket socket = new ClientWebSocket();
+                ApplySeedCredentialHeaders(socket);
+                await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + wsPath), token).ConfigureAwait(false);
+                string? connected = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+                if (String.IsNullOrWhiteSpace(connected) || !connected.Contains("server.connected", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Reconnect did not connect: " + connected);
+
+                await SendWebSocketJsonAsync(socket, new
+                {
+                    type = "client.register",
+                    clientId,
+                    tenantId = Constants.DefaultTenantId,
+                    name = "shared-contract-client",
+                    inventory = new { models = new[] { new { name = "llama3.2:latest", supportsCompletions = true, supportsEmbeddings = false } } }
+                }, token).ConfigureAwait(false);
+                string? registered = await ReceiveWebSocketTextAsync(socket, token).ConfigureAwait(false);
+                if (!String.IsNullOrWhiteSpace(registered) && registered.Contains("server.registered", StringComparison.OrdinalIgnoreCase)) return socket;
+
+                try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "retry", CancellationToken.None).ConfigureAwait(false); } catch (WebSocketException) { }
+                socket.Dispose();
+                await Task.Delay(250, token).ConfigureAwait(false);
+            }
+
+            throw new InvalidOperationException("Client did not reconnect within the allotted attempts.");
+        }
+
+        private static ClientView? FindClientView(string clientsJson, string clientId)
+        {
+            List<ClientView> views = DeserializeRequired<List<ClientView>>(clientsJson);
+            return views.FirstOrDefault(item => String.Equals(item.Id, clientId, StringComparison.Ordinal));
         }
 
         private static async Task RunManagementSmokeAsync()
