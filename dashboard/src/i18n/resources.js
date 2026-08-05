@@ -510,6 +510,8 @@ const en = {
     onboardingHaveAccount: 'Already have an account?',
     onboardingCheckEmailTitle: 'Check your email',
     onboardingCheckEmailBody: 'Click the link in your email to verify your address. After you verify, we will review your request and email you when your account is approved.',
+    onboardingReadyTitle: 'Your account is ready',
+    onboardingReadyBody: 'Your account has been created and is active. You can sign in now.',
     onboardingDisabledTitle: 'Sign-up is closed',
     onboardingDisabledBody: 'Public sign-up is not available on this deployment.',
     onboardingVerifying: 'Verifying your email…',

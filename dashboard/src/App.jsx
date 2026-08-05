@@ -2303,7 +2303,12 @@ function NukeRecordModal({ kind, onClose, onComplete, record }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const resultRef = useRef(null);
   const canExecute = confirmId === targetId && reason.trim().length >= 10 && !busy;
+
+  useEffect(() => {
+    if (result) resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [result]);
   const title = isTenant ? t('nukeTenant') : t('nukeUser');
   const confirmLabel = isTenant ? t('confirmTenantId') : t('confirmUserId');
   const resultTitle = isTenant ? t('tenantNukeResult') : t('userNukeResult');
@@ -2381,7 +2386,7 @@ function NukeRecordModal({ kind, onClose, onComplete, record }) {
         </div>
         <p className="form-status">{t('rowNukeConfirmHint')}</p>
         {error ? <p className="form-status danger" role="alert">{error}</p> : null}
-        {result ? <NukeResultPanel data={result} title={resultTitle} /> : null}
+        {result ? <div ref={resultRef}><NukeResultPanel data={result} title={resultTitle} /></div> : null}
       </div>
     </Modal>
   );
@@ -8161,7 +8166,7 @@ function OnboardingView({ onToggleTheme, theme }) {
   const [captchaToken, setCaptchaToken] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [outcome, setOutcome] = useState(null);
   const handleToken = useCallback((tok) => setCaptchaToken(tok || ''), []);
 
   useEffect(() => {
@@ -8195,7 +8200,10 @@ function OnboardingView({ onToggleTheme, theme }) {
         captchaToken: captchaToken || undefined
       }, { skipAuth: true });
       if (result?.error) throw new Error(result.message || result.error);
-      setSubmitted(true);
+      // The server only sends a verification email in verify+approve mode
+      // (status "pending_verification"); open mode returns an active account
+      // (status "success"), so only promise an email when one is actually sent.
+      setOutcome(result?.status === 'pending_verification' ? 'pending' : 'ready');
     } catch (error) {
       setErrors({ form: error?.message || t('onboardingFailed') });
     } finally {
@@ -8205,7 +8213,7 @@ function OnboardingView({ onToggleTheme, theme }) {
 
   return (
     <div className="login-view register-view">
-      <div className="login-shell register-shell">
+      <div className="login-shell register-shell onboarding-shell">
         <section className="login-brand-panel register-brand-panel">
           <img className="login-brand-logo" src="/logo.png" alt={t('appTitle')} />
           <h1>{t('onboardingHeroTitle')}</h1>
@@ -8217,19 +8225,24 @@ function OnboardingView({ onToggleTheme, theme }) {
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
           </div>
-          {submitted ? (
-            <div className="login-card-header">
+          {outcome === 'pending' ? (
+            <div className="login-card-header onboarding-card-header">
               <h2>{t('onboardingCheckEmailTitle')}</h2>
               <p>{t('onboardingCheckEmailBody')}</p>
             </div>
+          ) : outcome === 'ready' ? (
+            <div className="login-card-header onboarding-card-header">
+              <h2>{t('onboardingReadyTitle')}</h2>
+              <p>{t('onboardingReadyBody')}</p>
+            </div>
           ) : config.signupEnabled === false ? (
-            <div className="login-card-header">
+            <div className="login-card-header onboarding-card-header">
               <h2>{t('onboardingDisabledTitle')}</h2>
               <p>{t('onboardingDisabledBody')}</p>
             </div>
           ) : (
             <>
-              <div className="login-card-header">
+              <div className="login-card-header onboarding-card-header">
                 <h2>{t('onboardingFormTitle')}</h2>
                 <p>{t('onboardingFormSubtitle')}</p>
               </div>
@@ -8288,7 +8301,7 @@ function OnboardingVerifyView({ onToggleTheme, theme }) {
 
   return (
     <div className="login-view register-view">
-      <div className="login-shell register-shell">
+      <div className="login-shell register-shell onboarding-shell">
         <section className="login-brand-panel register-brand-panel">
           <img className="login-brand-logo" src="/logo.png" alt={t('appTitle')} />
           <h1>{t('onboardingHeroTitle')}</h1>
@@ -8300,7 +8313,7 @@ function OnboardingVerifyView({ onToggleTheme, theme }) {
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
           </div>
-          <div className="login-card-header">
+          <div className="login-card-header onboarding-card-header">
             {state === 'loading' ? <h2>{t('onboardingVerifying')}</h2> : null}
             {state === 'done' ? (<><h2>{t('onboardingVerifiedTitle')}</h2><p>{t('onboardingVerifiedBody')}</p></>) : null}
             {state === 'error' ? (<><h2>{t('onboardingVerifyErrorTitle')}</h2><p>{t('onboardingVerifyErrorBody')}</p></>) : null}
