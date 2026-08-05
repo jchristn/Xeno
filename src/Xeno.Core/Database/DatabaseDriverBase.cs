@@ -61,6 +61,12 @@ namespace Xeno.Core.Database
         public IAuditMethods? Audit { get; protected set; } = null;
 
         /// <summary>
+        /// Persisted cloud onboarding request methods. Onboarding requests are stored in their own
+        /// table, never in the in-memory platform state.
+        /// </summary>
+        public IOnboardingMethods? Onboarding { get; protected set; } = null;
+
+        /// <summary>
         /// Logging module. May be null when no logger is supplied.
         /// </summary>
         protected LoggingModule? _Logging { get; }

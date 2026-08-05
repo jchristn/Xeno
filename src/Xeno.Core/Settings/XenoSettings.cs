@@ -71,5 +71,10 @@ namespace Xeno.Core.Settings
         /// OpenTelemetry (metrics, traces, logs) settings.
         /// </summary>
         public TelemetrySettings Telemetry { get; set; } = new TelemetrySettings();
+
+        /// <summary>
+        /// Public onboarding (sign-up) settings.
+        /// </summary>
+        public OnboardingSettings Onboarding { get; set; } = new OnboardingSettings();
     }
 }

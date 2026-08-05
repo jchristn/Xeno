@@ -24,6 +24,11 @@ namespace Xeno.Core.Models
         public bool Active { get; set; } = true;
 
         /// <summary>
+        /// Source IP address that created the tenant during onboarding, when known.
+        /// </summary>
+        public string? CreationIpAddress { get; set; } = null;
+
+        /// <summary>
         /// Created timestamp.
         /// </summary>
         public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;

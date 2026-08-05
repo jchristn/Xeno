@@ -67,6 +67,7 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
                 await MysqlTelemetryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await MysqlRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await MysqlAuditMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlOnboardingMethods.InitializeAsync(connection, token).ConfigureAwait(false);
             }
 
             MysqlTelemetryMethods telemetryMethods = new MysqlTelemetryMethods(_ConnectionString);
@@ -75,6 +76,7 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new MysqlRequestHistoryMethods(_ConnectionString);
             Audit = new MysqlAuditMethods(_ConnectionString);
+            Onboarding = new MysqlOnboardingMethods(_ConnectionString);
             return true;
         }
 

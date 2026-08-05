@@ -1947,6 +1947,12 @@ namespace Xeno.Server
                 return;
             }
 
+            if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/onboarding/verify", "/v1.0/api/onboarding/verify"))
+            {
+                await HandleOnboardingVerifyAsync(context, token).ConfigureAwait(false);
+                return;
+            }
+
             if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
             {
                 ModelTokenLeaderboardRequest body = method == "POST"
@@ -1960,6 +1966,12 @@ namespace Xeno.Server
             }
 
             RequestContext requestContext = CreateRequestContext(context);
+
+            if (method == "POST" && IsPath(path, "/api/v1/onboarding/approve", "/v1.0/api/onboarding/approve"))
+            {
+                await HandleOnboardingApproveAsync(context, requestContext, token).ConfigureAwait(false);
+                return;
+            }
 
             if (method == "POST" && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
             {
@@ -6732,6 +6744,18 @@ namespace Xeno.Server
             }
 
             bool creatingTenant = String.IsNullOrWhiteSpace(requestedTenantId);
+
+            if (creatingTenant && _Settings.Onboarding.Mode == OnboardingModeEnum.Disabled)
+            {
+                throw new HttpStatusException(403, "OnboardingDisabled", "Sign-up is disabled on this deployment.");
+            }
+
+            if (creatingTenant && _Settings.Onboarding.Mode == OnboardingModeEnum.VerifyAndApprove)
+            {
+                await HandleOnboardingCloudSignupAsync(context, tenantName, username, email, password, token).ConfigureAwait(false);
+                return;
+            }
+
             Tenant tenant;
             if (creatingTenant)
             {
@@ -6741,6 +6765,7 @@ namespace Xeno.Server
                     Id = IdGenerator.NewId("ten_"),
                     Name = tenantName,
                     Active = true,
+                    CreationIpAddress = ResolveClientIp(context),
                     CreatedUtc = DateTime.UtcNow,
                     LastUpdateUtc = DateTime.UtcNow
                 };
@@ -6919,6 +6944,234 @@ namespace Xeno.Server
             OnboardingEmailContext emailContext = BuildOnboardingEmailContext(platform, signupContext, tenant, user, creatingTenant, eventUtc);
             await SendOnboardingNotificationsSafeAsync(emailContext, signupContext, token).ConfigureAwait(false);
             await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        private async Task HandleOnboardingCloudSignupAsync(HttpContextBase context, string tenantName, string username, string email, string password, CancellationToken token)
+        {
+            if (String.IsNullOrWhiteSpace(tenantName)) throw new ArgumentException("Organization name is required.");
+
+            XenoPlatform platform = RequirePlatform();
+            if (platform.Users.Any(item => item.IsAdmin && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new HttpStatusException(409, "GlobalAdminEmailAlreadyExists", "Email already belongs to a global administrator.");
+            }
+
+            string creationIp = ResolveClientIp(context);
+            Tenant tenant = new Tenant
+            {
+                Id = IdGenerator.NewId("ten_"),
+                Name = tenantName,
+                Active = false,
+                CreationIpAddress = creationIp,
+                CreatedUtc = DateTime.UtcNow,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+            platform.Tenants.Add(tenant);
+            platform.EnsureTenantDefaults(tenant.Id);
+            RemoveSeedDevelopmentPrincipal(platform, tenant.Id);
+
+            User user = new User
+            {
+                TenantId = tenant.Id,
+                Username = username,
+                Email = email,
+                IsAdmin = false,
+                IsTenantAdmin = true,
+                Active = false
+            };
+            _Authentication.SetUserPassword(user, password);
+            platform.Users.Add(user);
+
+            Role? tenantAdminRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantAdmin", StringComparison.OrdinalIgnoreCase) && item.Active);
+            if (tenantAdminRole != null)
+            {
+                platform.RoleAssignments.Add(new RoleAssignment
+                {
+                    TenantId = tenant.Id,
+                    RoleId = tenantAdminRole.Id,
+                    PrincipalType = PrincipalTypeEnum.User,
+                    PrincipalId = user.Id,
+                    Active = true,
+                    CreatedUtc = DateTime.UtcNow,
+                    LastUpdateUtc = DateTime.UtcNow
+                });
+            }
+
+            OnboardingRequest onboarding = new OnboardingRequest
+            {
+                TenantId = tenant.Id,
+                UserId = user.Id,
+                Organization = tenantName,
+                ContactName = username,
+                Email = email,
+                CreationIpAddress = creationIp,
+                Token = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
+                Status = OnboardingStatusEnum.PendingVerification,
+                CreatedUtc = DateTime.UtcNow
+            };
+            if (_Database?.Onboarding != null) await _Database.Onboarding.InsertAsync(onboarding, token).ConfigureAwait(false);
+
+            RequestContext signupContext = new RequestContext
+            {
+                TenantId = tenant.Id,
+                PrincipalType = PrincipalTypeEnum.User,
+                UserId = user.Id,
+                IsAuthenticated = false,
+                AuthScheme = AuthSchemeEnum.None
+            };
+            ApplyRequestMetadata(context, signupContext);
+            await RecordAuditAsync(signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignupPending", 200, tenant.Id, user.Id);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+
+            _Logging.Info(_Header + "onboarding sign-up pending verification for tenant " + tenant.Id + " (" + email + ") from " + creationIp);
+            await SendOnboardingVerificationEmailAsync(onboarding, token).ConfigureAwait(false);
+
+            await SendJsonAsync(context, new { status = "pending_verification", email, tenantId = tenant.Id }).ConfigureAwait(false);
+        }
+
+        private async Task HandleOnboardingVerifyAsync(HttpContextBase context, CancellationToken token)
+        {
+            string verificationToken = DecodeQueryValue(context.Request.Query.Elements.Get("token"));
+            if (String.IsNullOrWhiteSpace(verificationToken) && String.Equals(context.Request.Method.ToString(), "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                OnboardingActionRequest body = ReadJsonBody<OnboardingActionRequest>(context);
+                verificationToken = FirstNonEmpty(body.Token).Trim();
+            }
+
+            if (String.IsNullOrWhiteSpace(verificationToken)) throw new ArgumentException("Verification token is required.");
+            if (_Database?.Onboarding == null) throw new HttpStatusException(503, "OnboardingUnavailable", "Onboarding storage is not available.");
+
+            OnboardingRequest? record = await _Database.Onboarding.GetByTokenAsync(verificationToken, token).ConfigureAwait(false);
+            if (record == null) throw new HttpStatusException(404, "InvalidVerificationToken", "Verification link is invalid or has expired.");
+
+            if (record.Status == OnboardingStatusEnum.PendingVerification)
+            {
+                record.Status = OnboardingStatusEnum.Verified;
+                record.VerifiedUtc = DateTime.UtcNow;
+                await _Database.Onboarding.UpdateAsync(record, token).ConfigureAwait(false);
+                _Logging.Info(_Header + "onboarding email verified for tenant " + record.TenantId + " (" + record.Email + ")");
+            }
+
+            await SendJsonAsync(context, new { status = "verified", organization = record.Organization, email = record.Email }).ConfigureAwait(false);
+        }
+
+        private async Task HandleOnboardingApproveAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
+            XenoPlatform platform = RequirePlatform();
+            if (!_Authorization.IsSystemAdmin(platform, requestContext))
+            {
+                await RecordAuditAsync(requestContext, "Onboarding.Approve", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403);
+                throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can approve onboarding requests.");
+            }
+
+            OnboardingActionRequest body = ReadJsonBody<OnboardingActionRequest>(context);
+            string tenantId = FirstNonEmpty(body.TenantId).Trim();
+            if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenantId is required.");
+
+            Tenant? tenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase));
+            if (tenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant was not found.");
+
+            OnboardingRequest? record = _Database?.Onboarding != null
+                ? await _Database.Onboarding.GetByTenantAsync(tenantId, token).ConfigureAwait(false)
+                : null;
+
+            tenant.Active = true;
+            tenant.LastUpdateUtc = DateTime.UtcNow;
+            string? approvedUserId = record?.UserId;
+            foreach (User item in platform.Users.Where(item => item.TenantId == tenantId && (approvedUserId == null || item.Id == approvedUserId)))
+            {
+                item.Active = true;
+            }
+
+            if (record != null && _Database?.Onboarding != null)
+            {
+                record.Status = OnboardingStatusEnum.Approved;
+                record.ApprovedUtc = DateTime.UtcNow;
+                await _Database.Onboarding.UpdateAsync(record, token).ConfigureAwait(false);
+            }
+
+            await RecordAuditAsync(requestContext, "Onboarding.Approve", OperationTypeEnum.Admin, true, "OnboardingApproved", 200, tenantId, approvedUserId);
+            await SavePlatformAsync(token).ConfigureAwait(false);
+
+            _Logging.Info(_Header + "onboarding approved for tenant " + tenantId + " by " + (requestContext.UserId ?? requestContext.PrincipalId ?? "unknown"));
+            if (record != null) await SendTenantApprovedEmailAsync(record, token).ConfigureAwait(false);
+
+            await SendJsonAsync(context, new { status = "approved", tenantId, tenantName = tenant.Name }).ConfigureAwait(false);
+        }
+
+        private string ResolveOnboardingBaseUrl()
+        {
+            string baseUrl = FirstNonEmpty(_Settings.Onboarding.LinkBaseUrl, _Settings.Email.ApplicationBaseUrl, "https://app.xenocloud.ai");
+            return baseUrl.TrimEnd('/');
+        }
+
+        private async Task SendOnboardingVerificationEmailAsync(OnboardingRequest record, CancellationToken token)
+        {
+            if (!_Settings.Email.Enabled)
+            {
+                _Logging.Debug(_EmailHeader + "email disabled; skipping onboarding verification email for " + record.Email);
+                return;
+            }
+
+            try
+            {
+                string verifyUrl = ResolveOnboardingBaseUrl() + "/onboarding/verify?token=" + Uri.EscapeDataString(record.Token);
+                Xeno.Email.Templates.OnboardingVerificationEmailContext ctx = new Xeno.Email.Templates.OnboardingVerificationEmailContext
+                {
+                    Organization = record.Organization,
+                    ContactName = record.ContactName,
+                    VerificationUrl = verifyUrl
+                };
+                Xeno.Email.Templates.EmailTemplateRenderResult rendered = await _Email.RenderTemplateAsync(new Xeno.Email.Templates.OnboardingVerificationEmailTemplate(_Settings.Email), ctx, token).ConfigureAwait(false);
+                await SendOnboardingEmailAsync(record.Email, record.ContactName, rendered, token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _Logging.Warn(_EmailHeader + "failed to send onboarding verification email to " + record.Email + ": " + ex.Message);
+            }
+        }
+
+        private async Task SendTenantApprovedEmailAsync(OnboardingRequest record, CancellationToken token)
+        {
+            if (!_Settings.Email.Enabled)
+            {
+                _Logging.Debug(_EmailHeader + "email disabled; skipping onboarding approval email for " + record.Email);
+                return;
+            }
+
+            try
+            {
+                Xeno.Email.Templates.TenantApprovedEmailContext ctx = new Xeno.Email.Templates.TenantApprovedEmailContext
+                {
+                    Organization = record.Organization,
+                    ContactName = record.ContactName,
+                    Email = record.Email,
+                    SignInUrl = ResolveOnboardingBaseUrl() + "/"
+                };
+                Xeno.Email.Templates.EmailTemplateRenderResult rendered = await _Email.RenderTemplateAsync(new Xeno.Email.Templates.TenantApprovedEmailTemplate(_Settings.Email), ctx, token).ConfigureAwait(false);
+                await SendOnboardingEmailAsync(record.Email, record.ContactName, rendered, token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _Logging.Warn(_EmailHeader + "failed to send onboarding approval email to " + record.Email + ": " + ex.Message);
+            }
+        }
+
+        private async Task SendOnboardingEmailAsync(string toEmail, string toName, Xeno.Email.Templates.EmailTemplateRenderResult rendered, CancellationToken token)
+        {
+            EmailMessage message = new EmailMessage
+            {
+                From = EmailAddress.Create(_Settings.Email.FromAddress, _Settings.Email.FromName),
+                ReplyTo = String.IsNullOrWhiteSpace(_Settings.Email.ReplyToAddress) ? null : EmailAddress.Create(_Settings.Email.ReplyToAddress),
+                To = new List<EmailAddress> { EmailAddress.Create(toEmail, toName) },
+                Subject = rendered.Subject,
+                HtmlBody = rendered.HtmlBody,
+                TextBody = rendered.TextBody,
+                TemplateId = rendered.TemplateId
+            };
+            EmailSendResult result = await _Email.SendAsync(message, token).ConfigureAwait(false);
+            RecordEmailResult(result);
         }
 
         private static void RemoveSeedDevelopmentPrincipal(XenoPlatform platform, string tenantId)
@@ -9198,6 +9451,13 @@ namespace Xeno.Server
             if (Double.TryParse(samplingRatio, NumberStyles.Float, CultureInfo.InvariantCulture, out double samplingRatioValue)) settings.Telemetry.Traces.SamplingRatio = samplingRatioValue;
             string? tenantLabel = Environment.GetEnvironmentVariable("XENO_TELEMETRY_INCLUDE_TENANT_LABEL");
             if (Boolean.TryParse(tenantLabel, out bool tenantLabelValue)) settings.Telemetry.Metrics.IncludeTenantLabel = tenantLabelValue;
+
+            string? onboardingMode = Environment.GetEnvironmentVariable("XENO_ONBOARDING_MODE");
+            if (!String.IsNullOrWhiteSpace(onboardingMode) && Enum.TryParse(onboardingMode, true, out OnboardingModeEnum onboardingModeValue)) settings.Onboarding.Mode = onboardingModeValue;
+            string? onboardingLinkBase = Environment.GetEnvironmentVariable("XENO_ONBOARDING_LINK_BASE_URL");
+            if (!String.IsNullOrWhiteSpace(onboardingLinkBase)) settings.Onboarding.LinkBaseUrl = onboardingLinkBase;
+            string? onboardingCaptcha = Environment.GetEnvironmentVariable("XENO_ONBOARDING_CAPTCHA_SECRET");
+            if (!String.IsNullOrWhiteSpace(onboardingCaptcha)) settings.Onboarding.CaptchaSecretKey = onboardingCaptcha;
         }
 
         private static bool IsValidEmailAddress(string email)
