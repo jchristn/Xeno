@@ -155,7 +155,7 @@ namespace Xeno.Core.Database
         public virtual async Task InitializeAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
-            _Logging?.Debug(_Header + "initializing " + DatabaseType + " database");
+            _Logging?.Debug(_Header + "initializing " + DatabaseType + " database schema");
 
             bool storageAvailable = await InitializeStorageAsync(token).ConfigureAwait(false);
             if (storageAvailable)
@@ -168,7 +168,7 @@ namespace Xeno.Core.Database
                 await DatabaseSeeder.SeedIfEmptyAsync(this, seed, token).ConfigureAwait(false);
             }
 
-            _Logging?.Debug(_Header + "initialized " + DatabaseType + " database");
+            _Logging?.Debug(_Header + DatabaseType + " database ready");
         }
 
         /// <summary>

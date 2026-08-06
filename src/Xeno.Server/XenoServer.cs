@@ -301,6 +301,7 @@ namespace Xeno.Server
         public async Task StartAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
+            _Logging.Info(_Header + "starting up");
             try
             {
                 _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, _Logging, token).ConfigureAwait(false);
@@ -351,6 +352,7 @@ namespace Xeno.Server
         /// </summary>
         public void Stop()
         {
+            _Logging?.Info(_Header + "shutting down");
             _TelemetryCollectionCancellation?.Cancel();
             _WebSocketMaintenanceCancellation?.Cancel();
             _RequestHistoryRetentionCancellation?.Cancel();
