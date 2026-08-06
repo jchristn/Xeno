@@ -75,6 +75,9 @@
     "FromName": "Xeno",
     "ReplyToAddress": "support@xenocloud.ai",
     "SupportAddress": "support@xenocloud.ai",
+    "AdminEmailAddresses": [
+      "hello@latticetech.ai"
+    ],
     "ApplicationBaseUrl": "https://app.xenocloud.ai",
     "SubjectPrefix": "",
     "MaxBodyBytes": 262144,

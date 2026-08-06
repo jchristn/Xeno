@@ -6984,6 +6984,7 @@ namespace Xeno.Server
                 From = EmailAddress.Create(_Settings.Email.FromAddress, _Settings.Email.FromName),
                 ReplyTo = String.IsNullOrWhiteSpace(_Settings.Email.ReplyToAddress) ? null : EmailAddress.Create(_Settings.Email.ReplyToAddress),
                 To = new List<EmailAddress> { EmailAddress.Create(toEmail, toName) },
+                Bcc = BuildOnboardingAdminBcc(toEmail),
                 Subject = rendered.Subject,
                 HtmlBody = rendered.HtmlBody,
                 TextBody = rendered.TextBody,
@@ -6991,6 +6992,23 @@ namespace Xeno.Server
             };
             EmailSendResult result = await _Email.SendAsync(message, token).ConfigureAwait(false);
             RecordEmailResult(result);
+        }
+
+        // Administrators configured in Email.AdminEmailAddresses are BCC'd on applicant-facing onboarding
+        // emails. Blank entries are skipped and the applicant's own address is never BCC'd back to itself.
+        private List<EmailAddress> BuildOnboardingAdminBcc(string toEmail)
+        {
+            List<EmailAddress> bcc = new List<EmailAddress>();
+            if (_Settings.Email.AdminEmailAddresses == null) return bcc;
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!String.IsNullOrWhiteSpace(toEmail)) seen.Add(toEmail.Trim());
+            foreach (string admin in _Settings.Email.AdminEmailAddresses)
+            {
+                if (String.IsNullOrWhiteSpace(admin)) continue;
+                if (seen.Add(admin.Trim())) bcc.Add(EmailAddress.Create(admin));
+            }
+
+            return bcc;
         }
 
         private async Task<bool> GlobalAdminEmailExistsAsync(string email, CancellationToken token)

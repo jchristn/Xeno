@@ -1,6 +1,7 @@
 namespace Xeno.Core.Settings
 {
     using System;
+    using System.Collections.Generic;
     using Xeno.Core.Enums;
 
     /// <summary>
@@ -37,6 +38,12 @@ namespace Xeno.Core.Settings
         /// Support email address displayed in templates.
         /// </summary>
         public string SupportAddress { get; set; } = "support@xenocloud.ai";
+
+        /// <summary>
+        /// Administrator email addresses that are BCC'd on applicant-facing onboarding emails
+        /// (email verification and account-activated notices). Empty or whitespace entries are ignored.
+        /// </summary>
+        public List<string> AdminEmailAddresses { get; set; } = new List<string> { "hello@latticetech.ai" };
 
         /// <summary>
         /// Application base URL used by templates.
