@@ -1,0 +1,53 @@
+# Multi-node override — demonstrates running Xeno.Server as a cluster of stateless nodes
+# loosely coupled by the shared PostgreSQL backend.
+#
+# Since the rewrite, the control plane is authoritative in the database (no in-RAM state blob):
+# every node reads and writes tenants, users, credentials, sessions, roles, permissions, clients,
+# model definitions/configurations, routing policies, and ledger links directly from Postgres.
+# Auth/authorization reads go straight to the database (zero revocation lag across nodes); the
+# small set of cacheable, slow-changing entities (routing policies) uses a per-node sliding-TTL
+# cache (see the "Cache" section of xeno.json). This makes the server horizontally scalable:
+# additional nodes can be added or removed without a shared-memory coordinator.
+#
+# Usage:
+#   docker compose -f compose.yaml -f compose.cluster.yaml up -d
+#
+# This adds a second server node (xeno-server-2 on host port 9001) that shares the same Postgres
+# as xeno-server. Both are valid entry points for the REST/dashboard control plane and inference
+# routing decisions.
+#
+# NOTE on inference relay: a Xeno client holds a single WebSocket to whichever node it connected
+# to, and the pending-response bookkeeping for an in-flight relayed request is per-node in memory.
+# The DB-backed control plane (dashboard, admin APIs, routing eligibility, model catalog) is fully
+# multi-node today. To spread the inference-relay traffic itself across nodes in production, front
+# the nodes with a load balancer using sticky sessions for the WebSocket path (Settings.WebSocket.Path),
+# or run each node's clients against that node — a cross-node relay bus is a separate enhancement.
+
+name: xeno
+
+services:
+  xeno-server-2:
+    image: ${XENO_SERVER_IMAGE:-jchristn77/xeno-server:v0.1.0}
+    container_name: xeno-server-2
+    ports:
+      - "9001:9000"
+    volumes:
+      - ./xeno.json:/app/xeno.json
+      - ./logs:/app/logs
+    environment:
+      - XENO_LEDGER_API_KEY=${NETLEDGER_ACCESS_KEY:-default}
+      - XENO_LEDGER_SECRET_KEY=${NETLEDGER_SECRET_KEY:-default}
+      - XENO_TELEMETRY_OTLP_ENDPOINT=http://otel-collector:4317
+      - XENO_TELEMETRY_OTLP_PROTOCOL=grpc
+    depends_on:
+      xeno-postgres:
+        condition: service_healthy
+      xeno-postgres-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

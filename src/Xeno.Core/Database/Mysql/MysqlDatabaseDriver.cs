@@ -1,6 +1,7 @@
 namespace Xeno.Core.Database.Mysql
 {
     using System;
+    using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
@@ -14,7 +15,6 @@ namespace Xeno.Core.Database.Mysql
     /// </summary>
     public class MysqlDatabaseDriver : DatabaseDriverBase
     {
-        private const string StateId = "platform";
         private string _ConnectionString = String.Empty;
 
         /// <summary>
@@ -49,15 +49,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations
     applied_utc datetime(6) NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS xeno_platform_state
-(
-    id varchar(64) PRIMARY KEY,
-    data longtext NOT NULL,
-    created_utc datetime(6) NOT NULL,
-    updated_utc datetime(6) NOT NULL,
-    active tinyint(1) NOT NULL DEFAULT 1
-);
-
 INSERT IGNORE INTO schema_migrations (id, name, applied_utc)
 VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
 """;
@@ -68,6 +59,27 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
                 await MysqlRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await MysqlAuditMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await MysqlOnboardingMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+
+                await MysqlTenantMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlUserMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlCredentialMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlAuthSessionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlRoleMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlPermissionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlRoleAssignmentMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlClientMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlModelDefinitionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlModelConfigurationMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlRoutingPolicyMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlLedgerTenantLinkMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await MysqlLedgerAccountLinkMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+
+                List<SchemaMigration> forwardMigrations = new List<SchemaMigration>
+                {
+                    // Post-baseline schema changes are applied in ascending version order and recorded in
+                    // schema_migrations; add new SchemaMigration entries here as the schema evolves.
+                };
+                await SchemaMigrationRunner.ApplyAsync(connection, "UTC_TIMESTAMP(6)", forwardMigrations, token).ConfigureAwait(false);
             }
 
             MysqlTelemetryMethods telemetryMethods = new MysqlTelemetryMethods(_ConnectionString);
@@ -77,48 +89,21 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
             RequestHistory = new MysqlRequestHistoryMethods(_ConnectionString);
             Audit = new MysqlAuditMethods(_ConnectionString);
             Onboarding = new MysqlOnboardingMethods(_ConnectionString);
+
+            Tenants = new MysqlTenantMethods(_ConnectionString);
+            Users = new MysqlUserMethods(_ConnectionString);
+            Credentials = new MysqlCredentialMethods(_ConnectionString);
+            AuthSessions = new MysqlAuthSessionMethods(_ConnectionString);
+            Roles = new MysqlRoleMethods(_ConnectionString);
+            Permissions = new MysqlPermissionMethods(_ConnectionString);
+            RoleAssignments = new MysqlRoleAssignmentMethods(_ConnectionString);
+            Clients = new MysqlClientMethods(_ConnectionString);
+            ModelDefinitions = new MysqlModelDefinitionMethods(_ConnectionString);
+            ModelConfigurations = new MysqlModelConfigurationMethods(_ConnectionString);
+            RoutingPolicies = new MysqlRoutingPolicyMethods(_ConnectionString);
+            LedgerTenantLinks = new MysqlLedgerTenantLinkMethods(_ConnectionString);
+            LedgerAccountLinks = new MysqlLedgerAccountLinkMethods(_ConnectionString);
             return true;
-        }
-
-        /// <inheritdoc />
-        protected override async Task<string?> LoadStateJsonAsync(CancellationToken token = default)
-        {
-            if (String.IsNullOrWhiteSpace(_ConnectionString)) return null;
-            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                using (MySqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = "SELECT data FROM xeno_platform_state WHERE id = @id AND active = 1;";
-                    command.Parameters.AddWithValue("@id", StateId);
-                    object? value = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
-                    return value?.ToString();
-                }
-            }
-        }
-
-        /// <inheritdoc />
-        protected override async Task SaveStateJsonAsync(string stateJson, CancellationToken token = default)
-        {
-            if (String.IsNullOrWhiteSpace(_ConnectionString)) return;
-            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                using (MySqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = """
-INSERT INTO xeno_platform_state (id, data, created_utc, updated_utc, active)
-VALUES (@id, @data, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)
-ON DUPLICATE KEY UPDATE
-    data = VALUES(data),
-    updated_utc = UTC_TIMESTAMP(6),
-    active = 1;
-""";
-                    command.Parameters.AddWithValue("@id", StateId);
-                    command.Parameters.AddWithValue("@data", stateJson);
-                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-                }
-            }
         }
 
         /// <inheritdoc />

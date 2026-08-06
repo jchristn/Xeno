@@ -1,6 +1,7 @@
 namespace Xeno.Core.Database.SqlServer
 {
     using System;
+    using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
@@ -14,7 +15,6 @@ namespace Xeno.Core.Database.SqlServer
     /// </summary>
     public class SqlServerDatabaseDriver : DatabaseDriverBase
     {
-        private const string StateId = "platform";
         private string _ConnectionString = String.Empty;
 
         /// <summary>
@@ -52,18 +52,6 @@ BEGIN
     );
 END;
 
-IF OBJECT_ID(N'dbo.xeno_platform_state', N'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.xeno_platform_state
-    (
-        id nvarchar(64) NOT NULL PRIMARY KEY,
-        data nvarchar(max) NOT NULL,
-        created_utc datetime2 NOT NULL,
-        updated_utc datetime2 NOT NULL,
-        active bit NOT NULL DEFAULT 1
-    );
-END;
-
 IF NOT EXISTS (SELECT 1 FROM dbo.schema_migrations WHERE id = N'0001')
 BEGIN
     INSERT INTO dbo.schema_migrations (id, name, applied_utc)
@@ -77,6 +65,27 @@ END;
                 await SqlServerRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await SqlServerAuditMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await SqlServerOnboardingMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+
+                await SqlServerTenantMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerUserMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerCredentialMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerAuthSessionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerRoleMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerPermissionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerRoleAssignmentMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerClientMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerModelDefinitionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerModelConfigurationMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerRoutingPolicyMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerLedgerTenantLinkMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await SqlServerLedgerAccountLinkMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+
+                List<SchemaMigration> forwardMigrations = new List<SchemaMigration>
+                {
+                    // Post-baseline schema changes are applied in ascending version order and recorded in
+                    // schema_migrations; add new SchemaMigration entries here as the schema evolves.
+                };
+                await SchemaMigrationRunner.ApplyAsync(connection, "SYSUTCDATETIME()", forwardMigrations, token).ConfigureAwait(false);
             }
 
             SqlServerTelemetryMethods telemetryMethods = new SqlServerTelemetryMethods(_ConnectionString);
@@ -86,53 +95,21 @@ END;
             RequestHistory = new SqlServerRequestHistoryMethods(_ConnectionString);
             Audit = new SqlServerAuditMethods(_ConnectionString);
             Onboarding = new SqlServerOnboardingMethods(_ConnectionString);
+
+            Tenants = new SqlServerTenantMethods(_ConnectionString);
+            Users = new SqlServerUserMethods(_ConnectionString);
+            Credentials = new SqlServerCredentialMethods(_ConnectionString);
+            AuthSessions = new SqlServerAuthSessionMethods(_ConnectionString);
+            Roles = new SqlServerRoleMethods(_ConnectionString);
+            Permissions = new SqlServerPermissionMethods(_ConnectionString);
+            RoleAssignments = new SqlServerRoleAssignmentMethods(_ConnectionString);
+            Clients = new SqlServerClientMethods(_ConnectionString);
+            ModelDefinitions = new SqlServerModelDefinitionMethods(_ConnectionString);
+            ModelConfigurations = new SqlServerModelConfigurationMethods(_ConnectionString);
+            RoutingPolicies = new SqlServerRoutingPolicyMethods(_ConnectionString);
+            LedgerTenantLinks = new SqlServerLedgerTenantLinkMethods(_ConnectionString);
+            LedgerAccountLinks = new SqlServerLedgerAccountLinkMethods(_ConnectionString);
             return true;
-        }
-
-        /// <inheritdoc />
-        protected override async Task<string?> LoadStateJsonAsync(CancellationToken token = default)
-        {
-            if (String.IsNullOrWhiteSpace(_ConnectionString)) return null;
-            using (SqlConnection connection = new SqlConnection(_ConnectionString))
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = "SELECT data FROM dbo.xeno_platform_state WHERE id = @id AND active = 1;";
-                    command.Parameters.AddWithValue("@id", StateId);
-                    object? value = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
-                    return value?.ToString();
-                }
-            }
-        }
-
-        /// <inheritdoc />
-        protected override async Task SaveStateJsonAsync(string stateJson, CancellationToken token = default)
-        {
-            if (String.IsNullOrWhiteSpace(_ConnectionString)) return;
-            using (SqlConnection connection = new SqlConnection(_ConnectionString))
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = """
-IF EXISTS (SELECT 1 FROM dbo.xeno_platform_state WHERE id = @id)
-BEGIN
-    UPDATE dbo.xeno_platform_state
-    SET data = @data, updated_utc = SYSUTCDATETIME(), active = 1
-    WHERE id = @id;
-END
-ELSE
-BEGIN
-    INSERT INTO dbo.xeno_platform_state (id, data, created_utc, updated_utc, active)
-    VALUES (@id, @data, SYSUTCDATETIME(), SYSUTCDATETIME(), 1);
-END;
-""";
-                    command.Parameters.AddWithValue("@id", StateId);
-                    command.Parameters.AddWithValue("@data", stateJson);
-                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-                }
-            }
         }
 
         /// <inheritdoc />

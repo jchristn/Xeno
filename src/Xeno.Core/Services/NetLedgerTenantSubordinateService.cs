@@ -6,6 +6,7 @@ namespace Xeno.Core.Services
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
+    using Xeno.Core.Database;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
 
@@ -14,7 +15,7 @@ namespace Xeno.Core.Services
     /// </summary>
     public sealed class NetLedgerTenantSubordinateService : ITenantSubordinateService, IDisposable
     {
-        private readonly XenoPlatform _Platform;
+        private readonly DatabaseDriverBase _Database;
         private readonly LedgerSettings _Settings;
         private readonly LoggingModule _Logging;
         private readonly string _Header = "[NetLedgerTenantSubordinate] ";
@@ -25,16 +26,16 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Instantiate the service.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="settings">Ledger settings.</param>
         /// <param name="logging">Logging module.</param>
-        public NetLedgerTenantSubordinateService(XenoPlatform platform, LedgerSettings settings, LoggingModule logging)
+        public NetLedgerTenantSubordinateService(DatabaseDriverBase database, LedgerSettings settings, LoggingModule logging)
         {
-            _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Logging = logging ?? throw new ArgumentNullException(nameof(logging));
             _Client = new NetLedgerClient(_Settings, _Logging);
-            _Resolver = new LedgerAccountResolver(_Platform, _Settings, _Client);
+            _Resolver = new LedgerAccountResolver(_Database, _Settings, _Client);
         }
 
         /// <inheritdoc />
@@ -59,39 +60,39 @@ namespace Xeno.Core.Services
             }
             catch (Exception ex) when (allowDeferredProvisioning && IsProvisioningFailure(ex))
             {
-                LedgerTenantLink? link = FindLink(tenant.Id);
+                LedgerTenantLink? link = await FindLinkAsync(tenant.Id, token).ConfigureAwait(false);
                 return BuildStatus("create", tenant, "Deferred", ex.Message, link?.NetLedgerTenantId);
             }
         }
 
         /// <inheritdoc />
-        public Task<TenantSubordinateServiceStatus> UpdateAsync(Tenant tenant, CancellationToken token = default)
+        public async Task<TenantSubordinateServiceStatus> UpdateAsync(Tenant tenant, CancellationToken token = default)
         {
             if (tenant == null) throw new ArgumentNullException(nameof(tenant));
-            if (!_Settings.Enabled) return Task.FromResult(BuildStatus("update", tenant, "Skipped", "Ledgering is disabled."));
-            LedgerTenantLink? link = FindLink(tenant.Id);
-            if (link == null) return Task.FromResult(BuildStatus("update", tenant, "Deferred", "NetLedger tenant link is not provisioned."));
-            return UpdateNetLedgerTenantAsync(tenant, link, "update", token);
+            if (!_Settings.Enabled) return BuildStatus("update", tenant, "Skipped", "Ledgering is disabled.");
+            LedgerTenantLink? link = await FindLinkAsync(tenant.Id, token).ConfigureAwait(false);
+            if (link == null) return BuildStatus("update", tenant, "Deferred", "NetLedger tenant link is not provisioned.");
+            return await UpdateNetLedgerTenantAsync(tenant, link, "update", token).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
-        public Task<TenantSubordinateServiceStatus> SuspendAsync(Tenant tenant, CancellationToken token = default)
+        public async Task<TenantSubordinateServiceStatus> SuspendAsync(Tenant tenant, CancellationToken token = default)
         {
             if (tenant == null) throw new ArgumentNullException(nameof(tenant));
-            if (!_Settings.Enabled) return Task.FromResult(BuildStatus("suspend", tenant, "Skipped", "Ledgering is disabled."));
-            LedgerTenantLink? link = FindLink(tenant.Id);
-            if (link == null) return Task.FromResult(BuildStatus("suspend", tenant, "Deferred", "NetLedger tenant link is not provisioned."));
-            return UpdateNetLedgerTenantAsync(tenant, link, "suspend", token);
+            if (!_Settings.Enabled) return BuildStatus("suspend", tenant, "Skipped", "Ledgering is disabled.");
+            LedgerTenantLink? link = await FindLinkAsync(tenant.Id, token).ConfigureAwait(false);
+            if (link == null) return BuildStatus("suspend", tenant, "Deferred", "NetLedger tenant link is not provisioned.");
+            return await UpdateNetLedgerTenantAsync(tenant, link, "suspend", token).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
-        public Task<TenantSubordinateServiceStatus> ReactivateAsync(Tenant tenant, CancellationToken token = default)
+        public async Task<TenantSubordinateServiceStatus> ReactivateAsync(Tenant tenant, CancellationToken token = default)
         {
             if (tenant == null) throw new ArgumentNullException(nameof(tenant));
-            if (!_Settings.Enabled) return Task.FromResult(BuildStatus("reactivate", tenant, "Skipped", "Ledgering is disabled."));
-            LedgerTenantLink? link = FindLink(tenant.Id);
-            if (link == null) return Task.FromResult(BuildStatus("reactivate", tenant, "Deferred", "NetLedger tenant link is not provisioned."));
-            return UpdateNetLedgerTenantAsync(tenant, link, "reactivate", token);
+            if (!_Settings.Enabled) return BuildStatus("reactivate", tenant, "Skipped", "Ledgering is disabled.");
+            LedgerTenantLink? link = await FindLinkAsync(tenant.Id, token).ConfigureAwait(false);
+            if (link == null) return BuildStatus("reactivate", tenant, "Deferred", "NetLedger tenant link is not provisioned.");
+            return await UpdateNetLedgerTenantAsync(tenant, link, "reactivate", token).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
@@ -100,7 +101,7 @@ namespace Xeno.Core.Services
             if (tenant == null) throw new ArgumentNullException(nameof(tenant));
             if (!_Settings.Enabled) return BuildStatus("delete", tenant, "Skipped", "Ledgering is disabled.");
 
-            LedgerTenantLink? link = FindLink(tenant.Id);
+            LedgerTenantLink? link = await FindLinkAsync(tenant.Id, token).ConfigureAwait(false);
             if (link == null) return BuildStatus("delete", tenant, "Provisioned", "No NetLedger tenant link exists.");
 
             if (!hardDelete)
@@ -109,8 +110,8 @@ namespace Xeno.Core.Services
                 return await SuspendAsync(tenant, token).ConfigureAwait(false);
             }
 
-            List<string> accountIds = _Platform.LedgerAccountLinks
-                .Where(item => String.Equals(item.XenoTenantId, tenant.Id, StringComparison.OrdinalIgnoreCase))
+            List<LedgerAccountLink> tenantAccountLinks = await _Database.LedgerAccountLinks!.EnumerateByTenantAsync(tenant.Id, token).ConfigureAwait(false);
+            List<string> accountIds = tenantAccountLinks
                 .Select(item => item.NetLedgerAccountId)
                 .Where(item => !String.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -137,27 +138,28 @@ namespace Xeno.Core.Services
 
             await _Client.DeleteTenantAsync(link.NetLedgerTenantId, token).ConfigureAwait(false);
             _Logging.Info(_Header + "deleted netledger tenant " + link.NetLedgerTenantId + " for tenant " + tenant.Id);
-            _Platform.LedgerTenantLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenant.Id, StringComparison.OrdinalIgnoreCase));
-            _Platform.LedgerAccountLinks.RemoveAll(item => String.Equals(item.XenoTenantId, tenant.Id, StringComparison.OrdinalIgnoreCase));
+            await _Database.LedgerTenantLinks!.DeleteByTenantAsync(tenant.Id, token).ConfigureAwait(false);
+            await _Database.LedgerAccountLinks!.DeleteByTenantAsync(tenant.Id, token).ConfigureAwait(false);
             return BuildStatus("delete", tenant, "Deleted", null, link.NetLedgerTenantId);
         }
 
         /// <inheritdoc />
-        public Task<TenantSubordinateServiceStatus> ReconcileAsync(Tenant tenant, CancellationToken token = default)
+        public async Task<TenantSubordinateServiceStatus> ReconcileAsync(Tenant tenant, CancellationToken token = default)
         {
             if (tenant == null) throw new ArgumentNullException(nameof(tenant));
-            if (!_Settings.Enabled) return Task.FromResult(BuildStatus("reconcile", tenant, "Skipped", "Ledgering is disabled."));
-            LedgerTenantLink? link = FindLink(tenant.Id);
-            if (link == null) return Task.FromResult(BuildStatus("reconcile", tenant, "Missing", "NetLedger tenant link is missing."));
+            if (!_Settings.Enabled) return BuildStatus("reconcile", tenant, "Skipped", "Ledgering is disabled.");
+            LedgerTenantLink? link = await FindLinkAsync(tenant.Id, token).ConfigureAwait(false);
+            if (link == null) return BuildStatus("reconcile", tenant, "Missing", "NetLedger tenant link is missing.");
 
-            List<User> missingAccounts = _Platform.Users
-                .Where(item => String.Equals(item.TenantId, tenant.Id, StringComparison.OrdinalIgnoreCase))
-                .Where(item => !_Platform.LedgerAccountLinks.Any(linkItem =>
+            List<User> tenantUsers = await _Database.Users!.EnumerateAsync(tenant.Id, token).ConfigureAwait(false);
+            List<LedgerAccountLink> accountLinks = await _Database.LedgerAccountLinks!.EnumerateByTenantAsync(tenant.Id, token).ConfigureAwait(false);
+            List<User> missingAccounts = tenantUsers
+                .Where(item => !accountLinks.Any(linkItem =>
                     String.Equals(linkItem.XenoTenantId, tenant.Id, StringComparison.OrdinalIgnoreCase) &&
                     String.Equals(linkItem.XenoUserId, item.Id, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
             string? error = missingAccounts.Count == 0 ? null : missingAccounts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " account link(s) are missing.";
-            return Task.FromResult(BuildStatus("reconcile", tenant, missingAccounts.Count == 0 ? "Provisioned" : "Partial", error, link.NetLedgerTenantId));
+            return BuildStatus("reconcile", tenant, missingAccounts.Count == 0 ? "Provisioned" : "Partial", error, link.NetLedgerTenantId);
         }
 
         /// <summary>
@@ -181,9 +183,9 @@ namespace Xeno.Core.Services
             return BuildStatus(operation, tenant, updated.Active == tenant.Active ? "Provisioned" : "Partial", null, link.NetLedgerTenantId);
         }
 
-        private LedgerTenantLink? FindLink(string tenantId)
+        private Task<LedgerTenantLink?> FindLinkAsync(string tenantId, CancellationToken token)
         {
-            return _Platform.LedgerTenantLinks.FirstOrDefault(item => String.Equals(item.XenoTenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            return _Database.LedgerTenantLinks!.ReadByTenantAsync(tenantId, token);
         }
 
         private TenantSubordinateServiceStatus BuildStatus(string operation, Tenant tenant, string status, string? error, string? externalTenantId = null)

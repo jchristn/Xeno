@@ -6,6 +6,8 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Caching;
+    using Xeno.Core.Database;
     using Xeno.Core.Enums;
     using Xeno.Core.Helpers;
     using Xeno.Core.Models;
@@ -23,18 +25,24 @@ namespace Xeno.Core.Services
         private static long _LeastRecentlyUsedSequence = 0;
         private static int _RoundRobinIndex = 0;
 
-        private readonly XenoPlatform _Platform;
+        private readonly DatabaseDriverBase _Database;
         private readonly RoutingSettings _Settings;
+        private readonly EntityCache<List<RoutingPolicy>> _RoutingPolicyCache;
+        private readonly bool _CacheEnabled;
 
         /// <summary>
         /// Instantiate the routing service.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver providing access to the control-plane repositories.</param>
         /// <param name="settings">Routing settings.</param>
-        public RoutingService(XenoPlatform platform, RoutingSettings? settings = null)
+        /// <param name="cache">Service-layer cache settings. When null, defaults are used.</param>
+        public RoutingService(DatabaseDriverBase database, RoutingSettings? settings = null, CacheSettings? cache = null)
         {
-            _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
             _Settings = settings ?? new RoutingSettings();
+            CacheSettings cacheSettings = cache ?? new CacheSettings();
+            _CacheEnabled = cacheSettings.Enabled;
+            _RoutingPolicyCache = new EntityCache<List<RoutingPolicy>>(cacheSettings.RoutingPolicyCapacity, cacheSettings.RoutingPolicyTtlSeconds);
         }
 
         /// <summary>
@@ -59,7 +67,7 @@ namespace Xeno.Core.Services
         /// <param name="provider">Optional upstream provider filter.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Routing decision.</returns>
-        public Task<RoutingDecision> RouteAsync(RequestContext context, string? model, bool isEmbedding, ApiProviderTypeEnum? provider, CancellationToken token = default)
+        public async Task<RoutingDecision> RouteAsync(RequestContext context, string? model, bool isEmbedding, ApiProviderTypeEnum? provider, CancellationToken token = default)
         {
             if (context == null) throw new ArgumentNullException(nameof(context));
             token.ThrowIfCancellationRequested();
@@ -71,25 +79,26 @@ namespace Xeno.Core.Services
                 Message = "Routing started."
             };
 
-            Tenant? consumerTenant = _Platform.Tenants.FirstOrDefault(item => item.Id == context.TenantId);
+            Tenant? consumerTenant = String.IsNullOrEmpty(context.TenantId)
+                ? null
+                : await _Database.Tenants!.ReadAsync(context.TenantId, token).ConfigureAwait(false);
             bool consumeShared = consumerTenant?.ConsumeShared ?? false;
 
-            string effectiveModel = ResolveModel(context.TenantId, consumeShared, model, isEmbedding, provider);
+            List<XenoClientRecord> visibleClients = await LoadVisibleClientsAsync(context.TenantId, consumeShared, token).ConfigureAwait(false);
+
+            string effectiveModel = await ResolveModelAsync(context.TenantId, model, isEmbedding, provider, visibleClients, token).ConfigureAwait(false);
             decision.Timeline.Add("ModelResolution");
             if (String.IsNullOrWhiteSpace(effectiveModel))
             {
                 decision.HttpStatusCode = 404;
                 decision.OutcomeCode = "ModelNotFound";
                 decision.Message = "No advertised model can service the request.";
-                return Task.FromResult(decision);
+                return decision;
             }
             decision.EffectiveModel = effectiveModel;
 
             DateTime utcNow = DateTime.UtcNow;
             DateTime freshnessCutoffUtc = utcNow.AddMilliseconds(-_Settings.ClientFreshnessTimeoutMs);
-            List<XenoClientRecord> visibleClients = _Platform.Clients
-                .Where(item => VisibleToTenant(item, context.TenantId, consumeShared))
-                .ToList();
             List<XenoClientRecord> candidates = visibleClients
                 .Where(item => IsEligibleClient(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
                 .OrderBy(item => item.Name)
@@ -102,7 +111,7 @@ namespace Xeno.Core.Services
                 .ToList();
             decision.Timeline.Add("ClientInventory");
 
-            RoutingPolicy policy = ResolveRoutingPolicy(context.TenantId, effectiveModel, candidates);
+            RoutingPolicy policy = await ResolveRoutingPolicyAsync(context.TenantId, effectiveModel, candidates, token).ConfigureAwait(false);
             ApplyRoutingPolicy(decision, policy);
             decision.Timeline.Add("PolicyResolution");
 
@@ -120,7 +129,7 @@ namespace Xeno.Core.Services
                 decision.HttpStatusCode = 502;
                 decision.OutcomeCode = "NoEligibleClients";
                 decision.Message = "No connected client can service the request.";
-                return Task.FromResult(decision);
+                return decision;
             }
 
             XenoClientRecord selected = SelectClient(candidates, policy.LoadBalancingMode, BuildRouteScopeKey(context, effectiveModel, isEmbedding, policy), decision, policy.Adaptive);
@@ -140,7 +149,7 @@ namespace Xeno.Core.Services
             decision.SelectedClientLastHeartbeatUtc = selected.LastHeartbeatUtc;
             decision.SelectionReason = BuildSelectionReason(policy.LoadBalancingMode, selected, decision);
             decision.Timeline.Add("ClientSelection");
-            return Task.FromResult(decision);
+            return decision;
         }
 
         /// <summary>
@@ -185,10 +194,52 @@ namespace Xeno.Core.Services
             return entry;
         }
 
-        private string ResolveModel(string tenantId, bool consumeShared, string? requestedModel, bool isEmbedding, ApiProviderTypeEnum? provider)
+        /// <summary>
+        /// Load the clients visible to a tenant for routing, reading from the client repository. A tenant
+        /// always sees its own clients; when the tenant consumes shared clients, active shared clients owned
+        /// by other tenants are also included. Clients are read directly (never cached) because their
+        /// heartbeat and in-flight state changes frequently.
+        /// </summary>
+        /// <param name="tenantId">Consuming tenant identifier.</param>
+        /// <param name="consumeShared">Whether the consuming tenant consumes shared clients.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Clients visible to the tenant.</returns>
+        private async Task<List<XenoClientRecord>> LoadVisibleClientsAsync(string tenantId, bool consumeShared, CancellationToken token)
         {
-            List<ModelDefinition> definitions = _Platform.ModelDefinitions
-                .Where(item => item.TenantId == tenantId)
+            List<XenoClientRecord> owned = await _Database.Clients!.EnumerateAsync(tenantId, token).ConfigureAwait(false);
+            if (!consumeShared)
+            {
+                return owned.Where(item => VisibleToTenant(item, tenantId, consumeShared)).ToList();
+            }
+
+            List<XenoClientRecord> shared = await _Database.Clients!.EnumerateSharedAsync(token).ConfigureAwait(false);
+            Dictionary<string, XenoClientRecord> seenIds = new Dictionary<string, XenoClientRecord>(StringComparer.Ordinal);
+            List<XenoClientRecord> combined = new List<XenoClientRecord>();
+            foreach (XenoClientRecord client in owned)
+            {
+                if (client.Id != null)
+                {
+                    if (seenIds.ContainsKey(client.Id)) continue;
+                    seenIds[client.Id] = client;
+                }
+                combined.Add(client);
+            }
+            foreach (XenoClientRecord client in shared)
+            {
+                if (client.Id != null)
+                {
+                    if (seenIds.ContainsKey(client.Id)) continue;
+                    seenIds[client.Id] = client;
+                }
+                combined.Add(client);
+            }
+
+            return combined.Where(item => VisibleToTenant(item, tenantId, consumeShared)).ToList();
+        }
+
+        private async Task<string> ResolveModelAsync(string tenantId, string? requestedModel, bool isEmbedding, ApiProviderTypeEnum? provider, List<XenoClientRecord> visibleClients, CancellationToken token)
+        {
+            List<ModelDefinition> definitions = (await _Database.ModelDefinitions!.EnumerateAsync(tenantId, token).ConfigureAwait(false))
                 .Where(item => isEmbedding ? item.SupportsEmbeddings : item.SupportsCompletions)
                 .ToList();
 
@@ -197,17 +248,15 @@ namespace Xeno.Core.Services
                 ModelDefinition? requested = definitions.FirstOrDefault(item => String.Equals(item.Name, requestedModel, StringComparison.OrdinalIgnoreCase));
                 if (requested != null) return requested.Name;
 
-                bool clientAdvertisesRequestedModel = _Platform.Clients
-                    .Where(item => VisibleToTenant(item, tenantId, consumeShared))
-                    .Any(item => item.Models.Any(model => ModelMatches(model, requestedModel, isEmbedding, provider)));
+                bool clientAdvertisesRequestedModel = visibleClients
+                    .Any(item => item.Models.Any(clientModel => ModelMatches(clientModel, requestedModel, isEmbedding, provider)));
                 return clientAdvertisesRequestedModel ? requestedModel : String.Empty;
             }
 
             string? definedModel = definitions.FirstOrDefault()?.Name;
             if (!String.IsNullOrWhiteSpace(definedModel)) return definedModel;
 
-            return _Platform.Clients
-                .Where(item => VisibleToTenant(item, tenantId, consumeShared))
+            return visibleClients
                 .SelectMany(item => item.Models)
                 .Where(item => ModelMatches(item, item.Name, isEmbedding, provider))
                 .Select(item => item.Name)
@@ -506,9 +555,32 @@ namespace Xeno.Core.Services
             return (context.TenantId ?? String.Empty) + ":" + effectiveModel + ":" + (isEmbedding ? "embeddings" : "completions") + ":" + policy.Id;
         }
 
-        private RoutingPolicy ResolveRoutingPolicy(string tenantId, string effectiveModel, List<XenoClientRecord> candidates)
+        /// <summary>
+        /// Load the tenant's routing policies through the sliding-expiration cache. Routing policies change
+        /// rarely, so serving a copy up to the cache TTL old is acceptable per design; the cache is keyed by
+        /// tenant and holds the full policy list for that tenant.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>The tenant's routing policies.</returns>
+        private async Task<List<RoutingPolicy>> LoadTenantRoutingPoliciesAsync(string tenantId, CancellationToken token)
         {
-            List<RoutingPolicy> policies = _Platform.RoutingPolicies
+            if (String.IsNullOrEmpty(tenantId) || !_CacheEnabled)
+            {
+                return await _Database.RoutingPolicies!.EnumerateAsync(tenantId, token).ConfigureAwait(false);
+            }
+
+            List<RoutingPolicy>? cached = await _RoutingPolicyCache.GetOrLoadAsync(
+                tenantId,
+                async loaderToken => await _Database.RoutingPolicies!.EnumerateAsync(tenantId, loaderToken).ConfigureAwait(false),
+                token).ConfigureAwait(false);
+            return cached ?? new List<RoutingPolicy>();
+        }
+
+        private async Task<RoutingPolicy> ResolveRoutingPolicyAsync(string tenantId, string effectiveModel, List<XenoClientRecord> candidates, CancellationToken token)
+        {
+            List<RoutingPolicy> tenantPolicies = await LoadTenantRoutingPoliciesAsync(tenantId, token).ConfigureAwait(false);
+            List<RoutingPolicy> policies = tenantPolicies
                 .Where(item => item.TenantId == tenantId)
                 .Where(item => item.Active)
                 .ToList();
@@ -535,7 +607,7 @@ namespace Xeno.Core.Services
                 }
             }
 
-            return selected ?? FallbackPolicy(tenantId);
+            return selected ?? FallbackPolicy(tenantId, tenantPolicies);
         }
 
         private static void ApplyRoutingPolicy(RoutingDecision decision, RoutingPolicy policy)
@@ -579,9 +651,9 @@ namespace Xeno.Core.Services
             return "Matched routing policy '" + policy.Name + "' for model '" + policy.ModelName + "' and client '" + policy.ClientName + "'.";
         }
 
-        private RoutingPolicy FallbackPolicy(string tenantId)
+        private RoutingPolicy FallbackPolicy(string tenantId, List<RoutingPolicy> tenantPolicies)
         {
-            RoutingPolicy? defaultPolicy = _Platform.RoutingPolicies.FirstOrDefault(item =>
+            RoutingPolicy? defaultPolicy = tenantPolicies.FirstOrDefault(item =>
                 item.TenantId == tenantId &&
                 item.IsDefault);
             if (defaultPolicy != null) return defaultPolicy;

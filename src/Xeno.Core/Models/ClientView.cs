@@ -6,8 +6,9 @@ namespace Xeno.Core.Models
 
     /// <summary>
     /// Tenant-facing projection of a <see cref="XenoClientRecord"/>. A tenant sees its own clients in full;
-    /// clients owned by other tenants (shared clients) are returned with owner identity, weighting, and
-    /// live-load fields omitted so that no cross-tenant detail leaks to a consuming tenant.
+    /// clients owned by other tenants (shared clients) are returned with the client name, owner identity,
+    /// weighting, and live-load fields omitted so that no cross-tenant detail leaks to a consuming tenant.
+    /// Advertised model names remain visible so the consuming tenant can still route to them.
     /// </summary>
     public class ClientView
     {
@@ -22,7 +23,7 @@ namespace Xeno.Core.Models
         public string? TenantId { get; set; } = null;
 
         /// <summary>
-        /// Client name.
+        /// Client name. Populated only when the viewer owns the client; empty for shared clients owned by another tenant.
         /// </summary>
         public string Name { get; set; } = String.Empty;
 

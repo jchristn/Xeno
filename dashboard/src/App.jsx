@@ -2558,7 +2558,7 @@ function ClientsView() {
         <MetricCard icon={<Server size={18} />} label={t('completionModels')} value={formatNumber(clientModels.filter((model) => value(model, 'supportsCompletions') === true).length)} />
       </div>
       <DataTable
-        columns={['id', 'name', { key: 'origin', render: (row) => sharedOriginBadge(row, t), sortValue: (row) => clientOrigin(row), searchValue: (row) => clientOrigin(row) }, { key: 'modelCount', render: clientModelCount, sortValue: clientModelCount, searchValue: clientModelCount }, 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
+        columns={['id', { key: 'name', render: (row) => sharedClientName(row, t), sortValue: (row) => sharedClientName(row, t), searchValue: (row) => sharedClientName(row, t) }, { key: 'origin', render: (row) => sharedOriginBadge(row, t), sortValue: (row) => clientOrigin(row), searchValue: (row) => clientOrigin(row) }, { key: 'modelCount', render: clientModelCount, sortValue: clientModelCount, searchValue: clientModelCount }, 'connected', 'serviceState', 'inFlightRequests', 'maxParallelRequests', 'lastHeartbeatUtc']}
         canDelete={(row) => !isForeignClient(row)}
         onDelete={(row) => {
           if (recordId(selectedClient) === recordId(row)) setSelectedClient(null);
@@ -2699,12 +2699,14 @@ function AdvertisedModelsView() {
           {
             key: 'clientName',
             label: 'client',
-            render: (row) => (
+            render: (row) => (isForeignClient(row) ? (
+              <span className="muted-cell">{t('redactedShared', 'Redacted')}</span>
+            ) : (
               <button className="table-link-button" onClick={() => selectClientFromModel(row)} title={t('filterClientTelemetry', 'Filter client telemetry by client')} type="button">
                 {value(row, 'clientName') || value(row, 'clientId') || '-'}
               </button>
-            ),
-            searchValue: (row) => value(row, 'clientName') || value(row, 'clientId'),
+            )),
+            searchValue: (row) => (isForeignClient(row) ? t('redactedShared', 'Redacted') : (value(row, 'clientName') || value(row, 'clientId'))),
             searchable: false
           },
           { key: 'clientId', searchable: false },
@@ -3307,7 +3309,9 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedTenantId, setSelectedTenantId] = useState('');
   const isSystemAdmin = value(currentUser, 'isAdmin') === true;
-  const effectiveTenantId = publicMode ? '' : (isSystemAdmin ? selectedTenantId : (session?.tenantId || ''));
+  // Global by default for every viewer (empty tenant id ⇒ all tenants); a viewer opts into tenant scope via
+  // the filter below. System admins can select any tenant; a non-admin can scope to their own tenant only.
+  const effectiveTenantId = publicMode ? '' : selectedTenantId;
   const rows = modelLeaderboardRows(response, query.offset);
   const total = coerceInteger(value(response, 'total'), 0, 0, Number.MAX_SAFE_INTEGER);
   const pageSize = Math.max(1, query.limit);
@@ -3323,9 +3327,9 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
     : (session?.tenantId ? [{ id: session.tenantId, name: session.tenantName || session.tenantId }] : []);
   const selectedTenant = knownTenants.find((tenant) => String(value(tenant, 'id') || '') === effectiveTenantId);
   const selectedTenantExists = !selectedTenantId || knownTenants.some((tenant) => String(value(tenant, 'id') || '') === selectedTenantId);
-  const scopeLabel = publicMode
+  const scopeLabel = publicMode || !effectiveTenantId
     ? t('globalScope', 'Global')
-    : (!effectiveTenantId && isSystemAdmin ? t('globalScope', 'Global') : (value(selectedTenant, 'name') || session?.tenantName || effectiveTenantId || t('tenantScope', 'Tenant')));
+    : (value(selectedTenant, 'name') || session?.tenantName || effectiveTenantId || t('tenantScope', 'Tenant'));
 
   useEffect(() => {
     setDraftStartUtc(query.startUtc);
@@ -3363,18 +3367,6 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
   }, [publicMode, session?.userId]);
 
   useEffect(() => {
-    if (publicMode) return;
-    if (currentUser == null) return;
-    if (!isSystemAdmin) setSelectedTenantId(session?.tenantId || '');
-  }, [currentUser, isSystemAdmin, publicMode, session?.tenantId]);
-
-  useEffect(() => {
-    if (!publicMode && !effectiveTenantId) {
-      setResponse(null);
-      setLoading(false);
-      return undefined;
-    }
-
     let alive = true;
     setLoading(true);
     setError('');
@@ -3451,7 +3443,7 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
       <Panel
         actions={<IconButton disabled={loading} icon={<RefreshCw size={16} />} label={t('refresh')} onClick={() => setRefreshNonce((current) => current + 1)} tooltip={t('tooltipManualRefresh')} />}
         className="model-leaderboard-panel"
-        eyebrow={publicMode ? t('globalScope', 'Global') : t('tenantScope', 'Tenant')}
+        eyebrow={publicMode || !effectiveTenantId ? t('globalScope', 'Global') : t('tenantScope', 'Tenant')}
         title={t('xenoModelLeaderboard', 'Xeno Model Leaderboard')}
       >
         <div className="leaderboard-quick-range-panel">
@@ -3501,6 +3493,14 @@ function ModelLeaderboardView({ publicMode = false, session = null }) {
                 <input onChange={(event) => updateTenantFilter(event.target.value.trim())} placeholder={t('all')} value={selectedTenantId} />
               </label>
             </>
+          ) : !publicMode ? (
+            <label className="form-field compact-field tenant-filter-field">
+              <span>{t('leaderboardScope', 'Scope')}</span>
+              <select onChange={(event) => updateTenantFilter(event.target.value)} value={selectedTenantId}>
+                <option value="">{t('globalScope', 'Global')}</option>
+                {session?.tenantId ? <option value={session.tenantId}>{t('myTenantScope', 'My Tenant')}</option> : null}
+              </select>
+            </label>
           ) : null}
           <div className="leaderboard-filter-actions">
             <IconButton icon={<Search size={16} />} label={t('applyFilters', 'Apply Filters')} onClick={applyFilters} tooltip={t('applyFilters', 'Apply Filters')} variant="primary" />
@@ -7715,6 +7715,13 @@ function sharedOriginBadge(row, t) {
   if (origin === 'third-party') return <StatusChip tone="info" value={t('thirdPartyOrigin')} />;
   if (value(row, 'shared') === true) return <StatusChip tone="success" value={t('shared')} />;
   return <span className="muted-cell">-</span>;
+}
+
+// The name of a shared (foreign-owned) client is redacted server-side; show a redaction label in its place
+// so the column reads clearly rather than blank. Own-client names render normally.
+function sharedClientName(row, t, key = 'name') {
+  if (isForeignClient(row)) return t('redactedShared', 'Redacted');
+  return value(row, key) || '';
 }
 
 function flattenClientModels(clients) {

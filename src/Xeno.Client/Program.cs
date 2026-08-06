@@ -1836,6 +1836,12 @@ namespace Xeno.Client
                     {
                         ApplyServerAuthentication(socket, connectionSettings);
                         await socket.ConnectAsync(new Uri(connectionSettings.Server.Url), token).ConfigureAwait(false);
+
+                        // Reload settings after the connect completes so the advertised inventory reflects
+                        // the latest on-disk configuration. ConnectAsync can block while the server is
+                        // starting (for example across a restart), during which the operator may update
+                        // provider settings; loading only before the connect would register stale inventory.
+                        connectionSettings = LoadRuntimeSettingsForConnectedSession(settings);
                         ClientConnectionState.MarkWebSocketConnected(connectionSettings);
                         await SendMessageAsync(socket, new { type = "client.register", clientId = connectionSettings.ClientId, tenantId = connectionSettings.TenantId, name = connectionSettings.Name, inventory = connectionSettings.BuildInventoryMessage() }, token).ConfigureAwait(false);
                         string? disconnectReason = await ReceiveLoopAsync(socket, connectionSettings, token).ConfigureAwait(false);

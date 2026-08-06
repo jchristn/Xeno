@@ -16,7 +16,7 @@ namespace Test.Shared
     using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
-    using Microsoft.Data.Sqlite;
+    using System.Data.Common;
     using Touchstone.Core;
     using Xeno.Client;
     using Xeno.Client.LocalDashboard;
@@ -1231,15 +1231,15 @@ namespace Test.Shared
                         "Ledger drain writes tenant, user accounts, debit, credit, and searchable metadata through NetLedger REST",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
                             User requestUser = new User { Id = "usr_ledger_e2e_requestor", TenantId = Constants.DefaultTenantId, Email = "ledger-e2e-requestor@test", Username = "ledger-e2e-requestor@test", Active = true };
                             User servingUser = new User { Id = "usr_ledger_e2e_serving", TenantId = Constants.DefaultTenantId, Email = "ledger-e2e-serving@test", Username = "ledger-e2e-serving@test", Active = true };
-                            platform.Users.Add(requestUser);
-                            platform.Users.Add(servingUser);
+                            await database.Users!.CreateAsync(requestUser).ConfigureAwait(false);
+                            await database.Users!.CreateAsync(servingUser).ConfigureAwait(false);
                             Credential credential = new Credential { Id = "cred_ledger_e2e", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "ledger-e2e", SecretKey = "secret", Active = true };
-                            platform.Credentials.Add(credential);
+                            await database.Credentials!.CreateAsync(credential).ConfigureAwait(false);
                             XenoClientRecord clientRecord = new XenoClientRecord { Id = "xcl_ledger_e2e", TenantId = Constants.DefaultTenantId, Name = "ledger-e2e", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
-                            platform.Clients.Add(clientRecord);
+                            await database.Clients!.CreateAsync(clientRecord).ConfigureAwait(false);
 
                             using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
                             {
@@ -1251,11 +1251,12 @@ namespace Test.Shared
                                     SecretKey = netLedger.RequiredSecretKey,
                                     CommitEntriesImmediately = true
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(database, settings, _TestLogging))
                                 {
-                                    if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 123, "/v1/chat/completions"), out string? reason))
+                                    LedgerEnqueueResult enqueue = await ledger.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 123, "/v1/chat/completions")).ConfigureAwait(false);
+                                    if (!enqueue.Enqueued)
                                     {
-                                        throw new InvalidOperationException("Ledger enqueue failed: " + reason);
+                                        throw new InvalidOperationException("Ledger enqueue failed: " + enqueue.Reason);
                                     }
 
                                     LedgerDrainResponse response = await ledger.DrainOnceAsync(CancellationToken.None).ConfigureAwait(false);
@@ -1263,8 +1264,8 @@ namespace Test.Shared
                                     if (netLedger.TenantCreateCount != 1) throw new InvalidOperationException("Drain did not create one NetLedger tenant.");
                                     if (netLedger.AccountCreateCount != 2) throw new InvalidOperationException("Drain did not create requester and serving accounts.");
                                     if (netLedger.EntryCreateCount != 2) throw new InvalidOperationException("Drain did not create debit and credit entries.");
-                                    if (platform.LedgerTenantLinks.Count != 1) throw new InvalidOperationException("Tenant link was not persisted.");
-                                    if (platform.LedgerAccountLinks.Count(item => item.XenoUserId == requestUser.Id || item.XenoUserId == servingUser.Id) != 2) throw new InvalidOperationException("Account links were not persisted.");
+                                    if ((await database.LedgerTenantLinks!.EnumerateAsync().ConfigureAwait(false)).Count != 1) throw new InvalidOperationException("Tenant link was not persisted.");
+                                    if ((await database.LedgerAccountLinks!.EnumerateByTenantAsync(Constants.DefaultTenantId).ConfigureAwait(false)).Count(item => item.XenoUserId == requestUser.Id || item.XenoUserId == servingUser.Id) != 2) throw new InvalidOperationException("Account links were not persisted.");
 
                                     List<NetLedgerEntry> entries = netLedger.Entries;
                                     NetLedgerEntry? debit = entries.FirstOrDefault(item => String.Equals(item.Type, "Debit", StringComparison.OrdinalIgnoreCase));
@@ -1287,21 +1288,21 @@ namespace Test.Shared
                         "Ledger account resolver reuses tenant-scoped accounts found by Xeno metadata tags",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
                             User requestUser = new User { Id = "usr_ledger_metadata_requestor", TenantId = Constants.DefaultTenantId, Email = "ledger-metadata-requestor@test", Username = "ledger-metadata-requestor@test", Active = true };
                             User servingUser = new User { Id = "usr_ledger_metadata_serving", TenantId = Constants.DefaultTenantId, Email = "ledger-metadata-serving@test", Username = "ledger-metadata-serving@test", Active = true };
-                            platform.Users.Add(requestUser);
-                            platform.Users.Add(servingUser);
+                            await database.Users!.CreateAsync(requestUser).ConfigureAwait(false);
+                            await database.Users!.CreateAsync(servingUser).ConfigureAwait(false);
                             Credential credential = new Credential { Id = "cred_ledger_metadata", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "ledger-metadata", SecretKey = "secret", Active = true };
-                            platform.Credentials.Add(credential);
+                            await database.Credentials!.CreateAsync(credential).ConfigureAwait(false);
                             XenoClientRecord clientRecord = new XenoClientRecord { Id = "xcl_ledger_metadata", TenantId = Constants.DefaultTenantId, Name = "ledger-metadata", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
-                            platform.Clients.Add(clientRecord);
+                            await database.Clients!.CreateAsync(clientRecord).ConfigureAwait(false);
 
                             using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
                             {
                                 string netLedgerTenantId = "ten_existing_metadata";
                                 netLedger.AddTenant(netLedgerTenantId, "Existing Metadata");
-                                platform.LedgerTenantLinks.Add(new LedgerTenantLink { XenoTenantId = Constants.DefaultTenantId, NetLedgerTenantId = netLedgerTenantId, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow });
+                                await database.LedgerTenantLinks!.CreateAsync(new LedgerTenantLink { XenoTenantId = Constants.DefaultTenantId, NetLedgerTenantId = netLedgerTenantId, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }).ConfigureAwait(false);
                                 netLedger.AddAccount("acct_existing_requestor", netLedgerTenantId, "xeno:user:" + requestUser.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(Constants.DefaultTenantId, requestUser));
                                 netLedger.AddAccount("acct_existing_serving", netLedgerTenantId, "xeno:user:" + servingUser.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(Constants.DefaultTenantId, servingUser));
 
@@ -1312,18 +1313,20 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(database, settings, _TestLogging))
                                 {
-                                    if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 22, "/v1/embeddings"), out string? reason))
+                                    LedgerEnqueueResult enqueue = await ledger.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 22, "/v1/embeddings")).ConfigureAwait(false);
+                                    if (!enqueue.Enqueued)
                                     {
-                                        throw new InvalidOperationException("Ledger enqueue failed: " + reason);
+                                        throw new InvalidOperationException("Ledger enqueue failed: " + enqueue.Reason);
                                     }
 
                                     LedgerDrainResponse response = await ledger.DrainOnceAsync(CancellationToken.None).ConfigureAwait(false);
                                     if (response.Processed != 1) throw new InvalidOperationException("Metadata resolver drain did not process one event.");
                                     if (netLedger.AccountCreateCount != 0) throw new InvalidOperationException("Resolver created accounts instead of reusing metadata matches.");
-                                    LedgerAccountLink? requestLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == requestUser.Id);
-                                    LedgerAccountLink? servingLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == servingUser.Id);
+                                    List<LedgerAccountLink> metadataAccountLinks = await database.LedgerAccountLinks!.EnumerateByTenantAsync(Constants.DefaultTenantId).ConfigureAwait(false);
+                                    LedgerAccountLink? requestLink = metadataAccountLinks.FirstOrDefault(item => item.XenoUserId == requestUser.Id);
+                                    LedgerAccountLink? servingLink = metadataAccountLinks.FirstOrDefault(item => item.XenoUserId == servingUser.Id);
                                     if (requestLink == null || !String.Equals(requestLink.NetLedgerAccountId, "acct_existing_requestor", StringComparison.Ordinal)) throw new InvalidOperationException("Requester account link did not use metadata match.");
                                     if (servingLink == null || !String.Equals(servingLink.NetLedgerAccountId, "acct_existing_serving", StringComparison.Ordinal)) throw new InvalidOperationException("Serving account link did not use metadata match.");
                                 }
@@ -1335,9 +1338,9 @@ namespace Test.Shared
                         "Ledger drain treats existing entries with matching source, ledgerEventId, and direction tags as success",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-                            XenoClientRecord clientRecord = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+                            XenoClientRecord clientRecord = (await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.OwnerUserId == admin.Id);
                             using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
                             {
                                 LedgerSettings settings = new LedgerSettings
@@ -1349,7 +1352,7 @@ namespace Test.Shared
                                 };
                                 using (NetLedgerClient client = new NetLedgerClient(settings))
                                 {
-                                    LedgerAccountResolver resolver = new LedgerAccountResolver(platform, settings, client);
+                                    LedgerAccountResolver resolver = new LedgerAccountResolver(database, settings, client);
                                     LedgerDrainService drain = new LedgerDrainService(settings, client, resolver);
                                     LedgerEvent ledgerEvent = new LedgerEvent
                                     {
@@ -1379,10 +1382,10 @@ namespace Test.Shared
                         "Ledger drain requeues transient NetLedger failures and records retry status without throwing to capture",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
-                            XenoClientRecord clientRecord = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.UserId == admin.Id);
+                            XenoClientRecord clientRecord = (await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.OwnerUserId == admin.Id);
                             using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
                             {
                                 netLedger.FailNextEntryCreates = 1;
@@ -1393,11 +1396,12 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(database, settings, _TestLogging))
                                 {
-                                    if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, clientRecord.Id, 55, "/v1/chat/completions"), out string? reason))
+                                    LedgerEnqueueResult enqueue = await ledger.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, admin.Id, clientRecord.Id, 55, "/v1/chat/completions")).ConfigureAwait(false);
+                                    if (!enqueue.Enqueued)
                                     {
-                                        throw new InvalidOperationException("Ledger enqueue failed before retry test: " + reason);
+                                        throw new InvalidOperationException("Ledger enqueue failed before retry test: " + enqueue.Reason);
                                     }
 
                                     LedgerDrainResponse response = await ledger.DrainOnceAsync(CancellationToken.None).ConfigureAwait(false);
@@ -1415,7 +1419,7 @@ namespace Test.Shared
                         "Ledger status reports NetLedger health failures without throwing",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
                             using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
                             {
                                 netLedger.FailHealth = true;
@@ -1426,7 +1430,7 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                                using (LedgerService ledger = new LedgerService(database, settings, _TestLogging))
                                 {
                                     LedgerStatusResponse status = await ledger.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
                                     if (status.NetLedgerHealthy) throw new InvalidOperationException("Ledger status should report unhealthy NetLedger.");
@@ -1440,9 +1444,9 @@ namespace Test.Shared
                         "NetLedger tenant subordinate hard delete removes linked and tagged accounts before deleting the tenant",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            Tenant tenant = platform.GetDefaultTenant();
-                            User admin = platform.Users.First(item => item.TenantId == tenant.Id && item.IsAdmin);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            Tenant tenant = (await database.Tenants!.ReadAsync(Constants.DefaultTenantId).ConfigureAwait(false))!;
+                            User admin = (await database.Users!.EnumerateAsync(tenant.Id).ConfigureAwait(false)).First(item => item.IsAdmin);
                             using (FakeNetLedgerServer netLedger = new FakeNetLedgerServer())
                             {
                                 string netLedgerTenantId = "ten_delete_accounts";
@@ -1450,8 +1454,8 @@ namespace Test.Shared
                                 netLedger.AddAccount("acct_delete_linked", netLedgerTenantId, "xeno:user:" + admin.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(tenant.Id, admin));
                                 User taggedOnlyUser = new User { Id = "usr_tagged_only_delete", TenantId = tenant.Id, Email = "tagged-only-delete@test", Username = "tagged-only-delete@test", Active = true };
                                 netLedger.AddAccount("acct_delete_tagged_only", netLedgerTenantId, "xeno:user:" + taggedOnlyUser.Id, LedgerMetadataBuilder.BuildAccountLabels(), LedgerMetadataBuilder.BuildAccountTags(tenant.Id, taggedOnlyUser));
-                                platform.LedgerTenantLinks.Add(new LedgerTenantLink { XenoTenantId = tenant.Id, NetLedgerTenantId = netLedgerTenantId, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow });
-                                platform.LedgerAccountLinks.Add(new LedgerAccountLink { XenoTenantId = tenant.Id, XenoUserId = admin.Id, NetLedgerTenantId = netLedgerTenantId, NetLedgerAccountId = "acct_delete_linked", CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow });
+                                await database.LedgerTenantLinks!.CreateAsync(new LedgerTenantLink { XenoTenantId = tenant.Id, NetLedgerTenantId = netLedgerTenantId, CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }).ConfigureAwait(false);
+                                await database.LedgerAccountLinks!.CreateAsync(new LedgerAccountLink { XenoTenantId = tenant.Id, XenoUserId = admin.Id, NetLedgerTenantId = netLedgerTenantId, NetLedgerAccountId = "acct_delete_linked", CreatedUtc = DateTime.UtcNow, UpdatedUtc = DateTime.UtcNow }).ConfigureAwait(false);
 
                                 LedgerSettings settings = new LedgerSettings
                                 {
@@ -1460,14 +1464,14 @@ namespace Test.Shared
                                     ApiKey = netLedger.RequiredAccessKey,
                                     SecretKey = netLedger.RequiredSecretKey
                                 };
-                                using (NetLedgerTenantSubordinateService subordinate = new NetLedgerTenantSubordinateService(platform, settings, _TestLogging))
+                                using (NetLedgerTenantSubordinateService subordinate = new NetLedgerTenantSubordinateService(database, settings, _TestLogging))
                                 {
                                     TenantSubordinateServiceStatus status = await subordinate.DeleteAsync(tenant, true, CancellationToken.None).ConfigureAwait(false);
                                     if (!String.Equals(status.Status, "Deleted", StringComparison.Ordinal)) throw new InvalidOperationException("Subordinate delete status mismatch.");
                                     if (netLedger.AccountDeleteCount != 2) throw new InvalidOperationException("Hard delete did not delete both linked and tagged NetLedger accounts.");
                                     if (netLedger.TenantDeleteCount != 1) throw new InvalidOperationException("Hard delete did not delete the NetLedger tenant.");
-                                    if (platform.LedgerTenantLinks.Any(item => item.XenoTenantId == tenant.Id)) throw new InvalidOperationException("Tenant ledger links were not cleared.");
-                                    if (platform.LedgerAccountLinks.Any(item => item.XenoTenantId == tenant.Id)) throw new InvalidOperationException("Account ledger links were not cleared.");
+                                    if ((await database.LedgerTenantLinks!.EnumerateAsync().ConfigureAwait(false)).Any(item => item.XenoTenantId == tenant.Id)) throw new InvalidOperationException("Tenant ledger links were not cleared.");
+                                    if ((await database.LedgerAccountLinks!.EnumerateByTenantAsync(tenant.Id).ConfigureAwait(false)).Any(item => item.XenoTenantId == tenant.Id)) throw new InvalidOperationException("Account ledger links were not cleared.");
                                 }
                             }
                         }),
@@ -2325,11 +2329,7 @@ namespace Test.Shared
                                     Port = port,
                                     Ssl = false
                                 },
-                                Database = new DatabaseSettings
-                                {
-                                    Type = DatabaseTypeEnum.Sqlite,
-                                    Filename = dbFile
-                                }
+                                Database = TestDatabase.Settings(dbFile)
                             };
 
                             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -2512,18 +2512,17 @@ namespace Test.Shared
                         "Session tokens issue, validate, and revoke",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
-                            User user = platform.Users[0];
-                            AuthTokenResult token = auth.IssueToken(platform, new AuthSettings(), user.TenantId, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Credential);
-                            AuthSession? inferredSession = auth.ValidateToken(platform, token.Token);
+                            User user = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))[0];
+                            AuthTokenResult token = await auth.IssueTokenAsync(database, new AuthSettings(), user.TenantId, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Credential).ConfigureAwait(false);
+                            AuthSession? inferredSession = await auth.ValidateTokenAsync(database, token.Token).ConfigureAwait(false);
                             if (inferredSession == null || inferredSession.TenantId != user.TenantId) throw new InvalidOperationException("Token tenant was not inferred.");
-                            AuthSession? session = auth.ValidateToken(platform, user.TenantId, token.Token);
+                            AuthSession? session = await auth.ValidateTokenAsync(database, user.TenantId, token.Token).ConfigureAwait(false);
                             if (session == null) throw new InvalidOperationException("Token did not validate.");
-                            if (auth.ValidateToken(platform, "ten_wrong", token.Token) != null) throw new InvalidOperationException("Token validated for the wrong tenant.");
-                            if (!auth.RevokeSession(platform, session.Id)) throw new InvalidOperationException("Session was not revoked.");
-                            if (auth.ValidateToken(platform, user.TenantId, token.Token) != null) throw new InvalidOperationException("Revoked token still validates.");
+                            if (await auth.ValidateTokenAsync(database, "ten_wrong", token.Token).ConfigureAwait(false) != null) throw new InvalidOperationException("Token validated for the wrong tenant.");
+                            if (!await auth.RevokeSessionAsync(database, session.Id).ConfigureAwait(false)) throw new InvalidOperationException("Session was not revoked.");
+                            if (await auth.ValidateTokenAsync(database, user.TenantId, token.Token).ConfigureAwait(false) != null) throw new InvalidOperationException("Revoked token still validates.");
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
@@ -2531,15 +2530,14 @@ namespace Test.Shared
                         "Direct credentials validate by tenant-bound access key",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
-                            Credential credential = platform.Credentials[0];
-                            Credential? inferredCredential = auth.ValidateCredential(platform, credential.AccessKey);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))[0];
+                            Credential? inferredCredential = await auth.ValidateCredentialAsync(database, credential.AccessKey).ConfigureAwait(false);
                             if (inferredCredential == null || inferredCredential.TenantId != credential.TenantId) throw new InvalidOperationException("Credential tenant was not inferred.");
-                            if (auth.ValidateCredential(platform, credential.TenantId, credential.AccessKey) == null) throw new InvalidOperationException("Credential did not validate.");
-                            if (auth.ValidateCredential(platform, "ten_wrong", credential.AccessKey) != null) throw new InvalidOperationException("Credential validated for the wrong tenant.");
-                            if (auth.ValidateCredential(platform, credential.TenantId, "wrong") != null) throw new InvalidOperationException("Invalid credential validated.");
+                            if (await auth.ValidateCredentialAsync(database, credential.TenantId, credential.AccessKey).ConfigureAwait(false) == null) throw new InvalidOperationException("Credential did not validate.");
+                            if (await auth.ValidateCredentialAsync(database, "ten_wrong", credential.AccessKey).ConfigureAwait(false) != null) throw new InvalidOperationException("Credential validated for the wrong tenant.");
+                            if (await auth.ValidateCredentialAsync(database, credential.TenantId, "wrong").ConfigureAwait(false) != null) throw new InvalidOperationException("Invalid credential validated.");
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
@@ -2547,12 +2545,11 @@ namespace Test.Shared
                         "Seeded user password validates only for login bootstrap",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
-                            User? user = auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "password");
+                            User? user = await auth.ValidateUserPasswordAsync(database, Constants.DefaultTenantId, "admin@xeno", "password").ConfigureAwait(false);
                             if (user == null) throw new InvalidOperationException("Seeded user password did not validate.");
-                            if (auth.ValidateUserPassword(platform, Constants.DefaultTenantId, "admin@xeno", "wrong") != null) throw new InvalidOperationException("Invalid password validated.");
+                            if (await auth.ValidateUserPasswordAsync(database, Constants.DefaultTenantId, "admin@xeno", "wrong").ConfigureAwait(false) != null) throw new InvalidOperationException("Invalid password validated.");
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
@@ -2560,17 +2557,17 @@ namespace Test.Shared
                         "Tenant administrator effective permissions include admin",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
+                            User adminUser = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))[0];
                             RequestContext context = new RequestContext
                             {
-                                TenantId = platform.Users[0].TenantId,
-                                UserId = platform.Users[0].Id,
+                                TenantId = adminUser.TenantId,
+                                UserId = adminUser.Id,
                                 PrincipalType = PrincipalTypeEnum.User,
                                 IsAuthenticated = true
                             };
-                            if (!auth.IsAllowed(platform, context, "Admin", OperationTypeEnum.Admin)) throw new InvalidOperationException("Tenant admin did not resolve admin permission.");
+                            if (!await auth.IsAllowedAsync(database, context, "Admin", OperationTypeEnum.Admin).ConfigureAwait(false)) throw new InvalidOperationException("Tenant admin did not resolve admin permission.");
                         }),
                     new TestCaseDescriptor(
                         "Authentication",
@@ -2578,11 +2575,10 @@ namespace Test.Shared
                         "Authorization denials create audit records",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
                             AuthenticationService auth = new AuthenticationService();
-                            RequestContext context = new RequestContext { TenantId = platform.GetDefaultTenant().Id, IsAuthenticated = false };
-                            AuditRecord denialRecord = auth.AppendAudit(platform, context, "Admin", OperationTypeEnum.Admin, false, "PermissionDenied", 403);
+                            RequestContext context = new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = false };
+                            AuditRecord denialRecord = auth.AppendAudit(database, context, "Admin", OperationTypeEnum.Admin, false, "PermissionDenied", 403);
                             if (denialRecord.ReasonCode != "PermissionDenied") throw new InvalidOperationException("Audit reason mismatch.");
                             if (denialRecord.Allowed) throw new InvalidOperationException("Denial audit was marked allowed.");
                             if (denialRecord.StatusCode != 403) throw new InvalidOperationException("Denial audit status mismatch.");
@@ -2608,9 +2604,8 @@ namespace Test.Shared
 
         private static async Task RunTenantMemberBackfillAsync()
         {
-            XenoPlatform platform = new XenoPlatform();
-            await platform.InitializeAsync().ConfigureAwait(false);
-            Tenant tenant = platform.GetDefaultTenant();
+            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+            Tenant tenant = (await database.Tenants!.ReadAsync(Constants.DefaultTenantId).ConfigureAwait(false))!;
             User legacyUser = new User
             {
                 TenantId = tenant.Id,
@@ -2620,7 +2615,7 @@ namespace Test.Shared
                 IsTenantAdmin = false,
                 Active = true
             };
-            platform.Users.Add(legacyUser);
+            await database.Users!.CreateAsync(legacyUser).ConfigureAwait(false);
             Credential legacyCredential = new Credential
             {
                 TenantId = tenant.Id,
@@ -2629,42 +2624,42 @@ namespace Test.Shared
                 SecretKey = "legacy-member-secret",
                 Active = true
             };
-            platform.Credentials.Add(legacyCredential);
+            await database.Credentials!.CreateAsync(legacyCredential).ConfigureAwait(false);
 
-            if (platform.RoleAssignments.Any(item => item.PrincipalId == legacyUser.Id || item.PrincipalId == legacyCredential.Id)) throw new InvalidOperationException("Legacy user fixture unexpectedly started with role assignments.");
+            if ((await database.RoleAssignments!.EnumerateAsync(tenant.Id).ConfigureAwait(false)).Any(item => item.PrincipalId == legacyUser.Id || item.PrincipalId == legacyCredential.Id)) throw new InvalidOperationException("Legacy user fixture unexpectedly started with role assignments.");
 
-            platform.EnsureTenantDefaults(tenant.Id);
+            await DatabaseSeeder.SeedTenantDefaultsAsync(database, tenant.Id).ConfigureAwait(false);
 
-            Role? tenantMember = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantMember", StringComparison.OrdinalIgnoreCase));
+            Role? tenantMember = (await database.Roles!.EnumerateAsync(tenant.Id).ConfigureAwait(false)).FirstOrDefault(item => String.Equals(item.Name, "TenantMember", StringComparison.OrdinalIgnoreCase));
             if (tenantMember == null) throw new InvalidOperationException("TenantMember role was not created.");
-            if (!platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMember.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == legacyUser.Id && item.Active)) throw new InvalidOperationException("Legacy user did not receive TenantMember.");
-            if (!platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMember.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == legacyCredential.Id && item.Active)) throw new InvalidOperationException("Legacy credential did not receive TenantMember.");
+            List<RoleAssignment> memberAssignments = await database.RoleAssignments!.EnumerateAsync(tenant.Id).ConfigureAwait(false);
+            if (!memberAssignments.Any(item => item.RoleId == tenantMember.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == legacyUser.Id && item.Active)) throw new InvalidOperationException("Legacy user did not receive TenantMember.");
+            if (!memberAssignments.Any(item => item.RoleId == tenantMember.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == legacyCredential.Id && item.Active)) throw new InvalidOperationException("Legacy credential did not receive TenantMember.");
 
             AuthorizationService authorization = new AuthorizationService();
             RequestContext userContext = new RequestContext { TenantId = tenant.Id, UserId = legacyUser.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
             foreach (string resourceType in new List<string> { "Authentication", "Tenants", "Users", "Credentials", "Roles", "Permissions", "Clients", "ClientTelemetry", "Inference", "Ledger" })
             {
-                AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = resourceType, OperationType = OperationTypeEnum.Read }), "TenantMember should read " + resourceType + ".");
+                AssertAllowed(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = resourceType, OperationType = OperationTypeEnum.Read }).ConfigureAwait(false), "TenantMember should read " + resourceType + ".");
             }
 
-            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = "Credentials", OperationType = OperationTypeEnum.Write }), "TenantMember should create credentials.");
-            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Write }), "PermissionDenied");
+            AssertAllowed(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = "Credentials", OperationType = OperationTypeEnum.Write }).ConfigureAwait(false), "TenantMember should create credentials.");
+            AssertDenied(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = userContext, TargetTenantId = tenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Write }).ConfigureAwait(false), "PermissionDenied");
 
             RequestContext credentialContext = new RequestContext { TenantId = tenant.Id, UserId = legacyUser.Id, CredentialId = legacyCredential.Id, PrincipalType = PrincipalTypeEnum.Credential, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Credential };
-            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = credentialContext, TargetTenantId = tenant.Id, ResourceType = "Clients", OperationType = OperationTypeEnum.Read }), "TenantMember credential should read clients.");
+            AssertAllowed(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = credentialContext, TargetTenantId = tenant.Id, ResourceType = "Clients", OperationType = OperationTypeEnum.Read }).ConfigureAwait(false), "TenantMember credential should read clients.");
         }
 
         private static async Task RunAuthorizationKernelContractsAsync()
         {
-            XenoPlatform platform = new XenoPlatform();
-            await platform.InitializeAsync().ConfigureAwait(false);
+            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
             AuthorizationService authorization = new AuthorizationService();
-            Tenant defaultTenant = platform.GetDefaultTenant();
+            Tenant defaultTenant = (await database.Tenants!.ReadAsync(Constants.DefaultTenantId).ConfigureAwait(false))!;
             Tenant otherTenant = new Tenant { Id = "ten_security_other", Name = "Security Other", Active = true };
-            platform.Tenants.Add(otherTenant);
-            platform.EnsureTenantDefaults(otherTenant.Id);
+            await database.Tenants!.CreateAsync(otherTenant).ConfigureAwait(false);
+            await DatabaseSeeder.SeedTenantDefaultsAsync(database, otherTenant.Id).ConfigureAwait(false);
 
-            User systemAdmin = platform.Users.First(item => item.TenantId == defaultTenant.Id && item.IsAdmin);
+            User systemAdmin = (await database.Users!.EnumerateAsync(defaultTenant.Id).ConfigureAwait(false)).First(item => item.IsAdmin);
             User tenantAdmin = new User
             {
                 TenantId = defaultTenant.Id,
@@ -2674,7 +2669,7 @@ namespace Test.Shared
                 IsTenantAdmin = true,
                 Active = true
             };
-            platform.Users.Add(tenantAdmin);
+            await database.Users!.CreateAsync(tenantAdmin).ConfigureAwait(false);
             User rbacUser = new User
             {
                 TenantId = defaultTenant.Id,
@@ -2684,46 +2679,58 @@ namespace Test.Shared
                 IsTenantAdmin = false,
                 Active = true
             };
-            platform.Users.Add(rbacUser);
+            await database.Users!.CreateAsync(rbacUser).ConfigureAwait(false);
 
             Permission readUsers = new Permission { TenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Permit = true };
             Permission denyUsers = new Permission { TenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read, Permit = false };
-            platform.Permissions.Add(readUsers);
-            platform.Permissions.Add(denyUsers);
+            await database.Permissions!.CreateAsync(readUsers).ConfigureAwait(false);
+            await database.Permissions!.CreateAsync(denyUsers).ConfigureAwait(false);
             Role reader = new Role { TenantId = defaultTenant.Id, Name = "Security Reader", PermissionIds = new List<string> { readUsers.Id } };
             Role deniedReader = new Role { TenantId = defaultTenant.Id, Name = "Security Denied Reader", PermissionIds = new List<string> { readUsers.Id, denyUsers.Id } };
-            platform.Roles.Add(reader);
-            platform.Roles.Add(deniedReader);
-            platform.RoleAssignments.Add(new RoleAssignment { TenantId = defaultTenant.Id, RoleId = reader.Id, PrincipalType = PrincipalTypeEnum.User, PrincipalId = rbacUser.Id });
+            await database.Roles!.CreateAsync(reader).ConfigureAwait(false);
+            await database.Roles!.CreateAsync(deniedReader).ConfigureAwait(false);
+            RoleAssignment readerAssignment = await database.RoleAssignments!.CreateAsync(new RoleAssignment { TenantId = defaultTenant.Id, RoleId = reader.Id, PrincipalType = PrincipalTypeEnum.User, PrincipalId = rbacUser.Id }).ConfigureAwait(false);
 
             RequestContext systemContext = new RequestContext { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
-            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = systemContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Delete }), "System admin should access other tenant.");
+            AssertAllowed(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = systemContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Delete }).ConfigureAwait(false), "System admin should access other tenant.");
 
             RequestContext tenantAdminContext = new RequestContext { TenantId = defaultTenant.Id, UserId = tenantAdmin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
-            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = tenantAdminContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Delete }), "Tenant admin should access own tenant.");
-            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = tenantAdminContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "TenantMismatch");
+            AssertAllowed(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = tenantAdminContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Delete }).ConfigureAwait(false), "Tenant admin should access own tenant.");
+            AssertDenied(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = tenantAdminContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }).ConfigureAwait(false), "TenantMismatch");
 
             RequestContext rbacContext = new RequestContext { TenantId = defaultTenant.Id, UserId = rbacUser.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Bearer };
-            AssertAllowed(authorization.Authorize(platform, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "RBAC read should be allowed.");
-            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Write }), "PermissionDenied");
+            AssertAllowed(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }).ConfigureAwait(false), "RBAC read should be allowed.");
+            AssertDenied(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Write }).ConfigureAwait(false), "PermissionDenied");
 
-            platform.RoleAssignments.Clear();
-            platform.RoleAssignments.Add(new RoleAssignment { TenantId = defaultTenant.Id, RoleId = deniedReader.Id, PrincipalType = PrincipalTypeEnum.User, PrincipalId = rbacUser.Id });
-            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "PermissionDeniedExplicit");
+            // Swap the RBAC user from the plain reader role to the denied-reader role so the explicit deny applies.
+            await database.RoleAssignments!.DeleteAsync(defaultTenant.Id, readerAssignment.Id).ConfigureAwait(false);
+            await database.RoleAssignments!.CreateAsync(new RoleAssignment { TenantId = defaultTenant.Id, RoleId = deniedReader.Id, PrincipalType = PrincipalTypeEnum.User, PrincipalId = rbacUser.Id }).ConfigureAwait(false);
+            AssertDenied(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = rbacContext, TargetTenantId = defaultTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }).ConfigureAwait(false), "PermissionDeniedExplicit");
 
             Credential adminOwnedCredential = new Credential { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, AccessKey = "admin-owned", SecretKey = "secret", Active = true };
-            platform.Credentials.Add(adminOwnedCredential);
+            await database.Credentials!.CreateAsync(adminOwnedCredential).ConfigureAwait(false);
             RequestContext credentialContext = new RequestContext { TenantId = defaultTenant.Id, UserId = systemAdmin.Id, CredentialId = adminOwnedCredential.Id, PrincipalType = PrincipalTypeEnum.Credential, IsAuthenticated = true, AuthScheme = AuthSchemeEnum.Credential };
-            if (!authorization.IsSystemAdmin(platform, credentialContext)) throw new InvalidOperationException("System-admin-owned credential should satisfy system admin checks.");
-            AssertDenied(authorization.Authorize(platform, new AuthorizationRequest { Context = credentialContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }), "TenantMismatch");
+            if (!await authorization.IsSystemAdminAsync(database, credentialContext).ConfigureAwait(false)) throw new InvalidOperationException("System-admin-owned credential should satisfy system admin checks.");
+            AssertDenied(await authorization.AuthorizeAsync(database, new AuthorizationRequest { Context = credentialContext, TargetTenantId = otherTenant.Id, ResourceType = "Users", OperationType = OperationTypeEnum.Read }).ConfigureAwait(false), "TenantMismatch");
         }
 
-        private static async Task<XenoPlatform> CreateLedgerTestPlatformAsync()
+        // Create a fresh SQLite-backed database driver over a unique temp file. InitializeAsync seeds
+        // the same default tenant/admin/credential/client/model/routing-policy graph that
+        // XenoPlatform.InitializeAsync() used to seed, but into the normalized relational tables the
+        // services now read from. The caller owns disposal (a using declaration is sufficient).
+        private static Task<DatabaseDriverBase> CreateSeededDatabaseAsync()
         {
-            XenoPlatform platform = new XenoPlatform();
-            await platform.InitializeAsync().ConfigureAwait(false);
-            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-            platform.Clients.Add(new XenoClientRecord
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno_test_" + Guid.NewGuid().ToString("N") + ".db");
+            return DatabaseDriverFactory.CreateAndInitializeAsync(TestDatabase.Settings(dbFile), null, CancellationToken.None);
+        }
+
+        // DB-backed replacement for the former CreateLedgerTestPlatformAsync. Seeds the default graph
+        // and adds an admin-owned touchstone client through the client repository.
+        private static async Task<DatabaseDriverBase> CreateLedgerTestDatabaseAsync()
+        {
+            DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+            await database.Clients!.CreateAsync(new XenoClientRecord
             {
                 Id = "xcl_ledger_touchstone",
                 TenantId = Constants.DefaultTenantId,
@@ -2732,8 +2739,8 @@ namespace Test.Shared
                 OwnerPrincipalType = PrincipalTypeEnum.User,
                 Connected = true,
                 Active = true
-            });
-            return platform;
+            }).ConfigureAwait(false);
+            return database;
         }
 
         private static RequestHistoryEntry CreateLedgerHistory(string credentialId, string userId, string clientId, int totalTokens, string path)
@@ -2866,14 +2873,15 @@ namespace Test.Shared
                         "Ledger event factory maps request history to requester and serving owner",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
-                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.UserId == admin.Id);
+                            XenoClientRecord client = (await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.OwnerUserId == admin.Id);
                             RequestHistoryEntry history = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 42, "/v1/chat/completions");
 
-                            bool created = LedgerEventFactory.TryCreate(platform, history, out LedgerEvent? ledgerEvent, out string? reason);
-                            if (!created || ledgerEvent == null) throw new InvalidOperationException("Ledger event was not created: " + reason);
+                            LedgerEventCreationResult creation = await LedgerEventFactory.TryCreateAsync(database, history).ConfigureAwait(false);
+                            if (!creation.Success || creation.Event == null) throw new InvalidOperationException("Ledger event was not created: " + creation.Reason);
+                            LedgerEvent ledgerEvent = creation.Event;
                             if (ledgerEvent.TotalTokens != 42) throw new InvalidOperationException("Ledger event token count mismatch.");
                             if (!String.Equals(ledgerEvent.RequestUserId, admin.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Ledger request user mismatch.");
                             if (!String.Equals(ledgerEvent.ServingUserId, admin.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Ledger serving user mismatch.");
@@ -2941,24 +2949,27 @@ namespace Test.Shared
                         "Ledger capture skips disabled ledgering and histories without usable token counts",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
-                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
-                            using (LedgerService service = new LedgerService(platform, new LedgerSettings { Enabled = false }, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.UserId == admin.Id);
+                            XenoClientRecord client = (await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.OwnerUserId == admin.Id);
+                            using (LedgerService service = new LedgerService(database, new LedgerSettings { Enabled = false }, _TestLogging))
                             {
-                                if (service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions"), out string? disabledReason)) throw new InvalidOperationException("Disabled ledgering enqueued an event.");
-                                if (!String.Equals(disabledReason, "Ledgering is disabled.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected disabled reason: " + disabledReason);
+                                LedgerEnqueueResult disabled = await service.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions")).ConfigureAwait(false);
+                                if (disabled.Enqueued) throw new InvalidOperationException("Disabled ledgering enqueued an event.");
+                                if (!String.Equals(disabled.Reason, "Ledgering is disabled.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected disabled reason: " + disabled.Reason);
                             }
 
                             RequestHistoryEntry zeroTokens = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 0, "/v1/chat/completions");
-                            if (LedgerEventFactory.TryCreate(platform, zeroTokens, out LedgerEvent? _, out string? zeroReason)) throw new InvalidOperationException("Zero-token history created a ledger event.");
-                            if (String.IsNullOrWhiteSpace(zeroReason)) throw new InvalidOperationException("Zero-token skip reason was empty.");
+                            LedgerEventCreationResult zeroCreation = await LedgerEventFactory.TryCreateAsync(database, zeroTokens).ConfigureAwait(false);
+                            if (zeroCreation.Success) throw new InvalidOperationException("Zero-token history created a ledger event.");
+                            if (String.IsNullOrWhiteSpace(zeroCreation.Reason)) throw new InvalidOperationException("Zero-token skip reason was empty.");
 
                             RequestHistoryEntry missingTokens = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 1, "/v1/chat/completions");
                             missingTokens.Telemetry.TotalTokens = null;
-                            if (LedgerEventFactory.TryCreate(platform, missingTokens, out LedgerEvent? _, out string? missingReason)) throw new InvalidOperationException("Missing-token history created a ledger event.");
-                            if (String.IsNullOrWhiteSpace(missingReason)) throw new InvalidOperationException("Missing-token skip reason was empty.");
+                            LedgerEventCreationResult missingCreation = await LedgerEventFactory.TryCreateAsync(database, missingTokens).ConfigureAwait(false);
+                            if (missingCreation.Success) throw new InvalidOperationException("Missing-token history created a ledger event.");
+                            if (String.IsNullOrWhiteSpace(missingCreation.Reason)) throw new InvalidOperationException("Missing-token skip reason was empty.");
                         }),
                     new TestCaseDescriptor(
                         "Ledger",
@@ -2966,18 +2977,20 @@ namespace Test.Shared
                         "Ledger event factory resolves the requesting credential owner and selected client owner",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
                             User requestUser = new User { Id = "usr_ledger_requestor", TenantId = Constants.DefaultTenantId, Email = "ledger-requestor@test", Username = "ledger-requestor@test", Active = true };
                             User servingUser = new User { Id = "usr_ledger_serving", TenantId = Constants.DefaultTenantId, Email = "ledger-serving@test", Username = "ledger-serving@test", Active = true };
-                            platform.Users.Add(requestUser);
-                            platform.Users.Add(servingUser);
+                            await database.Users!.CreateAsync(requestUser).ConfigureAwait(false);
+                            await database.Users!.CreateAsync(servingUser).ConfigureAwait(false);
                             Credential credential = new Credential { Id = "cred_ledger_requestor", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "ledger-requestor", SecretKey = "secret", Active = true };
-                            platform.Credentials.Add(credential);
+                            await database.Credentials!.CreateAsync(credential).ConfigureAwait(false);
                             XenoClientRecord client = new XenoClientRecord { Id = "xcl_ledger_serving", TenantId = Constants.DefaultTenantId, Name = "ledger-serving", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
-                            platform.Clients.Add(client);
+                            await database.Clients!.CreateAsync(client).ConfigureAwait(false);
 
                             RequestHistoryEntry history = CreateLedgerHistory(credential.Id, requestUser.Id, client.Id, 37, "/v1/embeddings");
-                            if (!LedgerEventFactory.TryCreate(platform, history, out LedgerEvent? ledgerEvent, out string? reason) || ledgerEvent == null) throw new InvalidOperationException("Ledger event was not created: " + reason);
+                            LedgerEventCreationResult creation = await LedgerEventFactory.TryCreateAsync(database, history).ConfigureAwait(false);
+                            if (!creation.Success || creation.Event == null) throw new InvalidOperationException("Ledger event was not created: " + creation.Reason);
+                            LedgerEvent ledgerEvent = creation.Event;
                             if (!String.Equals(ledgerEvent.RequestUserId, requestUser.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Credential owner was not used as request user.");
                             if (!String.Equals(ledgerEvent.ServingUserId, servingUser.Id, StringComparison.Ordinal)) throw new InvalidOperationException("Selected client owner was not used as serving user.");
                             if (ledgerEvent.RequestKind != LedgerRequestKind.Embedding) throw new InvalidOperationException("Embedding request kind was not detected.");
@@ -2988,12 +3001,14 @@ namespace Test.Shared
                         "Ledger metadata keeps debit and credit entries distinct when the same user requests and serves",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
-                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.UserId == admin.Id);
+                            XenoClientRecord client = (await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.OwnerUserId == admin.Id);
                             RequestHistoryEntry history = CreateLedgerHistory(credential.Id, admin.Id, client.Id, 42, "/v1/chat/completions");
-                            if (!LedgerEventFactory.TryCreate(platform, history, out LedgerEvent? ledgerEvent, out string? reason) || ledgerEvent == null) throw new InvalidOperationException("Ledger event was not created: " + reason);
+                            LedgerEventCreationResult creation = await LedgerEventFactory.TryCreateAsync(database, history).ConfigureAwait(false);
+                            if (!creation.Success || creation.Event == null) throw new InvalidOperationException("Ledger event was not created: " + creation.Reason);
+                            LedgerEvent ledgerEvent = creation.Event;
 
                             Dictionary<string, string> debitTags = LedgerMetadataBuilder.BuildEntryTags(ledgerEvent, LedgerEntryDirection.Debit);
                             Dictionary<string, string> creditTags = LedgerMetadataBuilder.BuildEntryTags(ledgerEvent, LedgerEntryDirection.Credit);
@@ -3009,12 +3024,12 @@ namespace Test.Shared
                         "Tenant lifecycle coordinator records subordinate status and audit rows",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            Tenant tenant = platform.GetDefaultTenant();
-                            User admin = platform.Users.First(item => item.TenantId == tenant.Id && item.IsAdmin);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            Tenant tenant = (await database.Tenants!.ReadAsync(Constants.DefaultTenantId).ConfigureAwait(false))!;
+                            User admin = (await database.Users!.EnumerateAsync(tenant.Id).ConfigureAwait(false)).First(item => item.IsAdmin);
                             FakeTenantSubordinateService fakeService = new FakeTenantSubordinateService();
                             InMemoryAuditMethods lifecycleAudit = new InMemoryAuditMethods();
-                            TenantLifecycleService lifecycle = new TenantLifecycleService(platform, new ITenantSubordinateService[] { fakeService }, null, lifecycleAudit);
+                            TenantLifecycleService lifecycle = new TenantLifecycleService(database, new ITenantSubordinateService[] { fakeService }, null, lifecycleAudit);
                             RequestContext context = new RequestContext { TenantId = tenant.Id, UserId = admin.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true, RequestId = "req_lifecycle_test" };
 
                             TenantLifecycleResult createResult = await lifecycle.CreateAsync(tenant, new List<User> { admin }, false, context, CancellationToken.None).ConfigureAwait(false);
@@ -3034,18 +3049,18 @@ namespace Test.Shared
                         "Ledger service records queue-full failures without blocking request capture",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
-                            User admin = platform.Users.First(item => item.TenantId == Constants.DefaultTenantId && item.IsAdmin);
-                            Credential credential = platform.Credentials.First(item => item.TenantId == Constants.DefaultTenantId && item.UserId == admin.Id);
-                            XenoClientRecord client = platform.Clients.First(item => item.TenantId == Constants.DefaultTenantId && item.OwnerUserId == admin.Id);
+                            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
+                            User admin = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.IsAdmin);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.UserId == admin.Id);
+                            XenoClientRecord client = (await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).First(item => item.OwnerUserId == admin.Id);
                             LedgerSettings settings = new LedgerSettings { Enabled = true, MaxQueueDepth = 1, BaseUrl = "http://127.0.0.1:1" };
-                            using (LedgerService service = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken token) { return Task.CompletedTask; }))
+                            using (LedgerService service = new LedgerService(database, settings, _TestLogging))
                             {
-                                bool first = service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions"), out string? firstReason);
-                                bool second = service.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 11, "/v1/embeddings"), out string? secondReason);
-                                if (!first) throw new InvalidOperationException("First ledger enqueue failed: " + firstReason);
-                                if (second) throw new InvalidOperationException("Second ledger enqueue unexpectedly succeeded.");
-                                if (!String.Equals(secondReason, "Ledger queue is full.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected queue-full reason: " + secondReason);
+                                LedgerEnqueueResult first = await service.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 10, "/v1/chat/completions")).ConfigureAwait(false);
+                                LedgerEnqueueResult second = await service.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, admin.Id, client.Id, 11, "/v1/embeddings")).ConfigureAwait(false);
+                                if (!first.Enqueued) throw new InvalidOperationException("First ledger enqueue failed: " + first.Reason);
+                                if (second.Enqueued) throw new InvalidOperationException("Second ledger enqueue unexpectedly succeeded.");
+                                if (!String.Equals(second.Reason, "Ledger queue is full.", StringComparison.Ordinal)) throw new InvalidOperationException("Unexpected queue-full reason: " + second.Reason);
 
                                 settings.Enabled = false;
                                 LedgerStatusResponse status = await service.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
@@ -3261,11 +3276,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                },
+                Database = TestDatabase.Settings(dbFile),
                 TelemetryCollection = new TelemetryCollectionSettings
                 {
                     Enabled = false
@@ -3774,21 +3785,20 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         "Audit",
                         "AuditRecordsAreNotSerializedInPlatformState",
-                        "Audit records loaded from a legacy blob migrate out and are never re-serialized",
+                        "Serialized platform state never carries an audit-records surface",
                         executeAsync: delegate
                         {
                             XenoPlatform platform = new XenoPlatform();
-                            PlatformState legacy = platform.ToState();
-                            legacy.AuditRecords.Add(new AuditRecord { Id = "aud_legacy1", TenantId = "t1" });
-                            legacy.AuditRecords.Add(new AuditRecord { Id = "aud_legacy2", TenantId = "t1" });
-                            platform.LoadState(legacy);
+                            PlatformState state = platform.ToState();
+                            string json = JsonUtil.Serialize(state, true);
+                            if (json.IndexOf("audit", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                throw new InvalidOperationException("Audit records must not be serialized into platform state.");
+                            }
 
-                            List<AuditRecord> drained = platform.DrainPendingAuditRecords();
-                            if (drained.Count != 2) throw new InvalidOperationException("Legacy audit records were not exposed for migration.");
-                            if (platform.DrainPendingAuditRecords().Count != 0) throw new InvalidOperationException("Pending audit migration was not cleared after draining.");
-
-                            PlatformState roundTrip = platform.ToState();
-                            if (roundTrip.AuditRecords.Count != 0) throw new InvalidOperationException("Audit records must not be serialized into platform state.");
+                            // The snapshot must round-trip through import without reintroducing an audit surface.
+                            PlatformState roundTrip = JsonUtil.Deserialize<PlatformState>(json) ?? throw new InvalidOperationException("Platform state failed to round-trip.");
+                            platform.LoadState(roundTrip);
                             return Task.CompletedTask;
                         }),
                     new TestCaseDescriptor(
@@ -3800,7 +3810,7 @@ namespace Test.Shared
                             string dbFile = Path.Combine(Path.GetTempPath(), "xeno-audit-" + Guid.NewGuid().ToString("N") + ".db");
                             try
                             {
-                                using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(new DatabaseSettings { Type = DatabaseTypeEnum.Sqlite, Filename = dbFile }).ConfigureAwait(false))
+                                using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(TestDatabase.Settings(dbFile)).ConfigureAwait(false))
                                 {
                                     IAuditMethods audit = driver.Audit ?? throw new InvalidOperationException("Audit methods were not initialized.");
 
@@ -3836,7 +3846,7 @@ namespace Test.Shared
                             }
                             finally
                             {
-                                await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                                await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                             }
                         }),
                     new TestCaseDescriptor(
@@ -3848,7 +3858,7 @@ namespace Test.Shared
                             string dbFile = Path.Combine(Path.GetTempPath(), "xeno-audit-prune-" + Guid.NewGuid().ToString("N") + ".db");
                             try
                             {
-                                using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(new DatabaseSettings { Type = DatabaseTypeEnum.Sqlite, Filename = dbFile }).ConfigureAwait(false))
+                                using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(TestDatabase.Settings(dbFile)).ConfigureAwait(false))
                                 {
                                     IAuditMethods audit = driver.Audit ?? throw new InvalidOperationException("Audit methods were not initialized.");
                                     DateTime now = DateTime.UtcNow;
@@ -3864,7 +3874,7 @@ namespace Test.Shared
                             }
                             finally
                             {
-                                await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                                await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                             }
                         })
                 });
@@ -3887,7 +3897,10 @@ namespace Test.Shared
                     {
                         DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(new DatabaseSettings { Type = provider }).ConfigureAwait(false);
                         if (driver.DatabaseType != provider) throw new InvalidOperationException("Provider mismatch.");
-                        if (driver.Platform.Tenants.Count < 1) throw new InvalidOperationException("Seed tenant missing.");
+                        // Only file/embedded providers (Sqlite) can initialize storage without external connection
+                        // details; when storage is available the driver seeds the default control-plane graph.
+                        // Server providers without a connection have no storage (null repositories) and nothing to seed.
+                        if (driver.Tenants != null && (await driver.Tenants.EnumerateAsync(CancellationToken.None).ConfigureAwait(false)).Count < 1) throw new InvalidOperationException("Seed tenant missing.");
                     }));
             }
 
@@ -3900,17 +3913,13 @@ namespace Test.Shared
                     string dbFile = Path.Combine(Path.GetTempPath(), "xeno-persist-" + Guid.NewGuid().ToString("N") + ".db");
                     try
                     {
-                        DatabaseSettings settings = new DatabaseSettings
-                        {
-                            Type = DatabaseTypeEnum.Sqlite,
-                            Filename = dbFile
-                        };
+                        DatabaseSettings settings = TestDatabase.Settings(dbFile);
 
                         await RunPlatformStateRoundTripAsync(settings, "sqlite").ConfigureAwait(false);
                     }
                     finally
                     {
-                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                        await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     }
                 }));
 
@@ -3968,15 +3977,11 @@ namespace Test.Shared
                     string dbFile = Path.Combine(Path.GetTempPath(), "xeno-model-leaderboard-" + Guid.NewGuid().ToString("N") + ".db");
                     try
                     {
-                        await RunModelTokenLeaderboardRoundTripAsync(new DatabaseSettings
-                        {
-                            Type = DatabaseTypeEnum.Sqlite,
-                            Filename = dbFile
-                        }, "sqlite").ConfigureAwait(false);
+                        await RunModelTokenLeaderboardRoundTripAsync(TestDatabase.Settings(dbFile), "sqlite").ConfigureAwait(false);
                     }
                     finally
                     {
-                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                        await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     }
                 }));
 
@@ -4034,11 +4039,7 @@ namespace Test.Shared
                     string dbFile = Path.Combine(Path.GetTempPath(), "xeno-telemetry-attempts-" + Guid.NewGuid().ToString("N") + ".db");
                     try
                     {
-                        DatabaseSettings settings = new DatabaseSettings
-                        {
-                            Type = DatabaseTypeEnum.Sqlite,
-                            Filename = dbFile
-                        };
+                        DatabaseSettings settings = TestDatabase.Settings(dbFile);
 
                         using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
                         {
@@ -4075,7 +4076,7 @@ namespace Test.Shared
                     }
                     finally
                     {
-                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                        await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     }
                 }));
 
@@ -4131,11 +4132,7 @@ namespace Test.Shared
                     string dbFile = Path.Combine(Path.GetTempPath(), "xeno-tenant-purge-" + Guid.NewGuid().ToString("N") + ".db");
                     try
                     {
-                        DatabaseSettings settings = new DatabaseSettings
-                        {
-                            Type = DatabaseTypeEnum.Sqlite,
-                            Filename = dbFile
-                        };
+                        DatabaseSettings settings = TestDatabase.Settings(dbFile);
 
                         using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
                         {
@@ -4203,7 +4200,7 @@ namespace Test.Shared
                     }
                     finally
                     {
-                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                        await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     }
                 }));
 
@@ -4216,11 +4213,7 @@ namespace Test.Shared
                     string dbFile = Path.Combine(Path.GetTempPath(), "xeno-server-telemetry-rollups-" + Guid.NewGuid().ToString("N") + ".db");
                     try
                     {
-                        DatabaseSettings settings = new DatabaseSettings
-                        {
-                            Type = DatabaseTypeEnum.Sqlite,
-                            Filename = dbFile
-                        };
+                        DatabaseSettings settings = TestDatabase.Settings(dbFile);
 
                         using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
                         {
@@ -4335,7 +4328,7 @@ namespace Test.Shared
                     }
                     finally
                     {
-                        await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                        await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     }
                 }));
 
@@ -4443,24 +4436,33 @@ namespace Test.Shared
             string requestHistoryId = "req_state_" + marker;
             using (DatabaseDriverBase first = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
             {
-                AddPlatformStateRoundTripRecords(first.Platform, tenantId, userId, credentialId, sessionId, permissionId, roleId, roleAssignmentId, auditId, clientId, modelDefinitionId, modelConfigurationId, routingPolicyId, requestHistoryId, marker);
-                await first.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+                await first.Tenants!.CreateAsync(new Tenant { Id = tenantId, Name = "Tenant " + marker }, CancellationToken.None).ConfigureAwait(false);
+                await first.Users!.CreateAsync(new User { Id = userId, TenantId = tenantId, Username = "user_" + marker, Email = marker + "@xeno.test", IsAdmin = false, IsTenantAdmin = true, Active = true }, CancellationToken.None).ConfigureAwait(false);
+                await first.Credentials!.CreateAsync(new Credential { Id = credentialId, TenantId = tenantId, UserId = userId, AccessKey = "access_" + marker, SecretKey = "secret_" + marker, Active = true }, CancellationToken.None).ConfigureAwait(false);
+                await first.Clients!.CreateAsync(new XenoClientRecord { Id = clientId, TenantId = tenantId, Name = "client_" + marker, OwnerUserId = userId, OwnerCredentialId = credentialId, OwnerPrincipalType = PrincipalTypeEnum.User, Weight = 77 }, CancellationToken.None).ConfigureAwait(false);
+                await first.RoutingPolicies!.CreateAsync(new RoutingPolicy { Id = routingPolicyId, TenantId = tenantId, Name = "policy_" + marker, ModelName = "model_" + marker, ClientName = "client_" + marker, Active = true }, CancellationToken.None).ConfigureAwait(false);
             }
 
             using (DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
             {
-                AssertPlatformStateRoundTrip(second.Platform, tenantId, userId, credentialId, sessionId, permissionId, roleId, roleAssignmentId, auditId, clientId, modelDefinitionId, modelConfigurationId, routingPolicyId, requestHistoryId, marker, settings.Type);
-                int removed = second.Platform.Tenants.RemoveAll(item => item.Id == tenantId);
-                removed += second.Platform.RemoveTenantScopedRecords(tenantId);
-                if (removed < 13) throw new InvalidOperationException(settings.Type + " platform cleanup removed too few records.");
-                await second.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+                if (await second.Tenants!.ReadAsync(tenantId, CancellationToken.None).ConfigureAwait(false) == null) throw new InvalidOperationException(settings.Type + " tenant did not round-trip.");
+                List<User> users = await second.Users!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                if (!users.Any(item => item.Id == userId && item.Email == marker + "@xeno.test")) throw new InvalidOperationException(settings.Type + " user did not round-trip.");
+                List<Credential> credentials = await second.Credentials!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                if (!credentials.Any(item => item.Id == credentialId && item.AccessKey == "access_" + marker)) throw new InvalidOperationException(settings.Type + " credential did not round-trip.");
+                List<XenoClientRecord> clients = await second.Clients!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                if (!clients.Any(item => item.Id == clientId && item.Weight == 77)) throw new InvalidOperationException(settings.Type + " client did not round-trip.");
+                List<RoutingPolicy> routingPolicies = await second.RoutingPolicies!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                if (!routingPolicies.Any(item => item.Id == routingPolicyId)) throw new InvalidOperationException(settings.Type + " routing policy did not round-trip.");
+
+                await Xeno.Core.Database.DatabaseSeeder.PurgeTenantEntitiesAsync(second, tenantId, true, CancellationToken.None).ConfigureAwait(false);
             }
 
             using (DatabaseDriverBase third = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
             {
-                if (third.Platform.Tenants.Any(item => item.Id == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup did not persist.");
-                if (third.Platform.ToState().Users.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant users.");
-                if (third.Platform.ToState().Clients.Any(item => item.TenantId == tenantId)) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant clients.");
+                if (await third.Tenants!.ReadAsync(tenantId, CancellationToken.None).ConfigureAwait(false) != null) throw new InvalidOperationException(settings.Type + " platform cleanup did not persist.");
+                if ((await third.Users!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false)).Count != 0) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant users.");
+                if ((await third.Clients!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false)).Count != 0) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant clients.");
             }
         }
 
@@ -4472,15 +4474,14 @@ namespace Test.Shared
             DateTime nowUtc = DateTime.UtcNow;
             using (DatabaseDriverBase first = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
             {
-                first.Platform.Tenants.Add(new Tenant { Id = tenantId, Name = "Leaderboard " + marker });
-                first.Platform.Tenants.Add(new Tenant { Id = otherTenantId, Name = "Other Leaderboard " + marker });
+                await first.Tenants!.CreateAsync(new Tenant { Id = tenantId, Name = "Leaderboard " + marker }, CancellationToken.None).ConfigureAwait(false);
+                await first.Tenants!.CreateAsync(new Tenant { Id = otherTenantId, Name = "Other Leaderboard " + marker }, CancellationToken.None).ConfigureAwait(false);
                 await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_a1_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-20), 40, 60, 100), CancellationToken.None).ConfigureAwait(false);
                 await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_a2_" + marker, tenantId, "leader-alpha", nowUtc.AddMinutes(-10), 10, 20, 0), CancellationToken.None).ConfigureAwait(false);
                 await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_b1_" + marker, tenantId, "leader-beta", nowUtc.AddMinutes(-5), 25, 35, 60), CancellationToken.None).ConfigureAwait(false);
                 await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_old_" + marker, tenantId, "leader-older", nowUtc.AddDays(-5), 1, 1, 2), CancellationToken.None).ConfigureAwait(false);
                 await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_other_" + marker, otherTenantId, "leader-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000), CancellationToken.None).ConfigureAwait(false);
                 await first.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_leader_blank_" + marker, tenantId, null, nowUtc.AddMinutes(-5), 100, 100, 200), CancellationToken.None).ConfigureAwait(false);
-                await first.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
             using (DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
@@ -4544,10 +4545,10 @@ namespace Test.Shared
 
                 if (emptyPage.Total != 1 || emptyPage.Models.Count != 0) throw new InvalidOperationException(settings.Type + " leaderboard pagination total should include skipped matching records.");
 
-                second.Platform.Tenants.RemoveAll(item => item.Id == tenantId || item.Id == otherTenantId);
+                await second.Tenants!.DeleteAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
+                await second.Tenants!.DeleteAsync(otherTenantId, CancellationToken.None).ConfigureAwait(false);
                 await second.RequestHistory!.DeleteAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, CancellationToken.None).ConfigureAwait(false);
                 await second.RequestHistory!.DeleteAsync(new RequestHistoryQuery { TenantId = otherTenantId, MatchRequestorTenant = true }, CancellationToken.None).ConfigureAwait(false);
-                await second.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -4569,76 +4570,6 @@ namespace Test.Shared
             entry.Telemetry.CompletionTokens = outputTokens;
             entry.Telemetry.TotalTokens = totalTokens;
             return entry;
-        }
-
-        private static void AddPlatformStateRoundTripRecords(XenoPlatform platform, string tenantId, string userId, string credentialId, string sessionId, string permissionId, string roleId, string roleAssignmentId, string auditId, string clientId, string modelDefinitionId, string modelConfigurationId, string routingPolicyId, string requestHistoryId, string marker)
-        {
-            platform.Tenants.Add(new Tenant { Id = tenantId, Name = "Tenant " + marker });
-            platform.Users.Add(new User { Id = userId, TenantId = tenantId, Username = "user_" + marker, Email = marker + "@xeno.test", IsAdmin = false, IsTenantAdmin = true, Active = true });
-            platform.Credentials.Add(new Credential { Id = credentialId, TenantId = tenantId, UserId = userId, AccessKey = "access_" + marker, SecretKey = "secret_" + marker, Active = true });
-            platform.AuthSessions.Add(new AuthSession { Id = sessionId, TenantId = tenantId, UserId = userId, CredentialId = credentialId, TokenHash = "token_" + marker, AuthScheme = AuthSchemeEnum.Credential, Active = true });
-            platform.Permissions.Add(new Permission { Id = permissionId, TenantId = tenantId, ResourceType = "StateRoundTrip", OperationType = OperationTypeEnum.Write, Permit = true, BuiltIn = false, Active = true });
-            platform.Roles.Add(new Role { Id = roleId, TenantId = tenantId, Name = "StateRole_" + marker, PermissionIds = new List<string> { permissionId }, Active = true });
-            platform.RoleAssignments.Add(new RoleAssignment { Id = roleAssignmentId, TenantId = tenantId, RoleId = roleId, PrincipalType = PrincipalTypeEnum.User, PrincipalId = userId, Active = true });
-
-            XenoClientRecord client = new XenoClientRecord
-            {
-                Id = clientId,
-                TenantId = tenantId,
-                Name = "client_" + marker,
-                OwnerUserId = userId,
-                OwnerCredentialId = credentialId,
-                OwnerPrincipalType = PrincipalTypeEnum.User,
-                Connected = true,
-                ServiceState = ClientServiceStateEnum.Normal,
-                MaxParallelRequests = 9,
-                Weight = 77
-            };
-            client.Models.Add(new XenoClientModel { Name = "model_" + marker, Provider = ApiProviderTypeEnum.Ollama, Source = "source_" + marker, SupportsCompletions = true, SupportsEmbeddings = true });
-            platform.Clients.Add(client);
-
-            platform.ModelDefinitions.Add(new ModelDefinition { Id = modelDefinitionId, TenantId = tenantId, Name = "model_" + marker, SupportsCompletions = true, SupportsEmbeddings = true, Labels = new List<string> { "state", marker } });
-            ModelConfiguration modelConfiguration = new ModelConfiguration { Id = modelConfigurationId, TenantId = tenantId, Name = "config_" + marker, Model = "model_" + marker };
-            modelConfiguration.PinnedCompletionsProperties["temperature"] = 0.25;
-            modelConfiguration.PinnedCompletionsProperties["marker"] = marker;
-            platform.ModelConfigurations.Add(modelConfiguration);
-
-            RoutingPolicy routingPolicy = new RoutingPolicy
-            {
-                Id = routingPolicyId,
-                TenantId = tenantId,
-                Name = "policy_" + marker,
-                ModelName = "model_" + marker,
-                ClientName = "client_" + marker,
-                RequestTimeoutMs = 123456,
-                LoadBalancingMode = LoadBalancingModeEnum.Random,
-                MaxTelemetryAgeMs = 45000,
-                TelemetryFallbackMode = RoutingPolicyFallbackModeEnum.FailClosed,
-                Active = true
-            };
-            routingPolicy.TelemetryFilters.Add(new RoutingPolicyCondition { Metric = "telemetry.cpu.utilizationPercent", Operator = RoutingPolicyOperatorEnum.LessThanOrEqual, ValueType = RoutingPolicyMetricValueTypeEnum.Number, Value = "75" });
-            routingPolicy.TelemetryRanking.Add(new RoutingPolicyRankingRule { Metric = "provider.queuedRequests", Direction = RoutingPolicyRankingDirectionEnum.Ascending, Weight = 2 });
-            platform.RoutingPolicies.Add(routingPolicy);
-        }
-
-        private static void AssertPlatformStateRoundTrip(XenoPlatform platform, string tenantId, string userId, string credentialId, string sessionId, string permissionId, string roleId, string roleAssignmentId, string auditId, string clientId, string modelDefinitionId, string modelConfigurationId, string routingPolicyId, string requestHistoryId, string marker, DatabaseTypeEnum provider)
-        {
-            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Name == "Tenant " + marker)) throw new InvalidOperationException(provider + " tenant did not round-trip.");
-            if (!platform.Users.Any(item => item.Id == userId && item.TenantId == tenantId && item.Email == marker + "@xeno.test")) throw new InvalidOperationException(provider + " user did not round-trip.");
-            if (!platform.Credentials.Any(item => item.Id == credentialId && item.UserId == userId && item.AccessKey == "access_" + marker)) throw new InvalidOperationException(provider + " credential did not round-trip.");
-            if (!platform.AuthSessions.Any(item => item.Id == sessionId && item.UserId == userId && item.CredentialId == credentialId)) throw new InvalidOperationException(provider + " auth session did not round-trip.");
-            if (!platform.Permissions.Any(item => item.Id == permissionId && item.ResourceType == "StateRoundTrip" && item.OperationType == OperationTypeEnum.Write)) throw new InvalidOperationException(provider + " permission did not round-trip.");
-            if (!platform.Roles.Any(item => item.Id == roleId && item.PermissionIds.Contains(permissionId))) throw new InvalidOperationException(provider + " role did not round-trip.");
-            if (!platform.RoleAssignments.Any(item => item.Id == roleAssignmentId && item.RoleId == roleId && item.PrincipalId == userId)) throw new InvalidOperationException(provider + " role assignment did not round-trip.");
-
-            XenoClientRecord client = platform.Clients.FirstOrDefault(item => item.Id == clientId) ?? throw new InvalidOperationException(provider + " client did not round-trip.");
-            if (client.OwnerUserId != userId || client.Weight != 77 || !client.Models.Any(item => item.Name == "model_" + marker && item.SupportsEmbeddings)) throw new InvalidOperationException(provider + " client details did not round-trip.");
-            ModelDefinition modelDefinition = platform.ModelDefinitions.FirstOrDefault(item => item.Id == modelDefinitionId) ?? throw new InvalidOperationException(provider + " model definition did not round-trip.");
-            if (!modelDefinition.Labels.Contains(marker)) throw new InvalidOperationException(provider + " model definition labels did not round-trip.");
-            ModelConfiguration modelConfiguration = platform.ModelConfigurations.FirstOrDefault(item => item.Id == modelConfigurationId) ?? throw new InvalidOperationException(provider + " model configuration did not round-trip.");
-            if (!modelConfiguration.PinnedCompletionsProperties.ContainsKey("marker")) throw new InvalidOperationException(provider + " model configuration pinned properties did not round-trip.");
-            RoutingPolicy routingPolicy = platform.RoutingPolicies.FirstOrDefault(item => item.Id == routingPolicyId) ?? throw new InvalidOperationException(provider + " routing policy did not round-trip.");
-            if (routingPolicy.TelemetryFilters.Count != 1 || routingPolicy.TelemetryRanking.Count != 1 || routingPolicy.MaxTelemetryAgeMs != 45000) throw new InvalidOperationException(provider + " routing policy telemetry settings did not round-trip.");
         }
 
         private static async Task RunServerTelemetryRoundTripAsync(DatabaseSettings settings, string suffix)
@@ -4794,13 +4725,12 @@ namespace Test.Shared
                         "Completion requests route to a connected client",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            RoutingPolicy? defaultPolicy = platform.RoutingPolicies.FirstOrDefault(item => item.TenantId == Constants.DefaultTenantId && item.IsDefault);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            RoutingPolicy? defaultPolicy = (await database.RoutingPolicies!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).FirstOrDefault(item => item.IsDefault);
                             if (defaultPolicy == null) throw new InvalidOperationException("Default routing policy was not seeded.");
                             if (defaultPolicy.LoadBalancingMode != LoadBalancingModeEnum.LeastRecentlyUsed) throw new InvalidOperationException("Default routing policy did not use least-recently-used balancing.");
-                            platform.Clients[0].Connected = true;
-                            RoutingService routing = new RoutingService(platform);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => item.Connected = true).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (String.IsNullOrWhiteSpace(decision.SelectedClientId)) throw new InvalidOperationException("Client not selected.");
@@ -4812,10 +4742,9 @@ namespace Test.Shared
                         "Embedding requests route to an embedding-capable model",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            RoutingService routing = new RoutingService(platform);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => item.Connected = true).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "text-embedding-3-small", true).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.EffectiveModel != "text-embedding-3-small") throw new InvalidOperationException("Effective model mismatch.");
@@ -4826,10 +4755,9 @@ namespace Test.Shared
                         "Unknown model requests fail before client selection",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            RoutingService routing = new RoutingService(platform);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => item.Connected = true).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "missing-model", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Unknown model unexpectedly routed.");
                             if (decision.OutcomeCode != "ModelNotFound") throw new InvalidOperationException("Unexpected outcome " + decision.OutcomeCode + ".");
@@ -4840,11 +4768,11 @@ namespace Test.Shared
                         "Disconnected client is excluded from routing",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = false;
-                            RoutingService routing = new RoutingService(platform);
-                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, UserId = platform.Users[0].Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            User routingUser = (await database.Users!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))[0];
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => item.Connected = false).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
+                            RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, UserId = routingUser.Id, PrincipalType = PrincipalTypeEnum.User, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Disconnected client unexpectedly routed.");
                             if (decision.OutcomeCode != "NoEligibleClients") throw new InvalidOperationException("Unexpected disconnected-client outcome.");
                         }),
@@ -4870,16 +4798,14 @@ namespace Test.Shared
                         "A shared client is routable by another tenant that consumes shared clients",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.Clients[0].Shared = true;
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            XenoClientRecord sharedClient = await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => { item.Connected = true; item.Shared = true; }).ConfigureAwait(false);
                             // Second tenant with the default ConsumeShared value (true) and no clients of its own.
-                            platform.Tenants.Add(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true });
-                            RoutingService routing = new RoutingService(platform);
+                            await database.Tenants!.CreateAsync(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true }).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_consumer", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException("Shared client did not route to consuming tenant: " + decision.Message);
-                            if (decision.SelectedClientId != platform.Clients[0].Id) throw new InvalidOperationException("Consuming tenant did not select the shared client.");
+                            if (decision.SelectedClientId != sharedClient.Id) throw new InvalidOperationException("Consuming tenant did not select the shared client.");
                         }),
                     new TestCaseDescriptor(
                         "Routing",
@@ -4887,12 +4813,10 @@ namespace Test.Shared
                         "A client that is not shared is invisible to other tenants",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.Clients[0].Shared = false;
-                            platform.Tenants.Add(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true });
-                            RoutingService routing = new RoutingService(platform);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => { item.Connected = true; item.Shared = false; }).ConfigureAwait(false);
+                            await database.Tenants!.CreateAsync(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true }).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_consumer", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Non-shared client was unexpectedly routable cross-tenant.");
                             if (decision.OutcomeCode != "ModelNotFound") throw new InvalidOperationException("Unexpected cross-tenant outcome " + decision.OutcomeCode + ".");
@@ -4903,12 +4827,10 @@ namespace Test.Shared
                         "A tenant that does not consume shared clients ignores shared clients",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.Clients[0].Shared = true;
-                            platform.Tenants.Add(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true, ConsumeShared = false });
-                            RoutingService routing = new RoutingService(platform);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => { item.Connected = true; item.Shared = true; }).ConfigureAwait(false);
+                            await database.Tenants!.CreateAsync(new Tenant { Id = "ten_consumer", Name = "Consumer", Active = true, ConsumeShared = false }).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_consumer", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Shared client routed to a tenant that does not consume shared clients.");
                             if (decision.OutcomeCode != "ModelNotFound") throw new InvalidOperationException("Unexpected isolation outcome " + decision.OutcomeCode + ".");
@@ -4919,10 +4841,8 @@ namespace Test.Shared
                         "Adaptive routing selects the lower-load client",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.Clients[0].InFlightRequests = 3;
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => { item.Connected = true; item.InFlightRequests = 3; }).ConfigureAwait(false);
                             XenoClientRecord client = new XenoClientRecord
                             {
                                 TenantId = Constants.DefaultTenantId,
@@ -4931,9 +4851,9 @@ namespace Test.Shared
                                 InFlightRequests = 0
                             };
                             client.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
-                            platform.Clients.Add(client);
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.Adaptive);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Adaptive });
+                            client = await database.Clients!.CreateAsync(client).ConfigureAwait(false);
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.Adaptive).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Adaptive });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.SelectedClientId != client.Id) throw new InvalidOperationException("Adaptive lower-load client was not selected.");
@@ -4945,9 +4865,9 @@ namespace Test.Shared
                         "Round-robin routing rotates across eligible clients",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.RoundRobin);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.RoundRobin });
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.RoundRobin).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.RoundRobin });
                             RoutingDecision first = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             RoutingDecision second = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!first.Success || !second.Success) throw new InvalidOperationException("Round-robin routing failed.");
@@ -4960,9 +4880,9 @@ namespace Test.Shared
                         "First-available routing selects deterministic first client",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.FirstAvailable);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.FirstAvailable });
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.FirstAvailable).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.FirstAvailable });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.SelectedClientName != "alpha-client") throw new InvalidOperationException("First-available did not select the deterministic first client.");
@@ -4973,9 +4893,9 @@ namespace Test.Shared
                         "Least-recently-used routing rotates by route scope",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.LeastRecentlyUsed);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.LeastRecentlyUsed).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
                             RoutingDecision first = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             RoutingDecision second = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!first.Success || !second.Success) throw new InvalidOperationException("Least-recently-used routing failed.");
@@ -4987,14 +4907,15 @@ namespace Test.Shared
                         "Concurrent least-recently-used gpt-oss requests spread across eligible clients",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            foreach (XenoClientRecord client in platform.Clients)
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            foreach (XenoClientRecord client in await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))
                             {
                                 client.Models.Add(new XenoClientModel { Name = "gpt-oss:20b", SupportsCompletions = true });
+                                await database.Clients!.UpdateAsync(client).ConfigureAwait(false);
                             }
 
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.LeastRecentlyUsed);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.LeastRecentlyUsed).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
                             const int requestCount = 64;
                             List<Task<RoutingDecision>> tasks = new List<Task<RoutingDecision>>();
                             using (ManualResetEventSlim gate = new ManualResetEventSlim(false))
@@ -5027,10 +4948,11 @@ namespace Test.Shared
                         "Least-recently-used routing rotates across three eligible gpt-oss clients",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            foreach (XenoClientRecord client in platform.Clients)
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            foreach (XenoClientRecord client in await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))
                             {
                                 client.Models.Add(new XenoClientModel { Name = "gpt-oss:20b", Provider = ApiProviderTypeEnum.Ollama, SupportsCompletions = true });
+                                await database.Clients!.UpdateAsync(client).ConfigureAwait(false);
                             }
 
                             XenoClientRecord third = new XenoClientRecord
@@ -5043,10 +4965,10 @@ namespace Test.Shared
                                 InFlightRequests = 0
                             };
                             third.Models.Add(new XenoClientModel { Name = "gpt-oss:20b", Provider = ApiProviderTypeEnum.Ollama, SupportsCompletions = true });
-                            platform.Clients.Add(third);
+                            await database.Clients!.CreateAsync(third).ConfigureAwait(false);
 
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.LeastRecentlyUsed);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.LeastRecentlyUsed).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
                             List<RoutingDecision> decisions = new List<RoutingDecision>();
                             for (int i = 0; i < 6; i++)
                             {
@@ -5069,9 +4991,9 @@ namespace Test.Shared
                         "Random routing selects an eligible client and records mode",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            SetDefaultRoutingPolicyMode(platform, LoadBalancingModeEnum.Random);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Random });
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            await SetDefaultRoutingPolicyModeAsync(database, LoadBalancingModeEnum.Random).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.Random });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.LoadBalancingMode != LoadBalancingModeEnum.Random) throw new InvalidOperationException("Random mode was not recorded.");
@@ -5083,7 +5005,7 @@ namespace Test.Shared
                         "Exact client routing policy wins over wildcard default",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
                             RoutingPolicy policy = new RoutingPolicy
                             {
                                 TenantId = Constants.DefaultTenantId,
@@ -5093,8 +5015,8 @@ namespace Test.Shared
                                 LoadBalancingMode = LoadBalancingModeEnum.FirstAvailable,
                                 Active = true
                             };
-                            platform.RoutingPolicies.Add(policy);
-                            RoutingService routing = new RoutingService(platform);
+                            policy = await database.RoutingPolicies!.CreateAsync(policy).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException(decision.Message);
                             if (decision.SelectedClientName != "beta-client") throw new InvalidOperationException("Exact client policy did not select beta-client.");
@@ -5107,9 +5029,9 @@ namespace Test.Shared
                         "Request history persists routing policy metadata",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = await BuildRoutingPlatformWithTwoClientsAsync().ConfigureAwait(false);
-                            RoutingService routing = new RoutingService(platform);
-                            Credential credential = platform.Credentials[0];
+                            using DatabaseDriverBase database = await BuildRoutingDatabaseWithTwoClientsAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
+                            Credential credential = (await database.Credentials!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))[0];
                             RequestContext context = new RequestContext
                             {
                                 TenantId = Constants.DefaultTenantId,
@@ -5135,11 +5057,9 @@ namespace Test.Shared
                         "Stale client heartbeat excludes client from routing",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.Clients[0].LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-5);
-                            RoutingService routing = new RoutingService(platform);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => { item.Connected = true; item.LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-5); }).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Stale heartbeat client unexpectedly routed.");
                             if (decision.OutcomeCode != "NoEligibleClients") throw new InvalidOperationException("Unexpected stale heartbeat outcome.");
@@ -5150,11 +5070,9 @@ namespace Test.Shared
                         "Configured client freshness timeout controls routing eligibility",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            platform.Clients[0].Connected = true;
-                            platform.Clients[0].LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-2);
-                            RoutingService routing = new RoutingService(platform, new RoutingSettings { ClientFreshnessTimeoutMs = 180000 });
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => { item.Connected = true; item.LastHeartbeatUtc = DateTime.UtcNow.AddMinutes(-2); }).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database, new RoutingSettings { ClientFreshnessTimeoutMs = 180000 });
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (!decision.Success) throw new InvalidOperationException("Configured freshness timeout did not allow recently stale heartbeat: " + decision.Message);
                         })
@@ -5178,9 +5096,8 @@ namespace Test.Shared
                         "Cross-tenant routing does not leak clients",
                         executeAsync: async delegate
                         {
-                            XenoPlatform platform = new XenoPlatform();
-                            await platform.InitializeAsync().ConfigureAwait(false);
-                            RoutingService routing = new RoutingService(platform);
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
                             RoutingDecision decision = await routing.RouteAsync(new RequestContext { TenantId = "ten_other", IsAuthenticated = true }, "llama3.2:latest", false).ConfigureAwait(false);
                             if (decision.Success) throw new InvalidOperationException("Cross-tenant route unexpectedly succeeded.");
                         }),
@@ -5347,11 +5264,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                },
+                Database = TestDatabase.Settings(dbFile),
                 TelemetryCollection = new TelemetryCollectionSettings
                 {
                     Enabled = false
@@ -5401,6 +5314,7 @@ namespace Test.Shared
                             ?? throw new InvalidOperationException("Shared client was not visible to the consuming tenant.");
                         if (!consumerView.Shared) throw new InvalidOperationException("Consumer view did not report the client as shared.");
                         if (!String.Equals(consumerView.Origin, "operator", StringComparison.Ordinal)) throw new InvalidOperationException("Shared operator client origin should be 'operator', was '" + consumerView.Origin + "'.");
+                        if (!String.IsNullOrEmpty(consumerView.Name)) throw new InvalidOperationException("Consumer view leaked the client name.");
                         if (consumerView.TenantId != null) throw new InvalidOperationException("Consumer view leaked the owning tenant id.");
                         if (consumerView.OwnerUserId != null || consumerView.OwnerCredentialId != null || consumerView.OwnerPrincipalType != null) throw new InvalidOperationException("Consumer view leaked owner identity.");
                         if (consumerView.MaxParallelRequests != null || consumerView.Weight != null || consumerView.InFlightRequests != null) throw new InvalidOperationException("Consumer view leaked weighting or live load.");
@@ -5512,11 +5426,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                },
+                Database = TestDatabase.Settings(dbFile),
                 Email = new EmailSettings
                 {
                     Enabled = true,
@@ -5634,7 +5544,7 @@ namespace Test.Shared
                     }
 
                     server.Dispose();
-                    await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
                     if (Directory.Exists(emailDirectory)) Directory.Delete(emailDirectory, true);
                 }
@@ -5653,11 +5563,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -5861,11 +5767,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -5920,11 +5822,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -6040,11 +5938,7 @@ namespace Test.Shared
                 {
                     MaxLoginRequestsPerMinute = 1
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -6098,11 +5992,7 @@ namespace Test.Shared
                     RequireAuthentication = true,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -6402,7 +6292,7 @@ namespace Test.Shared
                     }
 
                     server.Dispose();
-                    await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                     await DeleteFileWithRetryAsync(settingsFile).ConfigureAwait(false);
                 }
             }
@@ -6422,23 +6312,18 @@ namespace Test.Shared
                     RequireAuthentication = true,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (DatabaseDriverBase driver = await DatabaseDriverFactory.CreateAndInitializeAsync(settings.Database).ConfigureAwait(false))
             {
                 const string otherTenantId = "ten_public_leaderboard_other";
-                driver.Platform.Tenants.Add(new Tenant { Id = otherTenantId, Name = "Public Leaderboard Other" });
+                await driver.Tenants!.CreateAsync(new Tenant { Id = otherTenantId, Name = "Public Leaderboard Other" }, CancellationToken.None).ConfigureAwait(false);
                 await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_alpha_1", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-20), 40, 60, 100), CancellationToken.None).ConfigureAwait(false);
                 await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_alpha_2", Constants.DefaultTenantId, "public-alpha", nowUtc.AddMinutes(-10), 10, 20, 30), CancellationToken.None).ConfigureAwait(false);
                 await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_beta_1", Constants.DefaultTenantId, "public-beta", nowUtc.AddMinutes(-5), 25, 35, 60), CancellationToken.None).ConfigureAwait(false);
                 await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_alpha_other", otherTenantId, "public-alpha", nowUtc.AddMinutes(-5), 500, 500, 1000), CancellationToken.None).ConfigureAwait(false);
                 await driver.RequestHistory!.InsertAsync(CreateModelLeaderboardHistory("req_public_old", Constants.DefaultTenantId, "public-old", nowUtc.AddDays(-3), 1, 1, 2), CancellationToken.None).ConfigureAwait(false);
-                await driver.SaveAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -6527,11 +6412,7 @@ namespace Test.Shared
                     RequireAuthentication = true,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -6766,11 +6647,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -7061,11 +6938,13 @@ namespace Test.Shared
             }
         }
 
-        private static async Task<XenoPlatform> BuildRoutingPlatformWithTwoClientsAsync()
+        private static async Task<DatabaseDriverBase> BuildRoutingDatabaseWithTwoClientsAsync()
         {
-            XenoPlatform platform = new XenoPlatform();
-            await platform.InitializeAsync().ConfigureAwait(false);
-            platform.Clients.Clear();
+            DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+            foreach (XenoClientRecord existing in await database.Clients!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false))
+            {
+                await database.Clients!.DeleteAsync(Constants.DefaultTenantId, existing.Id).ConfigureAwait(false);
+            }
 
             XenoClientRecord first = new XenoClientRecord
             {
@@ -7077,7 +6956,7 @@ namespace Test.Shared
                 InFlightRequests = 0
             };
             first.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
-            platform.Clients.Add(first);
+            await database.Clients!.CreateAsync(first).ConfigureAwait(false);
 
             XenoClientRecord second = new XenoClientRecord
             {
@@ -7089,16 +6968,27 @@ namespace Test.Shared
                 InFlightRequests = 0
             };
             second.Models.Add(new XenoClientModel { Name = "llama3.2:latest", SupportsCompletions = true });
-            platform.Clients.Add(second);
-            return platform;
+            await database.Clients!.CreateAsync(second).ConfigureAwait(false);
+            return database;
         }
 
-        private static void SetDefaultRoutingPolicyMode(XenoPlatform platform, LoadBalancingModeEnum mode)
+        private static async Task SetDefaultRoutingPolicyModeAsync(DatabaseDriverBase database, LoadBalancingModeEnum mode)
         {
-            RoutingPolicy? policy = platform.RoutingPolicies.FirstOrDefault(item => item.TenantId == Constants.DefaultTenantId && item.IsDefault);
+            RoutingPolicy? policy = (await database.RoutingPolicies!.EnumerateAsync(Constants.DefaultTenantId).ConfigureAwait(false)).FirstOrDefault(item => item.IsDefault);
             if (policy == null) throw new InvalidOperationException("Default routing policy was not seeded.");
             policy.LoadBalancingMode = mode;
             policy.LastUpdateUtc = DateTime.UtcNow;
+            await database.RoutingPolicies!.UpdateAsync(policy).ConfigureAwait(false);
+        }
+
+        // Read the tenant's single seeded default client, apply a mutation, and persist it back through
+        // the client repository (routing reads clients from the repository, not from mutated in-memory copies).
+        private static async Task<XenoClientRecord> UpdateSeededClientAsync(DatabaseDriverBase database, string tenantId, Action<XenoClientRecord> mutate)
+        {
+            XenoClientRecord client = (await database.Clients!.EnumerateAsync(tenantId).ConfigureAwait(false))[0];
+            mutate(client);
+            await database.Clients!.UpdateAsync(client).ConfigureAwait(false);
+            return client;
         }
 
         private static async Task RunManagementUpdateSmokeAsync()
@@ -7113,11 +7003,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -7338,11 +7224,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -7468,11 +7350,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -7584,11 +7462,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             CancellationTokenSource? serverTokenSource = null;
@@ -7665,7 +7539,7 @@ namespace Test.Shared
                 }
 
                 if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
-                await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
             }
         }
 
@@ -7686,11 +7560,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (FakeOllamaPullServer ollama = new FakeOllamaPullServer())
@@ -7801,11 +7671,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
             settings.WebSocket.RequestTimeoutMs = 10000;
 
@@ -7968,11 +7834,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
             settings.WebSocket.RequestTimeoutMs = 10000;
 
@@ -8113,7 +7975,7 @@ namespace Test.Shared
                     }
 
                     server.Dispose();
-                    await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+                    await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
                 }
             }
         }
@@ -8130,11 +7992,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -8320,11 +8178,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                },
+                Database = TestDatabase.Settings(dbFile),
                 WebSocket = new WebSocketSettings
                 {
                     ClientStaleTimeoutMs = 5000,
@@ -8386,11 +8240,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -8515,11 +8365,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -9637,11 +9483,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -9714,11 +9556,7 @@ namespace Test.Shared
                     Port = port,
                     Ssl = false
                 },
-                Database = new DatabaseSettings
-                {
-                    Type = DatabaseTypeEnum.Sqlite,
-                    Filename = dbFile
-                }
+                Database = TestDatabase.Settings(dbFile)
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
@@ -9878,15 +9716,15 @@ namespace Test.Shared
 
         private static async Task ExerciseRealNetLedgerContainerAsync(string baseUrl, CancellationToken token)
         {
-            XenoPlatform platform = await CreateLedgerTestPlatformAsync().ConfigureAwait(false);
+            using DatabaseDriverBase database = await CreateLedgerTestDatabaseAsync().ConfigureAwait(false);
             User requestUser = new User { Id = "usr_docker_ledger_requestor", TenantId = Constants.DefaultTenantId, Email = "docker-ledger-requestor@test", Username = "docker-ledger-requestor@test", Active = true };
             User servingUser = new User { Id = "usr_docker_ledger_serving", TenantId = Constants.DefaultTenantId, Email = "docker-ledger-serving@test", Username = "docker-ledger-serving@test", Active = true };
-            platform.Users.Add(requestUser);
-            platform.Users.Add(servingUser);
+            await database.Users!.CreateAsync(requestUser).ConfigureAwait(false);
+            await database.Users!.CreateAsync(servingUser).ConfigureAwait(false);
             Credential credential = new Credential { Id = "cred_docker_ledger", TenantId = Constants.DefaultTenantId, UserId = requestUser.Id, AccessKey = "docker-ledger", SecretKey = "secret", Active = true };
-            platform.Credentials.Add(credential);
+            await database.Credentials!.CreateAsync(credential).ConfigureAwait(false);
             XenoClientRecord clientRecord = new XenoClientRecord { Id = "xcl_docker_ledger", TenantId = Constants.DefaultTenantId, Name = "docker-ledger", OwnerUserId = servingUser.Id, OwnerPrincipalType = PrincipalTypeEnum.User, Connected = true, Active = true };
-            platform.Clients.Add(clientRecord);
+            await database.Clients!.CreateAsync(clientRecord).ConfigureAwait(false);
 
             LedgerSettings settings = new LedgerSettings
             {
@@ -9897,11 +9735,12 @@ namespace Test.Shared
                 CommitEntriesImmediately = true
             };
 
-            using (LedgerService ledger = new LedgerService(platform, settings, _TestLogging, delegate(CancellationToken saveToken) { return Task.CompletedTask; }))
+            using (LedgerService ledger = new LedgerService(database, settings, _TestLogging))
             {
-                if (!ledger.TryEnqueueFromHistory(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 77, "/v1/chat/completions"), out string? reason))
+                LedgerEnqueueResult enqueue = await ledger.TryEnqueueFromHistoryAsync(CreateLedgerHistory(credential.Id, requestUser.Id, clientRecord.Id, 77, "/v1/chat/completions")).ConfigureAwait(false);
+                if (!enqueue.Enqueued)
                 {
-                    throw new InvalidOperationException("Docker-backed ledger event was not enqueued: " + reason);
+                    throw new InvalidOperationException("Docker-backed ledger event was not enqueued: " + enqueue.Reason);
                 }
 
                 LedgerDrainResponse drain = await ledger.DrainOnceAsync(token).ConfigureAwait(false);
@@ -9911,10 +9750,11 @@ namespace Test.Shared
                 }
             }
 
-            LedgerTenantLink? tenantLink = platform.LedgerTenantLinks.FirstOrDefault(item => item.XenoTenantId == Constants.DefaultTenantId);
+            LedgerTenantLink? tenantLink = (await database.LedgerTenantLinks!.EnumerateAsync().ConfigureAwait(false)).FirstOrDefault(item => item.XenoTenantId == Constants.DefaultTenantId);
             if (tenantLink == null) throw new InvalidOperationException("Docker-backed drain did not persist a tenant link.");
-            LedgerAccountLink? requestLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == requestUser.Id);
-            LedgerAccountLink? servingLink = platform.LedgerAccountLinks.FirstOrDefault(item => item.XenoUserId == servingUser.Id);
+            List<LedgerAccountLink> dockerAccountLinks = await database.LedgerAccountLinks!.EnumerateByTenantAsync(Constants.DefaultTenantId).ConfigureAwait(false);
+            LedgerAccountLink? requestLink = dockerAccountLinks.FirstOrDefault(item => item.XenoUserId == requestUser.Id);
+            LedgerAccountLink? servingLink = dockerAccountLinks.FirstOrDefault(item => item.XenoUserId == servingUser.Id);
             if (requestLink == null || servingLink == null) throw new InvalidOperationException("Docker-backed drain did not persist both account links.");
 
             using (NetLedgerClient client = new NetLedgerClient(settings))
@@ -10034,7 +9874,7 @@ namespace Test.Shared
         private static async Task StopServerAsync(XenoServer server, Task serverTask, CancellationTokenSource serverTokenSource, string dbFile)
         {
             await StopServerRuntimeAsync(server, serverTask, serverTokenSource).ConfigureAwait(false);
-            await DeleteFileWithRetryAsync(dbFile).ConfigureAwait(false);
+            await TestDatabase.CleanupAsync(dbFile).ConfigureAwait(false);
         }
 
         private static async Task StopServerRuntimeAsync(XenoServer server, Task serverTask, CancellationTokenSource serverTokenSource)
@@ -10197,44 +10037,53 @@ namespace Test.Shared
 
         private static async Task InsertTelemetryRemnantRowsAsync(string dbFile, string tenantId, string providerSampleId)
         {
-            using (SqliteConnection connection = new SqliteConnection("Data Source=" + dbFile + ";Pooling=False;"))
+            // Runs against whichever provider the suite is configured for. Statements execute individually
+            // (not as one multi-statement command) so the same code works on SQLite, Postgres, MySQL, and
+            // SQL Server; @name markers and the ISO-string collected_utc value are portable across all four.
+            string now = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+            string[] statements = new[]
             {
-                await connection.OpenAsync().ConfigureAwait(false);
-                using (SqliteCommand command = connection.CreateCommand())
+                "INSERT INTO client_telemetry_gpu_samples (id, sample_id, tenant_id, client_id, collected_utc, gpu_uuid, name, utilization_percent) VALUES ('ctgpu_orphan', 'ctel_orphan', @tenantId, 'xcl_purge', @now, 'gpu-orphan', 'Orphan GPU', 99)",
+                "INSERT INTO client_provider_telemetry_models (id, sample_id, tenant_id, client_id, provider_name, model_name) VALUES ('ptm_child', @providerSampleId, @tenantId, 'xcl_purge', 'purge-provider', 'purge-model')",
+                "INSERT INTO client_provider_telemetry_models (id, sample_id, tenant_id, client_id, provider_name, model_name) VALUES ('ptm_orphan', 'ptel_orphan', @tenantId, 'xcl_purge', 'purge-provider', 'orphan-model')",
+                "INSERT INTO client_provider_telemetry_metrics (id, sample_id, tenant_id, client_id, provider_name, model_name, metric_name, metric_kind, metric_value, unit, source, labels_json) VALUES ('ptmet_child', @providerSampleId, @tenantId, 'xcl_purge', 'purge-provider', 'purge-model', 'active_requests', 'gauge', 1, 'count', 'Unknown', NULL)",
+                "INSERT INTO client_provider_telemetry_metrics (id, sample_id, tenant_id, client_id, provider_name, model_name, metric_name, metric_kind, metric_value, unit, source, labels_json) VALUES ('ptmet_orphan', 'ptel_orphan', @tenantId, 'xcl_purge', 'purge-provider', 'orphan-model', 'active_requests', 'gauge', 1, 'count', 'Unknown', NULL)"
+            };
+
+            using (DbConnection connection = await TestDatabase.OpenConnectionAsync(dbFile).ConfigureAwait(false))
+            {
+                foreach (string sql in statements)
                 {
-                    command.CommandText = """
-INSERT INTO client_telemetry_gpu_samples (id, sample_id, tenant_id, client_id, collected_utc, gpu_uuid, name, utilization_percent)
-VALUES ('ctgpu_orphan', 'ctel_orphan', $tenantId, 'xcl_purge', $now, 'gpu-orphan', 'Orphan GPU', 99);
-INSERT INTO client_provider_telemetry_models (id, sample_id, tenant_id, client_id, provider_name, model_name)
-VALUES ('ptm_child', $providerSampleId, $tenantId, 'xcl_purge', 'purge-provider', 'purge-model');
-INSERT INTO client_provider_telemetry_models (id, sample_id, tenant_id, client_id, provider_name, model_name)
-VALUES ('ptm_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider', 'orphan-model');
-INSERT INTO client_provider_telemetry_metrics (id, sample_id, tenant_id, client_id, provider_name, model_name, metric_name, metric_kind, metric_value, unit, source, labels_json)
-VALUES ('ptmet_child', $providerSampleId, $tenantId, 'xcl_purge', 'purge-provider', 'purge-model', 'active_requests', 'gauge', 1, 'count', 'Unknown', NULL);
-INSERT INTO client_provider_telemetry_metrics (id, sample_id, tenant_id, client_id, provider_name, model_name, metric_name, metric_kind, metric_value, unit, source, labels_json)
-VALUES ('ptmet_orphan', 'ptel_orphan', $tenantId, 'xcl_purge', 'purge-provider', 'orphan-model', 'active_requests', 'gauge', 1, 'count', 'Unknown', NULL);
-""";
-                    command.Parameters.AddWithValue("$tenantId", tenantId);
-                    command.Parameters.AddWithValue("$providerSampleId", providerSampleId);
-                    command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
-                    await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    using (DbCommand command = connection.CreateCommand())
+                    {
+                        command.CommandText = sql;
+                        AddParameter(command, "@tenantId", tenantId);
+                        AddParameter(command, "@providerSampleId", providerSampleId);
+                        AddParameter(command, "@now", now);
+                        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    }
                 }
             }
         }
 
         private static async Task<int> CountRowsForTenantAsync(string dbFile, string tableName, string tenantId)
         {
-            using (SqliteConnection connection = new SqliteConnection("Data Source=" + dbFile + ";Pooling=False;"))
+            using (DbConnection connection = await TestDatabase.OpenConnectionAsync(dbFile).ConfigureAwait(false))
+            using (DbCommand command = connection.CreateCommand())
             {
-                await connection.OpenAsync().ConfigureAwait(false);
-                using (SqliteCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = "SELECT COUNT(*) FROM " + tableName + " WHERE tenant_id = $tenantId;";
-                    command.Parameters.AddWithValue("$tenantId", tenantId);
-                    object? value = await command.ExecuteScalarAsync().ConfigureAwait(false);
-                    return Convert.ToInt32(value);
-                }
+                command.CommandText = "SELECT COUNT(*) FROM " + tableName + " WHERE tenant_id = @tenantId";
+                AddParameter(command, "@tenantId", tenantId);
+                object? value = await command.ExecuteScalarAsync().ConfigureAwait(false);
+                return Convert.ToInt32(value, CultureInfo.InvariantCulture);
             }
+        }
+
+        private static void AddParameter(DbCommand command, string name, object value)
+        {
+            DbParameter parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            command.Parameters.Add(parameter);
         }
 
         private static void ExpectArgumentException(Action action)

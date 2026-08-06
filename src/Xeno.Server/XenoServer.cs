@@ -211,11 +211,16 @@ namespace Xeno.Server
 
             try
             {
-                XenoPlatform? platform = _Database?.Platform;
-                if (platform != null)
+                if (_Database?.Clients != null && _Database?.Tenants != null)
                 {
-                    snapshot.ConnectedClients = platform.Clients.Count(item => item.Connected);
-                    snapshot.AvailableModels = platform.Clients
+                    List<XenoClientRecord> allClients = new List<XenoClientRecord>();
+                    foreach (Tenant tenant in _Database.Tenants.EnumerateAsync(CancellationToken.None).GetAwaiter().GetResult())
+                    {
+                        allClients.AddRange(_Database.Clients.EnumerateAsync(tenant.Id, CancellationToken.None).GetAwaiter().GetResult());
+                    }
+
+                    snapshot.ConnectedClients = allClients.Count(item => item.Connected);
+                    snapshot.AvailableModels = allClients
                         .Where(item => item.Connected)
                         .SelectMany(item => item.Models)
                         .Select(item => item.Name)
@@ -299,11 +304,11 @@ namespace Xeno.Server
             try
             {
                 _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, _Logging, token).ConfigureAwait(false);
-                MarkClientsDisconnected();
-                _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
-                _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, _Logging, SavePlatformAsync);
-                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
-                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging, _Database.Audit);
+                await MarkClientsDisconnectedAsync(token).ConfigureAwait(false);
+                _Routing = new RoutingService(_Database, _Settings.Routing, _Settings.Cache);
+                _Ledger = new LedgerService(_Database, _Settings.Ledger, _Logging);
+                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database, _Settings.Ledger, _Logging);
+                _TenantLifecycle = new TenantLifecycleService(_Database, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging, _Database.Audit);
 
                 StartTelemetry();
 
@@ -422,6 +427,30 @@ namespace Xeno.Server
             _Webserver.Routes.PostRouting = PostRoutingRouteAsync;
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.GET, "/openapi.json", OpenApiRouteAsync, ExceptionRouteAsync);
             _Webserver.Routes.PreAuthentication.Static.Add(HttpMethod.GET, "/swagger", SwaggerRouteAsync, ExceptionRouteAsync);
+            new Routes.HealthRoutes().Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.AuthRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.OnboardingRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.TenantRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.UserRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.CredentialRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.RoleRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.PermissionRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.RoleAssignmentRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.ModelDefinitionRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.ModelConfigurationRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.RoutingPolicyRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.AuthTokenRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.OnboardingApproveRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.EffectivePermissionsRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.AuditRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.ClientTelemetryRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.RequestHistoryRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.SettingsRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.EmailRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.AdminRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.ClientRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.InferenceRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.LedgerRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
             RegisterRestRoutes();
 
             if (_Settings.WebSocket.Enabled)
@@ -481,182 +510,47 @@ namespace Xeno.Server
 
         private void RegisterRestRoutes()
         {
-            RegisterStaticRoute(HttpMethod.GET, "/", "Health check", "Health");
-            RegisterStaticRoute(HttpMethod.GET, "/health", "Health check", "Health");
-            RegisterStaticRoute(HttpMethod.GET, "/ping", "Ping heartbeat", "Health");
+            // Health and ping routes are registered by Routes.HealthRoutes (a per-feature registrar).
             RegisterStaticRoute(HttpMethod.GET, "/metrics", "Prometheus-style metrics", "Health");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/health", "Health check", "Health");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/ping", "Ping heartbeat", "Health");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ping", "Ping heartbeat", "Health");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/tenants", "List login tenants for email", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/tenants", "List login tenants for email", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/dashboard/login", "Dashboard login", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/dashboard/login", "Dashboard login", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/onboarding/signup", "Onboard tenant or user", "Onboarding");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/onboarding/signup", "Onboard tenant or user", "Onboarding");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/login", "Login and create client credential", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/login", "Login and create client credential", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token", "Create token", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/token", "Create token", "Authentication");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/auth/token/details", "Token details", "Authentication");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/auth/token/details", "Token details", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/token/refresh", "Refresh token", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/token/refresh", "Refresh token", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/auth/logout", "Logout", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/auth/logout", "Logout", "Authentication");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/admin/nuke/tenant", "Nuke tenant", "Administration");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/admin/nuke/tenant", "Nuke tenant", "Administration");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/admin/nuke/user", "Nuke user", "Administration");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/admin/nuke/user", "Nuke user", "Administration");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/tenants", "List tenants", "Tenants");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/tenants", "List tenants", "Tenants");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/tenants", "Create tenant", "Tenants");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/tenants", "Create tenant", "Tenants");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/users", "List users", "Tenants");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/users", "List users", "Tenants");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/users", "Create user", "Tenants");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/users", "Create user", "Tenants");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/credentials", "List credentials", "Tenants");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/credentials", "List credentials", "Tenants");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/credentials", "Create credential", "Tenants");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/credentials", "Create credential", "Tenants");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/roles", "List roles", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/roles", "List roles", "Authorization");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/roles", "Create role", "Authorization");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/roles", "Create role", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/permissions", "List permissions", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/permissions", "List permissions", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/permissions/grantable", "List grantable permissions", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/permissions/grantable", "List grantable permissions", "Authorization");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/permissions", "Create permission", "Authorization");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/permissions", "Create permission", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/roleassignments", "List role assignments", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/role-assignments", "List role assignments", "Authorization");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/roleassignments", "Create role assignment", "Authorization");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/role-assignments", "Create role assignment", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/effective-permissions", "List effective permissions", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/effective-permissions", "List effective permissions", "Authorization");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/audit", "List audit records", "Audit");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/audit", "List audit records", "Audit");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/clients", "List clients", "Clients");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/clients", "List clients", "Clients");
-            RegisterStaticRoute(HttpMethod.DELETE, "/api/v1/clientmodels", "Delete managed client model", "Clients");
-            RegisterStaticRoute(HttpMethod.DELETE, "/v1.0/api/client-models", "Delete managed client model", "Clients");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/clientmodels/pull", "Pull managed client model", "Clients");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-models/pull", "Pull managed client model", "Clients");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelperformance/test", "Test model performance", "Clients");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/model-performance/test", "Test model performance", "Clients");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/status", "Client telemetry status", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/latest", "Latest client telemetry", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/collect", "Trigger client telemetry collection", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/history/search", "Search client telemetry history", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/history/rollups", "Client telemetry rollups", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/history/delete", "Bulk delete client telemetry", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/providers/latest", "Latest provider telemetry", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/collect", "Trigger provider telemetry collection", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/search", "Search provider telemetry history", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/rollups", "Provider telemetry rollups", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/delete", "Bulk delete provider telemetry", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/collection-attempts", "List client telemetry collection attempts", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/metrics", "Client telemetry metric catalog", "Client Telemetry");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/status", "Ledger status", "Ledger");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/balance/me", "My ledger balance", "Ledger");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/balances", "Ledger balances", "Ledger");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/ledger/entries/me", "My ledger entries", "Ledger");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/ledger/entries/search", "Search ledger entries", "Ledger");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/ledger/drain", "Drain ledger queue", "Ledger");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/ledger/reconcile", "Reconcile ledger links", "Ledger");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/modeldefinitions", "List model definitions", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-definitions", "List model definitions", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelconfigurations", "List model configurations", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/model-configurations", "List model configurations", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/routingpolicies", "List routing policies", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/routing-policies", "List routing policies", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/routingpolicies", "Create routing policy", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/routing-policies", "Create routing policy", "Routing");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/routing-policies/validate", "Validate routing policy", "Routing");
-            RegisterStaticRoute(HttpMethod.GET, "/v1/models", "List OpenAI models", "OpenAI");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/openai/v1/models", "List OpenAI models", "OpenAI");
-            RegisterStaticRoute(HttpMethod.POST, "/v1/chat/completions", "Create chat completion", "OpenAI");
-            RegisterStaticRoute(HttpMethod.POST, "/v1/completions", "Create completion", "OpenAI");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/openai/v1/chat/completions", "Create chat completion", "OpenAI");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/openai/v1/completions", "Create completion", "OpenAI");
-            RegisterStaticRoute(HttpMethod.POST, "/v1/embeddings", "Create embeddings", "OpenAI");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/openai/v1/embeddings", "Create embeddings", "OpenAI");
-            RegisterStaticRoute(HttpMethod.GET, "/api/tags", "List Ollama models", "Ollama");
-            RegisterStaticRoute(HttpMethod.POST, "/api/chat", "Create Ollama chat completion", "Ollama");
-            RegisterStaticRoute(HttpMethod.POST, "/api/generate", "Create Ollama generation", "Ollama");
-            RegisterStaticRoute(HttpMethod.POST, "/api/embed", "Create Ollama embeddings", "Ollama");
-            RegisterStaticRoute(HttpMethod.POST, "/api/embeddings", "Create Ollama embeddings", "Ollama");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory", "List request history", "Request History");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history", "List request history", "Request History");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/modelleaderboard", "Model token leaderboard", "Model Leaderboard");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/model-leaderboard", "Model token leaderboard", "Model Leaderboard");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/modelleaderboard", "Model token leaderboard", "Model Leaderboard");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/request-history/model-leaderboard", "Model token leaderboard", "Model Leaderboard");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/summary", "Request history summary", "Request History");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory/summary", "Request history summary", "Request History");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/requesthistory/bulk", "Bulk delete request history", "Request History");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/request-history/bulk", "Bulk delete request history", "Request History");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/requesthistory/analytics/overview", "Request analytics overview", "Request History");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/request-history/analytics/overview", "Request analytics overview", "Request History");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/analytics/overview", "Analytics overview", "Analytics");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/analytics/overview", "Analytics overview", "Analytics");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/settings", "Get server settings", "Settings");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/settings", "Get server settings", "Settings");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/settings", "Update server settings", "Settings");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/settings", "Update server settings", "Settings");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/email/test", "Send test email", "Email");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/email/test", "Send test email", "Email");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/backup", "Backup platform state", "Backup");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/backup", "Backup platform state", "Backup");
-            RegisterStaticRoute(HttpMethod.POST, "/api/v1/restore", "Restore platform state", "Backup");
-            RegisterStaticRoute(HttpMethod.POST, "/v1.0/api/restore", "Restore platform state", "Backup");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/tenants/{id}", "Delete tenant", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/tenants/{id}", "Delete tenant", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/tenants/{id}", "Update tenant", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/tenants/{id}", "Update tenant", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/users/{id}", "Delete user", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/users/{id}", "Delete user", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/users/{id}", "Update user", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/users/{id}", "Update user", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/credentials/{id}", "Delete credential", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/credentials/{id}", "Delete credential", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/credentials/{id}", "Update credential", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/credentials/{id}", "Update credential", "Tenants");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/roles/{id}", "Delete role", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/roles/{id}", "Delete role", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/roles/{id}", "Update role", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/roles/{id}", "Update role", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/permissions/{id}", "Delete permission", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/permissions/{id}", "Delete permission", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/permissions/{id}", "Update permission", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/permissions/{id}", "Update permission", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/roleassignments/{id}", "Delete role assignment", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/role-assignments/{id}", "Delete role assignment", "Authorization");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/audit/{id}", "Delete audit record", "Audit");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/audit/{id}", "Delete audit record", "Audit");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/clients/{id}", "Delete client", "Clients");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/clients/{id}", "Delete client", "Clients");
-            RegisterParameterizedRoute(HttpMethod.POST, "/api/v1/clients/{id}/sharing", "Set client sharing", "Clients");
-            RegisterParameterizedRoute(HttpMethod.POST, "/v1.0/api/clients/{id}/sharing", "Set client sharing", "Clients");
-            RegisterStaticRoute(HttpMethod.GET, "/api/v1/admin/shared-clients", "List shared clients", "Clients");
-            RegisterStaticRoute(HttpMethod.GET, "/v1.0/api/admin/shared-clients", "List shared clients", "Clients");
-            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/history/{id}", "Get client telemetry detail", "Client Telemetry");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/history/{id}", "Delete client telemetry detail", "Client Telemetry");
-            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/client-telemetry/providers/history/{id}", "Get provider telemetry detail", "Client Telemetry");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/client-telemetry/providers/history/{id}", "Delete provider telemetry detail", "Client Telemetry");
-            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/ledger/balances/users/{userId}", "Ledger user balance", "Ledger");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/api/v1/routingpolicies/{id}", "Update routing policy", "Routing");
-            RegisterParameterizedRoute(HttpMethod.PUT, "/v1.0/api/routing-policies/{id}", "Update routing policy", "Routing");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/routingpolicies/{id}", "Delete routing policy", "Routing");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/routing-policies/{id}", "Delete routing policy", "Routing");
-            RegisterParameterizedRoute(HttpMethod.GET, "/api/v1/requesthistory/{id}", "Get request history entry", "Request History");
-            RegisterParameterizedRoute(HttpMethod.GET, "/v1.0/api/request-history/{id}", "Get request history entry", "Request History");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/api/v1/requesthistory/{id}", "Delete request history entry", "Request History");
-            RegisterParameterizedRoute(HttpMethod.DELETE, "/v1.0/api/request-history/{id}", "Delete request history entry", "Request History");
+            // Auth routes (login, tenants, dashboard/login) are registered by Routes.AuthRoutes and
+            // onboarding routes (signup, verify, config) by Routes.OnboardingRoutes.
+            // Auth token routes (token, token/details, token/refresh, logout) are registered by Routes.AuthTokenRoutes.
+            // Admin nuke routes (tenant, user) are registered by Routes.AdminRoutes.
+            // Tenant routes are registered by Routes.TenantRoutes.
+            // User routes are registered by Routes.UserRoutes.
+            // Credential static routes are registered by Routes.CredentialRoutes.
+            // Role static routes are registered by Routes.RoleRoutes.
+            // Permission static routes are registered by Routes.PermissionRoutes.
+            // Role assignment static routes are registered by Routes.RoleAssignmentRoutes.
+            // Effective permissions static route is registered by Routes.EffectivePermissionsRoutes.
+            // Audit static route (list) is registered by Routes.AuditRoutes.
+            // Client static routes (list, admin/shared-clients) and client-model static routes (delete,
+            // pull, model-performance/test) are registered by Routes.ClientRoutes.
+            // Client telemetry static routes are registered by Routes.ClientTelemetryRoutes.
+            // Ledger static routes (status, balance/me, balances, entries/me, entries/search, drain,
+            // reconcile) are registered by Routes.LedgerRoutes.
+            // Model definition static routes are registered by Routes.ModelDefinitionRoutes.
+            // Model configuration static routes are registered by Routes.ModelConfigurationRoutes.
+            // Routing policy static routes are registered by Routes.RoutingPolicyRoutes.
+            // Inference static routes (OpenAI models/chat/completions/embeddings and Ollama tags/chat/
+            // generate/embed/embeddings, including the /api/v1/openai/... aliases) are registered by
+            // Routes.InferenceRoutes.
+            // Request history and model leaderboard static routes are registered by Routes.RequestHistoryRoutes.
+            // Settings static routes (get, update) are registered by Routes.SettingsRoutes.
+            // Email test static route is registered by Routes.EmailRoutes.
+            // Backup and restore static routes are registered by Routes.AdminRoutes.
+            // Tenant {id} routes are registered by Routes.TenantRoutes.
+            // User {id} routes are registered by Routes.UserRoutes.
+            // Credential {id} routes are registered by Routes.CredentialRoutes.
+            // Role {id} routes are registered by Routes.RoleRoutes.
+            // Permission {id} routes are registered by Routes.PermissionRoutes.
+            // Role assignment {id} routes are registered by Routes.RoleAssignmentRoutes.
+            // Audit delete/{id} routes are registered by Routes.AuditRoutes.
+            // Client {id} routes (delete/{id}, sharing/{id}) are registered by Routes.ClientRoutes.
+            // Client telemetry history/{id} and providers/history/{id} routes are registered by Routes.ClientTelemetryRoutes.
+            // Ledger balances/users/{userId} route is registered by Routes.LedgerRoutes.
+            // Routing policy {id} routes are registered by Routes.RoutingPolicyRoutes.
+            // Request history get/{id} and delete/{id} routes are registered by Routes.RequestHistoryRoutes.
         }
 
         private void RegisterStaticRoute(HttpMethod method, string path, string summary, string tag)
@@ -1810,6 +1704,22 @@ namespace Xeno.Server
         {
             string path = context.Request.Url.RawWithoutQuery ?? "/";
             string method = context.Request.Method.ToString().ToUpperInvariant();
+            await ExecuteRouteAsync(context, token => HandleRestAsync(context, method, path, token)).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Execute a route handler with the shared CORS application, distributed-tracing activity, and
+        /// exception-to-status mapping. Both the default dispatcher and the per-feature route registrars
+        /// invoke handlers through this method so error handling is identical regardless of how a route was
+        /// registered.
+        /// </summary>
+        /// <param name="context">HTTP context.</param>
+        /// <param name="handler">Route handler receiving the request cancellation token.</param>
+        /// <returns>Task.</returns>
+        internal async Task ExecuteRouteAsync(HttpContextBase context, Func<CancellationToken, Task> handler)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? "/";
+            string method = context.Request.Method.ToString().ToUpperInvariant();
 
             string route = NormalizeRoute(path);
             using Activity? activity = XenoTelemetry.ActivitySource.StartActivity(method + " " + route, ActivityKind.Server);
@@ -1823,7 +1733,7 @@ namespace Xeno.Server
             try
             {
                 ApplyCors(context);
-                await HandleRestAsync(context, method, path, context.Token).ConfigureAwait(false);
+                await handler(context.Token).ConfigureAwait(false);
                 if (activity != null) activity.SetTag("http.response.status_code", context.Response.StatusCode);
             }
             catch (AuthorizationDeniedException ex)
@@ -1880,30 +1790,8 @@ namespace Xeno.Server
         {
             token.ThrowIfCancellationRequested();
 
-            if (method == "GET" && IsPath(path, "/", "/health", "/v1.0/api/health"))
-            {
-                await SendJsonAsync(context, new { status = "healthy", product = Constants.ProductName, version = Constants.Version }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/ping", "/api/v1/ping", "/v1.0/api/ping"))
-            {
-                string sequenceValue = DecodeQueryValue(context.Request.Query.Elements.Get("sequence"));
-                string clientSentUtc = DecodeQueryValue(context.Request.Query.Elements.Get("clientSentUtc"));
-                string? echoedClientSentUtc = String.IsNullOrWhiteSpace(clientSentUtc) ? null : clientSentUtc;
-                int sequence = 0;
-                Int32.TryParse(sequenceValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out sequence);
-                await SendJsonAsync(context, new
-                {
-                    status = "healthy",
-                    product = Constants.ProductName,
-                    version = Constants.Version,
-                    sequence,
-                    clientSentUtc = echoedClientSentUtc,
-                    serverUtc = DateTime.UtcNow
-                }).ConfigureAwait(false);
-                return;
-            }
+            // Health ("/", "/health", "/v1.0/api/health") and ping ("/ping", "/api/v1/ping",
+            // "/v1.0/api/ping") are handled by the Routes.HealthRoutes registrar, not this dispatcher.
 
             if (method == "GET" && path.Equals("/metrics", StringComparison.OrdinalIgnoreCase))
             {
@@ -1924,920 +1812,664 @@ namespace Xeno.Server
                 return;
             }
 
-            if (method == "POST" && IsPath(path, "/api/v1/auth/login", "/v1.0/api/auth/login"))
-            {
-                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
-                await HandleLoginAsync(context, token).ConfigureAwait(false);
-                return;
-            }
+            // Auth (login, tenants, dashboard/login) and onboarding (signup, verify, config) routes are
+            // handled by the Routes.AuthRoutes and Routes.OnboardingRoutes registrars, not this dispatcher.
 
-            if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/auth/tenants", "/v1.0/api/auth/tenants"))
-            {
-                await HandleLoginTenantLookupAsync(context).ConfigureAwait(false);
-                return;
-            }
+            // Model leaderboard routes (GET/POST) are handled by the Routes.RequestHistoryRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/auth/dashboard/login", "/v1.0/api/auth/dashboard/login"))
-            {
-                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
-                await HandleDashboardLoginAsync(context, token).ConfigureAwait(false);
-                return;
-            }
+            RequestContext requestContext = await CreateRequestContextAsync(context, token).ConfigureAwait(false);
 
-            if (method == "POST" && IsPath(path, "/api/v1/onboarding/signup", "/v1.0/api/onboarding/signup"))
-            {
-                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
-                await HandleOnboardingSignupAsync(context, token).ConfigureAwait(false);
-                return;
-            }
+            // Onboarding approve route is handled by the Routes.OnboardingApproveRoutes registrar.
 
-            if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/onboarding/verify", "/v1.0/api/onboarding/verify"))
-            {
-                await HandleOnboardingVerifyAsync(context, token).ConfigureAwait(false);
-                return;
-            }
+            // Auth token routes (token, token/details, token/refresh, logout) are handled by the Routes.AuthTokenRoutes registrar.
 
-            if (method == "GET" && IsPath(path, "/api/v1/onboarding/config", "/v1.0/api/onboarding/config"))
-            {
-                await SendJsonAsync(context, new
-                {
-                    mode = _Settings.Onboarding.Mode.ToString(),
-                    signupEnabled = _Settings.Onboarding.Mode != OnboardingModeEnum.Disabled,
-                    captchaProvider = _Settings.Onboarding.Captcha.Provider.ToString(),
-                    captchaSiteKey = _Settings.Onboarding.Captcha.SiteKey ?? String.Empty
-                }).ConfigureAwait(false);
-                return;
-            }
+            // Admin nuke routes (tenant, user) are handled by the Routes.AdminRoutes registrar.
 
-            if ((method == "GET" || method == "POST") && IsPath(path, "/api/v1/modelleaderboard", "/v1.0/api/request-history/model-leaderboard"))
-            {
-                ModelTokenLeaderboardRequest body = method == "POST"
-                    ? NormalizeModelTokenLeaderboardRequest(ReadJsonBody<ModelTokenLeaderboardRequest>(context))
-                    : BuildModelTokenLeaderboardRequest(context);
-                ModelTokenLeaderboardResponse result = _Database == null
-                    ? new ModelTokenLeaderboardResponse { Limit = body.Limit ?? 100, Offset = body.Offset ?? 0 }
-                    : await _Database.GetModelTokenLeaderboardAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
+            // Tenant routes (list, create, update/{id}, delete/{id}) are handled by the Routes.TenantRoutes registrar.
 
-            RequestContext requestContext = CreateRequestContext(context);
+            // User routes (list, create, update/{id}, delete/{id}) are handled by the Routes.UserRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/onboarding/approve", "/v1.0/api/onboarding/approve"))
-            {
-                await HandleOnboardingApproveAsync(context, requestContext, token).ConfigureAwait(false);
-                return;
-            }
+            // Credential routes are handled by the Routes.CredentialRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/auth/token", "/v1.0/api/auth/token"))
-            {
-                if (await RejectRateLimitedAuthAttemptAsync(context).ConfigureAwait(false)) return;
-                await HandleCreateTokenAsync(context, requestContext, token).ConfigureAwait(false);
-                return;
-            }
+            // Role routes are handled by the Routes.RoleRoutes registrar.
 
-            if (method == "GET" && IsPath(path, "/api/v1/auth/token/details", "/v1.0/api/auth/token/details"))
-            {
-                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                AuthSession? session = String.IsNullOrWhiteSpace(requestContext.SessionId)
-                    ? null
-                    : RequirePlatform().AuthSessions.FirstOrDefault(item => item.Id == requestContext.SessionId && item.TenantId == requestContext.TenantId);
-                await SendJsonAsync(context, new
-                {
-                    requestContext.IsAuthenticated,
-                    requestContext.TenantId,
-                    requestContext.UserId,
-                    requestContext.CredentialId,
-                    requestContext.SessionId,
-                    requestContext.PrincipalType,
-                    requestContext.AuthScheme,
-                    expiresUtc = session?.ExpiresUtc
-                }).ConfigureAwait(false);
-                return;
-            }
+            // Permission routes are handled by the Routes.PermissionRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/auth/token/refresh", "/v1.0/api/auth/token/refresh"))
-            {
-                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                AuthTokenResult result = _Authentication.IssueToken(
-                    RequirePlatform(),
-                    _Settings.Auth,
-                    requestContext.TenantId,
-                    requestContext.PrincipalType == PrincipalTypeEnum.None ? PrincipalTypeEnum.User : requestContext.PrincipalType,
-                    requestContext.UserId,
-                    requestContext.CredentialId,
-                    AuthSchemeEnum.Bearer);
-                if (!String.IsNullOrWhiteSpace(requestContext.SessionId)) _Authentication.RevokeSession(RequirePlatform(), requestContext.SessionId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
+            // Role assignment routes are handled by the Routes.RoleAssignmentRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/auth/logout", "/v1.0/api/auth/logout"))
-            {
-                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                bool revoked = _Authentication.RevokeSession(RequirePlatform(), requestContext.SessionId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { revoked }).ConfigureAwait(false);
-                return;
-            }
+            // Effective permissions route is handled by the Routes.EffectivePermissionsRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/admin/nuke/tenant", "/v1.0/api/admin/nuke/tenant"))
-            {
-                AdminNukeResponse result = await HandleNukeTenantAsync(context, requestContext, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
+            // Audit routes (list, delete/{id}) are handled by the Routes.AuditRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/admin/nuke/user", "/v1.0/api/admin/nuke/user"))
-            {
-                AdminNukeResponse result = await HandleNukeUserAsync(context, requestContext, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
+            // Client routes (list, delete/{id}, sharing/{id}, admin/shared-clients) and client-model routes
+            // (delete, pull, model-performance/test) are handled by the Routes.ClientRoutes registrar.
 
-            if (method == "GET" && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
-            {
-                await RequirePermissionAsync(requestContext, "Tenants", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                List<Tenant> visibleTenants = RequirePlatform().Tenants.Where(item => IsTenantVisible(requestContext, item.Id)).ToList();
-                await SendJsonAsync(context, visibleTenants).ConfigureAwait(false);
-                return;
-            }
+            // Client telemetry routes (status, latest, providers/latest, collect, history/search,
+            // providers/history/search, history/rollups, providers/history/rollups, collection-attempts,
+            // metrics, history/{id}, providers/history/{id}, history/delete, providers/history/delete) are
+            // handled by the Routes.ClientTelemetryRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/tenants", "/v1.0/api/tenants"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                TenantSaveRequest tenantBody = ReadJsonBody<TenantSaveRequest>(context);
-                Tenant tenant = CreateTenant(tenantBody);
-                RequirePlatform().Tenants.Add(tenant);
-                RequirePlatform().EnsureTenantDefaults(tenant.Id);
-                bool allowDeferred = tenantBody.DeferSubordinateProvisioning == true;
-                await RequireTenantLifecycle().CreateAsync(tenant, ListSeedUsers(tenant.Id), allowDeferred, requestContext, token).ConfigureAwait(false);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, tenant).ConfigureAwait(false);
-                return;
-            }
+            // Model definition routes are handled by the Routes.ModelDefinitionRoutes registrar.
 
-            if (method == "PUT" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string updateTenantId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Tenant? originalTenant = RequirePlatform().Tenants.FirstOrDefault(item => item.Id == updateTenantId);
-                bool wasActive = originalTenant?.Active ?? false;
-                TenantSaveRequest tenantBody = ReadJsonBody<TenantSaveRequest>(context);
-                Tenant tenant = UpdateTenant(updateTenantId, tenantBody);
-                if (wasActive && !tenant.Active)
-                {
-                    await RequireTenantLifecycle().SuspendAsync(tenant, requestContext, token).ConfigureAwait(false);
-                }
-                else if (!wasActive && tenant.Active)
-                {
-                    await RequireTenantLifecycle().ReactivateAsync(tenant, requestContext, token).ConfigureAwait(false);
-                    await RequireTenantLifecycle().ReconcileAsync(tenant, requestContext, token).ConfigureAwait(false);
-                }
-                else
-                {
-                    await RequireTenantLifecycle().UpdateAsync(tenant, requestContext, token).ConfigureAwait(false);
-                }
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, tenant).ConfigureAwait(false);
-                return;
-            }
+            // Model configuration routes are handled by the Routes.ModelConfigurationRoutes registrar.
 
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/tenants/", "/v1.0/api/tenants/") is string deleteTenantId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                await DeleteTenantAsync(deleteTenantId, requestContext, token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
+            // Routing policy routes are handled by the Routes.RoutingPolicyRoutes registrar.
 
-            if (method == "GET" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
-            {
-                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, ListVisibleUsers(requestContext).Select(RedactUser).ToList()).ConfigureAwait(false);
-                return;
-            }
+            // Inference routes (OpenAI models/chat/completions/embeddings and Ollama tags/chat/generate/
+            // embed/embeddings, including the /api/v1/openai/... aliases) are handled by the
+            // Routes.InferenceRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/users", "/v1.0/api/users"))
-            {
-                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                User user = CreateUser(requestContext, context);
-                RequirePlatform().Users.Add(user);
-                await ProvisionLedgerAccountForUserAsync(user, requestContext, token).ConfigureAwait(false);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
-                return;
-            }
+            // Ledger routes (status, balance/me, balances, balances/users/{userId}, entries/me,
+            // entries/search, drain, reconcile) are handled by the Routes.LedgerRoutes registrar.
 
-            if (method == "PUT" && TryGetPathId(path, "/api/v1/users/", "/v1.0/api/users/") is string updateUserId)
-            {
-                await RequireUserUpdatePermissionAsync(requestContext, updateUserId, token).ConfigureAwait(false);
-                User user = UpdateUser(requestContext, updateUserId, context);
-                await ProvisionLedgerAccountForUserAsync(user, requestContext, token).ConfigureAwait(false);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
-                return;
-            }
+            // Request history routes (list, summary, analytics/overview, bulk delete, get/{id},
+            // delete/{id}) are handled by the Routes.RequestHistoryRoutes registrar.
 
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/users/", "/v1.0/api/users/") is string deleteUserId)
-            {
-                await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = DeleteUser(requestContext, deleteUserId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
+            // Settings routes (get, update) are handled by the Routes.SettingsRoutes registrar.
 
-            if (method == "GET" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
-            {
-                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, ListVisibleCredentials(requestContext).Select(RedactCredential).ToList()).ConfigureAwait(false);
-                return;
-            }
+            // Email test route is handled by the Routes.EmailRoutes registrar.
 
-            if (method == "POST" && IsPath(path, "/api/v1/credentials", "/v1.0/api/credentials"))
-            {
-                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                Credential credential = CreateCredential(requestContext, context);
-                RequirePlatform().Credentials.Add(credential);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, new
-                {
-                    credential.Id,
-                    credential.TenantId,
-                    credential.UserId,
-                    credential.AccessKey,
-                    credential.Active
-                }).ConfigureAwait(false);
-                return;
-            }
+            // Backup and restore routes are handled by the Routes.AdminRoutes registrar.
 
-            if (method == "PUT" && TryGetPathId(path, "/api/v1/credentials/", "/v1.0/api/credentials/") is string updateCredentialId)
-            {
-                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                Credential credential = UpdateCredential(requestContext, updateCredentialId, context);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, RedactCredential(credential)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/credentials/", "/v1.0/api/credentials/") is string deleteCredentialId)
-            {
-                await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = DeleteCredential(requestContext, deleteCredentialId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
-            {
-                await RequirePermissionAsync(requestContext, "Roles", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Roles.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/roles", "/v1.0/api/roles"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Role role = CreateRole(requestContext, context);
-                RequirePlatform().Roles.Add(role);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, role).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "PUT" && TryGetPathId(path, "/api/v1/roles/", "/v1.0/api/roles/") is string updateRoleId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Role role = UpdateRole(requestContext, updateRoleId, context);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, role).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/roles/", "/v1.0/api/roles/") is string deleteRoleId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                int removed = DeleteRole(requestContext, deleteRoleId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
-            {
-                await RequirePermissionAsync(requestContext, "Permissions", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().Permissions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/permissions/grantable", "/v1.0/api/permissions/grantable"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                await SendJsonAsync(context, ListGrantablePermissions(requestContext)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/permissions", "/v1.0/api/permissions"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Permission permission = CreatePermission(requestContext, context);
-                RequirePlatform().Permissions.Add(permission);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, permission).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "PUT" && TryGetPathId(path, "/api/v1/permissions/", "/v1.0/api/permissions/") is string updatePermissionId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                Permission permission = UpdatePermission(requestContext, updatePermissionId, context);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, permission).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/permissions/", "/v1.0/api/permissions/") is string deletePermissionId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                int removed = DeletePermission(requestContext, deletePermissionId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/roleassignments", "/v1.0/api/role-assignments"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().RoleAssignments.Where(item => IsTenantVisible(requestContext, item.TenantId)).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/roleassignments", "/v1.0/api/role-assignments"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                RoleAssignment assignment = CreateRoleAssignment(requestContext, context);
-                RequirePlatform().RoleAssignments.Add(assignment);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, assignment).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/roleassignments/", "/v1.0/api/role-assignments/") is string deleteRoleAssignmentId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                int removed = DeleteRoleAssignment(requestContext, deleteRoleAssignmentId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/effective-permissions", "/v1.0/api/effective-permissions"))
-            {
-                await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, _Authentication.GetEffectivePermissions(RequirePlatform(), requestContext)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/audit", "/v1.0/api/audit"))
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                List<AuditRecord> auditRecords = new List<AuditRecord>();
-                if (_Database?.Audit != null)
-                {
-                    AuditRecordPage auditPage = await _Database.Audit.QueryAsync(new AuditQuery { TenantId = requestContext.TenantId, OrderDescending = true }, token).ConfigureAwait(false);
-                    auditRecords = auditPage.Items;
-                }
-
-                await SendJsonAsync(context, auditRecords).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/audit/", "/v1.0/api/audit/") is string deleteAuditId)
-            {
-                await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                if (_Database?.Audit != null)
-                {
-                    await _Database.Audit.DeleteAsync(new AuditQuery { TenantId = requestContext.TenantId, Ids = new List<string> { deleteAuditId } }, token).ConfigureAwait(false);
-                }
-
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/clients", "/v1.0/api/clients"))
-            {
-                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                List<ClientView> clientViews = VisibleClientsForTenant(requestContext.TenantId)
-                    .Select(item => BuildClientView(item, requestContext.TenantId))
-                    .ToList();
-                await SendJsonAsync(context, clientViews).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && (TryGetPathIdBetween(path, "/api/v1/clients/", "/sharing") ?? TryGetPathIdBetween(path, "/v1.0/api/clients/", "/sharing")) is string sharingClientId)
-            {
-                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                ClientView updatedClient = await SetClientSharingAsync(requestContext, sharingClientId, ReadJsonBody<ClientSharingRequest>(context), token).ConfigureAwait(false);
-                await SendJsonAsync(context, updatedClient).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/admin/shared-clients", "/v1.0/api/admin/shared-clients"))
-            {
-                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                await SendJsonAsync(context, BuildSharedClientsAdminView()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/clients/", "/v1.0/api/clients/") is string deleteClientId)
-            {
-                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = DeleteClient(requestContext, deleteClientId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && IsPath(path, "/api/v1/clientmodels", "/v1.0/api/client-models"))
-            {
-                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                ClientModelManagementResponseMessage response = await RunClientModelDeleteAsync(requestContext, ReadJsonBody<ClientModelDeleteRequest>(context), token).ConfigureAwait(false);
-                await SendJsonAsync(context, response).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/clientmodels/pull", "/v1.0/api/client-models/pull"))
-            {
-                await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                ClientModelPullRequest body = ReadJsonBody<ClientModelPullRequest>(context);
-                if (body.Stream || RequestAcceptsModelManagementStream(context))
-                {
-                    await StreamClientModelPullAsync(context, requestContext, body, token).ConfigureAwait(false);
-                    return;
-                }
-
-                ClientModelManagementResponseMessage response = await RunClientModelPullAsync(requestContext, body, null, token).ConfigureAwait(false);
-                await SendJsonAsync(context, response).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/modelperformance/test", "/v1.0/api/model-performance/test"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
-                ModelPerformanceTestRequest body = ReadJsonBody<ModelPerformanceTestRequest>(context);
-                if (body.Stream || RequestAcceptsModelPerformanceStream(context))
-                {
-                    await StreamModelPerformanceTestAsync(context, requestContext, body, token).ConfigureAwait(false);
-                    return;
-                }
-
-                ModelPerformanceTestResponse response = await RunModelPerformanceTestAsync(requestContext, body, null, token).ConfigureAwait(false);
-                await SendJsonAsync(context, response).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/status"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, BuildTelemetryStatus(requestContext)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/latest"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string? clientId = context.Request.Query.Elements.Get("clientId");
-                ServerClientTelemetryLatestResponse latest = new ServerClientTelemetryLatestResponse();
-                latest.HostTelemetry.AddRange(_TelemetryLatestCache.GetHost(requestContext.TenantId, clientId));
-                latest.ProviderTelemetry.AddRange(_TelemetryLatestCache.GetProviders(requestContext.TenantId, clientId));
-                if (latest.HostTelemetry.Count == 0 && _Database?.ClientTelemetry != null)
-                {
-                    latest.HostTelemetry.AddRange(await _Database.ClientTelemetry.LatestHostByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false));
-                }
-
-                if (latest.ProviderTelemetry.Count == 0 && _Database?.ClientProviderTelemetry != null)
-                {
-                    latest.ProviderTelemetry.AddRange(await _Database.ClientProviderTelemetry.LatestProviderByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false));
-                }
-
-                await SendJsonAsync(context, latest).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/providers/latest"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string? clientId = context.Request.Query.Elements.Get("clientId");
-                IReadOnlyList<ServerProviderTelemetrySampleRecord> latest = _TelemetryLatestCache.GetProviders(requestContext.TenantId, clientId);
-                if (latest.Count == 0 && _Database?.ClientProviderTelemetry != null)
-                {
-                    latest = await _Database.ClientProviderTelemetry.LatestProviderByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false);
-                }
-
-                await SendJsonAsync(context, latest).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/collect", "/v1.0/api/client-telemetry/providers/collect"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                ServerClientTelemetryCollectRequest body = ReadJsonBody<ServerClientTelemetryCollectRequest>(context);
-                bool collectHostTelemetry = body.CollectHostTelemetry && _Settings.TelemetryCollection.CollectHostTelemetry;
-                bool collectProviderTelemetry = body.CollectProviderTelemetry && _Settings.TelemetryCollection.CollectProviderTelemetry;
-                ServerClientTelemetryCollectResponse collectResponse = await CollectTelemetryForConnectedClientsAsync(body.ClientId, collectHostTelemetry, collectProviderTelemetry, token).ConfigureAwait(false);
-                await SendJsonAsync(context, collectResponse).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/history/search"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                ServerClientTelemetrySearchRequest body = ReadJsonBody<ServerClientTelemetrySearchRequest>(context);
-                body.TenantId = requestContext.TenantId;
-                ServerClientTelemetrySearchResult result = _Database?.ClientTelemetry == null ? new ServerClientTelemetrySearchResult() : await _Database.ClientTelemetry.SearchHostAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/providers/history/search"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                ServerProviderTelemetrySearchRequest body = ReadJsonBody<ServerProviderTelemetrySearchRequest>(context);
-                body.TenantId = requestContext.TenantId;
-                ServerProviderTelemetrySearchResult result = _Database?.ClientProviderTelemetry == null ? new ServerProviderTelemetrySearchResult() : await _Database.ClientProviderTelemetry.SearchProviderAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/history/rollups"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                ServerClientTelemetryRollupRequest body = ReadJsonBody<ServerClientTelemetryRollupRequest>(context);
-                body.TenantId = requestContext.TenantId;
-                IReadOnlyList<ServerClientTelemetryRollupBucket> result = _Database?.ClientTelemetry == null ? Array.Empty<ServerClientTelemetryRollupBucket>() : await _Database.ClientTelemetry.RollupHostAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/providers/history/rollups"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                ServerProviderTelemetryRollupRequest body = ReadJsonBody<ServerProviderTelemetryRollupRequest>(context);
-                body.TenantId = requestContext.TenantId;
-                IReadOnlyList<ServerProviderTelemetryRollupBucket> result = _Database?.ClientProviderTelemetry == null ? Array.Empty<ServerProviderTelemetryRollupBucket>() : await _Database.ClientProviderTelemetry.RollupProviderAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/collection-attempts"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string? clientId = context.Request.Query.Elements.Get("clientId");
-                IReadOnlyList<ServerClientTelemetryCollectionAttemptRecord> attempts = _Database?.ClientTelemetryCollectionAttempts == null
-                    ? Array.Empty<ServerClientTelemetryCollectionAttemptRecord>()
-                    : await _Database.ClientTelemetryCollectionAttempts.SearchAttemptsAsync(requestContext.TenantId, clientId, 100, token).ConfigureAwait(false);
-                await SendJsonAsync(context, attempts).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/client-telemetry/metrics"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, BuildTelemetryMetricCatalog()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && TryGetPathId(path, "/v1.0/api/client-telemetry/history/") is string hostTelemetryId)
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                ServerClientTelemetrySampleDetail? detail = _Database?.ClientTelemetry == null ? null : await _Database.ClientTelemetry.ReadHostDetailAsync(requestContext.TenantId, hostTelemetryId, token).ConfigureAwait(false);
-                if (detail == null) throw new KeyNotFoundException("Telemetry sample was not found.");
-                await SendJsonAsync(context, detail).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/v1.0/api/client-telemetry/history/") is string deleteHostTelemetryId)
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                if (_Database?.ClientTelemetry != null) await _Database.ClientTelemetry.DeleteHostAsync(requestContext.TenantId, deleteHostTelemetryId, token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && TryGetPathId(path, "/v1.0/api/client-telemetry/providers/history/") is string providerTelemetryId)
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                ServerProviderTelemetrySampleDetail? detail = _Database?.ClientProviderTelemetry == null ? null : await _Database.ClientProviderTelemetry.ReadProviderDetailAsync(requestContext.TenantId, providerTelemetryId, token).ConfigureAwait(false);
-                if (detail == null) throw new KeyNotFoundException("Provider telemetry sample was not found.");
-                await SendJsonAsync(context, detail).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/v1.0/api/client-telemetry/providers/history/") is string deleteProviderTelemetryId)
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                if (_Database?.ClientProviderTelemetry != null) await _Database.ClientProviderTelemetry.DeleteProviderAsync(requestContext.TenantId, deleteProviderTelemetryId, token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/history/delete"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                ServerClientTelemetryDeleteRequest body = ReadJsonBody<ServerClientTelemetryDeleteRequest>(context);
-                body.TenantId = requestContext.TenantId;
-                int deleted = _Database?.ClientTelemetry == null ? 0 : await _Database.ClientTelemetry.DeleteHostBulkAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { deleted }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/client-telemetry/providers/history/delete"))
-            {
-                await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                ServerClientTelemetryDeleteRequest body = ReadJsonBody<ServerClientTelemetryDeleteRequest>(context);
-                body.TenantId = requestContext.TenantId;
-                int deleted = _Database?.ClientProviderTelemetry == null ? 0 : await _Database.ClientProviderTelemetry.DeleteProviderBulkAsync(body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { deleted }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/modeldefinitions", "/v1.0/api/model-definitions"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().ModelDefinitions.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/modelconfigurations", "/v1.0/api/model-configurations"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().ModelConfigurations.Where(item => item.TenantId == requestContext.TenantId).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/routingpolicies", "/v1.0/api/routing-policies"))
-            {
-                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, RequirePlatform().RoutingPolicies.Where(item => item.TenantId == requestContext.TenantId).OrderByDescending(item => item.IsDefault).ThenBy(item => item.ModelName).ThenBy(item => item.ClientName).ToList()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/routing-policies/validate"))
-            {
-                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
-                RoutingPolicyValidationResult result = ValidateRoutingPolicySaveRequest(body);
-                await SendJsonAsync(context, result).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/routingpolicies", "/v1.0/api/routing-policies"))
-            {
-                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                RoutingPolicy policy = CreateRoutingPolicy(requestContext, context);
-                RequirePlatform().RoutingPolicies.Add(policy);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, policy).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "PUT" && TryGetPathId(path, "/api/v1/routingpolicies/", "/v1.0/api/routing-policies/") is string updateRoutingPolicyId)
-            {
-                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Write, token).ConfigureAwait(false);
-                RoutingPolicy policy = UpdateRoutingPolicy(requestContext, updateRoutingPolicyId, context);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, policy).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/routingpolicies/", "/v1.0/api/routing-policies/") is string deleteRoutingPolicyId)
-            {
-                await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                int removed = DeleteRoutingPolicy(requestContext, deleteRoutingPolicyId);
-                if (removed > 0) await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1/models", "/api/v1/openai/v1/models"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string modelsViewerTenantId = requestContext.TenantId;
-                List<object> models = VisibleClientsForTenant(modelsViewerTenantId)
-                    .SelectMany(item => item.Models.Select(model => new { OwnerTenantId = item.TenantId, Model = model }))
-                    .GroupBy(item => item.Model.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(group => (object)new
-                    {
-                        id = group.Key,
-                        @object = "model",
-                        created = ToUnixTimeSeconds(group.Max(item => item.Model.LastAdvertisedUtc)),
-                        owned_by = group.Any(item => String.Equals(item.OwnerTenantId, modelsViewerTenantId, StringComparison.Ordinal)) ? "xeno" : "shared"
-                    })
-                    .ToList();
-                await SendJsonAsync(context, new { @object = "list", data = models }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/tags"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, BuildOllamaTagsResponse(requestContext)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1/chat/completions", "/v1/completions", "/api/v1/openai/v1/chat/completions", "/api/v1/openai/v1/completions"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
-                await HandleCompletionAsync(context, requestContext, path, false, token).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1/embeddings", "/api/v1/openai/v1/embeddings"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
-                await HandleEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/chat", "/api/generate"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
-                await HandleOllamaCompletionAsync(context, requestContext, path, token).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/embed", "/api/embeddings"))
-            {
-                await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
-                await HandleOllamaEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/status"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                LedgerStatusResponse response = _Ledger == null ? new LedgerStatusResponse() : await _Ledger.GetStatusAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, response).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/balance/me"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string userId = ResolveContextUserId(requestContext);
-                await SendJsonAsync(context, await BuildLedgerBalanceAsync(requestContext.TenantId, userId, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/balances"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                LedgerBalanceSearchRequest search = BuildLedgerBalanceSearchRequest(requestContext, context);
-                await SendJsonAsync(context, await SearchLedgerBalancesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && TryGetPathId(path, "/v1.0/api/ledger/balances/users/") is string ledgerUserId)
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                EnsureCanReadLedgerUser(requestContext, requestContext.TenantId, ledgerUserId);
-                await SendJsonAsync(context, await BuildLedgerBalanceAsync(requestContext.TenantId, ledgerUserId, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/v1.0/api/ledger/entries/me"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                string userId = ResolveContextUserId(requestContext);
-                LedgerEntrySearchRequest search = new LedgerEntrySearchRequest { TenantId = requestContext.TenantId, UserId = userId };
-                await SendJsonAsync(context, await SearchLedgerEntriesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/ledger/entries/search"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                LedgerEntrySearchRequest search = ReadJsonBody<LedgerEntrySearchRequest>(context);
-                await SendJsonAsync(context, await SearchLedgerEntriesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/ledger/drain"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Admin, token).ConfigureAwait(false);
-                LedgerDrainResponse response = _Ledger == null ? new LedgerDrainResponse() : await _Ledger.DrainOnceAsync(token).ConfigureAwait(false);
-                await RecordAuditAsync(requestContext, "Ledger.Drain", OperationTypeEnum.Admin, true, "LedgerDrainTriggered", 200, requestContext.TenantId, null);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, response).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/v1.0/api/ledger/reconcile"))
-            {
-                await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await RecordAuditAsync(requestContext, "Ledger.Reconcile", OperationTypeEnum.Admin, true, "LedgerReconcileTriggered", 200, requestContext.TenantId, null);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, BuildLedgerReconcileResponse(requestContext)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/requesthistory", "/v1.0/api/request-history"))
-            {
-                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, await ListRequestHistoryAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
-            {
-                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, await SummarizeRequestHistoryAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/requesthistory/analytics/overview", "/v1.0/api/request-history/analytics/overview", "/api/v1/analytics/overview", "/v1.0/api/analytics/overview"))
-            {
-                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendJsonAsync(context, await AnalyticsOverviewAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/requesthistory/bulk", "/v1.0/api/request-history/bulk"))
-            {
-                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                RequestHistoryDeleteRequest body = ReadJsonBody<RequestHistoryDeleteRequest>(context);
-                int removed = await DeleteRequestHistoryAsync(requestContext, body, token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
-            {
-                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                await SendJsonAsync(context, _Settings).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/settings", "/v1.0/api/settings"))
-            {
-                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                XenoSettings? incoming = JsonUtil.Deserialize<XenoSettings>(context.Request.DataAsString ?? "{}");
-                if (incoming == null) throw new ArgumentException("Settings payload is invalid.");
-                ApplySettings(incoming);
-                await SaveSettingsAsync(token).ConfigureAwait(false);
-                _Logging.Info(_Header + "updated server settings");
-                await SendJsonAsync(context, _Settings).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/email/test", "/v1.0/api/email/test"))
-            {
-                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                EmailTestRequest body = ReadJsonBody<EmailTestRequest>(context);
-                EmailTestResponse response = await SendAdministrativeTestEmailAsync(body, requestContext, token).ConfigureAwait(false);
-                await SendJsonAsync(context, response).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && IsPath(path, "/api/v1/backup", "/v1.0/api/backup"))
-            {
-                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                await SendJsonAsync(context, RequirePlatform().ToState()).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "POST" && IsPath(path, "/api/v1/restore", "/v1.0/api/restore"))
-            {
-                EnsureSystemAdmin(requestContext, requestContext.TenantId, null);
-                PlatformState? state = JsonUtil.Deserialize<PlatformState>(context.Request.DataAsString ?? "{}");
-                if (state == null) throw new ArgumentException("Restore payload is invalid.");
-                RequirePlatform().LoadState(state);
-                await SavePlatformAsync(token).ConfigureAwait(false);
-                await SendJsonAsync(context, new { restored = true }).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "GET" && TryGetPathId(path, "/api/v1/requesthistory/", "/v1.0/api/request-history/") is string requestHistoryId)
-            {
-                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                RequestHistoryEntry? entry = await RequireRequestHistory().GetAsync(requestContext.TenantId, requestHistoryId, token).ConfigureAwait(false);
-                if (entry == null) throw new KeyNotFoundException("Request history entry not found.");
-                await SendJsonAsync(context, entry).ConfigureAwait(false);
-                return;
-            }
-
-            if (method == "DELETE" && TryGetPathId(path, "/api/v1/requesthistory/", "/v1.0/api/request-history/") is string deleteRequestHistoryId)
-            {
-                await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
-                await RequireRequestHistory().DeleteAsync(new RequestHistoryQuery { TenantId = requestContext.TenantId, Ids = new[] { deleteRequestHistoryId } }, token).ConfigureAwait(false);
-                await SendNoContentAsync(context).ConfigureAwait(false);
-                return;
-            }
+            // Request history get/{id} and delete/{id} routes are handled by the Routes.RequestHistoryRoutes registrar.
 
             context.Response.StatusCode = 404;
             await SendJsonAsync(context, new { error = "NotFound", message = "Route not found." }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleNukeTenantRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            AdminNukeResponse result = await HandleNukeTenantAsync(context, requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleNukeUserRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            AdminNukeResponse result = await HandleNukeUserAsync(context, requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleBackupAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await EnsureSystemAdminAsync(requestContext, requestContext.TenantId, null, token).ConfigureAwait(false);
+            await SendJsonAsync(context, (await Xeno.Core.Database.DatabaseSeeder.LoadSnapshotAsync(_Database!, token).ConfigureAwait(false)).ToState()).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRestoreAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await EnsureSystemAdminAsync(requestContext, requestContext.TenantId, null, token).ConfigureAwait(false);
+            PlatformState? state = JsonUtil.Deserialize<PlatformState>(context.Request.DataAsString ?? "{}");
+            if (state == null) throw new ArgumentException("Restore payload is invalid.");
+            XenoPlatform importedPlatform = new XenoPlatform();
+            importedPlatform.LoadState(state);
+            foreach (Tenant importedTenant in importedPlatform.Tenants) await _Database!.Tenants!.CreateAsync(importedTenant, token).ConfigureAwait(false);
+            foreach (User importedUser in importedPlatform.Users) await _Database!.Users!.CreateAsync(importedUser, token).ConfigureAwait(false);
+            foreach (Credential importedCredential in importedPlatform.Credentials) await _Database!.Credentials!.CreateAsync(importedCredential, token).ConfigureAwait(false);
+            foreach (Permission importedPermission in importedPlatform.Permissions) await _Database!.Permissions!.CreateAsync(importedPermission, token).ConfigureAwait(false);
+            foreach (Role importedRole in importedPlatform.Roles) await _Database!.Roles!.CreateAsync(importedRole, token).ConfigureAwait(false);
+            foreach (RoleAssignment importedRoleAssignment in importedPlatform.RoleAssignments) await _Database!.RoleAssignments!.CreateAsync(importedRoleAssignment, token).ConfigureAwait(false);
+            foreach (XenoClientRecord importedClient in importedPlatform.Clients) await _Database!.Clients!.CreateAsync(importedClient, token).ConfigureAwait(false);
+            foreach (ModelDefinition importedModelDefinition in importedPlatform.ModelDefinitions) await _Database!.ModelDefinitions!.CreateAsync(importedModelDefinition, token).ConfigureAwait(false);
+            foreach (ModelConfiguration importedModelConfiguration in importedPlatform.ModelConfigurations) await _Database!.ModelConfigurations!.CreateAsync(importedModelConfiguration, token).ConfigureAwait(false);
+            foreach (RoutingPolicy importedRoutingPolicy in importedPlatform.RoutingPolicies) await _Database!.RoutingPolicies!.CreateAsync(importedRoutingPolicy, token).ConfigureAwait(false);
+            foreach (LedgerTenantLink importedLedgerTenantLink in importedPlatform.LedgerTenantLinks) await _Database!.LedgerTenantLinks!.CreateAsync(importedLedgerTenantLink, token).ConfigureAwait(false);
+            foreach (LedgerAccountLink importedLedgerAccountLink in importedPlatform.LedgerAccountLinks) await _Database!.LedgerAccountLinks!.CreateAsync(importedLedgerAccountLink, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new { restored = true }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            List<ClientView> clientViews = (await VisibleClientsForTenantAsync(requestContext.TenantId, token).ConfigureAwait(false))
+                .Select(item => BuildClientView(item, requestContext.TenantId))
+                .ToList();
+            await SendJsonAsync(context, clientViews).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientSharingSetAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            string? sharingClientId = TryGetPathIdBetween(path, "/api/v1/clients/", "/sharing") ?? TryGetPathIdBetween(path, "/v1.0/api/clients/", "/sharing");
+            if (String.IsNullOrWhiteSpace(sharingClientId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            ClientView updatedClient = await SetClientSharingAsync(requestContext, sharingClientId, ReadJsonBody<ClientSharingRequest>(context), token).ConfigureAwait(false);
+            await SendJsonAsync(context, updatedClient).ConfigureAwait(false);
+        }
+
+        internal async Task HandleSharedClientsAdminAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await EnsureSystemAdminAsync(requestContext, requestContext.TenantId, null, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await BuildSharedClientsAdminViewAsync(token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientDeleteRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            string? deleteClientId = TryGetPathId(path, "/api/v1/clients/", "/v1.0/api/clients/");
+            if (String.IsNullOrWhiteSpace(deleteClientId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            int removed = await DeleteClientAsync(requestContext, deleteClientId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientModelDeleteRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            ClientModelManagementResponseMessage response = await RunClientModelDeleteAsync(requestContext, ReadJsonBody<ClientModelDeleteRequest>(context), token).ConfigureAwait(false);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientModelPullRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Clients", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            ClientModelPullRequest body = ReadJsonBody<ClientModelPullRequest>(context);
+            if (body.Stream || RequestAcceptsModelManagementStream(context))
+            {
+                await StreamClientModelPullAsync(context, requestContext, body, token).ConfigureAwait(false);
+                return;
+            }
+
+            ClientModelManagementResponseMessage response = await RunClientModelPullAsync(requestContext, body, null, token).ConfigureAwait(false);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        internal async Task HandleModelPerformanceTestRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+            ModelPerformanceTestRequest body = ReadJsonBody<ModelPerformanceTestRequest>(context);
+            if (body.Stream || RequestAcceptsModelPerformanceStream(context))
+            {
+                await StreamModelPerformanceTestAsync(context, requestContext, body, token).ConfigureAwait(false);
+                return;
+            }
+
+            ModelPerformanceTestResponse response = await RunModelPerformanceTestAsync(requestContext, body, null, token).ConfigureAwait(false);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        internal async Task HandleOpenAiModelsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            string modelsViewerTenantId = requestContext.TenantId;
+            List<object> models = (await VisibleClientsForTenantAsync(modelsViewerTenantId, token).ConfigureAwait(false))
+                .SelectMany(item => item.Models.Select(model => new { OwnerTenantId = item.TenantId, Model = model }))
+                .GroupBy(item => item.Model.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => (object)new
+                {
+                    id = group.Key,
+                    @object = "model",
+                    created = ToUnixTimeSeconds(group.Max(item => item.Model.LastAdvertisedUtc)),
+                    owned_by = group.Any(item => String.Equals(item.OwnerTenantId, modelsViewerTenantId, StringComparison.Ordinal)) ? "xeno" : "shared"
+                })
+                .ToList();
+            await SendJsonAsync(context, new { @object = "list", data = models }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleOllamaTagsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await BuildOllamaTagsResponseAsync(requestContext, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleChatCompletionsRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+            await HandleCompletionAsync(context, requestContext, path, false, token).ConfigureAwait(false);
+        }
+
+        internal async Task HandleOpenAiEmbeddingsRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+            await HandleEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
+        }
+
+        internal async Task HandleOllamaChatRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+            await HandleOllamaCompletionAsync(context, requestContext, path, token).ConfigureAwait(false);
+        }
+
+        internal async Task HandleOllamaEmbedRouteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Execute, token).ConfigureAwait(false);
+            await HandleOllamaEmbeddingAsync(context, requestContext, path, token).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerStatusAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            LedgerStatusResponse response = _Ledger == null ? new LedgerStatusResponse() : await _Ledger.GetStatusAsync(token).ConfigureAwait(false);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerBalanceMeAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            string userId = await ResolveContextUserIdAsync(requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await BuildLedgerBalanceAsync(requestContext.TenantId, userId, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerBalancesAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            LedgerBalanceSearchRequest search = BuildLedgerBalanceSearchRequest(requestContext, context);
+            await SendJsonAsync(context, await SearchLedgerBalancesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerBalanceUserAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string path = context.Request.Url.RawWithoutQuery ?? String.Empty;
+            string? ledgerUserId = TryGetPathId(path, "/v1.0/api/ledger/balances/users/");
+            if (String.IsNullOrWhiteSpace(ledgerUserId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await EnsureCanReadLedgerUserAsync(requestContext, requestContext.TenantId, ledgerUserId, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await BuildLedgerBalanceAsync(requestContext.TenantId, ledgerUserId, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerEntriesMeAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            string userId = await ResolveContextUserIdAsync(requestContext, token).ConfigureAwait(false);
+            LedgerEntrySearchRequest search = new LedgerEntrySearchRequest { TenantId = requestContext.TenantId, UserId = userId };
+            await SendJsonAsync(context, await SearchLedgerEntriesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerEntriesSearchAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            LedgerEntrySearchRequest search = ReadJsonBody<LedgerEntrySearchRequest>(context);
+            await SendJsonAsync(context, await SearchLedgerEntriesAsync(requestContext, search, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerDrainAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            LedgerDrainResponse response = _Ledger == null ? new LedgerDrainResponse() : await _Ledger.DrainOnceAsync(token).ConfigureAwait(false);
+            await RecordAuditAsync(requestContext, "Ledger.Drain", OperationTypeEnum.Admin, true, "LedgerDrainTriggered", 200, requestContext.TenantId, null);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLedgerReconcileAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Ledger", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await RecordAuditAsync(requestContext, "Ledger.Reconcile", OperationTypeEnum.Admin, true, "LedgerReconcileTriggered", 200, requestContext.TenantId, null);
+            await SendJsonAsync(context, await BuildLedgerReconcileResponseAsync(requestContext, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleModelLeaderboardAsync(HttpContextBase context, bool isPost, CancellationToken token)
+        {
+            ModelTokenLeaderboardRequest body = isPost
+                ? NormalizeModelTokenLeaderboardRequest(ReadJsonBody<ModelTokenLeaderboardRequest>(context))
+                : BuildModelTokenLeaderboardRequest(context);
+            ModelTokenLeaderboardResponse result = _Database == null
+                ? new ModelTokenLeaderboardResponse { Limit = body.Limit ?? 100, Offset = body.Offset ?? 0 }
+                : await _Database.GetModelTokenLeaderboardAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleTokenDetailsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            AuthSession? session = String.IsNullOrWhiteSpace(requestContext.SessionId)
+                ? null
+                : await _Database!.AuthSessions!.ReadAsync(requestContext.TenantId, requestContext.SessionId, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new
+            {
+                requestContext.IsAuthenticated,
+                requestContext.TenantId,
+                requestContext.UserId,
+                requestContext.CredentialId,
+                requestContext.SessionId,
+                requestContext.PrincipalType,
+                requestContext.AuthScheme,
+                expiresUtc = session?.ExpiresUtc
+            }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleTokenRefreshAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            AuthTokenResult result = await _Authentication.IssueTokenAsync(
+                _Database!,
+                _Settings.Auth,
+                requestContext.TenantId,
+                requestContext.PrincipalType == PrincipalTypeEnum.None ? PrincipalTypeEnum.User : requestContext.PrincipalType,
+                requestContext.UserId,
+                requestContext.CredentialId,
+                AuthSchemeEnum.Bearer,
+                token).ConfigureAwait(false);
+            if (!String.IsNullOrWhiteSpace(requestContext.SessionId)) await _Authentication.RevokeSessionAsync(_Database!, requestContext.SessionId, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleLogoutAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            bool revoked = await _Authentication.RevokeSessionAsync(_Database!, requestContext.SessionId, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new { revoked }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleEffectivePermissionsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Authentication", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await _Authentication.GetEffectivePermissionsAsync(_Database!, requestContext, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleAuditListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            List<AuditRecord> auditRecords = new List<AuditRecord>();
+            if (_Database?.Audit != null)
+            {
+                AuditRecordPage auditPage = await _Database.Audit.QueryAsync(new AuditQuery { TenantId = requestContext.TenantId, OrderDescending = true }, token).ConfigureAwait(false);
+                auditRecords = auditPage.Items;
+            }
+
+            await SendJsonAsync(context, auditRecords).ConfigureAwait(false);
+        }
+
+        internal async Task HandleAuditDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteAuditId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/audit/", "/v1.0/api/audit/");
+            if (String.IsNullOrWhiteSpace(deleteAuditId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            if (_Database?.Audit != null)
+            {
+                await _Database.Audit.DeleteAsync(new AuditQuery { TenantId = requestContext.TenantId, Ids = new List<string> { deleteAuditId } }, token).ConfigureAwait(false);
+            }
+
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryStatusAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await BuildTelemetryStatusAsync(requestContext, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryLatestAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            string? clientId = context.Request.Query.Elements.Get("clientId");
+            ServerClientTelemetryLatestResponse latest = new ServerClientTelemetryLatestResponse();
+            latest.HostTelemetry.AddRange(_TelemetryLatestCache.GetHost(requestContext.TenantId, clientId));
+            latest.ProviderTelemetry.AddRange(_TelemetryLatestCache.GetProviders(requestContext.TenantId, clientId));
+            if (latest.HostTelemetry.Count == 0 && _Database?.ClientTelemetry != null)
+            {
+                latest.HostTelemetry.AddRange(await _Database.ClientTelemetry.LatestHostByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false));
+            }
+
+            if (latest.ProviderTelemetry.Count == 0 && _Database?.ClientProviderTelemetry != null)
+            {
+                latest.ProviderTelemetry.AddRange(await _Database.ClientProviderTelemetry.LatestProviderByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false));
+            }
+
+            await SendJsonAsync(context, latest).ConfigureAwait(false);
+        }
+
+        internal async Task HandleProviderTelemetryLatestAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            string? clientId = context.Request.Query.Elements.Get("clientId");
+            IReadOnlyList<ServerProviderTelemetrySampleRecord> latest = _TelemetryLatestCache.GetProviders(requestContext.TenantId, clientId);
+            if (latest.Count == 0 && _Database?.ClientProviderTelemetry != null)
+            {
+                latest = await _Database.ClientProviderTelemetry.LatestProviderByClientAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false);
+            }
+
+            await SendJsonAsync(context, latest).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryCollectAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            ServerClientTelemetryCollectRequest body = ReadJsonBody<ServerClientTelemetryCollectRequest>(context);
+            bool collectHostTelemetry = body.CollectHostTelemetry && _Settings.TelemetryCollection.CollectHostTelemetry;
+            bool collectProviderTelemetry = body.CollectProviderTelemetry && _Settings.TelemetryCollection.CollectProviderTelemetry;
+            ServerClientTelemetryCollectResponse collectResponse = await CollectTelemetryForConnectedClientsAsync(body.ClientId, collectHostTelemetry, collectProviderTelemetry, token).ConfigureAwait(false);
+            await SendJsonAsync(context, collectResponse).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryHistorySearchAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            ServerClientTelemetrySearchRequest body = ReadJsonBody<ServerClientTelemetrySearchRequest>(context);
+            body.TenantId = requestContext.TenantId;
+            ServerClientTelemetrySearchResult result = _Database?.ClientTelemetry == null ? new ServerClientTelemetrySearchResult() : await _Database.ClientTelemetry.SearchHostAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleProviderTelemetryHistorySearchAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            ServerProviderTelemetrySearchRequest body = ReadJsonBody<ServerProviderTelemetrySearchRequest>(context);
+            body.TenantId = requestContext.TenantId;
+            ServerProviderTelemetrySearchResult result = _Database?.ClientProviderTelemetry == null ? new ServerProviderTelemetrySearchResult() : await _Database.ClientProviderTelemetry.SearchProviderAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryHistoryRollupsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            ServerClientTelemetryRollupRequest body = ReadJsonBody<ServerClientTelemetryRollupRequest>(context);
+            body.TenantId = requestContext.TenantId;
+            IReadOnlyList<ServerClientTelemetryRollupBucket> result = _Database?.ClientTelemetry == null ? Array.Empty<ServerClientTelemetryRollupBucket>() : await _Database.ClientTelemetry.RollupHostAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleProviderTelemetryHistoryRollupsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            ServerProviderTelemetryRollupRequest body = ReadJsonBody<ServerProviderTelemetryRollupRequest>(context);
+            body.TenantId = requestContext.TenantId;
+            IReadOnlyList<ServerProviderTelemetryRollupBucket> result = _Database?.ClientProviderTelemetry == null ? Array.Empty<ServerProviderTelemetryRollupBucket>() : await _Database.ClientProviderTelemetry.RollupProviderAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryCollectionAttemptsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            string? clientId = context.Request.Query.Elements.Get("clientId");
+            IReadOnlyList<ServerClientTelemetryCollectionAttemptRecord> attempts = _Database?.ClientTelemetryCollectionAttempts == null
+                ? Array.Empty<ServerClientTelemetryCollectionAttemptRecord>()
+                : await _Database.ClientTelemetryCollectionAttempts.SearchAttemptsAsync(requestContext.TenantId, clientId, 100, token).ConfigureAwait(false);
+            await SendJsonAsync(context, attempts).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryMetricsAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, BuildTelemetryMetricCatalog()).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryHistoryGetAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? hostTelemetryId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/v1.0/api/client-telemetry/history/");
+            if (String.IsNullOrWhiteSpace(hostTelemetryId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            ServerClientTelemetrySampleDetail? detail = _Database?.ClientTelemetry == null ? null : await _Database.ClientTelemetry.ReadHostDetailAsync(requestContext.TenantId, hostTelemetryId, token).ConfigureAwait(false);
+            if (detail == null) throw new KeyNotFoundException("Telemetry sample was not found.");
+            await SendJsonAsync(context, detail).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryHistoryDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteHostTelemetryId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/v1.0/api/client-telemetry/history/");
+            if (String.IsNullOrWhiteSpace(deleteHostTelemetryId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            if (_Database?.ClientTelemetry != null) await _Database.ClientTelemetry.DeleteHostAsync(requestContext.TenantId, deleteHostTelemetryId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleProviderTelemetryHistoryGetAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? providerTelemetryId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/v1.0/api/client-telemetry/providers/history/");
+            if (String.IsNullOrWhiteSpace(providerTelemetryId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            ServerProviderTelemetrySampleDetail? detail = _Database?.ClientProviderTelemetry == null ? null : await _Database.ClientProviderTelemetry.ReadProviderDetailAsync(requestContext.TenantId, providerTelemetryId, token).ConfigureAwait(false);
+            if (detail == null) throw new KeyNotFoundException("Provider telemetry sample was not found.");
+            await SendJsonAsync(context, detail).ConfigureAwait(false);
+        }
+
+        internal async Task HandleProviderTelemetryHistoryDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteProviderTelemetryId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/v1.0/api/client-telemetry/providers/history/");
+            if (String.IsNullOrWhiteSpace(deleteProviderTelemetryId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            if (_Database?.ClientProviderTelemetry != null) await _Database.ClientProviderTelemetry.DeleteProviderAsync(requestContext.TenantId, deleteProviderTelemetryId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleClientTelemetryHistoryBulkDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            ServerClientTelemetryDeleteRequest body = ReadJsonBody<ServerClientTelemetryDeleteRequest>(context);
+            body.TenantId = requestContext.TenantId;
+            int deleted = _Database?.ClientTelemetry == null ? 0 : await _Database.ClientTelemetry.DeleteHostBulkAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new { deleted }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleProviderTelemetryHistoryBulkDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "ClientTelemetry", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            ServerClientTelemetryDeleteRequest body = ReadJsonBody<ServerClientTelemetryDeleteRequest>(context);
+            body.TenantId = requestContext.TenantId;
+            int deleted = _Database?.ClientProviderTelemetry == null ? 0 : await _Database.ClientProviderTelemetry.DeleteProviderBulkAsync(body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new { deleted }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRequestHistoryListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await ListRequestHistoryAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRequestHistorySummaryAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await SummarizeRequestHistoryAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRequestHistoryAnalyticsOverviewAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await AnalyticsOverviewAsync(requestContext, context, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRequestHistoryBulkDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            RequestHistoryDeleteRequest body = ReadJsonBody<RequestHistoryDeleteRequest>(context);
+            int removed = await DeleteRequestHistoryAsync(requestContext, body, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new { removed }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRequestHistoryGetAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? requestHistoryId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/requesthistory/", "/v1.0/api/request-history/");
+            if (String.IsNullOrWhiteSpace(requestHistoryId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            RequestHistoryEntry? entry = await RequireRequestHistory().GetAsync(requestContext.TenantId, requestHistoryId, token).ConfigureAwait(false);
+            if (entry == null) throw new KeyNotFoundException("Request history entry not found.");
+            await SendJsonAsync(context, entry).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRequestHistoryDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteRequestHistoryId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/requesthistory/", "/v1.0/api/request-history/");
+            if (String.IsNullOrWhiteSpace(deleteRequestHistoryId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "RequestHistory", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            await RequireRequestHistory().DeleteAsync(new RequestHistoryQuery { TenantId = requestContext.TenantId, Ids = new[] { deleteRequestHistoryId } }, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleSettingsGetAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await EnsureSystemAdminAsync(requestContext, requestContext.TenantId, null, token).ConfigureAwait(false);
+            await SendJsonAsync(context, _Settings).ConfigureAwait(false);
+        }
+
+        internal async Task HandleSettingsUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await EnsureSystemAdminAsync(requestContext, requestContext.TenantId, null, token).ConfigureAwait(false);
+            XenoSettings? incoming = JsonUtil.Deserialize<XenoSettings>(context.Request.DataAsString ?? "{}");
+            if (incoming == null) throw new ArgumentException("Settings payload is invalid.");
+            ApplySettings(incoming);
+            await SaveSettingsAsync(token).ConfigureAwait(false);
+            _Logging.Info(_Header + "updated server settings");
+            await SendJsonAsync(context, _Settings).ConfigureAwait(false);
+        }
+
+        internal async Task HandleEmailTestAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await EnsureSystemAdminAsync(requestContext, requestContext.TenantId, null, token).ConfigureAwait(false);
+            EmailTestRequest body = ReadJsonBody<EmailTestRequest>(context);
+            EmailTestResponse response = await SendAdministrativeTestEmailAsync(body, requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, response).ConfigureAwait(false);
         }
 
         private async Task HandleCompletionAsync(HttpContextBase context, RequestContext requestContext, string path, bool stream, CancellationToken token)
@@ -2922,7 +2554,7 @@ namespace Xeno.Server
             bool stream,
             CancellationToken token)
         {
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && (item.TenantId == requestContext.TenantId || (item.Shared && item.Active)));
+            XenoClientRecord? client = await ResolveSelectedClientAsync(requestContext.TenantId, decision.SelectedClientId, token).ConfigureAwait(false);
             if (client == null)
             {
                 decision.Success = false;
@@ -2959,6 +2591,7 @@ namespace Xeno.Server
 
             XenoClientModel? selectedModel = FindSelectedModel(client, decision, embeddings);
             client.InFlightRequests++;
+            await _Database!.Clients!.AdjustInFlightAsync(client.TenantId, client.Id, 1, token).ConfigureAwait(false);
             DateTime? clientRequestStartedUtc = null;
             bool requestDispatched = false;
             string dispatchedMethod = context.Request.Method.ToString().ToUpperInvariant();
@@ -3063,6 +2696,7 @@ namespace Xeno.Server
             finally
             {
                 client.InFlightRequests = Math.Max(0, client.InFlightRequests - 1);
+                await _Database!.Clients!.AdjustInFlightAsync(client.TenantId, client.Id, -1, CancellationToken.None).ConfigureAwait(false);
                 lock (_PendingResponsesLock)
                 {
                     _PendingClientResponses.Remove(requestId);
@@ -3070,7 +2704,7 @@ namespace Xeno.Server
                 _PendingCallerDisconnects.TryRemove(requestEventKey, out CancellationTokenSource? _);
                 requestWaitSource?.Dispose();
                 callerDisconnectedSource?.Dispose();
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
+                await _Database!.Clients!.UpdateAsync(client, CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -3176,7 +2810,7 @@ namespace Xeno.Server
                     Dictionary<string, string> finalResponseHeaders = ExtractHeaders(finalMessage);
                     if (finalResponseHeaders.Count > 0) responseHeaders = finalResponseHeaders;
                     PopulateRequestHistory(history, requestContext, requestBodyJson, requestHeaders, body, responseHeaders, finalMessage, decision);
-                    TryEnqueueLedgerEvent(history);
+                    await TryEnqueueLedgerEventAsync(history, token).ConfigureAwait(false);
                 }
             }
 
@@ -3235,9 +2869,9 @@ namespace Xeno.Server
             return connectionId.ToString("N", CultureInfo.InvariantCulture) + ":" + streamId.ToString("N", CultureInfo.InvariantCulture);
         }
 
-        private object BuildOllamaTagsResponse(RequestContext requestContext)
+        private async Task<object> BuildOllamaTagsResponseAsync(RequestContext requestContext, CancellationToken token)
         {
-            List<object> models = VisibleClientsForTenant(requestContext.TenantId)
+            List<object> models = (await VisibleClientsForTenantAsync(requestContext.TenantId, token).ConfigureAwait(false))
                 .SelectMany(item => item.Models)
                 .Where(item => item.Provider == ApiProviderTypeEnum.Ollama)
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -3384,27 +3018,34 @@ namespace Xeno.Server
 
         private async Task EvictStaleClientConnectionsAsync(DateTime utcNow, CancellationToken token)
         {
-            List<ClientConnection> staleConnections = new List<ClientConnection>();
+            List<ClientConnection> candidates;
             lock (_ClientConnectionsLock)
             {
-                foreach (ClientConnection connection in _ClientConnections.Values.ToList())
-                {
-                    if (!IsClientConnectionStale(connection.ClientId, connection.TenantId, utcNow)) continue;
-                    _ClientConnections.Remove(connection.ClientId);
-                    staleConnections.Add(connection);
-                }
+                candidates = _ClientConnections.Values.ToList();
+            }
+
+            List<ClientConnection> staleConnections = new List<ClientConnection>();
+            foreach (ClientConnection connection in candidates)
+            {
+                if (!await IsClientConnectionStaleAsync(connection.ClientId, connection.TenantId, utcNow, token).ConfigureAwait(false)) continue;
+                staleConnections.Add(connection);
             }
 
             if (staleConnections.Count == 0) return;
-            XenoPlatform platform = RequirePlatform();
+            lock (_ClientConnectionsLock)
+            {
+                foreach (ClientConnection connection in staleConnections) _ClientConnections.Remove(connection.ClientId);
+            }
+
             foreach (ClientConnection connection in staleConnections)
             {
-                XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == connection.ClientId && item.TenantId == connection.TenantId);
+                XenoClientRecord? client = await _Database!.Clients!.ReadAsync(connection.TenantId, connection.ClientId, token).ConfigureAwait(false);
                 if (client != null)
                 {
                     client.Connected = false;
                     client.InFlightRequests = 0;
                     client.ServiceState = ClientServiceStateEnum.Quarantined;
+                    await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
                 }
 
                 _Logging.Debug(_WebSocketMaintenanceHeader + "evicted stale client " + connection.ClientId);
@@ -3413,12 +3054,11 @@ namespace Xeno.Server
 
             XenoTelemetry.RecordClientEvictions(staleConnections.Count);
             XenoTelemetry.RecordClientDisconnection("evicted");
-            await SavePlatformAsync(token).ConfigureAwait(false);
         }
 
-        private bool IsClientConnectionStale(string clientId, string tenantId, DateTime utcNow)
+        private async Task<bool> IsClientConnectionStaleAsync(string clientId, string tenantId, DateTime utcNow, CancellationToken token)
         {
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == tenantId);
+            XenoClientRecord? client = await _Database!.Clients!.ReadAsync(tenantId, clientId, token).ConfigureAwait(false);
             if (client == null) return true;
             TimeSpan age = utcNow - client.LastHeartbeatUtc;
             return age > TimeSpan.FromMilliseconds(_Settings.WebSocket.ClientStaleTimeoutMs);
@@ -3490,7 +3130,7 @@ namespace Xeno.Server
         {
             token.ThrowIfCancellationRequested();
             ServerClientTelemetryCollectResponse response = new ServerClientTelemetryCollectResponse();
-            List<ClientTelemetryCollectionTarget> targets = SnapshotTelemetryTargets(clientId);
+            List<ClientTelemetryCollectionTarget> targets = await SnapshotTelemetryTargetsAsync(clientId, token).ConfigureAwait(false);
             response.TargetClientCount = targets.Count;
 
             if (Interlocked.Exchange(ref _TelemetryCollectionCycleActive, 1) == 1)
@@ -3565,48 +3205,55 @@ namespace Xeno.Server
             return attempt.Id;
         }
 
-        private List<ClientTelemetryCollectionTarget> SnapshotTelemetryTargets(string? clientId)
+        private async Task<List<ClientTelemetryCollectionTarget>> SnapshotTelemetryTargetsAsync(string? clientId, CancellationToken token)
         {
-            List<ClientTelemetryCollectionTarget> targets = new List<ClientTelemetryCollectionTarget>();
+            List<ClientConnection> connections = new List<ClientConnection>();
             lock (_ClientConnectionsLock)
             {
                 foreach (ClientConnection connection in _ClientConnections.Values)
                 {
                     if (!String.IsNullOrWhiteSpace(clientId) && !String.Equals(connection.ClientId, clientId, StringComparison.OrdinalIgnoreCase)) continue;
                     if (!connection.Session.IsConnected) continue;
-                    XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => String.Equals(item.Id, connection.ClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, connection.TenantId, StringComparison.OrdinalIgnoreCase));
-                    if (client == null) continue;
-                    targets.Add(new ClientTelemetryCollectionTarget
-                    {
-                        ClientId = connection.ClientId,
-                        TenantId = connection.TenantId,
-                        ClientName = client.Name
-                    });
+                    connections.Add(connection);
                 }
+            }
+
+            List<ClientTelemetryCollectionTarget> targets = new List<ClientTelemetryCollectionTarget>();
+            foreach (ClientConnection connection in connections)
+            {
+                XenoClientRecord? client = await _Database!.Clients!.ReadAsync(connection.TenantId, connection.ClientId, token).ConfigureAwait(false);
+                if (client == null) continue;
+                targets.Add(new ClientTelemetryCollectionTarget
+                {
+                    ClientId = connection.ClientId,
+                    TenantId = connection.TenantId,
+                    ClientName = client.Name
+                });
             }
 
             return targets;
         }
 
-        private bool TenantConsumesShared(string tenantId)
+        private async Task<bool> TenantConsumesSharedAsync(string tenantId, CancellationToken token)
         {
-            return RequirePlatform().Tenants
-                .FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.Ordinal))?.ConsumeShared ?? false;
+            Tenant? tenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
+            return tenant?.ConsumeShared ?? false;
         }
 
-        private static bool ClientVisibleToTenant(XenoClientRecord client, string tenantId, bool consumeShared)
+        private async Task<List<XenoClientRecord>> VisibleClientsForTenantAsync(string tenantId, CancellationToken token)
         {
-            if (String.Equals(client.TenantId, tenantId, StringComparison.Ordinal)) return true;
-            if (!consumeShared) return false;
-            return client.Shared && client.Active;
-        }
+            bool consumeShared = await TenantConsumesSharedAsync(tenantId, token).ConfigureAwait(false);
+            List<XenoClientRecord> clients = await _Database!.Clients!.EnumerateAsync(tenantId, token).ConfigureAwait(false);
+            if (consumeShared)
+            {
+                foreach (XenoClientRecord shared in await _Database!.Clients!.EnumerateSharedAsync(token).ConfigureAwait(false))
+                {
+                    if (String.Equals(shared.TenantId, tenantId, StringComparison.Ordinal)) continue;
+                    if (shared.Shared && shared.Active) clients.Add(shared);
+                }
+            }
 
-        private List<XenoClientRecord> VisibleClientsForTenant(string tenantId)
-        {
-            bool consumeShared = TenantConsumesShared(tenantId);
-            return RequirePlatform().Clients
-                .Where(item => ClientVisibleToTenant(item, tenantId, consumeShared))
-                .ToList();
+            return clients;
         }
 
         private static string ClientOrigin(XenoClientRecord client, string viewerTenantId)
@@ -3622,7 +3269,9 @@ namespace Xeno.Server
             ClientView view = new ClientView
             {
                 Id = client.Id,
-                Name = client.Name,
+                // The client name can be identifying; redact it for shared clients owned by another tenant
+                // (the model names it advertises remain visible so a consuming tenant can still route to them).
+                Name = own ? client.Name : String.Empty,
                 Origin = ClientOrigin(client, viewerTenantId),
                 Shared = client.Shared,
                 Connected = client.Connected,
@@ -3666,24 +3315,45 @@ namespace Xeno.Server
         {
             if (body == null || !body.Shared.HasValue) throw new ArgumentException("A 'shared' value is required.");
 
-            XenoPlatform platform = RequirePlatform();
-            XenoClientRecord? client = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, clientId, StringComparison.Ordinal));
-            if (client == null) throw new KeyNotFoundException("Client not found.");
-            if (!String.Equals(client.TenantId, requestContext.TenantId, StringComparison.Ordinal))
+            XenoClientRecord? client = await _Database!.Clients!.ReadAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false);
+            if (client == null)
             {
-                RecordAuditFireAndForget(requestContext, "Clients", OperationTypeEnum.Write, false, "CrossTenantSharingDenied", 403, client.TenantId, client.Id);
+                XenoClientRecord? foreign = await FindClientByIdAsync(clientId, token).ConfigureAwait(false);
+                if (foreign == null) throw new KeyNotFoundException("Client not found.");
+                RecordAuditFireAndForget(requestContext, "Clients", OperationTypeEnum.Write, false, "CrossTenantSharingDenied", 403, foreign.TenantId, foreign.Id);
                 throw new AuthorizationDeniedException(403, "CrossTenantSharingDenied", "Only the owning tenant can change a client's sharing state.");
             }
 
             client.Shared = body.Shared.Value;
-            await SavePlatformAsync(token).ConfigureAwait(false);
+            await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
             await RecordAuditAsync(requestContext, "Clients", OperationTypeEnum.Write, true, client.Shared ? "ClientShared" : "ClientUnshared", 200, client.TenantId, client.Id).ConfigureAwait(false);
             return BuildClientView(client, requestContext.TenantId);
         }
 
-        private List<object> BuildSharedClientsAdminView()
+        private async Task<XenoClientRecord?> FindClientByIdAsync(string clientId, CancellationToken token)
         {
-            return RequirePlatform().Clients
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                XenoClientRecord? candidate = await _Database!.Clients!.ReadAsync(tenant.Id, clientId, token).ConfigureAwait(false);
+                if (candidate != null) return candidate;
+            }
+
+            return null;
+        }
+
+        private async Task<XenoClientRecord?> ResolveSelectedClientAsync(string tenantId, string? clientId, CancellationToken token)
+        {
+            if (String.IsNullOrWhiteSpace(clientId)) return null;
+            XenoClientRecord? own = await _Database!.Clients!.ReadAsync(tenantId, clientId, token).ConfigureAwait(false);
+            if (own != null) return own;
+            XenoClientRecord? foreign = await FindClientByIdAsync(clientId, token).ConfigureAwait(false);
+            if (foreign != null && foreign.Shared && foreign.Active) return foreign;
+            return null;
+        }
+
+        private async Task<List<object>> BuildSharedClientsAdminViewAsync(CancellationToken token)
+        {
+            return (await _Database!.Clients!.EnumerateSharedAsync(token).ConfigureAwait(false))
                 .Where(item => item.Shared)
                 .OrderBy(item => item.TenantId, StringComparer.Ordinal)
                 .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -3704,15 +3374,16 @@ namespace Xeno.Server
                 .ToList();
         }
 
-        private ServerClientTelemetryCollectionStatusResponse BuildTelemetryStatus(RequestContext requestContext)
+        private async Task<ServerClientTelemetryCollectionStatusResponse> BuildTelemetryStatusAsync(RequestContext requestContext, CancellationToken token)
         {
-            List<ClientTelemetryCollectionTarget> targets = SnapshotTelemetryTargets(null);
-            bool consumeShared = TenantConsumesShared(requestContext.TenantId);
+            List<ClientTelemetryCollectionTarget> targets = await SnapshotTelemetryTargetsAsync(null, token).ConfigureAwait(false);
+            bool consumeShared = await TenantConsumesSharedAsync(requestContext.TenantId, token).ConfigureAwait(false);
             int sharedEligible = consumeShared
-                ? RequirePlatform().Clients.Count(item =>
+                ? (await _Database!.Clients!.EnumerateSharedAsync(token).ConfigureAwait(false)).Count(item =>
                     !String.Equals(item.TenantId, requestContext.TenantId, StringComparison.Ordinal)
                     && item.Shared && item.Active && item.Connected)
                 : 0;
+            int connectedClientCount = (await _Database!.Clients!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false)).Count(item => item.Connected);
             return new ServerClientTelemetryCollectionStatusResponse
             {
                 Enabled = _Settings.TelemetryCollection.Enabled,
@@ -3722,7 +3393,7 @@ namespace Xeno.Server
                 RetentionDays = _Settings.TelemetryCollection.RetentionDays,
                 LastCycleUtc = _TelemetryLastCycleUtc,
                 NextCycleUtc = _TelemetryNextCycleUtc,
-                ConnectedClientCount = RequirePlatform().Clients.Count(item => item.TenantId == requestContext.TenantId && item.Connected),
+                ConnectedClientCount = connectedClientCount,
                 EligibleClientCount = targets.Count(item => item.TenantId == requestContext.TenantId),
                 SharedEligibleClientCount = sharedEligible,
                 RecentFailureCount = _TelemetryRecentFailureCount
@@ -4075,7 +3746,7 @@ namespace Xeno.Server
             RequestContext requestContext;
             try
             {
-                requestContext = CreateWebSocketRequestContext(context);
+                requestContext = await CreateWebSocketRequestContextAsync(context, context.Token).ConfigureAwait(false);
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -4171,25 +3842,22 @@ namespace Xeno.Server
             {
                 ClientRegisterMessage? message = JsonUtil.Deserialize<ClientRegisterMessage>(json);
                 if (message == null) throw new ArgumentException("Client registration message is invalid.", nameof(json));
-                string clientId = RegisterClient(message, session, requestContext);
+                string clientId = await RegisterClientAsync(message, session, requestContext, token).ConfigureAwait(false);
                 registeredClientCallback(clientId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
                 return "server.registered";
             }
 
             if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
             {
                 ClientHeartbeatMessage? message = JsonUtil.Deserialize<ClientHeartbeatMessage>(json);
-                UpdateClientHeartbeat(message?.ClientId, session, requestContext);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await UpdateClientHeartbeatAsync(message?.ClientId, session, requestContext, token).ConfigureAwait(false);
                 return "server.heartbeat";
             }
 
             if (String.Equals(type, "client.inventory.update", StringComparison.OrdinalIgnoreCase))
             {
                 ClientInventoryUpdateMessage? message = JsonUtil.Deserialize<ClientInventoryUpdateMessage>(json);
-                UpdateClientInventory(message, requestContext);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await UpdateClientInventoryAsync(message, requestContext, token).ConfigureAwait(false);
                 return "server.inventory.updated";
             }
 
@@ -4339,7 +4007,7 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/v1/models"))
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendLocalInferenceJsonAsync(session, message, 200, BuildOpenAiModelListResponse(requestContext), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
+                await SendLocalInferenceJsonAsync(session, message, 200, await BuildOpenAiModelListResponseAsync(requestContext, token).ConfigureAwait(false), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
                 return;
             }
 
@@ -4347,7 +4015,7 @@ namespace Xeno.Server
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
                 string model = Uri.UnescapeDataString(path.Substring("/v1/models/".Length));
-                object? response = BuildOpenAiModelResponse(requestContext, model);
+                object? response = await BuildOpenAiModelResponseAsync(requestContext, model, token).ConfigureAwait(false);
                 if (response == null)
                 {
                     await SendLocalInferenceErrorAsync(session, message, 404, "Model not found: " + model, token).ConfigureAwait(false);
@@ -4361,21 +4029,21 @@ namespace Xeno.Server
             if (method == "GET" && IsPath(path, "/api/tags"))
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendLocalInferenceJsonAsync(session, message, 200, BuildOllamaTagsResponse(requestContext), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
+                await SendLocalInferenceJsonAsync(session, message, 200, await BuildOllamaTagsResponseAsync(requestContext, token).ConfigureAwait(false), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
                 return;
             }
 
             if (method == "GET" && IsPath(path, "/api/ps"))
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                await SendLocalInferenceJsonAsync(session, message, 200, BuildOllamaPsResponse(requestContext), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
+                await SendLocalInferenceJsonAsync(session, message, 200, await BuildOllamaPsResponseAsync(requestContext, token).ConfigureAwait(false), LocalInferenceTraceHeaders(requestContext, null, null), token).ConfigureAwait(false);
                 return;
             }
 
             if (method == "POST" && IsPath(path, "/api/show"))
             {
                 await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
-                object? response = BuildOllamaShowResponse(requestContext, message.Model);
+                object? response = await BuildOllamaShowResponseAsync(requestContext, message.Model, token).ConfigureAwait(false);
                 if (response == null)
                 {
                     await SendLocalInferenceErrorAsync(session, message, 404, "model not found", token).ConfigureAwait(false);
@@ -4401,7 +4069,7 @@ namespace Xeno.Server
                 return;
             }
 
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == decision.SelectedClientId && (item.TenantId == requestContext.TenantId || (item.Shared && item.Active)));
+            XenoClientRecord? client = await ResolveSelectedClientAsync(requestContext.TenantId, decision.SelectedClientId, token).ConfigureAwait(false);
             if (client == null)
             {
                 decision.Success = false;
@@ -4544,10 +4212,9 @@ namespace Xeno.Server
                 TotalSamples = requestCount
             }, token).ConfigureAwait(false);
 
-            XenoPlatform platform = RequirePlatform();
-            XenoClientRecord sourceClient = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, sourceClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+            XenoClientRecord sourceClient = await _Database!.Clients!.ReadAsync(requestContext.TenantId, sourceClientId, token).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException("Source client was not found in the current tenant: " + sourceClientId);
-            XenoClientRecord targetClient = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, targetClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+            XenoClientRecord targetClient = await _Database!.Clients!.ReadAsync(requestContext.TenantId, targetClientId, token).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException("Target client was not found in the current tenant: " + targetClientId);
             ClientConnection sourceConnection = GetClientConnection(sourceClient.Id) ?? throw new InvalidOperationException("Source client is not connected: " + sourceClient.Name);
             ClientConnection targetConnection = GetClientConnection(targetClient.Id) ?? throw new InvalidOperationException("Target client is not connected: " + targetClient.Name);
@@ -4824,7 +4491,7 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(clientId)) throw new ArgumentException("Client ID is required.");
             if (String.IsNullOrWhiteSpace(modelName)) throw new ArgumentException("Model name is required.");
 
-            XenoClientRecord client = RequireTenantClient(requestContext, clientId);
+            XenoClientRecord client = await RequireTenantClientAsync(requestContext, clientId, token).ConfigureAwait(false);
             XenoClientProvider provider = RequireManageableOllamaProvider(client, request.Source);
             ClientConnection connection = RequireConnectedClient(client);
             string requestId = IdGenerator.NewRequestHistoryId();
@@ -4857,8 +4524,8 @@ namespace Xeno.Server
 
             if (response.Success)
             {
-                UpsertManagedClientModel(requestContext, client, provider, modelName);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await UpsertManagedClientModelAsync(requestContext, client, provider, modelName, token).ConfigureAwait(false);
+                await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
             }
 
             await PublishModelManagementProgressAsync(progress, new ModelManagementProgressEvent
@@ -4885,7 +4552,7 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(clientId)) throw new ArgumentException("Client ID is required.");
             if (String.IsNullOrWhiteSpace(modelName)) throw new ArgumentException("Model name is required.");
 
-            XenoClientRecord client = RequireTenantClient(requestContext, clientId);
+            XenoClientRecord client = await RequireTenantClientAsync(requestContext, clientId, token).ConfigureAwait(false);
             XenoClientProvider provider = RequireManageableOllamaProviderForModel(client, request.Source, modelName);
             ClientConnection connection = RequireConnectedClient(client);
             string requestId = IdGenerator.NewRequestHistoryId();
@@ -4908,17 +4575,15 @@ namespace Xeno.Server
                 client.Models.RemoveAll(item =>
                     String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase) &&
                     String.Equals(item.Source, provider.Name, StringComparison.OrdinalIgnoreCase));
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
             }
 
             return response;
         }
 
-        private XenoClientRecord RequireTenantClient(RequestContext requestContext, string clientId)
+        private async Task<XenoClientRecord> RequireTenantClientAsync(RequestContext requestContext, string clientId, CancellationToken token)
         {
-            return RequirePlatform().Clients.FirstOrDefault(item =>
-                String.Equals(item.Id, clientId, StringComparison.OrdinalIgnoreCase) &&
-                String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+            return await _Database!.Clients!.ReadAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException("Client was not found in the current tenant: " + clientId);
         }
 
@@ -5115,7 +4780,7 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(response.Source)) response.Source = source;
         }
 
-        private void UpsertManagedClientModel(RequestContext requestContext, XenoClientRecord client, XenoClientProvider provider, string modelName)
+        private async Task UpsertManagedClientModelAsync(RequestContext requestContext, XenoClientRecord client, XenoClientProvider provider, string modelName, CancellationToken token)
         {
             XenoClientModel? model = client.Models.FirstOrDefault(item =>
                 String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase) &&
@@ -5136,9 +4801,7 @@ namespace Xeno.Server
             model.ModelManagementAllowed = provider.ModelManagementAllowed;
             model.LastAdvertisedUtc = DateTime.UtcNow;
 
-            ModelDefinition? definition = RequirePlatform().ModelDefinitions.FirstOrDefault(item =>
-                String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase) &&
-                String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
+            ModelDefinition? definition = await _Database!.ModelDefinitions!.ReadByNameAsync(requestContext.TenantId, modelName, token).ConfigureAwait(false);
             if (definition == null)
             {
                 definition = new ModelDefinition
@@ -5146,10 +4809,10 @@ namespace Xeno.Server
                     TenantId = requestContext.TenantId,
                     Name = modelName
                 };
-                RequirePlatform().ModelDefinitions.Add(definition);
             }
 
             definition.SupportsCompletions = true;
+            await _Database!.ModelDefinitions!.CreateAsync(definition, token).ConfigureAwait(false);
         }
 
         private async Task HandleClientPerformanceTestRelayRequestAsync(WebSocketSession session, string json, RequestContext requestContext, CancellationToken token)
@@ -5166,8 +4829,7 @@ namespace Xeno.Server
             try
             {
                 ValidatePerformanceRelayRequest(sourceSession, request, requestContext);
-                XenoPlatform platform = RequirePlatform();
-                XenoClientRecord target = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, request.TargetClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
+                XenoClientRecord target = await _Database!.Clients!.ReadAsync(requestContext.TenantId, request.TargetClientId, token).ConfigureAwait(false)
                     ?? throw new KeyNotFoundException("Performance test target client was not found: " + request.TargetClientId);
                 ClientConnection targetConnection = GetClientConnection(target.Id) ?? throw new InvalidOperationException("Performance test target client is not connected: " + target.Name);
                 if (!targetConnection.Session.IsConnected) throw new InvalidOperationException("Performance test target client is not connected: " + target.Name);
@@ -5554,10 +5216,9 @@ namespace Xeno.Server
             };
         }
 
-        private object BuildOpenAiModelListResponse(RequestContext requestContext)
+        private async Task<object> BuildOpenAiModelListResponseAsync(RequestContext requestContext, CancellationToken token)
         {
-            List<object> models = RequirePlatform().Clients
-                .Where(item => item.TenantId == requestContext.TenantId)
+            List<object> models = (await _Database!.Clients!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false))
                 .SelectMany(item => item.Models)
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(group => (object)new { id = group.Key, @object = "model", created = ToUnixTimeSeconds(group.Max(item => item.LastAdvertisedUtc)), owned_by = "xeno" })
@@ -5565,10 +5226,9 @@ namespace Xeno.Server
             return new { @object = "list", data = models };
         }
 
-        private object? BuildOpenAiModelResponse(RequestContext requestContext, string model)
+        private async Task<object?> BuildOpenAiModelResponseAsync(RequestContext requestContext, string model, CancellationToken token)
         {
-            XenoClientModel? record = RequirePlatform().Clients
-                .Where(item => item.TenantId == requestContext.TenantId)
+            XenoClientModel? record = (await _Database!.Clients!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false))
                 .SelectMany(item => item.Models)
                 .Where(item => String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(item => item.LastAdvertisedUtc)
@@ -5577,10 +5237,10 @@ namespace Xeno.Server
             return new { id = record.Name, @object = "model", created = ToUnixTimeSeconds(record.LastAdvertisedUtc), owned_by = "xeno" };
         }
 
-        private object BuildOllamaPsResponse(RequestContext requestContext)
+        private async Task<object> BuildOllamaPsResponseAsync(RequestContext requestContext, CancellationToken token)
         {
-            List<object> models = RequirePlatform().Clients
-                .Where(item => item.TenantId == requestContext.TenantId && item.Connected && item.Active)
+            List<object> models = (await _Database!.Clients!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false))
+                .Where(item => item.Connected && item.Active)
                 .SelectMany(item => item.Models)
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(group => (object)new
@@ -5604,11 +5264,10 @@ namespace Xeno.Server
             return new { models };
         }
 
-        private object? BuildOllamaShowResponse(RequestContext requestContext, string? model)
+        private async Task<object?> BuildOllamaShowResponseAsync(RequestContext requestContext, string? model, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(model)) return null;
-            XenoClientModel? record = RequirePlatform().Clients
-                .Where(item => item.TenantId == requestContext.TenantId)
+            XenoClientModel? record = (await _Database!.Clients!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false))
                 .SelectMany(item => item.Models)
                 .Where(item => String.Equals(item.Name, model, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(item => item.LastAdvertisedUtc)
@@ -5686,7 +5345,7 @@ namespace Xeno.Server
                 record = await _Database.ClientTelemetry.CreateHostSampleAsync(
                     requestContext.TenantId,
                     message.ClientId,
-                    TelemetryClientName(requestContext.TenantId, message.ClientId),
+                    await TelemetryClientNameAsync(requestContext.TenantId, message.ClientId, token).ConfigureAwait(false),
                     message.RequestId,
                     message.Snapshot,
                     rawJson,
@@ -5708,7 +5367,7 @@ namespace Xeno.Server
                 records = await _Database.ClientProviderTelemetry.CreateProviderSnapshotAsync(
                     requestContext.TenantId,
                     message.ClientId,
-                    TelemetryClientName(requestContext.TenantId, message.ClientId),
+                    await TelemetryClientNameAsync(requestContext.TenantId, message.ClientId, token).ConfigureAwait(false),
                     message.RequestId,
                     message.Snapshot,
                     _Settings.TelemetryCollection.PersistRawSnapshots,
@@ -5751,11 +5410,9 @@ namespace Xeno.Server
             if (!String.Equals(connection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Telemetry frame arrived on the wrong client session.");
         }
 
-        private string? TelemetryClientName(string tenantId, string clientId)
+        private async Task<string?> TelemetryClientNameAsync(string tenantId, string clientId, CancellationToken token)
         {
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item =>
-                String.Equals(item.Id, clientId, StringComparison.OrdinalIgnoreCase)
-                && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase));
+            XenoClientRecord? client = await _Database!.Clients!.ReadAsync(tenantId, clientId, token).ConfigureAwait(false);
             return client?.Name;
         }
 
@@ -5773,9 +5430,8 @@ namespace Xeno.Server
             }), token).ConfigureAwait(false);
         }
 
-        private string RegisterClient(ClientRegisterMessage message, WebSocketSession session, RequestContext requestContext)
+        private async Task<string> RegisterClientAsync(ClientRegisterMessage message, WebSocketSession session, RequestContext requestContext, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             string tenantId = message.TenantId ?? requestContext.TenantId;
             if (!String.Equals(tenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
             {
@@ -5785,12 +5441,13 @@ namespace Xeno.Server
             string clientId = message.ClientId ?? IdGenerator.NewId("xcl_");
             string name = message.Name ?? clientId;
 
-            XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
+            XenoClientRecord? client = await FindClientByIdAsync(clientId, token).ConfigureAwait(false);
             if (client != null && !String.Equals(client.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
             {
                 throw new UnauthorizedAccessException("Client ID belongs to a different tenant.");
             }
 
+            bool existingIsStale = client == null || (DateTime.UtcNow - client.LastHeartbeatUtc) > TimeSpan.FromMilliseconds(_Settings.WebSocket.ClientStaleTimeoutMs);
             ClientConnection? staleConnection = null;
             lock (_ClientConnectionsLock)
             {
@@ -5798,7 +5455,7 @@ namespace Xeno.Server
                     existingConnection.Session.IsConnected &&
                     !String.Equals(existingConnection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!IsClientConnectionStale(clientId, tenantId, DateTime.UtcNow))
+                    if (!existingIsStale)
                     {
                         throw new UnauthorizedAccessException("Client ID is already connected.");
                     }
@@ -5812,8 +5469,8 @@ namespace Xeno.Server
 
             if (client == null)
             {
-                bool defaultShared = platform.Tenants
-                    .FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase))?.DefaultClientShared ?? false;
+                Tenant? registrationTenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
+                bool defaultShared = registrationTenant?.DefaultClientShared ?? false;
                 client = new XenoClientRecord
                 {
                     Id = clientId,
@@ -5821,7 +5478,6 @@ namespace Xeno.Server
                     Name = name,
                     Shared = defaultShared
                 };
-                platform.Clients.Add(client);
             }
 
             BindClientOwner(client, requestContext);
@@ -5834,32 +5490,33 @@ namespace Xeno.Server
                 _ClientConnections[clientId] = new ClientConnection(clientId, tenantId, session);
             }
 
-            if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
+            if (message.Inventory != null) await RegisterClientInventoryAsync(client, message.Inventory, token).ConfigureAwait(false);
 
+            await _Database!.Clients!.CreateAsync(client, token).ConfigureAwait(false);
             _Logging.Debug(_WebSocketHeader + "client " + clientId + " registered (" + name + ")");
             XenoTelemetry.RecordClientRegistration();
             return clientId;
         }
 
-        private void UpdateClientInventory(ClientInventoryUpdateMessage? message, RequestContext requestContext)
+        private async Task UpdateClientInventoryAsync(ClientInventoryUpdateMessage? message, RequestContext requestContext, CancellationToken token)
         {
             if (message == null || String.IsNullOrWhiteSpace(message.ClientId)) throw new ArgumentException("Client inventory update message is invalid.");
-            XenoPlatform platform = RequirePlatform();
             string tenantId = message.TenantId ?? requestContext.TenantId;
             if (!String.Equals(tenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase))
             {
                 throw new UnauthorizedAccessException("Client tenant does not match authenticated tenant.");
             }
 
-            XenoClientRecord client = platform.Clients.FirstOrDefault(item => String.Equals(item.Id, message.ClientId, StringComparison.OrdinalIgnoreCase) && String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            XenoClientRecord client = await _Database!.Clients!.ReadAsync(tenantId, message.ClientId, token).ConfigureAwait(false)
                 ?? throw new ArgumentException("Client is not registered.");
 
             client.LastHeartbeatUtc = DateTime.UtcNow;
             BindClientOwner(client, requestContext);
-            if (message.Inventory != null) RegisterClientInventory(platform, client, message.Inventory);
+            if (message.Inventory != null) await RegisterClientInventoryAsync(client, message.Inventory, token).ConfigureAwait(false);
+            await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
         }
 
-        private static void RegisterClientInventory(XenoPlatform platform, XenoClientRecord client, ClientInventoryMessage inventory)
+        private async Task RegisterClientInventoryAsync(XenoClientRecord client, ClientInventoryMessage inventory, CancellationToken token)
         {
             client.ServiceState = ClientServiceStateEnum.Normal;
             client.Providers.Clear();
@@ -5867,21 +5524,21 @@ namespace Xeno.Server
 
             if (inventory.Models.Count > 0)
             {
-                RegisterClientModels(platform, client, "client", ApiProviderTypeEnum.OpenAICompatible, false, inventory.Models);
+                await RegisterClientModelsAsync(client, "client", ApiProviderTypeEnum.OpenAICompatible, false, inventory.Models, token).ConfigureAwait(false);
             }
 
             if (inventory.Providers.Count > 0)
             {
-                RegisterClientSources(platform, client, inventory.Providers);
+                await RegisterClientSourcesAsync(client, inventory.Providers, token).ConfigureAwait(false);
             }
 
             if (inventory.Runners.Count > 0)
             {
-                RegisterClientSources(platform, client, inventory.Runners);
+                await RegisterClientSourcesAsync(client, inventory.Runners, token).ConfigureAwait(false);
             }
         }
 
-        private static void RegisterClientSources(XenoPlatform platform, XenoClientRecord client, List<ClientInventorySourceMessage> sources)
+        private async Task RegisterClientSourcesAsync(XenoClientRecord client, List<ClientInventorySourceMessage> sources, CancellationToken token)
         {
             foreach (ClientInventorySourceMessage source in sources)
             {
@@ -5898,12 +5555,12 @@ namespace Xeno.Server
                 });
                 if (source.Models.Count > 0)
                 {
-                    RegisterClientModels(platform, client, sourceName, provider, modelManagementAllowed, source.Models);
+                    await RegisterClientModelsAsync(client, sourceName, provider, modelManagementAllowed, source.Models, token).ConfigureAwait(false);
                 }
             }
         }
 
-        private static void RegisterClientModels(XenoPlatform platform, XenoClientRecord client, string sourceName, ApiProviderTypeEnum provider, bool modelManagementAllowed, List<ClientInventoryModelMessage> models)
+        private async Task RegisterClientModelsAsync(XenoClientRecord client, string sourceName, ApiProviderTypeEnum provider, bool modelManagementAllowed, List<ClientInventoryModelMessage> models, CancellationToken token)
         {
             foreach (ClientInventoryModelMessage model in models)
             {
@@ -5923,10 +5580,7 @@ namespace Xeno.Server
                     LastAdvertisedUtc = DateTime.UtcNow
                 });
 
-                ModelDefinition? definition = platform.ModelDefinitions.FirstOrDefault(item =>
-                    item.TenantId == client.TenantId &&
-                    String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
-
+                ModelDefinition? definition = await _Database!.ModelDefinitions!.ReadByNameAsync(client.TenantId, modelName, token).ConfigureAwait(false);
                 if (definition == null)
                 {
                     definition = new ModelDefinition
@@ -5934,26 +5588,27 @@ namespace Xeno.Server
                         TenantId = client.TenantId,
                         Name = modelName
                     };
-                    platform.ModelDefinitions.Add(definition);
                 }
 
                 definition.SupportsCompletions = supportsCompletions;
                 definition.SupportsEmbeddings = supportsEmbeddings;
+                await _Database!.ModelDefinitions!.CreateAsync(definition, token).ConfigureAwait(false);
             }
         }
 
-        private void UpdateClientHeartbeat(string? clientId, WebSocketSession session, RequestContext requestContext)
+        private async Task UpdateClientHeartbeatAsync(string? clientId, WebSocketSession session, RequestContext requestContext, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(clientId)) return;
             ClientConnection? connection = GetClientConnection(clientId);
             if (connection == null) throw new UnauthorizedAccessException("Client heartbeat arrived before registration.");
             if (!String.Equals(connection.TenantId, requestContext.TenantId, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Client heartbeat tenant is invalid.");
             if (!String.Equals(connection.Session.Id.ToString(), session.Id.ToString(), StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("Client heartbeat arrived on the wrong session.");
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
+            XenoClientRecord? client = await _Database!.Clients!.ReadAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false);
             if (client == null) return;
             BindClientOwner(client, requestContext);
-            client.Connected = true;
-            client.LastHeartbeatUtc = DateTime.UtcNow;
+            // Targeted scalar update only: rewriting the full aggregate here would replace the provider/model
+            // child tables and could clobber a concurrent inventory update on reconnect.
+            await _Database!.Clients!.UpdateHeartbeatAsync(requestContext.TenantId, clientId, true, DateTime.UtcNow, token).ConfigureAwait(false);
         }
 
         private static void BindClientOwner(XenoClientRecord client, RequestContext requestContext)
@@ -6116,26 +5771,27 @@ namespace Xeno.Server
 
             if (!disconnected) return;
             _Logging.Debug(_WebSocketHeader + "client " + clientId + " deregistered");
-            XenoPlatform platform = RequirePlatform();
-            XenoClientRecord? client = platform.Clients.FirstOrDefault(item => item.Id == clientId);
+            XenoClientRecord? client = await FindClientByIdAsync(clientId, token).ConfigureAwait(false);
             if (client != null)
             {
                 client.Connected = false;
                 client.InFlightRequests = 0;
                 client.ServiceState = ClientServiceStateEnum.Quarantined;
+                await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
             }
-
-            await SavePlatformAsync(token).ConfigureAwait(false);
         }
 
-        private void MarkClientsDisconnected()
+        private async Task MarkClientsDisconnectedAsync(CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            foreach (XenoClientRecord client in platform.Clients)
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
             {
-                client.Connected = false;
-                client.InFlightRequests = 0;
-                client.ServiceState = ClientServiceStateEnum.Quarantined;
+                foreach (XenoClientRecord client in await _Database!.Clients!.EnumerateAsync(tenant.Id, token).ConfigureAwait(false))
+                {
+                    client.Connected = false;
+                    client.InFlightRequests = 0;
+                    client.ServiceState = ClientServiceStateEnum.Quarantined;
+                    await _Database!.Clients!.UpdateAsync(client, token).ConfigureAwait(false);
+                }
             }
         }
 
@@ -6150,7 +5806,7 @@ namespace Xeno.Server
             RequestHistoryEntry entry = RequireRouting().RecordHistory(requestContext, path, method, decision);
             configure?.Invoke(entry);
             RecordRelayMetric(entry, decision);
-            TryEnqueueLedgerEvent(entry);
+            await TryEnqueueLedgerEventAsync(entry, token).ConfigureAwait(false);
             await InsertRequestHistoryAsync(entry, token).ConfigureAwait(false);
             return entry;
         }
@@ -6233,13 +5889,13 @@ namespace Xeno.Server
             return String.Equals(message.Type, "client.response.start", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void TryEnqueueLedgerEvent(RequestHistoryEntry entry)
+        private async Task TryEnqueueLedgerEventAsync(RequestHistoryEntry entry, CancellationToken token)
         {
             if (_Ledger == null) return;
             try
             {
-                bool enqueued = _Ledger.TryEnqueueFromHistory(entry, out string? _);
-                XenoTelemetry.RecordLedgerEvent(enqueued ? "recorded" : "skipped");
+                LedgerEnqueueResult result = await _Ledger.TryEnqueueFromHistoryAsync(entry, token).ConfigureAwait(false);
+                XenoTelemetry.RecordLedgerEvent(result.Enqueued ? "recorded" : "skipped");
             }
             catch (ArgumentException)
             {
@@ -6608,12 +6264,6 @@ namespace Xeno.Server
             return sanitized.Length <= 1024 ? sanitized : sanitized.Substring(0, 1024);
         }
 
-        private async Task SavePlatformAsync(CancellationToken token)
-        {
-            if (_Database == null) return;
-            await _Database.SaveAsync(token).ConfigureAwait(false);
-        }
-
         /// <summary>
         /// Construct an audit record and persist it to the dedicated audit table as a best-effort
         /// side effect. Uses <see cref="CancellationToken.None"/> so a disconnected caller cannot
@@ -6631,7 +6281,7 @@ namespace Xeno.Server
         /// <returns>Task.</returns>
         private async Task RecordAuditAsync(RequestContext context, string resourceType, OperationTypeEnum operationType, bool allowed, string reasonCode, int statusCode, string? targetTenantId = null, string? targetResourceId = null)
         {
-            AuditRecord record = _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, allowed, reasonCode, statusCode, targetTenantId, targetResourceId);
+            AuditRecord record = _Authentication.AppendAudit(_Database!, context, resourceType, operationType, allowed, reasonCode, statusCode, targetTenantId, targetResourceId);
             await PersistAuditRecordAsync(record).ConfigureAwait(false);
         }
 
@@ -6650,7 +6300,7 @@ namespace Xeno.Server
         /// <param name="targetResourceId">Optional target resource ID.</param>
         private void RecordAuditFireAndForget(RequestContext context, string resourceType, OperationTypeEnum operationType, bool allowed, string reasonCode, int statusCode, string? targetTenantId = null, string? targetResourceId = null)
         {
-            AuditRecord record = _Authentication.AppendAudit(RequirePlatform(), context, resourceType, operationType, allowed, reasonCode, statusCode, targetTenantId, targetResourceId);
+            AuditRecord record = _Authentication.AppendAudit(_Database!, context, resourceType, operationType, allowed, reasonCode, statusCode, targetTenantId, targetResourceId);
             _ = PersistAuditRecordAsync(record);
         }
 
@@ -6695,13 +6345,13 @@ namespace Xeno.Server
             AlignRoutingFreshnessWithWebSocketSettings(_Settings);
             if (_Database != null)
             {
-                _Routing = new RoutingService(_Database.Platform, _Settings.Routing);
+                _Routing = new RoutingService(_Database, _Settings.Routing, _Settings.Cache);
                 _Ledger?.Dispose();
-                _Ledger = new LedgerService(_Database.Platform, _Settings.Ledger, _Logging, SavePlatformAsync);
+                _Ledger = new LedgerService(_Database, _Settings.Ledger, _Logging);
                 _Ledger.Start();
                 _NetLedgerTenantSubordinate?.Dispose();
-                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database.Platform, _Settings.Ledger, _Logging);
-                _TenantLifecycle = new TenantLifecycleService(_Database.Platform, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging, _Database.Audit);
+                _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database, _Settings.Ledger, _Logging);
+                _TenantLifecycle = new TenantLifecycleService(_Database, new ITenantSubordinateService[] { _NetLedgerTenantSubordinate }, _Logging, _Database.Audit);
             }
         }
 
@@ -6721,34 +6371,33 @@ namespace Xeno.Server
             return path;
         }
 
-        private async Task HandleCreateTokenAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        internal async Task HandleCreateTokenAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
         {
             AuthTokenRequest body = ReadJsonBody<AuthTokenRequest>(context);
             string accessKey = FirstNonEmpty(body.AccessKey, context.Request.Headers.Get("x-access-key"));
             string secretKey = FirstNonEmpty(body.SecretKey, context.Request.Headers.Get("x-secret-key"));
             if (!String.IsNullOrWhiteSpace(secretKey)) throw new UnauthorizedAccessException("Secret keys are not accepted for credential token authentication.");
 
-            XenoPlatform platform = RequirePlatform();
-            Credential? credential = _Authentication.ValidateCredential(platform, requestContext.TenantId, accessKey);
+            Credential? credential = await _Authentication.ValidateCredentialAsync(_Database!, requestContext.TenantId, accessKey, token).ConfigureAwait(false);
             if (credential == null)
             {
                 await RecordAuditAsync(requestContext, "Authentication", OperationTypeEnum.Read, false, "InvalidCredential", 401);
                 throw new UnauthorizedAccessException("Invalid credential.");
             }
 
-            AuthTokenResult credentialResult = _Authentication.IssueToken(
-                platform,
+            AuthTokenResult credentialResult = await _Authentication.IssueTokenAsync(
+                _Database!,
                 _Settings.Auth,
                 requestContext.TenantId,
                 PrincipalTypeEnum.Credential,
                 credential.UserId,
                 credential.Id,
-                AuthSchemeEnum.Credential);
-            await SavePlatformAsync(token).ConfigureAwait(false);
+                AuthSchemeEnum.Credential,
+                token).ConfigureAwait(false);
             await SendJsonAsync(context, credentialResult).ConfigureAwait(false);
         }
 
-        private async Task HandleLoginAsync(HttpContextBase context, CancellationToken token)
+        internal async Task HandleLoginAsync(HttpContextBase context, CancellationToken token)
         {
             AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
             string tenantId = ResolveTenantId(context, body.TenantId);
@@ -6759,8 +6408,7 @@ namespace Xeno.Server
                 throw new ArgumentException("Username and password are required.");
             }
 
-            XenoPlatform platform = RequirePlatform();
-            User? user = _Authentication.ValidateUserPassword(platform, tenantId, username, password);
+            User? user = await _Authentication.ValidateUserPasswordAsync(_Database!, tenantId, username, password, token).ConfigureAwait(false);
             RequestContext loginContext = new RequestContext
             {
                 TenantId = tenantId,
@@ -6785,9 +6433,8 @@ namespace Xeno.Server
                 SecretKey = _Authentication.HashCredentialSecret(_Authentication.GenerateSecret()),
                 Active = true
             };
-            platform.Credentials.Add(credential);
+            await _Database!.Credentials!.CreateAsync(credential, token).ConfigureAwait(false);
             await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Write, true, "ClientCredentialIssued", 200);
-            await SavePlatformAsync(token).ConfigureAwait(false);
             await SendJsonAsync(context, new
             {
                 id = credential.Id,
@@ -6798,7 +6445,7 @@ namespace Xeno.Server
             }).ConfigureAwait(false);
         }
 
-        private async Task HandleLoginTenantLookupAsync(HttpContextBase context)
+        internal async Task HandleLoginTenantLookupAsync(HttpContextBase context, CancellationToken token)
         {
             AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
             string email = FirstNonEmpty(body.Email, body.Username, DecodeQueryValue(context.Request.Query.Elements.Get("email"))).Trim();
@@ -6807,18 +6454,20 @@ namespace Xeno.Server
                 throw new ArgumentException("Email is required.");
             }
 
-            XenoPlatform platform = RequirePlatform();
-            List<AuthTenantSummary> tenants = platform.Users
-                .Where(user => user.Active && String.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase))
-                .Join(
-                    platform.Tenants.Where(tenant => tenant.Active),
-                    user => user.TenantId,
-                    tenant => tenant.Id,
-                    (user, tenant) => new AuthTenantSummary
-                    {
-                        Id = tenant.Id,
-                        Name = tenant.Name
-                    })
+            List<AuthTenantSummary> tenants = new List<AuthTenantSummary>();
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                if (!tenant.Active) continue;
+                User? user = await _Database!.Users!.ReadByEmailAsync(tenant.Id, email, token).ConfigureAwait(false);
+                if (user == null || !user.Active) continue;
+                tenants.Add(new AuthTenantSummary
+                {
+                    Id = tenant.Id,
+                    Name = tenant.Name
+                });
+            }
+
+            tenants = tenants
                 .GroupBy(tenant => tenant.Id, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .OrderBy(tenant => tenant.Name)
@@ -6832,7 +6481,7 @@ namespace Xeno.Server
             await SendJsonAsync(context, response).ConfigureAwait(false);
         }
 
-        private async Task HandleDashboardLoginAsync(HttpContextBase context, CancellationToken token)
+        internal async Task HandleDashboardLoginAsync(HttpContextBase context, CancellationToken token)
         {
             AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
             string tenantId = ResolveTenantId(context, body.TenantId);
@@ -6843,8 +6492,7 @@ namespace Xeno.Server
                 throw new ArgumentException("Email and password are required.");
             }
 
-            XenoPlatform platform = RequirePlatform();
-            User? user = _Authentication.ValidateUserPassword(platform, tenantId, email, password);
+            User? user = await _Authentication.ValidateUserPasswordAsync(_Database!, tenantId, email, password, token).ConfigureAwait(false);
             RequestContext loginContext = new RequestContext
             {
                 TenantId = tenantId,
@@ -6861,17 +6509,17 @@ namespace Xeno.Server
                 throw new UnauthorizedAccessException("Invalid email, tenant, or password.");
             }
 
-            AuthTokenResult tokenResult = _Authentication.IssueToken(
-                platform,
+            AuthTokenResult tokenResult = await _Authentication.IssueTokenAsync(
+                _Database!,
                 _Settings.Auth,
                 tenantId,
                 PrincipalTypeEnum.User,
                 user.Id,
                 null,
-                AuthSchemeEnum.Bearer);
-            Tenant? tenant = platform.Tenants.FirstOrDefault(item => item.Id == tenantId);
+                AuthSchemeEnum.Bearer,
+                token).ConfigureAwait(false);
+            Tenant? tenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
             await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Read, true, "DashboardLogin", 200);
-            await SavePlatformAsync(token).ConfigureAwait(false);
 
             AuthDashboardLoginResponse response = new AuthDashboardLoginResponse
             {
@@ -6887,7 +6535,7 @@ namespace Xeno.Server
             await SendJsonAsync(context, response).ConfigureAwait(false);
         }
 
-        private async Task HandleOnboardingSignupAsync(HttpContextBase context, CancellationToken token)
+        internal async Task HandleOnboardingSignupAsync(HttpContextBase context, CancellationToken token)
         {
             AuthOnboardingRequest body = ReadJsonBody<AuthOnboardingRequest>(context);
             string requestedTenantId = FirstNonEmpty(body.TenantId).Trim();
@@ -6904,8 +6552,7 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(requestedTenantId) && requestedTenantId.Length > 64) throw new ArgumentException("Tenant ID must be 64 characters or fewer.");
             if (!String.IsNullOrWhiteSpace(tenantName) && tenantName.Length > 256) throw new ArgumentException("Tenant name must be 256 characters or fewer.");
 
-            XenoPlatform platform = RequirePlatform();
-            if (platform.Users.Any(item => item.IsAdmin && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase)))
+            if (await GlobalAdminEmailExistsAsync(email, token).ConfigureAwait(false))
             {
                 throw new HttpStatusException(409, "GlobalAdminEmailAlreadyExists", "Email already belongs to a global administrator.");
             }
@@ -6936,21 +6583,21 @@ namespace Xeno.Server
                     CreatedUtc = DateTime.UtcNow,
                     LastUpdateUtc = DateTime.UtcNow
                 };
-                platform.Tenants.Add(tenant);
-                platform.EnsureTenantDefaults(tenant.Id);
-                RemoveSeedDevelopmentPrincipal(platform, tenant.Id);
+                await _Database!.Tenants!.CreateAsync(tenant, token).ConfigureAwait(false);
+                await Xeno.Core.Database.DatabaseSeeder.SeedTenantDefaultsAsync(_Database!, tenant.Id, token).ConfigureAwait(false);
+                await RemoveSeedDevelopmentPrincipalAsync(tenant.Id, token).ConfigureAwait(false);
             }
             else
             {
-                Tenant? existingTenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, requestedTenantId, StringComparison.OrdinalIgnoreCase));
+                Tenant? existingTenant = await _Database!.Tenants!.ReadAsync(requestedTenantId, token).ConfigureAwait(false);
                 if (existingTenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant ID was not found.");
                 if (!existingTenant.Active) throw new HttpStatusException(409, "TenantInactive", "Tenant is inactive.");
                 tenant = existingTenant;
             }
-            platform.EnsureTenantDefaults(tenant.Id);
+            await Xeno.Core.Database.DatabaseSeeder.SeedTenantDefaultsAsync(_Database!, tenant.Id, token).ConfigureAwait(false);
 
-            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase))) throw new HttpStatusException(409, "EmailAlreadyExists", "Email already exists in the tenant.");
-            if (platform.Users.Any(item => item.TenantId == tenant.Id && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new HttpStatusException(409, "UsernameAlreadyExists", "Username already exists in the tenant.");
+            if (await _Database!.Users!.ReadByEmailAsync(tenant.Id, email, token).ConfigureAwait(false) != null) throw new HttpStatusException(409, "EmailAlreadyExists", "Email already exists in the tenant.");
+            if (await _Database!.Users!.ReadByUsernameAsync(tenant.Id, username, token).ConfigureAwait(false) != null) throw new HttpStatusException(409, "UsernameAlreadyExists", "Username already exists in the tenant.");
 
             User user = new User
             {
@@ -6962,10 +6609,10 @@ namespace Xeno.Server
                 Active = true
             };
             _Authentication.SetUserPassword(user, password);
-            platform.Users.Add(user);
+            await _Database!.Users!.CreateAsync(user, token).ConfigureAwait(false);
 
             string accessKey = IdGenerator.NewId("xeno_");
-            while (platform.Credentials.Any(item => item.TenantId == tenant.Id && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal)))
+            while (await _Database!.Credentials!.ReadByAccessKeyAsync(tenant.Id, accessKey, token).ConfigureAwait(false) != null)
             {
                 accessKey = IdGenerator.NewId("xeno_");
             }
@@ -6979,12 +6626,13 @@ namespace Xeno.Server
                 SecretKey = _Authentication.HashCredentialSecret(secretKey),
                 Active = true
             };
-            platform.Credentials.Add(credential);
+            await _Database!.Credentials!.CreateAsync(credential, token).ConfigureAwait(false);
 
-            Role? tenantAdminRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantAdmin", StringComparison.OrdinalIgnoreCase) && item.Active);
-            if (creatingTenant && tenantAdminRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantAdminRole.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == user.Id))
+            Role? tenantAdminRole = await _Database!.Roles!.ReadByNameAsync(tenant.Id, "TenantAdmin", token).ConfigureAwait(false);
+            if (tenantAdminRole != null && !tenantAdminRole.Active) tenantAdminRole = null;
+            if (creatingTenant && tenantAdminRole != null)
             {
-                platform.RoleAssignments.Add(new RoleAssignment
+                await _Database!.RoleAssignments!.CreateAsync(new RoleAssignment
                 {
                     TenantId = tenant.Id,
                     RoleId = tenantAdminRole.Id,
@@ -6993,12 +6641,12 @@ namespace Xeno.Server
                     Active = true,
                     CreatedUtc = DateTime.UtcNow,
                     LastUpdateUtc = DateTime.UtcNow
-                });
+                }, token).ConfigureAwait(false);
             }
 
-            if (creatingTenant && tenantAdminRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantAdminRole.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credential.Id))
+            if (creatingTenant && tenantAdminRole != null)
             {
-                platform.RoleAssignments.Add(new RoleAssignment
+                await _Database!.RoleAssignments!.CreateAsync(new RoleAssignment
                 {
                     TenantId = tenant.Id,
                     RoleId = tenantAdminRole.Id,
@@ -7007,15 +6655,16 @@ namespace Xeno.Server
                     Active = true,
                     CreatedUtc = DateTime.UtcNow,
                     LastUpdateUtc = DateTime.UtcNow
-                });
+                }, token).ConfigureAwait(false);
             }
 
             if (!creatingTenant)
             {
-                Role? tenantMemberRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantMember", StringComparison.OrdinalIgnoreCase) && item.Active);
-                if (tenantMemberRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMemberRole.Id && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == user.Id))
+                Role? tenantMemberRole = await _Database!.Roles!.ReadByNameAsync(tenant.Id, "TenantMember", token).ConfigureAwait(false);
+                if (tenantMemberRole != null && !tenantMemberRole.Active) tenantMemberRole = null;
+                if (tenantMemberRole != null)
                 {
-                    platform.RoleAssignments.Add(new RoleAssignment
+                    await _Database!.RoleAssignments!.CreateAsync(new RoleAssignment
                     {
                         TenantId = tenant.Id,
                         RoleId = tenantMemberRole.Id,
@@ -7024,12 +6673,12 @@ namespace Xeno.Server
                         Active = true,
                         CreatedUtc = DateTime.UtcNow,
                         LastUpdateUtc = DateTime.UtcNow
-                    });
+                    }, token).ConfigureAwait(false);
                 }
 
-                if (tenantMemberRole != null && !platform.RoleAssignments.Any(item => item.TenantId == tenant.Id && item.RoleId == tenantMemberRole.Id && item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credential.Id))
+                if (tenantMemberRole != null)
                 {
-                    platform.RoleAssignments.Add(new RoleAssignment
+                    await _Database!.RoleAssignments!.CreateAsync(new RoleAssignment
                     {
                         TenantId = tenant.Id,
                         RoleId = tenantMemberRole.Id,
@@ -7038,7 +6687,7 @@ namespace Xeno.Server
                         Active = true,
                         CreatedUtc = DateTime.UtcNow,
                         LastUpdateUtc = DateTime.UtcNow
-                    });
+                    }, token).ConfigureAwait(false);
                 }
             }
 
@@ -7062,9 +6711,8 @@ namespace Xeno.Server
                 await ProvisionLedgerAccountForUserAsync(user, signupContext, token).ConfigureAwait(false);
             }
 
-            AuthTokenResult tokenResult = _Authentication.IssueToken(platform, _Settings.Auth, tenant.Id, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Bearer);
+            AuthTokenResult tokenResult = await _Authentication.IssueTokenAsync(_Database!, _Settings.Auth, tenant.Id, PrincipalTypeEnum.User, user.Id, null, AuthSchemeEnum.Bearer, token).ConfigureAwait(false);
             await RecordAuditAsync(signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignup", 200);
-            await SavePlatformAsync(token).ConfigureAwait(false);
 
             AuthOnboardingResponse response = new AuthOnboardingResponse
             {
@@ -7108,7 +6756,7 @@ namespace Xeno.Server
                 Request = BuildOnboardingRequestMetadata(signupContext, eventUtc)
             };
 
-            OnboardingEmailContext emailContext = BuildOnboardingEmailContext(platform, signupContext, tenant, user, creatingTenant, eventUtc);
+            OnboardingEmailContext emailContext = await BuildOnboardingEmailContextAsync(signupContext, tenant, user, creatingTenant, eventUtc, token).ConfigureAwait(false);
             await SendOnboardingNotificationsSafeAsync(emailContext, signupContext, token).ConfigureAwait(false);
             await SendJsonAsync(context, response).ConfigureAwait(false);
         }
@@ -7120,8 +6768,7 @@ namespace Xeno.Server
             bool captchaValid = await OnboardingCaptchaVerifier.VerifyAsync(_Settings.Onboarding.Captcha, captchaToken, ResolveClientIp(context), token).ConfigureAwait(false);
             if (!captchaValid) throw new HttpStatusException(400, "CaptchaFailed", "Captcha verification failed. Please try again.");
 
-            XenoPlatform platform = RequirePlatform();
-            if (platform.Users.Any(item => item.IsAdmin && String.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase)))
+            if (await GlobalAdminEmailExistsAsync(email, token).ConfigureAwait(false))
             {
                 throw new HttpStatusException(409, "GlobalAdminEmailAlreadyExists", "Email already belongs to a global administrator.");
             }
@@ -7136,9 +6783,9 @@ namespace Xeno.Server
                 CreatedUtc = DateTime.UtcNow,
                 LastUpdateUtc = DateTime.UtcNow
             };
-            platform.Tenants.Add(tenant);
-            platform.EnsureTenantDefaults(tenant.Id);
-            RemoveSeedDevelopmentPrincipal(platform, tenant.Id);
+            await _Database!.Tenants!.CreateAsync(tenant, token).ConfigureAwait(false);
+            await Xeno.Core.Database.DatabaseSeeder.SeedTenantDefaultsAsync(_Database!, tenant.Id, token).ConfigureAwait(false);
+            await RemoveSeedDevelopmentPrincipalAsync(tenant.Id, token).ConfigureAwait(false);
 
             User user = new User
             {
@@ -7150,12 +6797,13 @@ namespace Xeno.Server
                 Active = false
             };
             _Authentication.SetUserPassword(user, password);
-            platform.Users.Add(user);
+            await _Database!.Users!.CreateAsync(user, token).ConfigureAwait(false);
 
-            Role? tenantAdminRole = platform.Roles.FirstOrDefault(item => item.TenantId == tenant.Id && String.Equals(item.Name, "TenantAdmin", StringComparison.OrdinalIgnoreCase) && item.Active);
+            Role? tenantAdminRole = await _Database!.Roles!.ReadByNameAsync(tenant.Id, "TenantAdmin", token).ConfigureAwait(false);
+            if (tenantAdminRole != null && !tenantAdminRole.Active) tenantAdminRole = null;
             if (tenantAdminRole != null)
             {
-                platform.RoleAssignments.Add(new RoleAssignment
+                await _Database!.RoleAssignments!.CreateAsync(new RoleAssignment
                 {
                     TenantId = tenant.Id,
                     RoleId = tenantAdminRole.Id,
@@ -7164,7 +6812,7 @@ namespace Xeno.Server
                     Active = true,
                     CreatedUtc = DateTime.UtcNow,
                     LastUpdateUtc = DateTime.UtcNow
-                });
+                }, token).ConfigureAwait(false);
             }
 
             OnboardingRequest onboarding = new OnboardingRequest
@@ -7191,7 +6839,6 @@ namespace Xeno.Server
             };
             ApplyRequestMetadata(context, signupContext);
             await RecordAuditAsync(signupContext, "Onboarding", OperationTypeEnum.Write, true, "OnboardingSignupPending", 200, tenant.Id, user.Id);
-            await SavePlatformAsync(token).ConfigureAwait(false);
 
             _Logging.Info(_Header + "onboarding sign-up pending verification for tenant " + tenant.Id + " (" + email + ") from " + creationIp);
             await SendOnboardingVerificationEmailAsync(onboarding, token).ConfigureAwait(false);
@@ -7199,7 +6846,7 @@ namespace Xeno.Server
             await SendJsonAsync(context, new { status = "pending_verification", email, tenantId = tenant.Id }).ConfigureAwait(false);
         }
 
-        private async Task HandleOnboardingVerifyAsync(HttpContextBase context, CancellationToken token)
+        internal async Task HandleOnboardingVerifyAsync(HttpContextBase context, CancellationToken token)
         {
             string verificationToken = DecodeQueryValue(context.Request.Query.Elements.Get("token"));
             if (String.IsNullOrWhiteSpace(verificationToken) && String.Equals(context.Request.Method.ToString(), "POST", StringComparison.OrdinalIgnoreCase))
@@ -7225,11 +6872,10 @@ namespace Xeno.Server
             await SendJsonAsync(context, new { status = "verified", organization = record.Organization, email = record.Email }).ConfigureAwait(false);
         }
 
-        private async Task HandleOnboardingApproveAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        internal async Task HandleOnboardingApproveAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
         {
             if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
-            XenoPlatform platform = RequirePlatform();
-            if (!_Authorization.IsSystemAdmin(platform, requestContext))
+            if (!await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false))
             {
                 await RecordAuditAsync(requestContext, "Onboarding.Approve", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403);
                 throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can approve onboarding requests.");
@@ -7239,7 +6885,7 @@ namespace Xeno.Server
             string tenantId = FirstNonEmpty(body.TenantId).Trim();
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenantId is required.");
 
-            Tenant? tenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase));
+            Tenant? tenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
             if (tenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant was not found.");
 
             OnboardingRequest? record = _Database?.Onboarding != null
@@ -7248,10 +6894,12 @@ namespace Xeno.Server
 
             tenant.Active = true;
             tenant.LastUpdateUtc = DateTime.UtcNow;
+            await _Database!.Tenants!.UpdateAsync(tenant, token).ConfigureAwait(false);
             string? approvedUserId = record?.UserId;
-            foreach (User item in platform.Users.Where(item => item.TenantId == tenantId && (approvedUserId == null || item.Id == approvedUserId)))
+            foreach (User item in (await _Database!.Users!.EnumerateAsync(tenantId, token).ConfigureAwait(false)).Where(item => approvedUserId == null || item.Id == approvedUserId))
             {
                 item.Active = true;
+                await _Database!.Users!.UpdateAsync(item, token).ConfigureAwait(false);
             }
 
             if (record != null && _Database?.Onboarding != null)
@@ -7262,7 +6910,6 @@ namespace Xeno.Server
             }
 
             await RecordAuditAsync(requestContext, "Onboarding.Approve", OperationTypeEnum.Admin, true, "OnboardingApproved", 200, tenantId, approvedUserId);
-            await SavePlatformAsync(token).ConfigureAwait(false);
 
             _Logging.Info(_Header + "onboarding approved for tenant " + tenantId + " by " + (requestContext.UserId ?? requestContext.PrincipalId ?? "unknown"));
             if (record != null) await SendTenantApprovedEmailAsync(record, token).ConfigureAwait(false);
@@ -7344,21 +6991,54 @@ namespace Xeno.Server
             RecordEmailResult(result);
         }
 
-        private static void RemoveSeedDevelopmentPrincipal(XenoPlatform platform, string tenantId)
+        private async Task<bool> GlobalAdminEmailExistsAsync(string email, CancellationToken token)
         {
-            List<string> seedUserIds = platform.Users
-                .Where(item => item.TenantId == tenantId && String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase))
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                User? user = await _Database!.Users!.ReadByEmailAsync(tenant.Id, email, token).ConfigureAwait(false);
+                if (user != null && user.IsAdmin) return true;
+            }
+
+            return false;
+        }
+
+        private async Task RemoveSeedDevelopmentPrincipalAsync(string tenantId, CancellationToken token)
+        {
+            List<User> tenantUsers = await _Database!.Users!.EnumerateAsync(tenantId, token).ConfigureAwait(false);
+            List<string> seedUserIds = tenantUsers
+                .Where(item => String.Equals(item.Email, "admin@xeno", StringComparison.OrdinalIgnoreCase))
                 .Select(item => item.Id)
                 .ToList();
             if (seedUserIds.Count == 0) return;
 
-            platform.Credentials.RemoveAll(item => item.TenantId == tenantId && (seedUserIds.Contains(item.UserId) || String.Equals(item.AccessKey, "default", StringComparison.Ordinal)));
-            platform.RoleAssignments.RemoveAll(item => item.TenantId == tenantId && item.PrincipalType == PrincipalTypeEnum.User && seedUserIds.Contains(item.PrincipalId));
-            platform.Users.RemoveAll(item => item.TenantId == tenantId && seedUserIds.Contains(item.Id));
+            foreach (Credential credential in await _Database!.Credentials!.EnumerateAsync(tenantId, token).ConfigureAwait(false))
+            {
+                if (seedUserIds.Contains(credential.UserId) || String.Equals(credential.AccessKey, "default", StringComparison.Ordinal))
+                {
+                    await _Database!.Credentials!.DeleteAsync(tenantId, credential.Id, token).ConfigureAwait(false);
+                }
+            }
+
+            foreach (string seedUserId in seedUserIds)
+            {
+                foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, seedUserId, token).ConfigureAwait(false))
+                {
+                    if (assignment.PrincipalType == PrincipalTypeEnum.User && assignment.PrincipalId == seedUserId)
+                    {
+                        await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false);
+                    }
+                }
+
+                await _Database!.Users!.DeleteAsync(tenantId, seedUserId, token).ConfigureAwait(false);
+            }
         }
 
-        private OnboardingEmailContext BuildOnboardingEmailContext(XenoPlatform platform, RequestContext requestContext, Tenant tenant, User user, bool createdTenant, DateTime eventUtc)
+        private async Task<OnboardingEmailContext> BuildOnboardingEmailContextAsync(RequestContext requestContext, Tenant tenant, User user, bool createdTenant, DateTime eventUtc, CancellationToken token)
         {
+            List<EmailAddress> tenantAdministrators = (await _Database!.Users!.EnumerateAsync(tenant.Id, token).ConfigureAwait(false))
+                .Where(item => item.Active && item.IsTenantAdmin && !String.IsNullOrWhiteSpace(item.Email))
+                .Select(item => EmailAddress.Create(item.Email, item.Username))
+                .ToList();
             return new OnboardingEmailContext
             {
                 CreatedTenant = createdTenant,
@@ -7380,10 +7060,7 @@ namespace Xeno.Server
                 CorrelationId = requestContext.CorrelationId ?? String.Empty,
                 EventUtc = eventUtc,
                 PlatformAdministrators = BuildConfiguredEmailRecipients(_Settings.Email.Notifications.PlatformAdministratorRecipients),
-                TenantAdministrators = platform.Users
-                    .Where(item => item.TenantId == tenant.Id && item.Active && item.IsTenantAdmin && !String.IsNullOrWhiteSpace(item.Email))
-                    .Select(item => EmailAddress.Create(item.Email, item.Username))
-                    .ToList()
+                TenantAdministrators = tenantAdministrators
             };
         }
 
@@ -7436,32 +7113,26 @@ namespace Xeno.Server
                         await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, result.Skipped ? 202 : 200, emailContext.TenantId, emailContext.UserId);
                     }
                 }
-
-                await SavePlatformAsync(token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailCanceled", 499, emailContext.TenantId, emailContext.UserId);
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (EmailDeliveryException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailDeliveryFailed", 502, emailContext.TenantId, emailContext.UserId);
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (InvalidOperationException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailInvalidOperation", 500, emailContext.TenantId, emailContext.UserId);
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (ArgumentException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), "onboarding");
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "EmailConfigurationInvalid", 500, emailContext.TenantId, emailContext.UserId);
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -7509,7 +7180,6 @@ namespace Xeno.Server
                 string reasonCode = result.Skipped ? "TestEmailSkipped" : "TestEmailAccepted";
                 int statusCode = result.Skipped ? 202 : 200;
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, !result.Skipped, reasonCode, statusCode, auditContext.TenantId, auditContext.UserId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
                 return new EmailTestResponse
                 {
                     Accepted = result.Accepted,
@@ -7527,14 +7197,12 @@ namespace Xeno.Server
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), template.TemplateId);
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailDeliveryFailed", 502, auditContext.TenantId, auditContext.UserId);
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
                 throw new HttpStatusException(502, "EmailDeliveryFailed", "Test email delivery failed.");
             }
             catch (InvalidOperationException)
             {
                 RecordEmailFailure(_Settings.Email.Provider.ToString(), template.TemplateId);
                 await RecordAuditAsync(auditContext, "Email", OperationTypeEnum.Write, false, "TestEmailInvalidOperation", 500, auditContext.TenantId, auditContext.UserId);
-                await SavePlatformAsync(CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
         }
@@ -7546,13 +7214,13 @@ namespace Xeno.Server
 
         private async Task RequirePermissionAsync(RequestContext context, string targetTenantId, string resourceType, OperationTypeEnum operationType, CancellationToken token)
         {
-            AuthorizationDecision decision = _Authorization.Authorize(RequirePlatform(), new AuthorizationRequest
+            AuthorizationDecision decision = await _Authorization.AuthorizeAsync(_Database!, new AuthorizationRequest
             {
                 Context = context,
                 TargetTenantId = targetTenantId,
                 ResourceType = resourceType,
                 OperationType = operationType
-            });
+            }, token).ConfigureAwait(false);
 
             if (!decision.Allowed)
             {
@@ -7587,53 +7255,433 @@ namespace Xeno.Server
 
         private async Task RequireUserUpdatePermissionAsync(RequestContext context, string userId, CancellationToken token)
         {
-            AuthorizationDecision decision = _Authorization.Authorize(RequirePlatform(), new AuthorizationRequest
+            AuthorizationDecision decision = await _Authorization.AuthorizeAsync(_Database!, new AuthorizationRequest
             {
                 Context = context,
                 TargetTenantId = context.TenantId,
                 ResourceType = "Users",
                 OperationType = OperationTypeEnum.Write
-            });
+            }, token).ConfigureAwait(false);
             if (decision.Allowed) return;
             if (String.Equals(context.UserId, userId, StringComparison.Ordinal))
             {
-                User? self = RequirePlatform().Users.FirstOrDefault(item => item.Id == userId && item.TenantId == context.TenantId && item.Active);
-                if (self != null) return;
+                User? self = await _Database!.Users!.ReadAsync(context.TenantId, userId, token).ConfigureAwait(false);
+                if (self != null && self.Active) return;
             }
 
             await RecordAuditAsync(context, "Users", OperationTypeEnum.Write, false, decision.ReasonCode, decision.StatusCode, context.TenantId, userId);
             throw new AuthorizationDeniedException(decision.StatusCode, decision.ReasonCode, decision.Message);
         }
 
-        private List<User> ListVisibleUsers(RequestContext requestContext)
+        private async Task<List<User>> ListVisibleUsersAsync(RequestContext requestContext, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            if (CanManageTenant(requestContext, requestContext.TenantId))
+            if (await CanManageTenantAsync(requestContext, requestContext.TenantId, token).ConfigureAwait(false))
             {
-                return platform.Users.Where(item => IsTenantVisible(requestContext, item.TenantId)).ToList();
+                List<User> visibleUsers = new List<User>();
+                foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+                {
+                    if (!await IsTenantVisibleAsync(requestContext, tenant.Id, token).ConfigureAwait(false)) continue;
+                    visibleUsers.AddRange(await _Database!.Users!.EnumerateAsync(tenant.Id, token).ConfigureAwait(false));
+                }
+
+                return visibleUsers;
             }
 
-            return platform.Users.Where(item => item.TenantId == requestContext.TenantId && item.Id == requestContext.UserId).ToList();
+            User? self = await _Database!.Users!.ReadAsync(requestContext.TenantId, requestContext.UserId ?? String.Empty, token).ConfigureAwait(false);
+            return self == null ? new List<User>() : new List<User> { self };
         }
 
-        private List<Credential> ListVisibleCredentials(RequestContext requestContext)
+        private async Task<List<Credential>> ListVisibleCredentialsAsync(RequestContext requestContext, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            if (CanManageTenant(requestContext, requestContext.TenantId))
+            if (await CanManageTenantAsync(requestContext, requestContext.TenantId, token).ConfigureAwait(false))
             {
-                return platform.Credentials.Where(item => item.TenantId == requestContext.TenantId).ToList();
+                return await _Database!.Credentials!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false);
             }
 
-            return platform.Credentials.Where(item => item.TenantId == requestContext.TenantId && item.UserId == requestContext.UserId).ToList();
+            return await _Database!.Credentials!.EnumerateByUserAsync(requestContext.TenantId, requestContext.UserId ?? String.Empty, token).ConfigureAwait(false);
         }
 
-        private bool CanManageTenant(RequestContext requestContext, string tenantId)
+        private async Task<bool> CanManageTenantAsync(RequestContext requestContext, string tenantId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            return _Authorization.IsSystemAdmin(platform, requestContext) || _Authorization.IsTenantAdmin(platform, requestContext, tenantId);
+            return await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false)
+                || await _Authorization.IsTenantAdminAsync(_Database!, requestContext, tenantId, token).ConfigureAwait(false);
         }
 
-        private async Task<bool> RejectRateLimitedAuthAttemptAsync(HttpContextBase context)
+        internal async Task HandleCredentialsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, (await ListVisibleCredentialsAsync(requestContext, token).ConfigureAwait(false)).Select(RedactCredential).ToList()).ConfigureAwait(false);
+        }
+
+        internal async Task HandleCredentialCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            Credential credential = await CreateCredentialAsync(requestContext, context, token).ConfigureAwait(false);
+            await _Database!.Credentials!.CreateAsync(credential, token).ConfigureAwait(false);
+            await SendJsonAsync(context, new
+            {
+                credential.Id,
+                credential.TenantId,
+                credential.UserId,
+                credential.AccessKey,
+                credential.Active
+            }).ConfigureAwait(false);
+        }
+
+        internal async Task HandleCredentialUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? updateCredentialId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/credentials/", "/v1.0/api/credentials/");
+            if (String.IsNullOrWhiteSpace(updateCredentialId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            Credential credential = await UpdateCredentialAsync(requestContext, updateCredentialId, context, token).ConfigureAwait(false);
+            await SendJsonAsync(context, RedactCredential(credential)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleCredentialDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteCredentialId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/credentials/", "/v1.0/api/credentials/");
+            if (String.IsNullOrWhiteSpace(deleteCredentialId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Credentials", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            await DeleteCredentialAsync(requestContext, deleteCredentialId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRolesListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Roles", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await _Database!.Roles!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoleCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            Role role = await CreateRoleAsync(requestContext, context, token).ConfigureAwait(false);
+            await _Database!.Roles!.CreateAsync(role, token).ConfigureAwait(false);
+            await SendJsonAsync(context, role).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoleUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? updateRoleId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/roles/", "/v1.0/api/roles/");
+            if (String.IsNullOrWhiteSpace(updateRoleId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            Role role = await UpdateRoleAsync(requestContext, updateRoleId, context, token).ConfigureAwait(false);
+            await SendJsonAsync(context, role).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoleDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteRoleId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/roles/", "/v1.0/api/roles/");
+            if (String.IsNullOrWhiteSpace(deleteRoleId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            await DeleteRoleAsync(requestContext, deleteRoleId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandlePermissionsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Permissions", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await _Database!.Permissions!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandlePermissionsGrantableAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await ListGrantablePermissionsAsync(requestContext, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandlePermissionCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            Permission permission = await CreatePermissionAsync(requestContext, context, token).ConfigureAwait(false);
+            await _Database!.Permissions!.CreateAsync(permission, token).ConfigureAwait(false);
+            await SendJsonAsync(context, permission).ConfigureAwait(false);
+        }
+
+        internal async Task HandlePermissionUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? updatePermissionId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/permissions/", "/v1.0/api/permissions/");
+            if (String.IsNullOrWhiteSpace(updatePermissionId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            Permission permission = await UpdatePermissionAsync(requestContext, updatePermissionId, context, token).ConfigureAwait(false);
+            await SendJsonAsync(context, permission).ConfigureAwait(false);
+        }
+
+        internal async Task HandlePermissionDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deletePermissionId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/permissions/", "/v1.0/api/permissions/");
+            if (String.IsNullOrWhiteSpace(deletePermissionId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            await DeletePermissionAsync(requestContext, deletePermissionId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoleAssignmentsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            List<RoleAssignment> visibleAssignments = new List<RoleAssignment>();
+            foreach (Tenant assignmentTenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                if (!await IsTenantVisibleAsync(requestContext, assignmentTenant.Id, token).ConfigureAwait(false)) continue;
+                visibleAssignments.AddRange(await _Database!.RoleAssignments!.EnumerateAsync(assignmentTenant.Id, token).ConfigureAwait(false));
+            }
+
+            await SendJsonAsync(context, visibleAssignments).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoleAssignmentCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            RoleAssignment assignment = await CreateRoleAssignmentAsync(requestContext, context, token).ConfigureAwait(false);
+            await _Database!.RoleAssignments!.CreateAsync(assignment, token).ConfigureAwait(false);
+            await SendJsonAsync(context, assignment).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoleAssignmentDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteRoleAssignmentId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/roleassignments/", "/v1.0/api/role-assignments/");
+            if (String.IsNullOrWhiteSpace(deleteRoleAssignmentId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            await DeleteRoleAssignmentAsync(requestContext, deleteRoleAssignmentId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleModelDefinitionsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await _Database!.ModelDefinitions!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleModelConfigurationsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Inference", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, await _Database!.ModelConfigurations!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoutingPoliciesListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, (await _Database!.RoutingPolicies!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false)).OrderByDescending(item => item.IsDefault).ThenBy(item => item.ModelName).ThenBy(item => item.ClientName).ToList()).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoutingPolicyValidateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
+            RoutingPolicyValidationResult result = ValidateRoutingPolicySaveRequest(body);
+            await SendJsonAsync(context, result).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoutingPolicyCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            RoutingPolicy policy = await CreateRoutingPolicyAsync(requestContext, context, token).ConfigureAwait(false);
+            await _Database!.RoutingPolicies!.CreateAsync(policy, token).ConfigureAwait(false);
+            await SendJsonAsync(context, policy).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoutingPolicyUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? updateRoutingPolicyId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/routingpolicies/", "/v1.0/api/routing-policies/");
+            if (String.IsNullOrWhiteSpace(updateRoutingPolicyId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            RoutingPolicy policy = await UpdateRoutingPolicyAsync(requestContext, updateRoutingPolicyId, context, token).ConfigureAwait(false);
+            await SendJsonAsync(context, policy).ConfigureAwait(false);
+        }
+
+        internal async Task HandleRoutingPolicyDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteRoutingPolicyId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/routingpolicies/", "/v1.0/api/routing-policies/");
+            if (String.IsNullOrWhiteSpace(deleteRoutingPolicyId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "RoutingPolicies", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            await DeleteRoutingPolicyAsync(requestContext, deleteRoutingPolicyId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleUsersListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            await SendJsonAsync(context, (await ListVisibleUsersAsync(requestContext, token).ConfigureAwait(false)).Select(RedactUser).ToList()).ConfigureAwait(false);
+        }
+
+        internal async Task HandleUserCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Write, token).ConfigureAwait(false);
+            User user = await CreateUserAsync(requestContext, context, token).ConfigureAwait(false);
+            await _Database!.Users!.CreateAsync(user, token).ConfigureAwait(false);
+            await ProvisionLedgerAccountForUserAsync(user, requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleUserUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? updateUserId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/users/", "/v1.0/api/users/");
+            if (String.IsNullOrWhiteSpace(updateUserId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "User not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequireUserUpdatePermissionAsync(requestContext, updateUserId, token).ConfigureAwait(false);
+            User user = await UpdateUserAsync(requestContext, updateUserId, context, token).ConfigureAwait(false);
+            await ProvisionLedgerAccountForUserAsync(user, requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, RedactUser(user)).ConfigureAwait(false);
+        }
+
+        internal async Task HandleUserDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteUserId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/users/", "/v1.0/api/users/");
+            if (String.IsNullOrWhiteSpace(deleteUserId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "User not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Users", OperationTypeEnum.Delete, token).ConfigureAwait(false);
+            await DeleteUserAsync(requestContext, deleteUserId, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleTenantsListAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Tenants", OperationTypeEnum.Read, token).ConfigureAwait(false);
+            List<Tenant> visibleTenants = new List<Tenant>();
+            foreach (Tenant tenantItem in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                if (await IsTenantVisibleAsync(requestContext, tenantItem.Id, token).ConfigureAwait(false)) visibleTenants.Add(tenantItem);
+            }
+
+            await SendJsonAsync(context, visibleTenants).ConfigureAwait(false);
+        }
+
+        internal async Task HandleTenantCreateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            TenantSaveRequest tenantBody = ReadJsonBody<TenantSaveRequest>(context);
+            Tenant tenant = await CreateTenantAsync(tenantBody, token).ConfigureAwait(false);
+            await _Database!.Tenants!.CreateAsync(tenant, token).ConfigureAwait(false);
+            await Xeno.Core.Database.DatabaseSeeder.SeedTenantDefaultsAsync(_Database!, tenant.Id, token).ConfigureAwait(false);
+            bool allowDeferred = tenantBody.DeferSubordinateProvisioning == true;
+            await RequireTenantLifecycle().CreateAsync(tenant, await ListSeedUsersAsync(tenant.Id, token).ConfigureAwait(false), allowDeferred, requestContext, token).ConfigureAwait(false);
+            await SendJsonAsync(context, tenant).ConfigureAwait(false);
+        }
+
+        internal async Task HandleTenantUpdateAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? updateTenantId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/tenants/", "/v1.0/api/tenants/");
+            if (String.IsNullOrWhiteSpace(updateTenantId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Tenant not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            Tenant? originalTenant = await _Database!.Tenants!.ReadAsync(updateTenantId, token).ConfigureAwait(false);
+            bool wasActive = originalTenant?.Active ?? false;
+            TenantSaveRequest tenantBody = ReadJsonBody<TenantSaveRequest>(context);
+            Tenant tenant = await UpdateTenantAsync(updateTenantId, tenantBody, token).ConfigureAwait(false);
+            if (wasActive && !tenant.Active)
+            {
+                await RequireTenantLifecycle().SuspendAsync(tenant, requestContext, token).ConfigureAwait(false);
+            }
+            else if (!wasActive && tenant.Active)
+            {
+                await RequireTenantLifecycle().ReactivateAsync(tenant, requestContext, token).ConfigureAwait(false);
+                await RequireTenantLifecycle().ReconcileAsync(tenant, requestContext, token).ConfigureAwait(false);
+            }
+            else
+            {
+                await RequireTenantLifecycle().UpdateAsync(tenant, requestContext, token).ConfigureAwait(false);
+            }
+
+            await SendJsonAsync(context, tenant).ConfigureAwait(false);
+        }
+
+        internal async Task HandleTenantDeleteAsync(HttpContextBase context, RequestContext requestContext, CancellationToken token)
+        {
+            string? deleteTenantId = TryGetPathId(context.Request.Url.RawWithoutQuery ?? String.Empty, "/api/v1/tenants/", "/v1.0/api/tenants/");
+            if (String.IsNullOrWhiteSpace(deleteTenantId))
+            {
+                context.Response.StatusCode = 404;
+                await SendJsonAsync(context, new { error = "NotFound", message = "Tenant not found." }).ConfigureAwait(false);
+                return;
+            }
+
+            await RequirePermissionAsync(requestContext, "Admin", OperationTypeEnum.Admin, token).ConfigureAwait(false);
+            await DeleteTenantAsync(deleteTenantId, requestContext, token).ConfigureAwait(false);
+            await SendNoContentAsync(context).ConfigureAwait(false);
+        }
+
+        internal async Task HandleOnboardingConfigAsync(HttpContextBase context, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            await SendJsonAsync(context, new
+            {
+                mode = _Settings.Onboarding.Mode.ToString(),
+                signupEnabled = _Settings.Onboarding.Mode != OnboardingModeEnum.Disabled,
+                captchaProvider = _Settings.Onboarding.Captcha.Provider.ToString(),
+                captchaSiteKey = _Settings.Onboarding.Captcha.SiteKey ?? String.Empty
+            }).ConfigureAwait(false);
+        }
+
+        internal async Task<bool> RejectRateLimitedAuthAttemptAsync(HttpContextBase context)
         {
             int limit = _Settings.Auth.MaxLoginRequestsPerMinute;
             if (limit <= 0) return false;
@@ -7675,13 +7723,12 @@ namespace Xeno.Server
             return true;
         }
 
-        private Tenant CreateTenant(TenantSaveRequest body)
+        private async Task<Tenant> CreateTenantAsync(TenantSaveRequest body, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             string id = FirstNonEmpty(body.Id, IdGenerator.NewId("ten_"));
             string name = FirstNonEmpty(body.Name);
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Tenant name is required.");
-            if (platform.Tenants.Any(item => String.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Tenant ID already exists.");
+            if (await _Database!.Tenants!.ExistsAsync(id, token).ConfigureAwait(false)) throw new ArgumentException("Tenant ID already exists.");
 
             Tenant tenant = new Tenant
             {
@@ -7698,17 +7745,17 @@ namespace Xeno.Server
             return tenant;
         }
 
-        private User CreateUser(RequestContext requestContext, HttpContextBase context)
+        private async Task<User> CreateUserAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             UserSaveRequest body = ReadJsonBody<UserSaveRequest>(context);
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
-            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
+            if (!await IsTenantVisibleAsync(requestContext, tenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            Tenant? createUserTenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
+            if (createUserTenant == null || !createUserTenant.Active) throw new ArgumentException("Tenant does not exist or is inactive.");
 
             string username = FirstNonEmpty(body.Username, body.Email);
             if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
-            if (platform.Users.Any(item => item.TenantId == tenantId && String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Username already exists in the tenant.");
+            if (await _Database!.Users!.ReadByUsernameAsync(tenantId, username, token).ConfigureAwait(false) != null) throw new ArgumentException("Username already exists in the tenant.");
 
             string password = FirstNonEmpty(body.Password);
             if (String.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password is required.");
@@ -7724,13 +7771,13 @@ namespace Xeno.Server
             };
             if (body.IsAdmin.HasValue && body.IsAdmin.Value)
             {
-                EnsureCanChangeSystemAdminFlag(requestContext);
+                await EnsureCanChangeSystemAdminFlagAsync(requestContext, token).ConfigureAwait(false);
                 user.IsAdmin = body.IsAdmin.Value;
             }
 
             if (body.IsTenantAdmin.HasValue && body.IsTenantAdmin.Value)
             {
-                EnsureCanChangeTenantAdminFlag(requestContext, tenantId);
+                await EnsureCanChangeTenantAdminFlagAsync(requestContext, tenantId, token).ConfigureAwait(false);
                 user.IsTenantAdmin = body.IsTenantAdmin.Value;
             }
 
@@ -7740,29 +7787,29 @@ namespace Xeno.Server
             return user;
         }
 
-        private Credential CreateCredential(RequestContext requestContext, HttpContextBase context)
+        private async Task<Credential> CreateCredentialAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             CredentialSaveRequest body = ReadJsonBody<CredentialSaveRequest>(context);
             if (!String.IsNullOrWhiteSpace(body.SecretKey)) throw new ArgumentException("Secret keys are not accepted for credential creation.");
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            if (!await IsTenantVisibleAsync(requestContext, tenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
             string userId = FirstNonEmpty(body.UserId, requestContext.UserId);
             if (String.IsNullOrWhiteSpace(userId))
             {
-                User? user = platform.Users.FirstOrDefault(item => item.TenantId == tenantId && item.Active);
+                User? user = (await _Database!.Users!.EnumerateAsync(tenantId, token).ConfigureAwait(false)).FirstOrDefault(item => item.Active);
                 userId = user?.Id ?? String.Empty;
             }
 
             if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.");
-            if (!platform.Users.Any(item => item.Id == userId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("Credential user does not exist or is inactive.");
-            if (!CanManageTenant(requestContext, tenantId) && !String.Equals(userId, requestContext.UserId, StringComparison.Ordinal))
+            User? credentialUser = await _Database!.Users!.ReadAsync(tenantId, userId, token).ConfigureAwait(false);
+            if (credentialUser == null || !credentialUser.Active) throw new ArgumentException("Credential user does not exist or is inactive.");
+            if (!await CanManageTenantAsync(requestContext, tenantId, token).ConfigureAwait(false) && !String.Equals(userId, requestContext.UserId, StringComparison.Ordinal))
             {
                 throw new AuthorizationDeniedException(403, "SelfServiceCredentialOnly", "Regular users can create credentials only for their own account.");
             }
 
             string accessKey = FirstNonEmpty(body.AccessKey, IdGenerator.NewId("xeno_"));
-            if (platform.Credentials.Any(item => item.TenantId == tenantId && String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))) throw new ArgumentException("Access key already exists in the tenant.");
+            if (await _Database!.Credentials!.ReadByAccessKeyAsync(tenantId, accessKey, token).ConfigureAwait(false) != null) throw new ArgumentException("Access key already exists in the tenant.");
             Credential credential = new Credential
             {
                 TenantId = tenantId,
@@ -7776,20 +7823,19 @@ namespace Xeno.Server
             return credential;
         }
 
-        private Role CreateRole(RequestContext requestContext, HttpContextBase context)
+        private async Task<Role> CreateRoleAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             RoleSaveRequest body = ReadJsonBody<RoleSaveRequest>(context);
             string name = FirstNonEmpty(body.Name);
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Role name is required.");
-            if (platform.Roles.Any(item => item.TenantId == requestContext.TenantId && String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Role name already exists in the tenant.");
+            if (await _Database!.Roles!.ReadByNameAsync(requestContext.TenantId, name, token).ConfigureAwait(false) != null) throw new ArgumentException("Role name already exists in the tenant.");
 
             Role role = new Role
             {
                 TenantId = requestContext.TenantId,
                 Name = name.Trim(),
                 BuiltIn = false,
-                PermissionIds = GetGrantablePermissionIds(requestContext, GetStringSet(body.PermissionIds)).ToList(),
+                PermissionIds = await GetGrantablePermissionIdsAsync(requestContext, GetStringSet(body.PermissionIds), token).ConfigureAwait(false),
                 CreatedUtc = DateTime.UtcNow,
                 LastUpdateUtc = DateTime.UtcNow,
                 Active = true
@@ -7799,7 +7845,7 @@ namespace Xeno.Server
             return role;
         }
 
-        private Permission CreatePermission(RequestContext requestContext, HttpContextBase context)
+        private async Task<Permission> CreatePermissionAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
             PermissionSaveRequest body = ReadJsonBody<PermissionSaveRequest>(context);
             string resourceType = FirstNonEmpty(body.ResourceType);
@@ -7808,7 +7854,7 @@ namespace Xeno.Server
             OperationTypeEnum operationType = OperationTypeEnum.Read;
             string? operationTypeText = body.OperationType;
             if (!String.IsNullOrWhiteSpace(operationTypeText) && !Enum.TryParse(operationTypeText, true, out operationType)) throw new ArgumentException("Operation type is invalid.");
-            EnsureCanGrantPermission(requestContext, requestContext.TenantId, resourceType, operationType);
+            await EnsureCanGrantPermissionAsync(requestContext, requestContext.TenantId, resourceType, operationType, token).ConfigureAwait(false);
 
             Permission permission = new Permission
             {
@@ -7826,60 +7872,66 @@ namespace Xeno.Server
             return permission;
         }
 
-        private IEnumerable<string> GetGrantablePermissionIds(RequestContext requestContext, IEnumerable<string> permissionIds)
+        private async Task<List<string>> GetGrantablePermissionIdsAsync(RequestContext requestContext, IEnumerable<string> permissionIds, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
+            List<string> grantable = new List<string>();
             foreach (string permissionId in permissionIds)
             {
-                Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId && item.Active);
-                if (permission == null) continue;
-                EnsureCanGrantPermission(requestContext, permission.TenantId, permission.ResourceType, permission.OperationType);
-                yield return permission.Id;
+                Permission? permission = await _Database!.Permissions!.ReadAsync(requestContext.TenantId, permissionId, token).ConfigureAwait(false);
+                if (permission == null || !permission.Active) continue;
+                await EnsureCanGrantPermissionAsync(requestContext, permission.TenantId, permission.ResourceType, permission.OperationType, token).ConfigureAwait(false);
+                grantable.Add(permission.Id);
             }
+
+            return grantable;
         }
 
-        private List<Permission> ListGrantablePermissions(RequestContext requestContext)
+        private async Task<List<Permission>> ListGrantablePermissionsAsync(RequestContext requestContext, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            List<Permission> permissions = platform.Permissions
-                .Where(item => item.TenantId == requestContext.TenantId && item.Active)
+            List<Permission> permissions = (await _Database!.Permissions!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false))
+                .Where(item => item.Active)
                 .ToList();
-            if (_Authorization.IsSystemAdmin(platform, requestContext)) return permissions;
-            if (_Authorization.IsTenantAdmin(platform, requestContext, requestContext.TenantId)) return permissions;
-            return permissions
-                .Where(permission => _Authorization.Authorize(platform, new AuthorizationRequest
+            if (await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false)) return permissions;
+            if (await _Authorization.IsTenantAdminAsync(_Database!, requestContext, requestContext.TenantId, token).ConfigureAwait(false)) return permissions;
+            List<Permission> grantablePermissions = new List<Permission>();
+            foreach (Permission permission in permissions)
+            {
+                AuthorizationDecision decision = await _Authorization.AuthorizeAsync(_Database!, new AuthorizationRequest
                 {
                     Context = requestContext,
                     TargetTenantId = permission.TenantId,
                     ResourceType = permission.ResourceType,
                     OperationType = permission.OperationType
-                }).Allowed)
-                .ToList();
+                }, token).ConfigureAwait(false);
+                if (decision.Allowed) grantablePermissions.Add(permission);
+            }
+
+            return grantablePermissions;
         }
 
-        private void EnsureCanGrantPermission(RequestContext requestContext, string tenantId, string resourceType, OperationTypeEnum operationType)
+        private async Task EnsureCanGrantPermissionAsync(RequestContext requestContext, string tenantId, string resourceType, OperationTypeEnum operationType, CancellationToken token)
         {
-            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
-            if (_Authorization.IsTenantAdmin(RequirePlatform(), requestContext, tenantId)) return;
-            AuthorizationDecision decision = _Authorization.Authorize(RequirePlatform(), new AuthorizationRequest
+            if (await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false)) return;
+            if (await _Authorization.IsTenantAdminAsync(_Database!, requestContext, tenantId, token).ConfigureAwait(false)) return;
+            AuthorizationDecision decision = await _Authorization.AuthorizeAsync(_Database!, new AuthorizationRequest
             {
                 Context = requestContext,
                 TargetTenantId = tenantId,
                 ResourceType = resourceType,
                 OperationType = operationType
-            });
+            }, token).ConfigureAwait(false);
             if (decision.Allowed) return;
             RecordAuditFireAndForget(requestContext, resourceType, operationType, false, "GrantExceedsAuthority", 403, tenantId, null);
             throw new AuthorizationDeniedException(403, "GrantExceedsAuthority", "Permission grant exceeds the grantor's authority.");
         }
 
-        private RoutingPolicy CreateRoutingPolicy(RequestContext requestContext, HttpContextBase context)
+        private async Task<RoutingPolicy> CreateRoutingPolicyAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
-            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) throw new ArgumentException("Tenant does not exist or is inactive.");
+            if (!await IsTenantVisibleAsync(requestContext, tenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            Tenant? policyTenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
+            if (policyTenant == null || !policyTenant.Active) throw new ArgumentException("Tenant does not exist or is inactive.");
 
             string name = FirstNonEmpty(body.Name);
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Routing policy name is required.");
@@ -7903,14 +7955,14 @@ namespace Xeno.Server
                 LastUpdateUtc = DateTime.UtcNow
             };
 
-            EnsureRoutingPolicyUnique(policy, null);
+            await EnsureRoutingPolicyUniqueAsync(policy, null, token).ConfigureAwait(false);
             _Logging.Info(_Header + "created routing policy " + policy.Id);
             return policy;
         }
 
-        private RoutingPolicy UpdateRoutingPolicy(RequestContext requestContext, string policyId, HttpContextBase context)
+        private async Task<RoutingPolicy> UpdateRoutingPolicyAsync(RequestContext requestContext, string policyId, HttpContextBase context, CancellationToken token)
         {
-            RoutingPolicy? policy = RequirePlatform().RoutingPolicies.FirstOrDefault(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            RoutingPolicy? policy = await _Database!.RoutingPolicies!.ReadAsync(requestContext.TenantId, policyId, token).ConfigureAwait(false);
             if (policy == null) throw new KeyNotFoundException("Routing policy not found.");
 
             RoutingPolicySaveRequest body = ReadJsonBody<RoutingPolicySaveRequest>(context);
@@ -7942,17 +7994,19 @@ namespace Xeno.Server
             if (body.TelemetryRanking != null) policy.TelemetryRanking = body.TelemetryRanking;
             if (body.TelemetryFallbackMode.HasValue) policy.TelemetryFallbackMode = body.TelemetryFallbackMode.Value;
             policy.LastUpdateUtc = DateTime.UtcNow;
-            EnsureRoutingPolicyUnique(policy, policy.Id);
+            await EnsureRoutingPolicyUniqueAsync(policy, policy.Id, token).ConfigureAwait(false);
+            await _Database!.RoutingPolicies!.UpdateAsync(policy, token).ConfigureAwait(false);
             _Logging.Info(_Header + "updated routing policy " + policy.Id);
             return policy;
         }
 
-        private int DeleteRoutingPolicy(RequestContext requestContext, string policyId)
+        private async Task<int> DeleteRoutingPolicyAsync(RequestContext requestContext, string policyId, CancellationToken token)
         {
-            RoutingPolicy? policy = RequirePlatform().RoutingPolicies.FirstOrDefault(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            RoutingPolicy? policy = await _Database!.RoutingPolicies!.ReadAsync(requestContext.TenantId, policyId, token).ConfigureAwait(false);
             if (policy == null) return 0;
             if (policy.IsDefault) throw new InvalidOperationException("The default routing policy cannot be deleted.");
-            int removed = RequirePlatform().RoutingPolicies.RemoveAll(item => item.Id == policyId && item.TenantId == requestContext.TenantId);
+            bool deleted = await _Database!.RoutingPolicies!.DeleteAsync(requestContext.TenantId, policyId, token).ConfigureAwait(false);
+            int removed = deleted ? 1 : 0;
             if (removed > 0) _Logging.Info(_Header + "deleted routing policy " + policyId);
             return removed;
         }
@@ -7966,10 +8020,10 @@ namespace Xeno.Server
             ValidateNukeReason(body.Reason);
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenantId is required.");
             if (!String.Equals(tenantId, confirmTenantId, StringComparison.Ordinal)) throw new ArgumentException("confirmTenantId must exactly match tenantId.");
-            EnsureSystemAdmin(requestContext, tenantId, tenantId);
+            await EnsureSystemAdminAsync(requestContext, tenantId, tenantId, token).ConfigureAwait(false);
             if (String.Equals(tenantId, Constants.DefaultTenantId, StringComparison.OrdinalIgnoreCase)) throw new HttpStatusException(409, "ProtectedTenant", "The default/system tenant cannot be nuked.");
 
-            XenoPlatform platform = RequirePlatform();
+            XenoPlatform platform = await Xeno.Core.Database.DatabaseSeeder.LoadSnapshotAsync(_Database!, token).ConfigureAwait(false);
             Tenant? tenant = platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, tenantId, StringComparison.OrdinalIgnoreCase));
             if (tenant == null) throw new HttpStatusException(404, "TenantNotFound", "Tenant was not found.");
 
@@ -7997,7 +8051,7 @@ namespace Xeno.Server
                     Name = tenant.Name,
                     Status = body.DryRun ? (tenant.Active ? "Active" : "Inactive") : "Deleted"
                 },
-                RequestedBy = BuildNukeRequestedBy(requestContext, tenantId),
+                RequestedBy = await BuildNukeRequestedByAsync(requestContext, tenantId, token).ConfigureAwait(false),
                 Deleted = counts,
                 StartedUtc = startedUtc
             };
@@ -8019,6 +8073,7 @@ namespace Xeno.Server
                     .Select(item => item.Id)
                     .ToList();
                 response.Deleted = platform.RemoveTenantScopedRecords(tenantId, body.IncludeAuditRecords, body.IncludeRequestHistory);
+                await Xeno.Core.Database.DatabaseSeeder.PurgeTenantEntitiesAsync(_Database!, tenantId, true, token).ConfigureAwait(false);
                 if (body.IncludeRequestHistory && _Database?.RequestHistory != null)
                 {
                     response.Deleted.RequestHistory = await _Database.RequestHistory.DeleteAsync(new RequestHistoryQuery { TenantId = tenantId, MatchRequestorTenant = true }, token).ConfigureAwait(false);
@@ -8042,7 +8097,6 @@ namespace Xeno.Server
                 }
 
                 await RecordAuditAsync(requestContext, "Admin.Nuke.Tenant", OperationTypeEnum.Admin, true, "TenantNukeExecuted", 200, tenantId, tenantId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
                 response.CompletedUtc = DateTime.UtcNow;
                 return response;
             }
@@ -8064,14 +8118,13 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("userId is required.");
             if (!String.Equals(userId, confirmUserId, StringComparison.Ordinal)) throw new ArgumentException("confirmUserId must exactly match userId.");
 
-            XenoPlatform platform = RequirePlatform();
-            bool isSystemAdmin = _Authorization.IsSystemAdmin(platform, requestContext);
-            bool isTenantAdmin = _Authorization.IsTenantAdmin(platform, requestContext, tenantId);
+            XenoPlatform platform = await Xeno.Core.Database.DatabaseSeeder.LoadSnapshotAsync(_Database!, token).ConfigureAwait(false);
+            bool isSystemAdmin = await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false);
+            bool isTenantAdmin = await _Authorization.IsTenantAdminAsync(_Database!, requestContext, tenantId, token).ConfigureAwait(false);
             if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
             if (!isSystemAdmin && !isTenantAdmin)
             {
                 await RecordAuditAsync(requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, userId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
                 throw new AuthorizationDeniedException(403, "TenantAdminRequired", "Only a system administrator or same-tenant tenant administrator can nuke a user.");
             }
 
@@ -8121,7 +8174,7 @@ namespace Xeno.Server
                     Email = user.Email,
                     Status = body.DryRun ? (user.Active ? "Active" : "Inactive") : "Deleted"
                 },
-                RequestedBy = BuildNukeRequestedBy(requestContext, tenantId),
+                RequestedBy = await BuildNukeRequestedByAsync(requestContext, tenantId, token).ConfigureAwait(false),
                 Deleted = counted.Deleted,
                 Updated = counted.Updated,
                 StartedUtc = startedUtc
@@ -8140,6 +8193,7 @@ namespace Xeno.Server
             try
             {
                 AdminNukeResponse removed = platform.RemoveUserScopedRecords(tenantId, userId, body.IncludeAuditRecords, body.AnonymizeRequestHistory);
+                await PurgeUserScopedEntitiesAsync(tenantId, userId, token).ConfigureAwait(false);
                 response.Deleted = removed.Deleted;
                 response.Updated = removed.Updated;
                 if (body.AnonymizeRequestHistory && _Database?.RequestHistory != null)
@@ -8158,7 +8212,6 @@ namespace Xeno.Server
                 }
 
                 await RecordAuditAsync(requestContext, "Admin.Nuke.User", OperationTypeEnum.Admin, true, "UserNukeExecuted", 200, tenantId, userId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
                 response.CompletedUtc = DateTime.UtcNow;
                 return response;
             }
@@ -8170,17 +8223,17 @@ namespace Xeno.Server
 
         private async Task<int> DeleteTenantAsync(string tenantId, RequestContext requestContext, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            Tenant? tenant = platform.Tenants.FirstOrDefault(item => item.Id == tenantId);
+            Tenant? tenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
             if (tenant == null) return 0;
             await RequireTenantLifecycle().DeleteAsync(tenant, true, requestContext, token).ConfigureAwait(false);
 
-            List<string> clientIds = platform.Clients.Where(item => item.TenantId == tenantId).Select(item => item.Id).ToList();
-            int removed = platform.Tenants.RemoveAll(item => item.Id == tenantId);
+            List<string> clientIds = (await _Database!.Clients!.EnumerateAsync(tenantId, token).ConfigureAwait(false)).Select(item => item.Id).ToList();
+            XenoPlatform snapshot = await Xeno.Core.Database.DatabaseSeeder.LoadSnapshotAsync(_Database!, token).ConfigureAwait(false);
+            int removed = snapshot.Tenants.RemoveAll(item => item.Id == tenantId);
             if (removed > 0)
             {
-                removed += platform.RemoveTenantScopedRecords(tenantId);
-                await SavePlatformAsync(token).ConfigureAwait(false);
+                removed += snapshot.RemoveTenantScopedRecords(tenantId);
+                await Xeno.Core.Database.DatabaseSeeder.PurgeTenantEntitiesAsync(_Database!, tenantId, true, token).ConfigureAwait(false);
                 _Logging.Info(_Header + "deleted tenant " + tenantId);
             }
 
@@ -8191,10 +8244,49 @@ namespace Xeno.Server
             return removed;
         }
 
-        private void EnsureRoutingPolicyUnique(RoutingPolicy policy, string? existingPolicyId)
+        private async Task PurgeUserScopedEntitiesAsync(string tenantId, string userId, CancellationToken token)
         {
-            bool duplicate = RequirePlatform().RoutingPolicies.Any(item =>
-                item.TenantId == policy.TenantId &&
+            List<Credential> credentials = await _Database!.Credentials!.EnumerateByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            List<string> credentialIds = credentials.Select(item => item.Id).ToList();
+
+            await _Database!.Users!.DeleteAsync(tenantId, userId, token).ConfigureAwait(false);
+            foreach (Credential credential in credentials)
+            {
+                await _Database!.Credentials!.DeleteAsync(tenantId, credential.Id, token).ConfigureAwait(false);
+            }
+
+            await _Database!.AuthSessions!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            foreach (string credentialId in credentialIds)
+            {
+                await _Database!.AuthSessions!.DeleteByCredentialAsync(tenantId, credentialId, token).ConfigureAwait(false);
+            }
+
+            foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, userId, token).ConfigureAwait(false))
+            {
+                if (assignment.PrincipalType == PrincipalTypeEnum.User && assignment.PrincipalId == userId)
+                {
+                    await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false);
+                }
+            }
+
+            foreach (string credentialId in credentialIds)
+            {
+                foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, credentialId, token).ConfigureAwait(false))
+                {
+                    if (assignment.PrincipalType == PrincipalTypeEnum.Credential && assignment.PrincipalId == credentialId)
+                    {
+                        await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false);
+                    }
+                }
+            }
+
+            await _Database!.LedgerAccountLinks!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+        }
+
+        private async Task EnsureRoutingPolicyUniqueAsync(RoutingPolicy policy, string? existingPolicyId, CancellationToken token)
+        {
+            List<RoutingPolicy> policies = await _Database!.RoutingPolicies!.EnumerateAsync(policy.TenantId, token).ConfigureAwait(false);
+            bool duplicate = policies.Any(item =>
                 item.Id != existingPolicyId &&
                 String.Equals(item.ModelName, policy.ModelName, StringComparison.OrdinalIgnoreCase) &&
                 String.Equals(item.ClientName, policy.ClientName, StringComparison.OrdinalIgnoreCase));
@@ -8215,9 +8307,9 @@ namespace Xeno.Server
             return timeout;
         }
 
-        private Tenant UpdateTenant(string tenantId, TenantSaveRequest body)
+        private async Task<Tenant> UpdateTenantAsync(string tenantId, TenantSaveRequest body, CancellationToken token)
         {
-            Tenant? tenant = RequirePlatform().Tenants.FirstOrDefault(item => item.Id == tenantId);
+            Tenant? tenant = await _Database!.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
             if (tenant == null) throw new KeyNotFoundException("Tenant not found.");
 
             string? name = body.Name;
@@ -8231,39 +8323,58 @@ namespace Xeno.Server
             if (body.DefaultClientShared.HasValue) tenant.DefaultClientShared = body.DefaultClientShared.Value;
             if (body.ConsumeShared.HasValue) tenant.ConsumeShared = body.ConsumeShared.Value;
             tenant.LastUpdateUtc = DateTime.UtcNow;
+            await _Database!.Tenants!.UpdateAsync(tenant, token).ConfigureAwait(false);
             _Logging.Info(_Header + "updated tenant " + tenant.Id);
             return tenant;
         }
 
-        private int DeleteUser(RequestContext requestContext, string userId)
+        private async Task<int> DeleteUserAsync(RequestContext requestContext, string userId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            User? user = platform.Users.FirstOrDefault(item => item.Id == userId && IsTenantVisible(requestContext, item.TenantId));
+            User? user = await FindVisibleUserAsync(requestContext, userId, token).ConfigureAwait(false);
             if (user == null) return 0;
+            string tenantId = user.TenantId;
 
-            List<string> credentialIds = platform.Credentials
-                .Where(item => item.TenantId == user.TenantId && item.UserId == userId)
-                .Select(item => item.Id)
-                .ToList();
+            List<Credential> credentials = await _Database!.Credentials!.EnumerateByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            List<string> credentialIds = credentials.Select(item => item.Id).ToList();
 
-            int removed = platform.Users.RemoveAll(item => item.Id == userId && item.TenantId == user.TenantId);
-            removed += platform.Credentials.RemoveAll(item => item.TenantId == user.TenantId && item.UserId == userId);
-            removed += platform.AuthSessions.RemoveAll(item => item.TenantId == user.TenantId && (item.UserId == userId || (item.CredentialId != null && credentialIds.Contains(item.CredentialId))));
-            removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.User && item.PrincipalId == userId);
-            removed += platform.RoleAssignments.RemoveAll(item => item.TenantId == user.TenantId && item.PrincipalType == PrincipalTypeEnum.Credential && credentialIds.Contains(item.PrincipalId));
-            platform.LedgerAccountLinks.RemoveAll(item => item.XenoTenantId == user.TenantId && item.XenoUserId == userId);
+            int removed = 0;
+            if (await _Database!.Users!.DeleteAsync(tenantId, userId, token).ConfigureAwait(false)) removed++;
+            foreach (Credential credential in credentials)
+            {
+                if (await _Database!.Credentials!.DeleteAsync(tenantId, credential.Id, token).ConfigureAwait(false)) removed++;
+            }
+
+            removed += await _Database!.AuthSessions!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            foreach (string credentialId in credentialIds)
+            {
+                removed += await _Database!.AuthSessions!.DeleteByCredentialAsync(tenantId, credentialId, token).ConfigureAwait(false);
+            }
+
+            foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, userId, token).ConfigureAwait(false))
+            {
+                if (assignment.PrincipalType == PrincipalTypeEnum.User && assignment.PrincipalId == userId && await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false)) removed++;
+            }
+
+            foreach (string credentialId in credentialIds)
+            {
+                foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, credentialId, token).ConfigureAwait(false))
+                {
+                    if (assignment.PrincipalType == PrincipalTypeEnum.Credential && assignment.PrincipalId == credentialId && await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false)) removed++;
+                }
+            }
+
+            await _Database!.LedgerAccountLinks!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
             _Logging.Info(_Header + "deleted user " + userId);
             return removed;
         }
 
-        private User UpdateUser(RequestContext requestContext, string userId, HttpContextBase context)
+        private async Task<User> UpdateUserAsync(RequestContext requestContext, string userId, HttpContextBase context, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            User? user = platform.Users.FirstOrDefault(item => item.Id == userId && IsTenantVisible(requestContext, item.TenantId));
+            User? user = await FindVisibleUserAsync(requestContext, userId, token).ConfigureAwait(false);
             if (user == null) throw new KeyNotFoundException("User not found.");
 
             UserSaveRequest body = ReadJsonBody<UserSaveRequest>(context);
-            bool selfService = !CanManageTenant(requestContext, user.TenantId);
+            bool selfService = !await CanManageTenantAsync(requestContext, user.TenantId, token).ConfigureAwait(false);
             if (selfService && !String.Equals(user.Id, requestContext.UserId, StringComparison.Ordinal))
             {
                 throw new AuthorizationDeniedException(403, "SelfServiceUserOnly", "Regular users can update only their own account.");
@@ -8279,7 +8390,8 @@ namespace Xeno.Server
             {
                 if (String.IsNullOrWhiteSpace(username)) throw new ArgumentException("Username is required.");
                 string normalizedUsername = username.Trim();
-                if (platform.Users.Any(item => item.TenantId == user.TenantId && item.Id != user.Id && String.Equals(item.Username, normalizedUsername, StringComparison.OrdinalIgnoreCase)))
+                User? existingByUsername = await _Database!.Users!.ReadByUsernameAsync(user.TenantId, normalizedUsername, token).ConfigureAwait(false);
+                if (existingByUsername != null && existingByUsername.Id != user.Id)
                 {
                     throw new HttpStatusException(409, "UsernameAlreadyExists", "Username already exists in the tenant.");
                 }
@@ -8293,7 +8405,8 @@ namespace Xeno.Server
                 string normalizedEmail = email.Trim();
                 if (String.IsNullOrWhiteSpace(normalizedEmail)) throw new ArgumentException("Email is required.");
                 if (!IsValidEmailAddress(normalizedEmail)) throw new ArgumentException("Email address is invalid.");
-                if (platform.Users.Any(item => item.TenantId == user.TenantId && item.Id != user.Id && String.Equals(item.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase)))
+                User? existingByEmail = await _Database!.Users!.ReadByEmailAsync(user.TenantId, normalizedEmail, token).ConfigureAwait(false);
+                if (existingByEmail != null && existingByEmail.Id != user.Id)
                 {
                     throw new HttpStatusException(409, "EmailAlreadyExists", "Email already exists in the tenant.");
                 }
@@ -8303,14 +8416,14 @@ namespace Xeno.Server
 
             if (body.IsAdmin.HasValue && body.IsAdmin.Value != user.IsAdmin)
             {
-                EnsureCanChangeSystemAdminFlag(requestContext);
-                EnsureCanDisableSystemAdminFlag(requestContext, user, body.IsAdmin.Value);
+                await EnsureCanChangeSystemAdminFlagAsync(requestContext, token).ConfigureAwait(false);
+                await EnsureCanDisableSystemAdminFlagAsync(requestContext, user, body.IsAdmin.Value, token).ConfigureAwait(false);
                 user.IsAdmin = body.IsAdmin.Value;
             }
 
             if (body.IsTenantAdmin.HasValue && body.IsTenantAdmin.Value != user.IsTenantAdmin)
             {
-                EnsureCanChangeTenantAdminFlag(requestContext, user.TenantId);
+                await EnsureCanChangeTenantAdminFlagAsync(requestContext, user.TenantId, token).ConfigureAwait(false);
                 user.IsTenantAdmin = body.IsTenantAdmin.Value;
             }
 
@@ -8319,47 +8432,61 @@ namespace Xeno.Server
             string? password = body.Password;
             if (!String.IsNullOrWhiteSpace(password)) _Authentication.SetUserPassword(user, password);
 
+            await _Database!.Users!.UpdateAsync(user, token).ConfigureAwait(false);
             _Logging.Info(_Header + "updated user " + user.Id);
             return user;
         }
 
-        private void EnsureCanChangeSystemAdminFlag(RequestContext requestContext)
+        private async Task EnsureCanChangeSystemAdminFlagAsync(RequestContext requestContext, CancellationToken token)
         {
-            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
+            if (await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false)) return;
             RecordAuditFireAndForget(requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, requestContext.TenantId, null);
             throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can change the system administrator flag.");
         }
 
-        private void EnsureCanDisableSystemAdminFlag(RequestContext requestContext, User user, bool requestedIsAdmin)
+        private async Task EnsureCanDisableSystemAdminFlagAsync(RequestContext requestContext, User user, bool requestedIsAdmin, CancellationToken token)
         {
             if (requestedIsAdmin) return;
             if (!user.IsAdmin) return;
             if (!String.Equals(requestContext.UserId, user.Id, StringComparison.Ordinal)) return;
 
-            int activeSystemAdminCount = RequirePlatform().Users.Count(item => item.Active && item.IsAdmin);
+            int activeSystemAdminCount = await CountActiveSystemAdminsAsync(token).ConfigureAwait(false);
             if (activeSystemAdminCount > 1) return;
 
             RecordAuditFireAndForget(requestContext, "Users.SystemAdmin", OperationTypeEnum.Admin, false, "LastSystemAdminProtected", 403, user.TenantId, user.Id);
             throw new AuthorizationDeniedException(403, "LastSystemAdminProtected", "The last active system administrator cannot remove their own system administrator flag.");
         }
 
-        private void EnsureSystemAdmin(RequestContext requestContext, string targetTenantId, string? targetResourceId)
+        private async Task<int> CountActiveSystemAdminsAsync(CancellationToken token)
+        {
+            int count = 0;
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                foreach (User user in await _Database!.Users!.EnumerateAsync(tenant.Id, token).ConfigureAwait(false))
+                {
+                    if (user.Active && user.IsAdmin) count++;
+                }
+            }
+
+            return count;
+        }
+
+        private async Task EnsureSystemAdminAsync(RequestContext requestContext, string targetTenantId, string? targetResourceId, CancellationToken token)
         {
             if (!requestContext.IsAuthenticated) throw new UnauthorizedAccessException("Authentication is required.");
-            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
+            if (await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false)) return;
             RecordAuditFireAndForget(requestContext, "Admin.Nuke", OperationTypeEnum.Admin, false, "SystemAdminRequired", 403, targetTenantId, targetResourceId);
             throw new AuthorizationDeniedException(403, "SystemAdminRequired", "Only a system administrator can perform this operation.");
         }
 
-        private AdminNukeRequestedBy BuildNukeRequestedBy(RequestContext requestContext, string targetTenantId)
+        private async Task<AdminNukeRequestedBy> BuildNukeRequestedByAsync(RequestContext requestContext, string targetTenantId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             return new AdminNukeRequestedBy
             {
                 TenantId = requestContext.TenantId,
                 UserId = requestContext.UserId,
-                IsGlobalAdmin = _Authorization.IsSystemAdmin(platform, requestContext),
-                IsTenantAdmin = _Authorization.IsTenantAdmin(platform, requestContext, targetTenantId)
+                IsGlobalAdmin = await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false),
+                IsTenantAdmin = await _Authorization.IsTenantAdminAsync(_Database!, requestContext, targetTenantId, token).ConfigureAwait(false)
             };
         }
 
@@ -8379,19 +8506,19 @@ namespace Xeno.Server
             }
         }
 
-        private void EnsureCanChangeTenantAdminFlag(RequestContext requestContext, string tenantId)
+        private async Task EnsureCanChangeTenantAdminFlagAsync(RequestContext requestContext, string tenantId, CancellationToken token)
         {
-            if (_Authorization.IsSystemAdmin(RequirePlatform(), requestContext)) return;
-            if (_Authorization.IsTenantAdmin(RequirePlatform(), requestContext, tenantId)) return;
+            if (await _Authorization.IsSystemAdminAsync(_Database!, requestContext, token).ConfigureAwait(false)) return;
+            if (await _Authorization.IsTenantAdminAsync(_Database!, requestContext, tenantId, token).ConfigureAwait(false)) return;
             RecordAuditFireAndForget(requestContext, "Users.TenantAdmin", OperationTypeEnum.Admin, false, "TenantAdminRequired", 403, tenantId, null);
             throw new AuthorizationDeniedException(403, "TenantAdminRequired", "Only a system administrator or same-tenant tenant administrator can change the tenant administrator flag.");
         }
 
-        private Credential UpdateCredential(RequestContext requestContext, string credentialId, HttpContextBase context)
+        private async Task<Credential> UpdateCredentialAsync(RequestContext requestContext, string credentialId, HttpContextBase context, CancellationToken token)
         {
-            Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
+            Credential? credential = await _Database!.Credentials!.ReadAsync(requestContext.TenantId, credentialId, token).ConfigureAwait(false);
             if (credential == null) throw new KeyNotFoundException("Credential not found.");
-            if (!CanManageTenant(requestContext, credential.TenantId) && !String.Equals(credential.UserId, requestContext.UserId, StringComparison.Ordinal))
+            if (!await CanManageTenantAsync(requestContext, credential.TenantId, token).ConfigureAwait(false) && !String.Equals(credential.UserId, requestContext.UserId, StringComparison.Ordinal))
             {
                 throw new AuthorizationDeniedException(403, "SelfServiceCredentialOnly", "Regular users can update only their own credentials.");
             }
@@ -8400,7 +8527,7 @@ namespace Xeno.Server
             string? userId = body.UserId;
             if (userId != null)
             {
-                if (!CanManageTenant(requestContext, credential.TenantId)) throw new AuthorizationDeniedException(403, "SelfServiceCredentialOwnerDenied", "Regular users cannot reassign credentials.");
+                if (!await CanManageTenantAsync(requestContext, credential.TenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "SelfServiceCredentialOwnerDenied", "Regular users cannot reassign credentials.");
                 credential.UserId = userId.Trim();
             }
 
@@ -8409,7 +8536,8 @@ namespace Xeno.Server
             {
                 if (String.IsNullOrWhiteSpace(accessKey)) throw new ArgumentException("Access key is required.");
                 string normalizedAccessKey = accessKey.Trim();
-                if (RequirePlatform().Credentials.Any(item => item.TenantId == credential.TenantId && item.Id != credential.Id && String.Equals(item.AccessKey, normalizedAccessKey, StringComparison.Ordinal)))
+                Credential? existingByAccessKey = await _Database!.Credentials!.ReadByAccessKeyAsync(credential.TenantId, normalizedAccessKey, token).ConfigureAwait(false);
+                if (existingByAccessKey != null && existingByAccessKey.Id != credential.Id)
                 {
                     throw new HttpStatusException(409, "AccessKeyAlreadyExists", "Access key already exists in the tenant.");
                 }
@@ -8419,26 +8547,31 @@ namespace Xeno.Server
 
             if (!String.IsNullOrWhiteSpace(body.SecretKey)) throw new ArgumentException("Secret keys are not accepted for credential updates.");
             if (body.Active.HasValue) credential.Active = body.Active.Value;
+            await _Database!.Credentials!.UpdateAsync(credential, token).ConfigureAwait(false);
             _Logging.Info(_Header + "updated credential " + credential.Id);
             return credential;
         }
 
-        private int DeleteCredential(RequestContext requestContext, string credentialId)
+        private async Task<int> DeleteCredentialAsync(RequestContext requestContext, string credentialId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            Credential? credential = platform.Credentials.FirstOrDefault(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
+            Credential? credential = await _Database!.Credentials!.ReadAsync(requestContext.TenantId, credentialId, token).ConfigureAwait(false);
             if (credential == null) return 0;
 
-            int removed = platform.Credentials.RemoveAll(item => item.Id == credentialId && item.TenantId == requestContext.TenantId);
-            removed += platform.AuthSessions.RemoveAll(item => item.CredentialId == credentialId && item.TenantId == requestContext.TenantId);
-            removed += platform.RoleAssignments.RemoveAll(item => item.PrincipalType == PrincipalTypeEnum.Credential && item.PrincipalId == credentialId && item.TenantId == requestContext.TenantId);
+            int removed = 0;
+            if (await _Database!.Credentials!.DeleteAsync(requestContext.TenantId, credentialId, token).ConfigureAwait(false)) removed++;
+            removed += await _Database!.AuthSessions!.DeleteByCredentialAsync(requestContext.TenantId, credentialId, token).ConfigureAwait(false);
+            foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(requestContext.TenantId, credentialId, token).ConfigureAwait(false))
+            {
+                if (assignment.PrincipalType == PrincipalTypeEnum.Credential && assignment.PrincipalId == credentialId && await _Database!.RoleAssignments!.DeleteAsync(requestContext.TenantId, assignment.Id, token).ConfigureAwait(false)) removed++;
+            }
+
             _Logging.Info(_Header + "deleted credential " + credentialId);
             return removed;
         }
 
-        private Role UpdateRole(RequestContext requestContext, string roleId, HttpContextBase context)
+        private async Task<Role> UpdateRoleAsync(RequestContext requestContext, string roleId, HttpContextBase context, CancellationToken token)
         {
-            Role? role = RequirePlatform().Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
+            Role? role = await _Database!.Roles!.ReadAsync(requestContext.TenantId, roleId, token).ConfigureAwait(false);
             if (role == null) throw new KeyNotFoundException("Role not found.");
             if (role.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInRoleProtected", "Built-in roles cannot be modified through the management API.");
 
@@ -8450,27 +8583,28 @@ namespace Xeno.Server
                 role.Name = name.Trim();
             }
 
-            if (body.PermissionIds != null) role.PermissionIds = GetGrantablePermissionIds(requestContext, GetStringSet(body.PermissionIds)).ToList();
+            if (body.PermissionIds != null) role.PermissionIds = await GetGrantablePermissionIdsAsync(requestContext, GetStringSet(body.PermissionIds), token).ConfigureAwait(false);
             if (body.Active.HasValue) role.Active = body.Active.Value;
             role.LastUpdateUtc = DateTime.UtcNow;
+            await _Database!.Roles!.UpdateAsync(role, token).ConfigureAwait(false);
             _Logging.Info(_Header + "updated role " + role.Id);
             return role;
         }
 
-        private int DeleteRole(RequestContext requestContext, string roleId)
+        private async Task<int> DeleteRoleAsync(RequestContext requestContext, string roleId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            Role? role = platform.Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
+            Role? role = await _Database!.Roles!.ReadAsync(requestContext.TenantId, roleId, token).ConfigureAwait(false);
             if (role != null && role.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInRoleProtected", "Built-in roles cannot be deleted through the management API.");
-            int removed = platform.Roles.RemoveAll(item => item.Id == roleId && item.TenantId == requestContext.TenantId);
-            removed += platform.RoleAssignments.RemoveAll(item => item.RoleId == roleId && item.TenantId == requestContext.TenantId);
+            int removed = 0;
+            if (await _Database!.Roles!.DeleteAsync(requestContext.TenantId, roleId, token).ConfigureAwait(false)) removed++;
+            removed += await _Database!.RoleAssignments!.DeleteByRoleAsync(requestContext.TenantId, roleId, token).ConfigureAwait(false);
             if (removed > 0) _Logging.Info(_Header + "deleted role " + roleId);
             return removed;
         }
 
-        private Permission UpdatePermission(RequestContext requestContext, string permissionId, HttpContextBase context)
+        private async Task<Permission> UpdatePermissionAsync(RequestContext requestContext, string permissionId, HttpContextBase context, CancellationToken token)
         {
-            Permission? permission = RequirePlatform().Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
+            Permission? permission = await _Database!.Permissions!.ReadAsync(requestContext.TenantId, permissionId, token).ConfigureAwait(false);
             if (permission == null) throw new KeyNotFoundException("Permission not found.");
             if (permission.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInPermissionProtected", "Built-in permissions cannot be modified through the management API.");
 
@@ -8486,49 +8620,51 @@ namespace Xeno.Server
             if (!String.IsNullOrWhiteSpace(operationType))
             {
                 if (!Enum.TryParse(operationType, true, out OperationTypeEnum parsedOperation)) throw new ArgumentException("Operation type is invalid.");
-                EnsureCanGrantPermission(requestContext, requestContext.TenantId, permission.ResourceType, parsedOperation);
+                await EnsureCanGrantPermissionAsync(requestContext, requestContext.TenantId, permission.ResourceType, parsedOperation, token).ConfigureAwait(false);
                 permission.OperationType = parsedOperation;
             }
 
-            EnsureCanGrantPermission(requestContext, requestContext.TenantId, permission.ResourceType, permission.OperationType);
+            await EnsureCanGrantPermissionAsync(requestContext, requestContext.TenantId, permission.ResourceType, permission.OperationType, token).ConfigureAwait(false);
             if (body.Permit.HasValue) permission.Permit = body.Permit.Value;
             if (body.Active.HasValue) permission.Active = body.Active.Value;
             permission.LastUpdateUtc = DateTime.UtcNow;
+            await _Database!.Permissions!.UpdateAsync(permission, token).ConfigureAwait(false);
             _Logging.Info(_Header + "updated permission " + permission.Id);
             return permission;
         }
 
-        private int DeletePermission(RequestContext requestContext, string permissionId)
+        private async Task<int> DeletePermissionAsync(RequestContext requestContext, string permissionId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
+            Permission? permission = await _Database!.Permissions!.ReadAsync(requestContext.TenantId, permissionId, token).ConfigureAwait(false);
             if (permission != null && permission.BuiltIn) throw new AuthorizationDeniedException(403, "BuiltInPermissionProtected", "Built-in permissions cannot be deleted through the management API.");
-            int removed = platform.Permissions.RemoveAll(item => item.Id == permissionId && item.TenantId == requestContext.TenantId);
-            foreach (Role role in platform.Roles.Where(item => item.TenantId == requestContext.TenantId))
+            int removed = 0;
+            if (await _Database!.Permissions!.DeleteAsync(requestContext.TenantId, permissionId, token).ConfigureAwait(false)) removed++;
+            foreach (Role role in await _Database!.Roles!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false))
             {
+                int before = role.PermissionIds.Count;
                 role.PermissionIds.RemoveAll(item => String.Equals(item, permissionId, StringComparison.OrdinalIgnoreCase));
+                if (role.PermissionIds.Count != before) await _Database!.Roles!.UpdateAsync(role, token).ConfigureAwait(false);
             }
 
             if (removed > 0) _Logging.Info(_Header + "deleted permission " + permissionId);
             return removed;
         }
 
-        private RoleAssignment CreateRoleAssignment(RequestContext requestContext, HttpContextBase context)
+        private async Task<RoleAssignment> CreateRoleAssignmentAsync(RequestContext requestContext, HttpContextBase context, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
             RoleAssignmentSaveRequest body = ReadJsonBody<RoleAssignmentSaveRequest>(context);
             string tenantId = FirstNonEmpty(body.TenantId, requestContext.TenantId);
-            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            if (!await IsTenantVisibleAsync(requestContext, tenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
 
             string roleId = FirstNonEmpty(body.RoleId);
             if (String.IsNullOrWhiteSpace(roleId)) throw new ArgumentException("Role ID is required.");
-            Role? role = platform.Roles.FirstOrDefault(item => item.Id == roleId && item.TenantId == tenantId && item.Active);
-            if (role == null) throw new KeyNotFoundException("Role not found.");
+            Role? role = await _Database!.Roles!.ReadAsync(tenantId, roleId, token).ConfigureAwait(false);
+            if (role == null || !role.Active) throw new KeyNotFoundException("Role not found.");
             foreach (string permissionId in role.PermissionIds)
             {
-                Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == tenantId && item.Active);
-                if (permission == null) continue;
-                EnsureCanGrantPermission(requestContext, tenantId, permission.ResourceType, permission.OperationType);
+                Permission? permission = await _Database!.Permissions!.ReadAsync(tenantId, permissionId, token).ConfigureAwait(false);
+                if (permission == null || !permission.Active) continue;
+                await EnsureCanGrantPermissionAsync(requestContext, tenantId, permission.ResourceType, permission.OperationType, token).ConfigureAwait(false);
             }
 
             string principalTypeText = FirstNonEmpty(body.PrincipalType, PrincipalTypeEnum.User.ToString());
@@ -8537,11 +8673,19 @@ namespace Xeno.Server
 
             string principalId = FirstNonEmpty(body.PrincipalId);
             if (String.IsNullOrWhiteSpace(principalId)) throw new ArgumentException("Principal ID is required.");
-            if (principalType == PrincipalTypeEnum.User && !platform.Users.Any(item => item.Id == principalId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("User principal does not exist in the tenant.");
-            if (principalType == PrincipalTypeEnum.Credential && !platform.Credentials.Any(item => item.Id == principalId && item.TenantId == tenantId && item.Active)) throw new ArgumentException("Credential principal does not exist in the tenant.");
+            if (principalType == PrincipalTypeEnum.User)
+            {
+                User? principalUser = await _Database!.Users!.ReadAsync(tenantId, principalId, token).ConfigureAwait(false);
+                if (principalUser == null || !principalUser.Active) throw new ArgumentException("User principal does not exist in the tenant.");
+            }
 
-            RoleAssignment? existing = platform.RoleAssignments.FirstOrDefault(item =>
-                item.TenantId == tenantId &&
+            if (principalType == PrincipalTypeEnum.Credential)
+            {
+                Credential? principalCredential = await _Database!.Credentials!.ReadAsync(tenantId, principalId, token).ConfigureAwait(false);
+                if (principalCredential == null || !principalCredential.Active) throw new ArgumentException("Credential principal does not exist in the tenant.");
+            }
+
+            RoleAssignment? existing = (await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, principalId, token).ConfigureAwait(false)).FirstOrDefault(item =>
                 item.RoleId == roleId &&
                 item.PrincipalType == principalType &&
                 item.PrincipalId == principalId);
@@ -8564,33 +8708,44 @@ namespace Xeno.Server
             return assignment;
         }
 
-        private int DeleteRoleAssignment(RequestContext requestContext, string assignmentId)
+        private async Task<int> DeleteRoleAssignmentAsync(RequestContext requestContext, string assignmentId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            RoleAssignment? assignment = platform.RoleAssignments.FirstOrDefault(item => item.Id == assignmentId && IsTenantVisible(requestContext, item.TenantId));
+            RoleAssignment? assignment = null;
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                if (!await IsTenantVisibleAsync(requestContext, tenant.Id, token).ConfigureAwait(false)) continue;
+                RoleAssignment? candidate = await _Database!.RoleAssignments!.ReadAsync(tenant.Id, assignmentId, token).ConfigureAwait(false);
+                if (candidate != null)
+                {
+                    assignment = candidate;
+                    break;
+                }
+            }
+
             if (assignment == null) return 0;
-            Role? role = platform.Roles.FirstOrDefault(item => item.Id == assignment.RoleId && item.TenantId == assignment.TenantId);
+            Role? role = await _Database!.Roles!.ReadAsync(assignment.TenantId, assignment.RoleId, token).ConfigureAwait(false);
             if (role != null)
             {
                 foreach (string permissionId in role.PermissionIds)
                 {
-                    Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == assignment.TenantId && item.Active);
-                    if (permission == null) continue;
-                    EnsureCanGrantPermission(requestContext, assignment.TenantId, permission.ResourceType, permission.OperationType);
+                    Permission? permission = await _Database!.Permissions!.ReadAsync(assignment.TenantId, permissionId, token).ConfigureAwait(false);
+                    if (permission == null || !permission.Active) continue;
+                    await EnsureCanGrantPermissionAsync(requestContext, assignment.TenantId, permission.ResourceType, permission.OperationType, token).ConfigureAwait(false);
                 }
             }
 
-            int removed = platform.RoleAssignments.RemoveAll(item => item.Id == assignmentId && item.TenantId == assignment.TenantId);
+            int removed = 0;
+            if (await _Database!.RoleAssignments!.DeleteAsync(assignment.TenantId, assignmentId, token).ConfigureAwait(false)) removed++;
             if (removed > 0) _Logging.Info(_Header + "deleted role assignment " + assignmentId);
             return removed;
         }
 
-        private int DeleteClient(RequestContext requestContext, string clientId)
+        private async Task<int> DeleteClientAsync(RequestContext requestContext, string clientId, CancellationToken token)
         {
-            XenoPlatform platform = RequirePlatform();
-            int removed = platform.Clients.RemoveAll(item => item.Id == clientId && item.TenantId == requestContext.TenantId);
-            if (removed > 0)
+            int removed = 0;
+            if (await _Database!.Clients!.DeleteAsync(requestContext.TenantId, clientId, token).ConfigureAwait(false))
             {
+                removed = 1;
                 lock (_ClientConnectionsLock)
                 {
                     _ClientConnections.Remove(clientId);
@@ -8620,14 +8775,14 @@ namespace Xeno.Server
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? requestContext.TenantId : request.TenantId;
-            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            if (!await IsTenantVisibleAsync(requestContext, tenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
 
             int page = Math.Max(1, request.Page);
             int pageSize = Math.Clamp(request.PageSize, 1, 1000);
-            IEnumerable<User> users = RequirePlatform().Users.Where(item => item.TenantId == tenantId && item.Active);
-            if (!CanManageTenant(requestContext, tenantId))
+            IEnumerable<User> users = (await _Database!.Users!.EnumerateAsync(tenantId, token).ConfigureAwait(false)).Where(item => item.Active);
+            if (!await CanManageTenantAsync(requestContext, tenantId, token).ConfigureAwait(false))
             {
-                string currentUserId = ResolveContextUserId(requestContext);
+                string currentUserId = await ResolveContextUserIdAsync(requestContext, token).ConfigureAwait(false);
                 users = users.Where(item => item.Id == currentUserId);
             }
 
@@ -8665,8 +8820,8 @@ namespace Xeno.Server
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
             if (String.IsNullOrWhiteSpace(userId)) throw new ArgumentException("User ID is required.", nameof(userId));
 
-            LedgerAccountLink? accountLink = RequirePlatform().LedgerAccountLinks.FirstOrDefault(item => item.XenoTenantId == tenantId && item.XenoUserId == userId);
-            LedgerTenantLink? tenantLink = RequirePlatform().LedgerTenantLinks.FirstOrDefault(item => item.XenoTenantId == tenantId);
+            LedgerAccountLink? accountLink = await _Database!.LedgerAccountLinks!.ReadByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            LedgerTenantLink? tenantLink = await _Database!.LedgerTenantLinks!.ReadByTenantAsync(tenantId, token).ConfigureAwait(false);
             LedgerBalanceResponse response = new LedgerBalanceResponse
             {
                 XenoTenantId = tenantId,
@@ -8679,13 +8834,13 @@ namespace Xeno.Server
             {
                 int totalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);
                 if (totalTokens <= 0) continue;
-                string? requestUserId = ResolveRequestUserId(entry);
+                string? requestUserId = await ResolveRequestUserIdAsync(entry, token).ConfigureAwait(false);
                 if (String.Equals(requestUserId, userId, StringComparison.OrdinalIgnoreCase))
                 {
                     response.DebitTotal += totalTokens;
                 }
 
-                string? servingUserId = ResolveServingUserId(entry);
+                string? servingUserId = await ResolveServingUserIdAsync(entry, token).ConfigureAwait(false);
                 if (String.Equals(servingUserId, userId, StringComparison.OrdinalIgnoreCase))
                 {
                     response.CreditTotal += totalTokens;
@@ -8700,8 +8855,8 @@ namespace Xeno.Server
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             string tenantId = String.IsNullOrWhiteSpace(request.TenantId) ? requestContext.TenantId : request.TenantId;
-            if (!IsTenantVisible(requestContext, tenantId)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
-            if (!String.IsNullOrWhiteSpace(request.UserId)) EnsureCanReadLedgerUser(requestContext, tenantId, request.UserId);
+            if (!await IsTenantVisibleAsync(requestContext, tenantId, token).ConfigureAwait(false)) throw new AuthorizationDeniedException(403, "TenantMismatch", "Authenticated tenant cannot access the requested tenant.");
+            if (!String.IsNullOrWhiteSpace(request.UserId)) await EnsureCanReadLedgerUserAsync(requestContext, tenantId, request.UserId, token).ConfigureAwait(false);
 
             List<LedgerEntryRecord> records = new List<LedgerEntryRecord>();
             foreach (RequestHistoryEntry entry in await LedgerEligibleHistoryAsync(tenantId, token).ConfigureAwait(false))
@@ -8712,8 +8867,8 @@ namespace Xeno.Server
                 if (!String.IsNullOrWhiteSpace(request.SelectedClientId) && entry.SelectedClientId != request.SelectedClientId) continue;
                 if (!String.IsNullOrWhiteSpace(request.RequestCredentialId) && entry.CredentialId != request.RequestCredentialId) continue;
 
-                LedgerEntryRecord? debit = BuildLedgerEntryRecord(entry, LedgerEntryDirection.Debit);
-                LedgerEntryRecord? credit = BuildLedgerEntryRecord(entry, LedgerEntryDirection.Credit);
+                LedgerEntryRecord? debit = await BuildLedgerEntryRecordAsync(entry, LedgerEntryDirection.Debit, token).ConfigureAwait(false);
+                LedgerEntryRecord? credit = await BuildLedgerEntryRecordAsync(entry, LedgerEntryDirection.Credit, token).ConfigureAwait(false);
                 AddLedgerEntryIfMatched(records, debit, request);
                 AddLedgerEntryIfMatched(records, credit, request);
             }
@@ -8741,12 +8896,12 @@ namespace Xeno.Server
             records.Add(record);
         }
 
-        private LedgerEntryRecord? BuildLedgerEntryRecord(RequestHistoryEntry entry, LedgerEntryDirection direction)
+        private async Task<LedgerEntryRecord?> BuildLedgerEntryRecordAsync(RequestHistoryEntry entry, LedgerEntryDirection direction, CancellationToken token)
         {
             int totalTokens = Math.Max(0, entry.Telemetry?.TotalTokens ?? 0);
             if (totalTokens <= 0) return null;
-            string? requestUserId = ResolveRequestUserId(entry);
-            string? servingUserId = ResolveServingUserId(entry);
+            string? requestUserId = await ResolveRequestUserIdAsync(entry, token).ConfigureAwait(false);
+            string? servingUserId = await ResolveServingUserIdAsync(entry, token).ConfigureAwait(false);
             string? userId = direction == LedgerEntryDirection.Debit ? requestUserId : servingUserId;
             if (String.IsNullOrWhiteSpace(userId)) return null;
 
@@ -8783,23 +8938,23 @@ namespace Xeno.Server
             };
         }
 
-        private LedgerReconcileResponse BuildLedgerReconcileResponse(RequestContext requestContext)
+        private async Task<LedgerReconcileResponse> BuildLedgerReconcileResponseAsync(RequestContext requestContext, CancellationToken token)
         {
             LedgerReconcileResponse response = new LedgerReconcileResponse();
-            IEnumerable<Tenant> tenants = CanManageTenant(requestContext, requestContext.TenantId)
-                ? RequirePlatform().Tenants.Where(item => item.Active)
-                : RequirePlatform().Tenants.Where(item => item.Id == requestContext.TenantId && item.Active);
+            bool manageAll = await CanManageTenantAsync(requestContext, requestContext.TenantId, token).ConfigureAwait(false);
+            IEnumerable<Tenant> tenants = (await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+                .Where(item => item.Active && (manageAll || item.Id == requestContext.TenantId));
 
             foreach (Tenant tenant in tenants)
             {
-                if (!RequirePlatform().LedgerTenantLinks.Any(item => item.XenoTenantId == tenant.Id))
+                if (await _Database!.LedgerTenantLinks!.ReadByTenantAsync(tenant.Id, token).ConfigureAwait(false) == null)
                 {
                     response.MissingTenantLinks.Add(tenant.Id);
                 }
 
-                foreach (User user in RequirePlatform().Users.Where(item => item.TenantId == tenant.Id && item.Active))
+                foreach (User user in (await _Database!.Users!.EnumerateAsync(tenant.Id, token).ConfigureAwait(false)).Where(item => item.Active))
                 {
-                    if (!RequirePlatform().LedgerAccountLinks.Any(item => item.XenoTenantId == tenant.Id && item.XenoUserId == user.Id))
+                    if (await _Database!.LedgerAccountLinks!.ReadByUserAsync(tenant.Id, user.Id, token).ConfigureAwait(false) == null)
                     {
                         response.MissingAccountLinks.Add(tenant.Id + ":" + user.Id);
                     }
@@ -8823,12 +8978,12 @@ namespace Xeno.Server
             return page.Items;
         }
 
-        private string ResolveContextUserId(RequestContext requestContext)
+        private async Task<string> ResolveContextUserIdAsync(RequestContext requestContext, CancellationToken token)
         {
             if (!String.IsNullOrWhiteSpace(requestContext.UserId)) return requestContext.UserId;
             if (!String.IsNullOrWhiteSpace(requestContext.CredentialId))
             {
-                Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == requestContext.CredentialId && item.TenantId == requestContext.TenantId);
+                Credential? credential = await _Database!.Credentials!.ReadAsync(requestContext.TenantId, requestContext.CredentialId, token).ConfigureAwait(false);
                 if (!String.IsNullOrWhiteSpace(credential?.UserId)) return credential.UserId;
             }
 
@@ -8836,11 +8991,11 @@ namespace Xeno.Server
             throw new AuthorizationDeniedException(403, "LedgerUserNotResolved", "Authenticated ledger user could not be resolved.");
         }
 
-        private string? ResolveRequestUserId(RequestHistoryEntry entry)
+        private async Task<string?> ResolveRequestUserIdAsync(RequestHistoryEntry entry, CancellationToken token)
         {
             if (!String.IsNullOrWhiteSpace(entry.CredentialId))
             {
-                Credential? credential = RequirePlatform().Credentials.FirstOrDefault(item => item.Id == entry.CredentialId && item.TenantId == entry.RequestorTenantId);
+                Credential? credential = await _Database!.Credentials!.ReadAsync(entry.RequestorTenantId, entry.CredentialId, token).ConfigureAwait(false);
                 if (!String.IsNullOrWhiteSpace(credential?.UserId)) return credential.UserId;
             }
 
@@ -8849,17 +9004,17 @@ namespace Xeno.Server
             return null;
         }
 
-        private string? ResolveServingUserId(RequestHistoryEntry entry)
+        private async Task<string?> ResolveServingUserIdAsync(RequestHistoryEntry entry, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(entry.SelectedClientId)) return null;
-            XenoClientRecord? client = RequirePlatform().Clients.FirstOrDefault(item => item.Id == entry.SelectedClientId && item.TenantId == entry.TenantId);
+            XenoClientRecord? client = await _Database!.Clients!.ReadAsync(entry.TenantId, entry.SelectedClientId, token).ConfigureAwait(false);
             return client?.OwnerUserId;
         }
 
-        private void EnsureCanReadLedgerUser(RequestContext requestContext, string tenantId, string userId)
+        private async Task EnsureCanReadLedgerUserAsync(RequestContext requestContext, string tenantId, string userId, CancellationToken token)
         {
-            if (CanManageTenant(requestContext, tenantId)) return;
-            string currentUserId = ResolveContextUserId(requestContext);
+            if (await CanManageTenantAsync(requestContext, tenantId, token).ConfigureAwait(false)) return;
+            string currentUserId = await ResolveContextUserIdAsync(requestContext, token).ConfigureAwait(false);
             if (String.Equals(currentUserId, userId, StringComparison.OrdinalIgnoreCase)) return;
             throw new AuthorizationDeniedException(403, "LedgerUserDenied", "Authenticated user cannot read another user's ledger.");
         }
@@ -8894,7 +9049,7 @@ namespace Xeno.Server
             return await RequireRequestHistory().DeleteAsync(query, token).ConfigureAwait(false);
         }
 
-        private RequestContext CreateRequestContext(HttpContextBase context)
+        internal async Task<RequestContext> CreateRequestContextAsync(HttpContextBase context, CancellationToken token)
         {
             string? tenantHint = ResolveTenantHint(context, null);
             string tenantId = tenantHint ?? Constants.DefaultTenantId;
@@ -8921,7 +9076,7 @@ namespace Xeno.Server
 
             if (!String.IsNullOrWhiteSpace(sessionToken))
             {
-                AuthSession? session = _Authentication.ValidateToken(RequirePlatform(), sessionToken);
+                AuthSession? session = await _Authentication.ValidateTokenAsync(_Database!, sessionToken, token).ConfigureAwait(false);
                 if (session != null)
                 {
                     if (!TenantHintMatches(tenantHint, session.TenantId)) throw new UnauthorizedAccessException("Authenticated tenant does not match supplied tenant.");
@@ -8936,7 +9091,7 @@ namespace Xeno.Server
                     return requestContext;
                 }
 
-                Credential? bearerCredential = _Authentication.ValidateCredential(RequirePlatform(), sessionToken);
+                Credential? bearerCredential = await _Authentication.ValidateCredentialAsync(_Database!, sessionToken, token).ConfigureAwait(false);
                 if (bearerCredential == null) throw new UnauthorizedAccessException("Invalid or expired token.");
                 if (!TenantHintMatches(tenantHint, bearerCredential.TenantId)) throw new UnauthorizedAccessException("Authenticated tenant does not match supplied tenant.");
                 requestContext.TenantId = bearerCredential.TenantId;
@@ -8951,7 +9106,7 @@ namespace Xeno.Server
 
             if (!String.IsNullOrWhiteSpace(accessKey))
             {
-                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey);
+                Credential? credential = await _Authentication.ValidateCredentialAsync(_Database!, tenantId, accessKey, token).ConfigureAwait(false);
                 if (credential == null) throw new UnauthorizedAccessException("Invalid credential.");
                 requestContext.IsAuthenticated = true;
                 requestContext.CredentialId = credential.Id;
@@ -8969,7 +9124,7 @@ namespace Xeno.Server
             return requestContext;
         }
 
-        private RequestContext CreateWebSocketRequestContext(HttpContextBase context)
+        private async Task<RequestContext> CreateWebSocketRequestContextAsync(HttpContextBase context, CancellationToken token)
         {
             string tenantId = ResolveTenantId(context, null);
             string authorization = context.Request.Headers.Get("Authorization") ?? String.Empty;
@@ -8991,7 +9146,7 @@ namespace Xeno.Server
 
             if (!String.IsNullOrWhiteSpace(accessKey))
             {
-                Credential? credential = _Authentication.ValidateCredential(RequirePlatform(), tenantId, accessKey);
+                Credential? credential = await _Authentication.ValidateCredentialAsync(_Database!, tenantId, accessKey, token).ConfigureAwait(false);
                 if (credential == null) throw new UnauthorizedAccessException("Invalid WebSocket credential.");
                 requestContext.IsAuthenticated = true;
                 requestContext.CredentialId = credential.Id;
@@ -9078,9 +9233,21 @@ namespace Xeno.Server
             return String.Equals(value, filter, StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool IsTenantVisible(RequestContext context, string tenantId)
+        private async Task<bool> IsTenantVisibleAsync(RequestContext context, string tenantId, CancellationToken token)
         {
-            return _Authorization.CanAccessTenant(RequirePlatform(), context, tenantId);
+            return await _Authorization.CanAccessTenantAsync(_Database!, context, tenantId, token).ConfigureAwait(false);
+        }
+
+        private async Task<User?> FindVisibleUserAsync(RequestContext requestContext, string userId, CancellationToken token)
+        {
+            foreach (Tenant tenant in await _Database!.Tenants!.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                if (!await IsTenantVisibleAsync(requestContext, tenant.Id, token).ConfigureAwait(false)) continue;
+                User? candidate = await _Database!.Users!.ReadAsync(tenant.Id, userId, token).ConfigureAwait(false);
+                if (candidate != null) return candidate;
+            }
+
+            return null;
         }
 
         private static bool FixedTimeEquals(string left, string right)
@@ -9119,9 +9286,17 @@ namespace Xeno.Server
 
         private async Task SendMetricsAsync(HttpContextBase context)
         {
-            XenoPlatform platform = RequirePlatform();
-            int connectedClients = platform.Clients.Count(item => item.Connected);
-            int availableModels = platform.Clients.Where(item => item.Connected).SelectMany(item => item.Models).Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            List<XenoClientRecord> allClients = new List<XenoClientRecord>();
+            if (_Database?.Clients != null && _Database?.Tenants != null)
+            {
+                foreach (Tenant tenant in await _Database.Tenants.EnumerateAsync(context.Token).ConfigureAwait(false))
+                {
+                    allClients.AddRange(await _Database.Clients.EnumerateAsync(tenant.Id, context.Token).ConfigureAwait(false));
+                }
+            }
+
+            int connectedClients = allClients.Count(item => item.Connected);
+            int availableModels = allClients.Where(item => item.Connected).SelectMany(item => item.Models).Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             int requests = 0;
             int failures = 0;
             if (_Database?.RequestHistory != null)
@@ -9292,9 +9467,7 @@ namespace Xeno.Server
             List<RequestHistoryEntry> entries = await FilterRequestHistoryAsync(requestContext, fromUtc, toUtc, false, token).ConfigureAwait(false);
             int total = entries.Count;
             int failures = entries.Count(item => item.StatusCode >= 400);
-            List<XenoClientRecord> clients = RequirePlatform().Clients
-                .Where(item => item.TenantId == requestContext.TenantId)
-                .ToList();
+            List<XenoClientRecord> clients = await _Database!.Clients!.EnumerateAsync(requestContext.TenantId, token).ConfigureAwait(false);
             List<XenoClientModel> clientModels = clients
                 .SelectMany(item => item.Models)
                 .ToList();
@@ -9529,12 +9702,6 @@ namespace Xeno.Server
             return allowedOrigins.Count == 1 ? allowedOrigins[0] : String.Empty;
         }
 
-        private XenoPlatform RequirePlatform()
-        {
-            if (_Database == null) throw new InvalidOperationException("Database has not been initialized.");
-            return _Database.Platform;
-        }
-
         private IRequestHistoryMethods RequireRequestHistory()
         {
             if (_Database?.RequestHistory == null) throw new InvalidOperationException("Request history storage has not been initialized.");
@@ -9553,17 +9720,15 @@ namespace Xeno.Server
             return _TenantLifecycle;
         }
 
-        private List<User> ListSeedUsers(string tenantId)
+        private async Task<List<User>> ListSeedUsersAsync(string tenantId, CancellationToken token)
         {
-            return RequirePlatform().Users
-                .Where(item => String.Equals(item.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            return await _Database!.Users!.EnumerateAsync(tenantId, token).ConfigureAwait(false);
         }
 
         private async Task ProvisionLedgerAccountForUserAsync(User user, RequestContext requestContext, CancellationToken token)
         {
             if (user == null) throw new ArgumentNullException(nameof(user));
-            Tenant? tenant = RequirePlatform().Tenants.FirstOrDefault(item => String.Equals(item.Id, user.TenantId, StringComparison.OrdinalIgnoreCase));
+            Tenant? tenant = await _Database!.Tenants!.ReadAsync(user.TenantId, token).ConfigureAwait(false);
             if (tenant == null) return;
             await RequireTenantLifecycle().CreateAsync(tenant, new List<User> { user }, true, requestContext, token).ConfigureAwait(false);
         }

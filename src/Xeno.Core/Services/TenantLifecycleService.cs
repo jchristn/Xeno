@@ -6,6 +6,7 @@ namespace Xeno.Core.Services
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
+    using Xeno.Core.Database;
     using Xeno.Core.Database.Interfaces;
     using Xeno.Core.Enums;
     using Xeno.Core.Models;
@@ -15,7 +16,7 @@ namespace Xeno.Core.Services
     /// </summary>
     public class TenantLifecycleService
     {
-        private readonly XenoPlatform _Platform;
+        private readonly DatabaseDriverBase _Database;
         private readonly LoggingModule? _Logging;
         private readonly string _Header = "[TenantLifecycle] ";
         private readonly List<ITenantSubordinateService> _SubordinateServices;
@@ -24,13 +25,13 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Instantiate the service.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="subordinateServices">Subordinate services.</param>
         /// <param name="logging">Optional logging module.</param>
         /// <param name="audit">Optional audit table methods for persisting lifecycle audit records.</param>
-        public TenantLifecycleService(XenoPlatform platform, IEnumerable<ITenantSubordinateService> subordinateServices, LoggingModule? logging = null, IAuditMethods? audit = null)
+        public TenantLifecycleService(DatabaseDriverBase database, IEnumerable<ITenantSubordinateService> subordinateServices, LoggingModule? logging = null, IAuditMethods? audit = null)
         {
-            _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
             _Logging = logging;
             _SubordinateServices = subordinateServices == null ? new List<ITenantSubordinateService>() : subordinateServices.ToList();
             _Audit = audit;

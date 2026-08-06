@@ -43,11 +43,6 @@ namespace Xeno.Core.Models
         public List<RoleAssignment> RoleAssignments { get; set; } = new List<RoleAssignment>();
 
         /// <summary>
-        /// Audit records.
-        /// </summary>
-        public List<AuditRecord> AuditRecords { get; set; } = new List<AuditRecord>();
-
-        /// <summary>
         /// Clients.
         /// </summary>
         public List<XenoClientRecord> Clients { get; set; } = new List<XenoClientRecord>();

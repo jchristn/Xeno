@@ -1,6 +1,7 @@
 namespace Xeno.Core.Database.Postgresql
 {
     using System;
+    using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
@@ -14,7 +15,6 @@ namespace Xeno.Core.Database.Postgresql
     /// </summary>
     public class PostgresqlDatabaseDriver : DatabaseDriverBase
     {
-        private const string StateId = "platform";
         private string _ConnectionString = String.Empty;
 
         /// <summary>
@@ -49,15 +49,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations
     applied_utc timestamptz NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS xeno_platform_state
-(
-    id varchar(64) PRIMARY KEY,
-    data text NOT NULL,
-    created_utc timestamptz NOT NULL,
-    updated_utc timestamptz NOT NULL,
-    active boolean NOT NULL DEFAULT true
-);
-
 INSERT INTO schema_migrations (id, name, applied_utc)
 VALUES ('0001', 'initial_platform_state', now())
 ON CONFLICT (id) DO NOTHING;
@@ -69,6 +60,27 @@ ON CONFLICT (id) DO NOTHING;
                 await PostgresqlRequestHistoryMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await PostgresqlAuditMethods.InitializeAsync(connection, token).ConfigureAwait(false);
                 await PostgresqlOnboardingMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+
+                await PostgresqlTenantMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlUserMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlCredentialMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlAuthSessionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlRoleMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlPermissionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlRoleAssignmentMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlClientMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlModelDefinitionMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlModelConfigurationMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlRoutingPolicyMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlLedgerTenantLinkMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+                await PostgresqlLedgerAccountLinkMethods.InitializeAsync(connection, token).ConfigureAwait(false);
+
+                List<SchemaMigration> forwardMigrations = new List<SchemaMigration>
+                {
+                    // Post-baseline schema changes are applied in ascending version order and recorded in
+                    // schema_migrations; add new SchemaMigration entries here as the schema evolves.
+                };
+                await SchemaMigrationRunner.ApplyAsync(connection, "now()", forwardMigrations, token).ConfigureAwait(false);
             }
 
             PostgresqlTelemetryMethods telemetryMethods = new PostgresqlTelemetryMethods(_ConnectionString);
@@ -78,48 +90,21 @@ ON CONFLICT (id) DO NOTHING;
             RequestHistory = new PostgresqlRequestHistoryMethods(_ConnectionString);
             Audit = new PostgresqlAuditMethods(_ConnectionString);
             Onboarding = new PostgresqlOnboardingMethods(_ConnectionString);
+
+            Tenants = new PostgresqlTenantMethods(_ConnectionString);
+            Users = new PostgresqlUserMethods(_ConnectionString);
+            Credentials = new PostgresqlCredentialMethods(_ConnectionString);
+            AuthSessions = new PostgresqlAuthSessionMethods(_ConnectionString);
+            Roles = new PostgresqlRoleMethods(_ConnectionString);
+            Permissions = new PostgresqlPermissionMethods(_ConnectionString);
+            RoleAssignments = new PostgresqlRoleAssignmentMethods(_ConnectionString);
+            Clients = new PostgresqlClientMethods(_ConnectionString);
+            ModelDefinitions = new PostgresqlModelDefinitionMethods(_ConnectionString);
+            ModelConfigurations = new PostgresqlModelConfigurationMethods(_ConnectionString);
+            RoutingPolicies = new PostgresqlRoutingPolicyMethods(_ConnectionString);
+            LedgerTenantLinks = new PostgresqlLedgerTenantLinkMethods(_ConnectionString);
+            LedgerAccountLinks = new PostgresqlLedgerAccountLinkMethods(_ConnectionString);
             return true;
-        }
-
-        /// <inheritdoc />
-        protected override async Task<string?> LoadStateJsonAsync(CancellationToken token = default)
-        {
-            if (String.IsNullOrWhiteSpace(_ConnectionString)) return null;
-            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                using (NpgsqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = "SELECT data FROM xeno_platform_state WHERE id = @id AND active = true;";
-                    command.Parameters.AddWithValue("@id", StateId);
-                    object? value = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
-                    return value?.ToString();
-                }
-            }
-        }
-
-        /// <inheritdoc />
-        protected override async Task SaveStateJsonAsync(string stateJson, CancellationToken token = default)
-        {
-            if (String.IsNullOrWhiteSpace(_ConnectionString)) return;
-            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                using (NpgsqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandText = """
-INSERT INTO xeno_platform_state (id, data, created_utc, updated_utc, active)
-VALUES (@id, @data, now(), now(), true)
-ON CONFLICT (id) DO UPDATE SET
-    data = excluded.data,
-    updated_utc = now(),
-    active = true;
-""";
-                    command.Parameters.AddWithValue("@id", StateId);
-                    command.Parameters.AddWithValue("@data", stateJson);
-                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-                }
-            }
         }
 
         /// <inheritdoc />

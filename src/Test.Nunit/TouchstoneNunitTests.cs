@@ -24,6 +24,17 @@ namespace Test.Nunit
         }
 
         /// <summary>
+        /// Drop any per-test server catalogs created during the run. The backing database is selected
+        /// through the XENO_TEST_DB_* environment variables (defaulting to SQLite).
+        /// </summary>
+        /// <returns>Task.</returns>
+        [OneTimeTearDown]
+        public async Task DropTestDatabasesAsync()
+        {
+            await TestDatabase.DropAllAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Run a shared test case.
         /// </summary>
         /// <param name="testCase">Test case.</param>

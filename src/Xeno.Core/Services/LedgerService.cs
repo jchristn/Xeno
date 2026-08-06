@@ -6,8 +6,25 @@ namespace Xeno.Core.Services
     using System.Threading;
     using System.Threading.Tasks;
     using SyslogLogging;
+    using Xeno.Core.Database;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
+
+    /// <summary>
+    /// Outcome of a ledger enqueue attempt.
+    /// </summary>
+    public class LedgerEnqueueResult
+    {
+        /// <summary>
+        /// True when an event was queued.
+        /// </summary>
+        public bool Enqueued { get; set; }
+
+        /// <summary>
+        /// Reason no event was queued; otherwise null.
+        /// </summary>
+        public string? Reason { get; set; }
+    }
 
     /// <summary>
     /// Ledgering facade for request capture, queue draining, and status.
@@ -28,14 +45,13 @@ namespace Xeno.Core.Services
 
         #region Private-Members
 
-        private readonly XenoPlatform _Platform;
+        private readonly DatabaseDriverBase _Database;
         private readonly LedgerSettings _Settings;
         private readonly LoggingModule _Logging;
         private readonly string _Header = "[LedgerService] ";
         private readonly LedgerQueue _Queue;
         private readonly NetLedgerClient _Client;
         private readonly LedgerDrainService _DrainService;
-        private readonly Func<CancellationToken, Task> _SavePlatformAsync;
         private readonly LedgerQueueStatus _Status = new LedgerQueueStatus();
         private CancellationTokenSource? _Cancellation;
         private Task? _DrainTask;
@@ -48,19 +64,17 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Instantiate the ledger service.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="settings">Ledger settings.</param>
         /// <param name="logging">Logging module.</param>
-        /// <param name="savePlatformAsync">Platform persistence callback.</param>
-        public LedgerService(XenoPlatform platform, LedgerSettings settings, LoggingModule logging, Func<CancellationToken, Task> savePlatformAsync)
+        public LedgerService(DatabaseDriverBase database, LedgerSettings settings, LoggingModule logging)
         {
-            _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Logging = logging ?? throw new ArgumentNullException(nameof(logging));
-            _SavePlatformAsync = savePlatformAsync ?? throw new ArgumentNullException(nameof(savePlatformAsync));
             _Queue = new LedgerQueue(_Settings.MaxQueueDepth);
             _Client = new NetLedgerClient(_Settings, _Logging);
-            LedgerAccountResolver resolver = new LedgerAccountResolver(_Platform, _Settings, _Client);
+            LedgerAccountResolver resolver = new LedgerAccountResolver(_Database, _Settings, _Client);
             _DrainService = new LedgerDrainService(_Settings, _Client, resolver);
             _Status.Enabled = _Settings.Enabled;
         }
@@ -99,33 +113,35 @@ namespace Xeno.Core.Services
         /// Try to enqueue ledger work from request history.
         /// </summary>
         /// <param name="history">Request history entry.</param>
-        /// <param name="reason">Reason no event was queued.</param>
-        /// <returns>True if an event was queued.</returns>
-        public bool TryEnqueueFromHistory(RequestHistoryEntry history, out string? reason)
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger enqueue result.</returns>
+        public async Task<LedgerEnqueueResult> TryEnqueueFromHistoryAsync(RequestHistoryEntry history, CancellationToken token = default)
         {
-            reason = null;
             if (!_Settings.Enabled)
             {
-                reason = "Ledgering is disabled.";
-                return false;
+                return new LedgerEnqueueResult { Enqueued = false, Reason = "Ledgering is disabled." };
             }
 
-            if (!LedgerEventFactory.TryCreate(_Platform, history, out LedgerEvent? ledgerEvent, out reason)) return false;
-            if (ledgerEvent == null)
+            LedgerEventCreationResult creation = await LedgerEventFactory.TryCreateAsync(_Database, history, token).ConfigureAwait(false);
+            if (!creation.Success)
             {
-                reason = "Ledger event could not be created.";
-                return false;
+                return new LedgerEnqueueResult { Enqueued = false, Reason = creation.Reason };
             }
 
-            if (!_Queue.TryEnqueue(ledgerEvent))
+            if (creation.Event == null)
             {
-                reason = "Ledger queue is full.";
+                return new LedgerEnqueueResult { Enqueued = false, Reason = "Ledger event could not be created." };
+            }
+
+            if (!_Queue.TryEnqueue(creation.Event))
+            {
+                string reason = "Ledger queue is full.";
                 RecordFailure(reason, false);
-                return false;
+                return new LedgerEnqueueResult { Enqueued = false, Reason = reason };
             }
 
             _Status.QueueDepth = _Queue.Count;
-            return true;
+            return new LedgerEnqueueResult { Enqueued = true, Reason = null };
         }
 
         /// <summary>
@@ -175,7 +191,6 @@ namespace Xeno.Core.Services
             if (response.Processed > 0)
             {
                 _Status.LastSuccessfulDrainUtc = DateTime.UtcNow;
-                await _SavePlatformAsync(token).ConfigureAwait(false);
             }
 
             return response;

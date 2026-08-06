@@ -76,5 +76,10 @@ namespace Xeno.Core.Settings
         /// Public onboarding (sign-up) settings.
         /// </summary>
         public OnboardingSettings Onboarding { get; set; } = new OnboardingSettings();
+
+        /// <summary>
+        /// Service-layer cache settings (per-node, sliding TTL for cacheable control-plane entities).
+        /// </summary>
+        public CacheSettings Cache { get; set; } = new CacheSettings();
     }
 }

@@ -8,9 +8,28 @@ namespace Test.Xunit
     using global::Xunit;
 
     /// <summary>
+    /// Shared fixture that drops any per-test server catalogs after the suite completes. The backing
+    /// database is selected through the XENO_TEST_DB_* environment variables (defaulting to SQLite).
+    /// </summary>
+    public sealed class DatabaseCleanupFixture : IAsyncLifetime
+    {
+        /// <inheritdoc />
+        public Task InitializeAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public async Task DisposeAsync()
+        {
+            await TestDatabase.DropAllAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// xUnit runner for shared Touchstone suites.
     /// </summary>
-    public sealed class TouchstoneTheoryTests
+    public sealed class TouchstoneTheoryTests : IClassFixture<DatabaseCleanupFixture>
     {
         /// <summary>
         /// Return test cases.

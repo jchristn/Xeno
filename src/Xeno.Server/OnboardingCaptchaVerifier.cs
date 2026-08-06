@@ -52,16 +52,28 @@ namespace Xeno.Server
                 {
                     if (!response.IsSuccessStatusCode) return false;
                     string body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
-                    using (JsonDocument document = JsonDocument.Parse(body))
-                    {
-                        return document.RootElement.TryGetProperty("success", out JsonElement success) && success.ValueKind == JsonValueKind.True;
-                    }
+                    CaptchaVerifyResult? result = JsonSerializer.Deserialize<CaptchaVerifyResult>(body, _CaptchaSerializerOptions);
+                    return result != null && result.Success;
                 }
             }
             catch (Exception)
             {
                 return false;
             }
+        }
+
+        private static readonly JsonSerializerOptions _CaptchaSerializerOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        /// <summary>
+        /// Typed shape of the captcha provider verification response. Both Cloudflare Turnstile and Google
+        /// reCAPTCHA return a boolean <c>success</c> field.
+        /// </summary>
+        private sealed class CaptchaVerifyResult
+        {
+            /// <summary>
+            /// Whether the captcha token was verified successfully.
+            /// </summary>
+            public bool Success { get; set; }
         }
     }
 }

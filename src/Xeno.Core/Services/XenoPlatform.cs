@@ -50,14 +50,6 @@ namespace Xeno.Core.Services
         public List<RoleAssignment> RoleAssignments { get; } = new List<RoleAssignment>();
 
         /// <summary>
-        /// Audit records loaded from a legacy serialized state blob that still need to be migrated
-        /// into the dedicated audit table. Populated on <see cref="LoadState"/> and drained by the
-        /// database driver on startup. Audit records are not otherwise cached in memory or persisted
-        /// in the serialized platform state.
-        /// </summary>
-        public List<AuditRecord> PendingAuditMigration { get; } = new List<AuditRecord>();
-
-        /// <summary>
         /// Clients.
         /// </summary>
         public List<XenoClientRecord> Clients { get; } = new List<XenoClientRecord>();
@@ -506,19 +498,6 @@ namespace Xeno.Core.Services
         }
 
         /// <summary>
-        /// Remove and return audit records loaded from a legacy state blob so the database driver can
-        /// migrate them into the dedicated audit table. Returns an empty list when there is nothing to
-        /// migrate.
-        /// </summary>
-        /// <returns>Audit records pending migration.</returns>
-        public List<AuditRecord> DrainPendingAuditRecords()
-        {
-            List<AuditRecord> drained = new List<AuditRecord>(PendingAuditMigration);
-            PendingAuditMigration.Clear();
-            return drained;
-        }
-
-        /// <summary>
         /// Create a serializable snapshot of platform state.
         /// </summary>
         /// <returns>Platform state snapshot.</returns>
@@ -570,9 +549,6 @@ namespace Xeno.Core.Services
 
             RoleAssignments.Clear();
             RoleAssignments.AddRange(state.RoleAssignments);
-
-            PendingAuditMigration.Clear();
-            if (state.AuditRecords != null) PendingAuditMigration.AddRange(state.AuditRecords);
 
             Clients.Clear();
             Clients.AddRange(state.Clients);

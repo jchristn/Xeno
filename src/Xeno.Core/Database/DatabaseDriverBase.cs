@@ -29,11 +29,6 @@ namespace Xeno.Core.Database
         public DatabaseSettings Settings { get; private set; }
 
         /// <summary>
-        /// Platform state.
-        /// </summary>
-        public XenoPlatform Platform { get; protected set; } = new XenoPlatform();
-
-        /// <summary>
         /// Server-collected host telemetry methods.
         /// </summary>
         public IClientTelemetryMethods? ClientTelemetry { get; protected set; } = null;
@@ -67,6 +62,71 @@ namespace Xeno.Core.Database
         public IOnboardingMethods? Onboarding { get; protected set; } = null;
 
         /// <summary>
+        /// Tenant methods (normalized relational store).
+        /// </summary>
+        public ITenantMethods? Tenants { get; protected set; } = null;
+
+        /// <summary>
+        /// User methods (normalized relational store).
+        /// </summary>
+        public IUserMethods? Users { get; protected set; } = null;
+
+        /// <summary>
+        /// Credential methods (normalized relational store).
+        /// </summary>
+        public ICredentialMethods? Credentials { get; protected set; } = null;
+
+        /// <summary>
+        /// Authentication session methods (normalized relational store).
+        /// </summary>
+        public IAuthSessionMethods? AuthSessions { get; protected set; } = null;
+
+        /// <summary>
+        /// Role methods (normalized relational store).
+        /// </summary>
+        public IRoleMethods? Roles { get; protected set; } = null;
+
+        /// <summary>
+        /// Permission methods (normalized relational store).
+        /// </summary>
+        public IPermissionMethods? Permissions { get; protected set; } = null;
+
+        /// <summary>
+        /// Role assignment methods (normalized relational store).
+        /// </summary>
+        public IRoleAssignmentMethods? RoleAssignments { get; protected set; } = null;
+
+        /// <summary>
+        /// Client methods (normalized relational store).
+        /// </summary>
+        public IClientMethods? Clients { get; protected set; } = null;
+
+        /// <summary>
+        /// Model definition methods (normalized relational store).
+        /// </summary>
+        public IModelDefinitionMethods? ModelDefinitions { get; protected set; } = null;
+
+        /// <summary>
+        /// Model configuration methods (normalized relational store).
+        /// </summary>
+        public IModelConfigurationMethods? ModelConfigurations { get; protected set; } = null;
+
+        /// <summary>
+        /// Routing policy methods (normalized relational store).
+        /// </summary>
+        public IRoutingPolicyMethods? RoutingPolicies { get; protected set; } = null;
+
+        /// <summary>
+        /// Ledger tenant link methods (normalized relational store).
+        /// </summary>
+        public ILedgerTenantLinkMethods? LedgerTenantLinks { get; protected set; } = null;
+
+        /// <summary>
+        /// Ledger account link methods (normalized relational store).
+        /// </summary>
+        public ILedgerAccountLinkMethods? LedgerAccountLinks { get; protected set; } = null;
+
+        /// <summary>
         /// Logging module. May be null when no logger is supplied.
         /// </summary>
         protected LoggingModule? _Logging { get; }
@@ -98,63 +158,17 @@ namespace Xeno.Core.Database
             _Logging?.Debug(_Header + "initializing " + DatabaseType + " database");
 
             bool storageAvailable = await InitializeStorageAsync(token).ConfigureAwait(false);
-            string? stateJson = storageAvailable ? await LoadStateJsonAsync(token).ConfigureAwait(false) : null;
-            if (!String.IsNullOrWhiteSpace(stateJson))
+            if (storageAvailable)
             {
-                PlatformState? state = JsonUtil.Deserialize<PlatformState>(stateJson);
-                if (state != null) Platform.LoadState(state);
-                if (storageAvailable) await MigrateLegacyAuditRecordsAsync(token).ConfigureAwait(false);
-                if (storageAvailable) await SaveAsync(token).ConfigureAwait(false);
-            }
-            else
-            {
-                await Platform.InitializeAsync(token).ConfigureAwait(false);
-                if (storageAvailable) await SaveAsync(token).ConfigureAwait(false);
+                // The control plane is stored in normalized relational tables. On first boot, build the
+                // default control-plane graph in memory and persist it through the repositories; on
+                // subsequent boots this is a no-op because the tenant table is already populated.
+                XenoPlatform seed = new XenoPlatform();
+                await seed.InitializeAsync(token).ConfigureAwait(false);
+                await DatabaseSeeder.SeedIfEmptyAsync(this, seed, token).ConfigureAwait(false);
             }
 
             _Logging?.Debug(_Header + "initialized " + DatabaseType + " database");
-        }
-
-        /// <summary>
-        /// One-time migration of audit records that were previously embedded in the serialized
-        /// platform state into the dedicated audit table. After this runs the state blob is saved
-        /// without audit records, so this is a no-op on subsequent startups.
-        /// </summary>
-        /// <param name="token">Cancellation token.</param>
-        /// <returns>Task.</returns>
-        private async Task MigrateLegacyAuditRecordsAsync(CancellationToken token)
-        {
-            if (Audit == null) return;
-            List<AuditRecord> pending = Platform.DrainPendingAuditRecords();
-            if (pending.Count == 0) return;
-
-            int migrated = 0;
-            foreach (AuditRecord record in pending)
-            {
-                try
-                {
-                    await Audit.InsertAsync(record, token).ConfigureAwait(false);
-                    migrated++;
-                }
-                catch (Exception ex)
-                {
-                    _Logging?.Warn(_Header + "failed to migrate audit record " + record.Id + ": " + ex.Message);
-                }
-            }
-
-            _Logging?.Info(_Header + "migrated " + migrated + " legacy audit record(s) from platform state to the audit table");
-        }
-
-        /// <summary>
-        /// Persist current platform state.
-        /// </summary>
-        /// <param name="token">Cancellation token.</param>
-        /// <returns>Task.</returns>
-        public async Task SaveAsync(CancellationToken token = default)
-        {
-            token.ThrowIfCancellationRequested();
-            string stateJson = JsonUtil.Serialize(Platform.ToState());
-            await SaveStateJsonAsync(stateJson, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -264,20 +278,5 @@ namespace Xeno.Core.Database
         /// <param name="token">Cancellation token.</param>
         /// <returns>True if storage is available.</returns>
         protected abstract Task<bool> InitializeStorageAsync(CancellationToken token = default);
-
-        /// <summary>
-        /// Load serialized platform state.
-        /// </summary>
-        /// <param name="token">Cancellation token.</param>
-        /// <returns>Serialized state, if available.</returns>
-        protected abstract Task<string?> LoadStateJsonAsync(CancellationToken token = default);
-
-        /// <summary>
-        /// Save serialized platform state.
-        /// </summary>
-        /// <param name="stateJson">Serialized state.</param>
-        /// <param name="token">Cancellation token.</param>
-        /// <returns>Task.</returns>
-        protected abstract Task SaveStateJsonAsync(string stateJson, CancellationToken token = default);
     }
 }

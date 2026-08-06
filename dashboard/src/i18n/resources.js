@@ -372,6 +372,8 @@ const en = {
     shared: 'Shared',
     operatorOrigin: 'Shared: operator',
     thirdPartyOrigin: 'Shared: third-party',
+    redactedShared: 'Redacted',
+    myTenantScope: 'My Tenant',
     shareClient: 'Share Client',
     unshareClient: 'Stop Sharing',
     tooltipShareClient: 'Share this client with other tenants.',

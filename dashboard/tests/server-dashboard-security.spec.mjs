@@ -821,8 +821,8 @@ test('public model leaderboard uses the unauthenticated global API', async ({ pa
   expect(quickRangeUrl.searchParams.get('tenantId')).toBeNull();
 });
 
-test('tenant model leaderboard scopes regular users to their session tenant', async ({ page }) => {
-  let leaderboardRequest = null;
+test('model leaderboard is global by default for regular users and can be scoped to their tenant', async ({ page }) => {
+  const leaderboardRequests = [];
   await page.addInitScript((storedSession) => {
     window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
   }, session('usr_regular'));
@@ -839,7 +839,7 @@ test('tenant model leaderboard scopes regular users to their session tenant', as
     }
 
     if (url.pathname === '/v1.0/api/request-history/model-leaderboard') {
-      leaderboardRequest = route.request();
+      leaderboardRequests.push(route.request());
       await fulfillLeaderboard(route);
       return;
     }
@@ -852,16 +852,23 @@ test('tenant model leaderboard scopes regular users to their session tenant', as
   await expect(page.getByText('llama3.2:latest')).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Request Count' })).toBeVisible();
   await expect(page.getByRole('row', { name: /llama3\.2:latest/ })).toContainText('2');
-  await expect(page.getByRole('combobox', { name: 'Rows Per Page' })).toHaveValue('10');
-  await expect(page.getByRole('combobox', { name: 'Rows Per Page' }).locator('option')).toHaveText(['10', '25', '50', '100']);
+  // Regular users get a Global/My-Tenant scope selector, not the admin tenant filter.
   await expect(page.getByRole('combobox', { name: 'Tenant Filter' })).toHaveCount(0);
-  await expect.poll(() => leaderboardRequest).not.toBeNull();
+  await expect(page.getByRole('combobox', { name: 'Scope' })).toBeVisible();
+  await expect.poll(() => leaderboardRequests.length).toBeGreaterThan(0);
 
-  const url = new URL(leaderboardRequest.url());
-  expect(url.searchParams.get('tenantId')).toBe('ten_default');
-  expect(url.searchParams.get('limit')).toBe('10');
-  expect(url.searchParams.get('offset')).toBe('0');
-  expect(leaderboardRequest.headers()).not.toHaveProperty('authorization');
+  // Default scope is global: the initial request carries no tenant id.
+  const initialUrl = new URL(leaderboardRequests[0].url());
+  expect(initialUrl.searchParams.get('tenantId')).toBeNull();
+  expect(initialUrl.searchParams.get('limit')).toBe('10');
+  expect(initialUrl.searchParams.get('offset')).toBe('0');
+  expect(leaderboardRequests[0].headers()).not.toHaveProperty('authorization');
+
+  // Scoping to "My Tenant" re-requests with the session tenant id.
+  await page.getByRole('combobox', { name: 'Scope' }).selectOption('ten_default');
+  await expect
+    .poll(() => new URL(leaderboardRequests[leaderboardRequests.length - 1].url()).searchParams.get('tenantId'))
+    .toBe('ten_default');
 });
 
 test('regular tenant members see member dashboard surfaces without admin routes', async ({ page }) => {

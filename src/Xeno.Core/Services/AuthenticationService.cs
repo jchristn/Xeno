@@ -5,6 +5,9 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Security.Cryptography;
     using System.Text;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using Xeno.Core.Database;
     using Xeno.Core.Enums;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
@@ -17,28 +20,30 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Issue a bearer session token.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="settings">Authentication settings.</param>
         /// <param name="tenantId">Tenant ID.</param>
         /// <param name="principalType">Principal type.</param>
         /// <param name="userId">User ID.</param>
         /// <param name="credentialId">Credential ID.</param>
         /// <param name="authScheme">Authentication scheme.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>Token issuance result.</returns>
-        public AuthTokenResult IssueToken(
-            XenoPlatform platform,
+        public async Task<AuthTokenResult> IssueTokenAsync(
+            DatabaseDriverBase database,
             AuthSettings settings,
             string tenantId,
             PrincipalTypeEnum principalType,
             string? userId,
             string? credentialId,
-            AuthSchemeEnum authScheme)
+            AuthSchemeEnum authScheme,
+            CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
 
-            string token = GenerateToken();
+            string bearerToken = GenerateToken();
             DateTime expiresUtc = DateTime.UtcNow.AddMinutes(Math.Max(1, settings.SessionMinutes));
             AuthSession session = new AuthSession
             {
@@ -46,16 +51,16 @@ namespace Xeno.Core.Services
                 PrincipalType = principalType,
                 UserId = userId,
                 CredentialId = credentialId,
-                TokenHash = HashToken(token),
+                TokenHash = HashToken(bearerToken),
                 AuthScheme = authScheme,
                 ExpiresUtc = expiresUtc,
                 Active = true
             };
-            platform.AuthSessions.Add(session);
+            await database.AuthSessions!.CreateAsync(session, token).ConfigureAwait(false);
 
             return new AuthTokenResult
             {
-                Token = token,
+                Token = bearerToken,
                 TenantId = tenantId,
                 SessionId = session.Id,
                 ExpiresUtc = expiresUtc
@@ -65,40 +70,38 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Validate a bearer token.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
-        /// <param name="token">Bearer token.</param>
+        /// <param name="database">Database driver.</param>
+        /// <param name="bearerToken">Bearer token.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>Active auth session.</returns>
-        public AuthSession? ValidateToken(XenoPlatform platform, string token)
+        public async Task<AuthSession?> ValidateTokenAsync(DatabaseDriverBase database, string bearerToken, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
-            if (String.IsNullOrWhiteSpace(token)) return null;
+            if (database == null) throw new ArgumentNullException(nameof(database));
+            if (String.IsNullOrWhiteSpace(bearerToken)) return null;
 
-            string tokenHash = HashToken(token);
+            string tokenHash = HashToken(bearerToken);
             DateTime now = DateTime.UtcNow;
-            List<AuthSession> sessions = platform.AuthSessions
-                .Where(item =>
-                    item.Active &&
-                    item.ExpiresUtc > now &&
-                    String.Equals(item.TokenHash, tokenHash, StringComparison.Ordinal))
-                .Where(item => IsSessionValid(platform, item))
-                .ToList();
-
-            return sessions.Count == 1 ? sessions[0] : null;
+            AuthSession? session = await database.AuthSessions!.ReadByTokenHashAsync(tokenHash, token).ConfigureAwait(false);
+            if (session == null) return null;
+            if (!(session.Active && session.ExpiresUtc > now && String.Equals(session.TokenHash, tokenHash, StringComparison.Ordinal))) return null;
+            if (!await IsSessionValidAsync(database, session, token).ConfigureAwait(false)) return null;
+            return session;
         }
 
         /// <summary>
         /// Validate a bearer token for a specific tenant.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="tenantId">Tenant ID.</param>
-        /// <param name="token">Bearer token.</param>
+        /// <param name="bearerToken">Bearer token.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>Active auth session.</returns>
-        public AuthSession? ValidateToken(XenoPlatform platform, string tenantId, string token)
+        public async Task<AuthSession?> ValidateTokenAsync(DatabaseDriverBase database, string tenantId, string bearerToken, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
-            if (String.IsNullOrWhiteSpace(token)) return null;
+            if (database == null) throw new ArgumentNullException(nameof(database));
+            if (String.IsNullOrWhiteSpace(bearerToken)) return null;
 
-            AuthSession? session = ValidateToken(platform, token);
+            AuthSession? session = await ValidateTokenAsync(database, bearerToken, token).ConfigureAwait(false);
             if (session == null || !String.Equals(session.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)) return null;
             return session;
         }
@@ -106,20 +109,24 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Validate a direct credential by globally unique access key.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="accessKey">Access key.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>Credential when valid and unambiguous.</returns>
-        public Credential? ValidateCredential(XenoPlatform platform, string accessKey)
+        public async Task<Credential?> ValidateCredentialAsync(DatabaseDriverBase database, string accessKey, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (String.IsNullOrWhiteSpace(accessKey)) return null;
 
-            List<Credential> credentials = platform.Credentials
-                .Where(item =>
-                    item.Active &&
-                    String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal))
-                .Where(item => IsCredentialValid(platform, item))
-                .ToList();
+            List<Credential> candidates = await database.Credentials!.EnumerateByAccessKeyAsync(accessKey, token).ConfigureAwait(false);
+            List<Credential> credentials = new List<Credential>();
+            foreach (Credential candidate in candidates)
+            {
+                if (!candidate.Active) continue;
+                if (!String.Equals(candidate.AccessKey, accessKey, StringComparison.Ordinal)) continue;
+                if (!await IsCredentialValidAsync(database, candidate, token).ConfigureAwait(false)) continue;
+                credentials.Add(candidate);
+            }
 
             return credentials.Count == 1 ? credentials[0] : null;
         }
@@ -127,47 +134,55 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Validate a direct credential for a specific tenant.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="tenantId">Tenant ID.</param>
         /// <param name="accessKey">Access key.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>Credential when valid.</returns>
-        public Credential? ValidateCredential(XenoPlatform platform, string tenantId, string accessKey)
+        public async Task<Credential?> ValidateCredentialAsync(DatabaseDriverBase database, string tenantId, string accessKey, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (String.IsNullOrWhiteSpace(accessKey)) return null;
 
-            Credential? credential = platform.Credentials.FirstOrDefault(item =>
-                item.TenantId == tenantId &&
-                item.Active &&
-                String.Equals(item.AccessKey, accessKey, StringComparison.Ordinal));
-            if (credential == null) return null;
-            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
-            if (!platform.Users.Any(item => item.Id == credential.UserId && item.TenantId == tenantId && item.Active)) return null;
+            Credential? credential = await database.Credentials!.ReadByAccessKeyAsync(tenantId, accessKey, token).ConfigureAwait(false);
+            if (credential == null || !credential.Active) return null;
+            if (!String.Equals(credential.AccessKey, accessKey, StringComparison.Ordinal)) return null;
+
+            Tenant? tenant = await database.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
+            if (tenant == null || !tenant.Active) return null;
+
+            User? user = await database.Users!.ReadAsync(tenantId, credential.UserId, token).ConfigureAwait(false);
+            if (user == null || !user.Active) return null;
             return credential;
         }
 
-        private static bool IsSessionValid(XenoPlatform platform, AuthSession session)
+        private static async Task<bool> IsSessionValidAsync(DatabaseDriverBase database, AuthSession session, CancellationToken token)
         {
-            if (!platform.Tenants.Any(item => item.Id == session.TenantId && item.Active)) return false;
+            Tenant? tenant = await database.Tenants!.ReadAsync(session.TenantId, token).ConfigureAwait(false);
+            if (tenant == null || !tenant.Active) return false;
+
             if (!String.IsNullOrWhiteSpace(session.UserId))
             {
-                User? user = platform.Users.FirstOrDefault(item => item.Id == session.UserId && item.TenantId == session.TenantId && item.Active);
-                if (user == null) return false;
+                User? user = await database.Users!.ReadAsync(session.TenantId, session.UserId!, token).ConfigureAwait(false);
+                if (user == null || !user.Active) return false;
             }
 
             if (!String.IsNullOrWhiteSpace(session.CredentialId))
             {
-                Credential? credential = platform.Credentials.FirstOrDefault(item => item.Id == session.CredentialId && item.TenantId == session.TenantId && item.Active);
-                if (credential == null) return false;
+                Credential? credential = await database.Credentials!.ReadAsync(session.TenantId, session.CredentialId!, token).ConfigureAwait(false);
+                if (credential == null || !credential.Active) return false;
             }
 
             return true;
         }
 
-        private static bool IsCredentialValid(XenoPlatform platform, Credential credential)
+        private static async Task<bool> IsCredentialValidAsync(DatabaseDriverBase database, Credential credential, CancellationToken token)
         {
-            if (!platform.Tenants.Any(item => item.Id == credential.TenantId && item.Active)) return false;
-            return platform.Users.Any(item => item.Id == credential.UserId && item.TenantId == credential.TenantId && item.Active);
+            Tenant? tenant = await database.Tenants!.ReadAsync(credential.TenantId, token).ConfigureAwait(false);
+            if (tenant == null || !tenant.Active) return false;
+
+            User? user = await database.Users!.ReadAsync(credential.TenantId, credential.UserId, token).ConfigureAwait(false);
+            return user != null && user.Active;
         }
 
         /// <summary>
@@ -189,23 +204,27 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Validate a user's username/password pair.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="tenantId">Tenant ID.</param>
         /// <param name="username">Username or email address.</param>
         /// <param name="password">Plaintext password supplied by the user.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>User when valid.</returns>
-        public User? ValidateUserPassword(XenoPlatform platform, string tenantId, string username, string password)
+        public async Task<User?> ValidateUserPasswordAsync(DatabaseDriverBase database, string tenantId, string username, string password, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (String.IsNullOrWhiteSpace(username) || String.IsNullOrWhiteSpace(password)) return null;
 
-            User? user = platform.Users.FirstOrDefault(item =>
-                item.TenantId == tenantId &&
-                item.Active &&
-                (String.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase) ||
-                 String.Equals(item.Email, username, StringComparison.OrdinalIgnoreCase)));
-            if (user == null) return null;
-            if (!platform.Tenants.Any(item => item.Id == tenantId && item.Active)) return null;
+            User? user = await database.Users!.ReadByUsernameAsync(tenantId, username, token).ConfigureAwait(false);
+            if (user == null)
+            {
+                user = await database.Users!.ReadByEmailAsync(tenantId, username, token).ConfigureAwait(false);
+            }
+
+            if (user == null || !user.Active) return null;
+
+            Tenant? tenant = await database.Tenants!.ReadAsync(tenantId, token).ConfigureAwait(false);
+            if (tenant == null || !tenant.Active) return null;
             if (String.IsNullOrWhiteSpace(user.PasswordSalt) || String.IsNullOrWhiteSpace(user.PasswordHash)) return null;
 
             string candidateHash = HashPassword(user.PasswordSalt, password);
@@ -215,35 +234,38 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Revoke an auth session.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="sessionId">Session ID.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>True if a session was revoked.</returns>
-        public bool RevokeSession(XenoPlatform platform, string? sessionId)
+        public async Task<bool> RevokeSessionAsync(DatabaseDriverBase database, string? sessionId, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (String.IsNullOrWhiteSpace(sessionId)) return false;
 
-            AuthSession? session = platform.AuthSessions.FirstOrDefault(item => item.Id == sessionId && item.Active);
-            if (session == null) return false;
+            AuthSession? session = await database.AuthSessions!.ReadByIdAsync(sessionId, token).ConfigureAwait(false);
+            if (session == null || !session.Active) return false;
             session.Active = false;
             session.LastUpdateUtc = DateTime.UtcNow;
+            await database.AuthSessions!.UpdateAsync(session, token).ConfigureAwait(false);
             return true;
         }
 
         /// <summary>
         /// Resolve effective permissions for a request context.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="context">Request context.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>Effective permissions.</returns>
-        public List<EffectivePermission> GetEffectivePermissions(XenoPlatform platform, RequestContext context)
+        public async Task<List<EffectivePermission>> GetEffectivePermissionsAsync(DatabaseDriverBase database, RequestContext context, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (context == null) throw new ArgumentNullException(nameof(context));
 
             User? user = String.IsNullOrWhiteSpace(context.UserId)
                 ? null
-                : platform.Users.FirstOrDefault(item => item.Id == context.UserId && item.TenantId == context.TenantId);
+                : await database.Users!.ReadAsync(context.TenantId, context.UserId!, token).ConfigureAwait(false);
 
             if (context.PrincipalType == PrincipalTypeEnum.Administrator || (user != null && (user.IsAdmin || user.IsTenantAdmin)))
             {
@@ -260,22 +282,24 @@ namespace Xeno.Core.Services
             string? principalId = context.PrincipalType == PrincipalTypeEnum.Credential ? context.CredentialId : context.UserId;
             if (String.IsNullOrWhiteSpace(principalId)) return new List<EffectivePermission>();
 
-            List<RoleAssignment> assignments = platform.RoleAssignments
-                .Where(item => item.TenantId == context.TenantId)
-                .Where(item => item.Active)
-                .Where(item => item.PrincipalType == context.PrincipalType)
-                .Where(item => item.PrincipalId == principalId)
-                .ToList();
+            List<RoleAssignment> allAssignments = await database.RoleAssignments!.EnumerateByPrincipalAsync(context.TenantId, principalId, token).ConfigureAwait(false);
+            List<RoleAssignment> assignments = new List<RoleAssignment>();
+            foreach (RoleAssignment assignment in allAssignments)
+            {
+                if (!assignment.Active) continue;
+                if (assignment.PrincipalType != context.PrincipalType) continue;
+                assignments.Add(assignment);
+            }
 
             List<EffectivePermission> permissions = new List<EffectivePermission>();
             foreach (RoleAssignment assignment in assignments)
             {
-                Role? role = platform.Roles.FirstOrDefault(item => item.Id == assignment.RoleId && item.TenantId == context.TenantId && item.Active);
-                if (role == null) continue;
+                Role? role = await database.Roles!.ReadAsync(context.TenantId, assignment.RoleId, token).ConfigureAwait(false);
+                if (role == null || !role.Active) continue;
                 foreach (string permissionId in role.PermissionIds)
                 {
-                    Permission? permission = platform.Permissions.FirstOrDefault(item => item.Id == permissionId && item.TenantId == context.TenantId && item.Active);
-                    if (permission == null) continue;
+                    Permission? permission = await database.Permissions!.ReadAsync(context.TenantId, permissionId, token).ConfigureAwait(false);
+                    if (permission == null || !permission.Active) continue;
                     permissions.Add(new EffectivePermission
                     {
                         ResourceType = permission.ResourceType,
@@ -292,14 +316,15 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Determine whether the request context has permission.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="context">Request context.</param>
         /// <param name="resourceType">Resource type.</param>
         /// <param name="operationType">Operation type.</param>
+        /// <param name="token">Cancellation token.</param>
         /// <returns>True if permitted.</returns>
-        public bool IsAllowed(XenoPlatform platform, RequestContext context, string resourceType, OperationTypeEnum operationType)
+        public async Task<bool> IsAllowedAsync(DatabaseDriverBase database, RequestContext context, string resourceType, OperationTypeEnum operationType, CancellationToken token = default)
         {
-            List<EffectivePermission> permissions = GetEffectivePermissions(platform, context);
+            List<EffectivePermission> permissions = await GetEffectivePermissionsAsync(database, context, token).ConfigureAwait(false);
             EffectivePermission? explicitDeny = permissions.FirstOrDefault(item =>
                 !item.Permit &&
                 Matches(item.ResourceType, resourceType) &&
@@ -317,7 +342,7 @@ namespace Xeno.Core.Services
         /// persisted to the dedicated audit table by the caller and are never cached in the in-memory
         /// platform state.
         /// </summary>
-        /// <param name="platform">Platform state. Unused; retained for call-site compatibility.</param>
+        /// <param name="database">Database driver. Unused; retained for call-site compatibility.</param>
         /// <param name="context">Request context.</param>
         /// <param name="resourceType">Resource type.</param>
         /// <param name="operationType">Operation type.</param>
@@ -328,7 +353,7 @@ namespace Xeno.Core.Services
         /// <param name="targetResourceId">Optional target resource ID.</param>
         /// <returns>Audit record.</returns>
         public AuditRecord AppendAudit(
-            XenoPlatform platform,
+            DatabaseDriverBase database,
             RequestContext context,
             string resourceType,
             OperationTypeEnum operationType,
@@ -338,7 +363,7 @@ namespace Xeno.Core.Services
             string? targetTenantId = null,
             string? targetResourceId = null)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (context == null) throw new ArgumentNullException(nameof(context));
 
             AuditRecord record = new AuditRecord

@@ -1,8 +1,32 @@
 namespace Xeno.Core.Services
 {
     using System;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using Xeno.Core.Database;
     using Xeno.Core.Enums;
     using Xeno.Core.Models;
+
+    /// <summary>
+    /// Outcome of a ledger event creation attempt.
+    /// </summary>
+    public class LedgerEventCreationResult
+    {
+        /// <summary>
+        /// True when a ledger event was built.
+        /// </summary>
+        public bool Success { get; set; }
+
+        /// <summary>
+        /// Ledger event when one could be built; otherwise null.
+        /// </summary>
+        public LedgerEvent? Event { get; set; }
+
+        /// <summary>
+        /// Reason no event was built; otherwise null.
+        /// </summary>
+        public string? Reason { get; set; }
+    }
 
     /// <summary>
     /// Builds ledger events from request history.
@@ -12,55 +36,44 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Try to build a ledger event.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="history">Request history entry.</param>
-        /// <param name="ledgerEvent">Ledger event when one can be built.</param>
-        /// <param name="reason">Reason no event was built.</param>
-        /// <returns>True if an event was built.</returns>
-        public static bool TryCreate(XenoPlatform platform, RequestHistoryEntry history, out LedgerEvent? ledgerEvent, out string? reason)
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Ledger event creation result.</returns>
+        public static async Task<LedgerEventCreationResult> TryCreateAsync(DatabaseDriverBase database, RequestHistoryEntry history, CancellationToken token = default)
         {
-            if (platform == null) throw new ArgumentNullException(nameof(platform));
+            if (database == null) throw new ArgumentNullException(nameof(database));
             if (history == null) throw new ArgumentNullException(nameof(history));
-
-            ledgerEvent = null;
-            reason = null;
 
             if (history.StatusCode < 200 || history.StatusCode >= 300)
             {
-                reason = "Request did not complete successfully.";
-                return false;
+                return Failure("Request did not complete successfully.");
             }
 
             int totalTokens = Math.Max(0, history.Telemetry?.TotalTokens ?? 0);
             if (totalTokens <= 0)
             {
-                reason = "Request history entry does not include positive total token usage.";
-                return false;
+                return Failure("Request history entry does not include positive total token usage.");
             }
 
             if (String.IsNullOrWhiteSpace(history.SelectedClientId))
             {
-                reason = "Request history entry does not include a selected client.";
-                return false;
+                return Failure("Request history entry does not include a selected client.");
             }
 
-            string? requestUserId = ResolveRequestUserId(platform, history);
+            string? requestUserId = await ResolveRequestUserIdAsync(database, history, token).ConfigureAwait(false);
             if (String.IsNullOrWhiteSpace(requestUserId))
             {
-                reason = "Requesting user could not be resolved.";
-                return false;
+                return Failure("Requesting user could not be resolved.");
             }
 
-            XenoClientRecord? selectedClient = platform.Clients.Find(item =>
-                String.Equals(item.Id, history.SelectedClientId, StringComparison.OrdinalIgnoreCase)
-                && String.Equals(item.TenantId, history.TenantId, StringComparison.OrdinalIgnoreCase));
+            XenoClientRecord? selectedClient = await database.Clients!.ReadAsync(history.TenantId, history.SelectedClientId, token).ConfigureAwait(false);
             if (selectedClient == null || String.IsNullOrWhiteSpace(selectedClient.OwnerUserId))
             {
-                reason = "Serving client owner could not be resolved.";
-                return false;
+                return Failure("Serving client owner could not be resolved.");
             }
 
-            ledgerEvent = new LedgerEvent
+            LedgerEvent ledgerEvent = new LedgerEvent
             {
                 XenoTenantId = history.TenantId,
                 RequestHistoryId = history.Id,
@@ -72,16 +85,30 @@ namespace Xeno.Core.Services
                 TotalTokens = totalTokens,
                 OccurredUtc = (history.CompletedUtc ?? history.CreatedUtc).ToUniversalTime()
             };
-            return true;
+
+            return new LedgerEventCreationResult
+            {
+                Success = true,
+                Event = ledgerEvent,
+                Reason = null
+            };
         }
 
-        private static string? ResolveRequestUserId(XenoPlatform platform, RequestHistoryEntry history)
+        private static LedgerEventCreationResult Failure(string reason)
+        {
+            return new LedgerEventCreationResult
+            {
+                Success = false,
+                Event = null,
+                Reason = reason
+            };
+        }
+
+        private static async Task<string?> ResolveRequestUserIdAsync(DatabaseDriverBase database, RequestHistoryEntry history, CancellationToken token)
         {
             if (!String.IsNullOrWhiteSpace(history.CredentialId))
             {
-                Credential? credential = platform.Credentials.Find(item =>
-                    String.Equals(item.Id, history.CredentialId, StringComparison.OrdinalIgnoreCase)
-                    && String.Equals(item.TenantId, history.RequestorTenantId, StringComparison.OrdinalIgnoreCase));
+                Credential? credential = await database.Credentials!.ReadAsync(history.RequestorTenantId, history.CredentialId, token).ConfigureAwait(false);
                 if (!String.IsNullOrWhiteSpace(credential?.UserId)) return credential.UserId;
             }
 

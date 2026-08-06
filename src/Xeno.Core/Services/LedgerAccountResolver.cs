@@ -5,6 +5,7 @@ namespace Xeno.Core.Services
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Database;
     using Xeno.Core.Models;
     using Xeno.Core.Settings;
 
@@ -15,7 +16,7 @@ namespace Xeno.Core.Services
     {
         #region Private-Members
 
-        private readonly XenoPlatform _Platform;
+        private readonly DatabaseDriverBase _Database;
         private readonly LedgerSettings _Settings;
         private readonly NetLedgerClient _Client;
 
@@ -26,12 +27,12 @@ namespace Xeno.Core.Services
         /// <summary>
         /// Instantiate the resolver.
         /// </summary>
-        /// <param name="platform">Platform state.</param>
+        /// <param name="database">Database driver.</param>
         /// <param name="settings">Ledger settings.</param>
         /// <param name="client">NetLedger client.</param>
-        public LedgerAccountResolver(XenoPlatform platform, LedgerSettings settings, NetLedgerClient client)
+        public LedgerAccountResolver(DatabaseDriverBase database, LedgerSettings settings, NetLedgerClient client)
         {
-            _Platform = platform ?? throw new ArgumentNullException(nameof(platform));
+            _Database = database ?? throw new ArgumentNullException(nameof(database));
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _Client = client ?? throw new ArgumentNullException(nameof(client));
         }
@@ -51,11 +52,11 @@ namespace Xeno.Core.Services
             if (String.IsNullOrWhiteSpace(xenoTenantId)) throw new ArgumentException("Tenant ID is required.", nameof(xenoTenantId));
             token.ThrowIfCancellationRequested();
 
-            LedgerTenantLink? existing = _Platform.LedgerTenantLinks.FirstOrDefault(item => String.Equals(item.XenoTenantId, xenoTenantId, StringComparison.OrdinalIgnoreCase));
+            LedgerTenantLink? existing = await _Database.LedgerTenantLinks!.ReadByTenantAsync(xenoTenantId, token).ConfigureAwait(false);
             if (existing != null) return existing;
             if (!_Settings.CreateTenantsAutomatically) throw new InvalidOperationException("Ledger tenant link does not exist and automatic tenant creation is disabled.");
 
-            Tenant? xenoTenant = _Platform.Tenants.FirstOrDefault(item => String.Equals(item.Id, xenoTenantId, StringComparison.OrdinalIgnoreCase));
+            Tenant? xenoTenant = await _Database.Tenants!.ReadAsync(xenoTenantId, token).ConfigureAwait(false);
             if (xenoTenant == null) throw new InvalidOperationException("Xeno tenant '" + xenoTenantId + "' was not found.");
 
             NetLedgerTenant created = await _Client.CreateTenantAsync(new NetLedgerTenant
@@ -72,8 +73,7 @@ namespace Xeno.Core.Services
                 CreatedUtc = DateTime.UtcNow,
                 UpdatedUtc = DateTime.UtcNow
             };
-            _Platform.LedgerTenantLinks.Add(link);
-            return link;
+            return await _Database.LedgerTenantLinks!.CreateAsync(link, token).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -91,14 +91,10 @@ namespace Xeno.Core.Services
             if (tenantLink == null) throw new ArgumentNullException(nameof(tenantLink));
             token.ThrowIfCancellationRequested();
 
-            LedgerAccountLink? existing = _Platform.LedgerAccountLinks.FirstOrDefault(item =>
-                String.Equals(item.XenoTenantId, xenoTenantId, StringComparison.OrdinalIgnoreCase)
-                && String.Equals(item.XenoUserId, xenoUserId, StringComparison.OrdinalIgnoreCase));
+            LedgerAccountLink? existing = await _Database.LedgerAccountLinks!.ReadByUserAsync(xenoTenantId, xenoUserId, token).ConfigureAwait(false);
             if (existing != null) return existing;
 
-            User? user = _Platform.Users.FirstOrDefault(item =>
-                String.Equals(item.TenantId, xenoTenantId, StringComparison.OrdinalIgnoreCase)
-                && String.Equals(item.Id, xenoUserId, StringComparison.OrdinalIgnoreCase));
+            User? user = await _Database.Users!.ReadAsync(xenoTenantId, xenoUserId, token).ConfigureAwait(false);
             if (user == null) throw new InvalidOperationException("Xeno user '" + xenoUserId + "' was not found.");
 
             Dictionary<string, string> tags = LedgerMetadataBuilder.BuildAccountTags(xenoTenantId, user);
@@ -106,7 +102,7 @@ namespace Xeno.Core.Services
             NetLedgerAccount? matched = matches.FirstOrDefault(item => TagsMatch(item.Tags, tags));
             if (matched != null)
             {
-                return AddAccountLink(xenoTenantId, xenoUserId, tenantLink.NetLedgerTenantId, matched.Id);
+                return await AddAccountLinkAsync(xenoTenantId, xenoUserId, tenantLink.NetLedgerTenantId, matched.Id, token).ConfigureAwait(false);
             }
 
             if (!_Settings.CreateAccountsAutomatically) throw new InvalidOperationException("Ledger account link does not exist and automatic account creation is disabled.");
@@ -119,14 +115,14 @@ namespace Xeno.Core.Services
                 Tags = tags
             }, token).ConfigureAwait(false);
 
-            return AddAccountLink(xenoTenantId, xenoUserId, tenantLink.NetLedgerTenantId, created.Id);
+            return await AddAccountLinkAsync(xenoTenantId, xenoUserId, tenantLink.NetLedgerTenantId, created.Id, token).ConfigureAwait(false);
         }
 
         #endregion
 
         #region Private-Methods
 
-        private LedgerAccountLink AddAccountLink(string xenoTenantId, string xenoUserId, string netLedgerTenantId, string netLedgerAccountId)
+        private async Task<LedgerAccountLink> AddAccountLinkAsync(string xenoTenantId, string xenoUserId, string netLedgerTenantId, string netLedgerAccountId, CancellationToken token)
         {
             LedgerAccountLink link = new LedgerAccountLink
             {
@@ -137,8 +133,7 @@ namespace Xeno.Core.Services
                 CreatedUtc = DateTime.UtcNow,
                 UpdatedUtc = DateTime.UtcNow
             };
-            _Platform.LedgerAccountLinks.Add(link);
-            return link;
+            return await _Database.LedgerAccountLinks!.CreateAsync(link, token).ConfigureAwait(false);
         }
 
         private static bool TagsMatch(Dictionary<string, string> actual, Dictionary<string, string> expected)

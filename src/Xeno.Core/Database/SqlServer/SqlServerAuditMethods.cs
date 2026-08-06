@@ -165,11 +165,15 @@ namespace Xeno.Core.Database.SqlServer
 
         private static string InsertSql()
         {
+            // Idempotent insert: a duplicate id is silently ignored, matching the other providers
+            // (SQLite INSERT OR IGNORE, Postgres ON CONFLICT DO NOTHING, MySQL INSERT IGNORE). SQL Server
+            // has no INSERT-IGNORE form, so guard the insert with WHERE NOT EXISTS.
             return """
 INSERT INTO audit_records
     (id, tenant_id, target_tenant_id, principal_id, target_resource_id, created_utc, record_json)
-VALUES
-    (@id, @tenant_id, @target_tenant_id, @principal_id, @target_resource_id, @created_utc, @record_json);
+SELECT
+    @id, @tenant_id, @target_tenant_id, @principal_id, @target_resource_id, @created_utc, @record_json
+WHERE NOT EXISTS (SELECT 1 FROM audit_records WHERE id = @id);
 """;
         }
 
