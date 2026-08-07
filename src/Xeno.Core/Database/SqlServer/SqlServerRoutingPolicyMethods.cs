@@ -269,6 +269,48 @@ namespace Xeno.Core.Database.SqlServer
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (SqlConnection connection = new SqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (SqlTransaction transaction = (SqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false))
+                {
+                    using (SqlCommand filterCommand = connection.CreateCommand())
+                    {
+                        filterCommand.Transaction = transaction;
+                        filterCommand.CommandText = "DELETE FROM dbo.routing_policy_filters WHERE policy_id IN (SELECT id FROM dbo.routing_policies WHERE tenant_id = @tenant);";
+                        filterCommand.Parameters.AddWithValue("@tenant", tenantId);
+                        await filterCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    using (SqlCommand rankingCommand = connection.CreateCommand())
+                    {
+                        rankingCommand.Transaction = transaction;
+                        rankingCommand.CommandText = "DELETE FROM dbo.routing_policy_ranking_rules WHERE policy_id IN (SELECT id FROM dbo.routing_policies WHERE tenant_id = @tenant);";
+                        rankingCommand.Parameters.AddWithValue("@tenant", tenantId);
+                        await rankingCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    int rows;
+                    using (SqlCommand command = connection.CreateCommand())
+                    {
+                        command.Transaction = transaction;
+                        command.CommandText = "DELETE FROM dbo.routing_policies WHERE tenant_id = @tenant;";
+                        command.Parameters.AddWithValue("@tenant", tenantId);
+                        rows = await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    await transaction.CommitAsync(token).ConfigureAwait(false);
+                    return rows;
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<bool> ExistsAsync(string tenantId, string id, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return false;

@@ -83,6 +83,23 @@ namespace Xeno.Core.Database.Interfaces
         Task<bool> DeleteAsync(string tenantId, string id, CancellationToken token = default);
 
         /// <summary>
+        /// Delete every credential owned by a tenant in a single set-based statement.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of rows deleted.</returns>
+        Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default);
+
+        /// <summary>
+        /// Delete every credential owned by a specific user in a single set-based statement.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="userId">Owning user identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of rows deleted.</returns>
+        Task<int> DeleteByUserAsync(string tenantId, string userId, CancellationToken token = default);
+
+        /// <summary>
         /// Determine whether a credential exists within a tenant.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>

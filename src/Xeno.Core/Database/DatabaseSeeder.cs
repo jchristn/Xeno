@@ -148,66 +148,20 @@ namespace Xeno.Core.Database
             if (driver == null) throw new ArgumentNullException(nameof(driver));
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
 
-            if (driver.AuthSessions != null)
-            {
-                foreach (AuthSession session in await driver.AuthSessions.EnumerateByTenantAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.AuthSessions.DeleteAsync(tenantId, session.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.RoleAssignments != null)
-            {
-                foreach (RoleAssignment assignment in await driver.RoleAssignments.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.RoleAssignments.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.Roles != null)
-            {
-                foreach (Role role in await driver.Roles.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.Roles.DeleteAsync(tenantId, role.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.Permissions != null)
-            {
-                foreach (Permission permission in await driver.Permissions.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.Permissions.DeleteAsync(tenantId, permission.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.Credentials != null)
-            {
-                foreach (Credential credential in await driver.Credentials.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.Credentials.DeleteAsync(tenantId, credential.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.Users != null)
-            {
-                foreach (User user in await driver.Users.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.Users.DeleteAsync(tenantId, user.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.Clients != null)
-            {
-                foreach (XenoClientRecord client in await driver.Clients.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.Clients.DeleteAsync(tenantId, client.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.ModelDefinitions != null)
-            {
-                foreach (ModelDefinition definition in await driver.ModelDefinitions.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.ModelDefinitions.DeleteAsync(tenantId, definition.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.ModelConfigurations != null)
-            {
-                foreach (ModelConfiguration configuration in await driver.ModelConfigurations.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.ModelConfigurations.DeleteAsync(tenantId, configuration.Id, token).ConfigureAwait(false);
-            }
-
-            if (driver.RoutingPolicies != null)
-            {
-                foreach (RoutingPolicy policy in await driver.RoutingPolicies.EnumerateAsync(tenantId, token).ConfigureAwait(false))
-                    await driver.RoutingPolicies.DeleteAsync(tenantId, policy.Id, token).ConfigureAwait(false);
-            }
-
+            // Set-based tenant purge: each repository issues a single DELETE (child rows removed in the same
+            // statement/transaction by the repository) rather than enumerating and deleting row by row.
+            // onboarding_requests is a leaf table, deleted first so ordering never depends on other tables.
+            if (driver.Onboarding != null) await driver.Onboarding.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.AuthSessions != null) await driver.AuthSessions.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.RoleAssignments != null) await driver.RoleAssignments.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.Roles != null) await driver.Roles.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.Permissions != null) await driver.Permissions.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.Credentials != null) await driver.Credentials.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.Users != null) await driver.Users.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.Clients != null) await driver.Clients.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.ModelDefinitions != null) await driver.ModelDefinitions.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.ModelConfigurations != null) await driver.ModelConfigurations.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.RoutingPolicies != null) await driver.RoutingPolicies.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
             if (driver.LedgerAccountLinks != null) await driver.LedgerAccountLinks.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
             if (driver.LedgerTenantLinks != null) await driver.LedgerTenantLinks.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
 

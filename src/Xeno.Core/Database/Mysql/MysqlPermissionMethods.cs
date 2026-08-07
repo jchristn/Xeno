@@ -177,6 +177,24 @@ namespace Xeno.Core.Database.Mysql
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (MySqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM permissions WHERE tenant_id = @tenant_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<bool> ExistsAsync(string tenantId, string id, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return false;

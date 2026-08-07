@@ -220,6 +220,45 @@ namespace Xeno.Core.Database.Postgresql
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM role_assignments WHERE tenant_id = @tenant_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> DeleteByPrincipalAsync(string tenantId, PrincipalTypeEnum principalType, string principalId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            if (String.IsNullOrWhiteSpace(principalId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM role_assignments WHERE tenant_id = @tenant_id AND principal_type = @principal_type AND principal_id = @principal_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    command.Parameters.AddWithValue("@principal_type", principalType.ToString());
+                    command.Parameters.AddWithValue("@principal_id", principalId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<int> DeleteByRoleAsync(string tenantId, string roleId, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return 0;

@@ -211,6 +211,24 @@ namespace Xeno.Core.Database.Postgresql
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM auth_sessions WHERE tenant_id = @tenant_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<int> DeleteByUserAsync(string tenantId, string userId, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();

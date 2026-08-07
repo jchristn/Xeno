@@ -8266,41 +8266,22 @@ namespace Xeno.Server
 
         private async Task PurgeUserScopedEntitiesAsync(string tenantId, string userId, CancellationToken token)
         {
+            // Enumerate the user's credential ids once so their dependent rows (auth sessions, role
+            // assignments) can be removed set-based; every deletion below is a single DELETE statement.
             List<Credential> credentials = await _Database!.Credentials!.EnumerateByUserAsync(tenantId, userId, token).ConfigureAwait(false);
             List<string> credentialIds = credentials.Select(item => item.Id).ToList();
 
-            await _Database!.Users!.DeleteAsync(tenantId, userId, token).ConfigureAwait(false);
-            foreach (Credential credential in credentials)
-            {
-                await _Database!.Credentials!.DeleteAsync(tenantId, credential.Id, token).ConfigureAwait(false);
-            }
-
-            await _Database!.AuthSessions!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
             foreach (string credentialId in credentialIds)
             {
                 await _Database!.AuthSessions!.DeleteByCredentialAsync(tenantId, credentialId, token).ConfigureAwait(false);
+                await _Database!.RoleAssignments!.DeleteByPrincipalAsync(tenantId, PrincipalTypeEnum.Credential, credentialId, token).ConfigureAwait(false);
             }
 
-            foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, userId, token).ConfigureAwait(false))
-            {
-                if (assignment.PrincipalType == PrincipalTypeEnum.User && assignment.PrincipalId == userId)
-                {
-                    await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false);
-                }
-            }
-
-            foreach (string credentialId in credentialIds)
-            {
-                foreach (RoleAssignment assignment in await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, credentialId, token).ConfigureAwait(false))
-                {
-                    if (assignment.PrincipalType == PrincipalTypeEnum.Credential && assignment.PrincipalId == credentialId)
-                    {
-                        await _Database!.RoleAssignments!.DeleteAsync(tenantId, assignment.Id, token).ConfigureAwait(false);
-                    }
-                }
-            }
-
+            await _Database!.AuthSessions!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            await _Database!.RoleAssignments!.DeleteByPrincipalAsync(tenantId, PrincipalTypeEnum.User, userId, token).ConfigureAwait(false);
             await _Database!.LedgerAccountLinks!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            await _Database!.Credentials!.DeleteByUserAsync(tenantId, userId, token).ConfigureAwait(false);
+            await _Database!.Users!.DeleteAsync(tenantId, userId, token).ConfigureAwait(false);
         }
 
         private async Task EnsureRoutingPolicyUniqueAsync(RoutingPolicy policy, string? existingPolicyId, CancellationToken token)

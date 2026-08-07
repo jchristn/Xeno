@@ -272,6 +272,48 @@ namespace Xeno.Core.Database.Mysql
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (MySqlTransaction transaction = (MySqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false))
+                {
+                    using (MySqlCommand providerCommand = connection.CreateCommand())
+                    {
+                        providerCommand.Transaction = transaction;
+                        providerCommand.CommandText = "DELETE FROM client_providers WHERE client_id IN (SELECT id FROM (SELECT id FROM clients WHERE tenant_id = @tenant_id) AS matched);";
+                        providerCommand.Parameters.AddWithValue("@tenant_id", tenantId);
+                        await providerCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    using (MySqlCommand modelCommand = connection.CreateCommand())
+                    {
+                        modelCommand.Transaction = transaction;
+                        modelCommand.CommandText = "DELETE FROM client_models WHERE client_id IN (SELECT id FROM (SELECT id FROM clients WHERE tenant_id = @tenant_id) AS matched);";
+                        modelCommand.Parameters.AddWithValue("@tenant_id", tenantId);
+                        await modelCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    int rows;
+                    using (MySqlCommand command = connection.CreateCommand())
+                    {
+                        command.Transaction = transaction;
+                        command.CommandText = "DELETE FROM clients WHERE tenant_id = @tenant_id;";
+                        command.Parameters.AddWithValue("@tenant_id", tenantId);
+                        rows = await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    await transaction.CommitAsync(token).ConfigureAwait(false);
+                    return rows;
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<bool> ExistsAsync(string tenantId, string id, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return false;

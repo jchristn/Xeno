@@ -4441,6 +4441,7 @@ namespace Test.Shared
                 await first.Credentials!.CreateAsync(new Credential { Id = credentialId, TenantId = tenantId, UserId = userId, AccessKey = "access_" + marker, SecretKey = "secret_" + marker, Active = true }, CancellationToken.None).ConfigureAwait(false);
                 await first.Clients!.CreateAsync(new XenoClientRecord { Id = clientId, TenantId = tenantId, Name = "client_" + marker, OwnerUserId = userId, OwnerCredentialId = credentialId, OwnerPrincipalType = PrincipalTypeEnum.User, Weight = 77 }, CancellationToken.None).ConfigureAwait(false);
                 await first.RoutingPolicies!.CreateAsync(new RoutingPolicy { Id = routingPolicyId, TenantId = tenantId, Name = "policy_" + marker, ModelName = "model_" + marker, ClientName = "client_" + marker, Active = true }, CancellationToken.None).ConfigureAwait(false);
+                await first.Onboarding!.InsertAsync(new OnboardingRequest { TenantId = tenantId, UserId = userId, Organization = "Org " + marker, ContactName = "Contact " + marker, Email = marker + "@xeno.test", Token = "onbtok_" + marker, Status = OnboardingStatusEnum.PendingVerification }, CancellationToken.None).ConfigureAwait(false);
             }
 
             using (DatabaseDriverBase second = await DatabaseDriverFactory.CreateAndInitializeAsync(settings).ConfigureAwait(false))
@@ -4454,6 +4455,7 @@ namespace Test.Shared
                 if (!clients.Any(item => item.Id == clientId && item.Weight == 77)) throw new InvalidOperationException(settings.Type + " client did not round-trip.");
                 List<RoutingPolicy> routingPolicies = await second.RoutingPolicies!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false);
                 if (!routingPolicies.Any(item => item.Id == routingPolicyId)) throw new InvalidOperationException(settings.Type + " routing policy did not round-trip.");
+                if (await second.Onboarding!.GetByTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false) == null) throw new InvalidOperationException(settings.Type + " onboarding request did not round-trip.");
 
                 await Xeno.Core.Database.DatabaseSeeder.PurgeTenantEntitiesAsync(second, tenantId, true, CancellationToken.None).ConfigureAwait(false);
             }
@@ -4463,6 +4465,9 @@ namespace Test.Shared
                 if (await third.Tenants!.ReadAsync(tenantId, CancellationToken.None).ConfigureAwait(false) != null) throw new InvalidOperationException(settings.Type + " platform cleanup did not persist.");
                 if ((await third.Users!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false)).Count != 0) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant users.");
                 if ((await third.Clients!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false)).Count != 0) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant clients.");
+                if ((await third.RoutingPolicies!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false)).Count != 0) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant routing policies.");
+                if ((await third.Credentials!.EnumerateAsync(tenantId, CancellationToken.None).ConfigureAwait(false)).Count != 0) throw new InvalidOperationException(settings.Type + " platform cleanup left tenant credentials.");
+                if (await third.Onboarding!.GetByTenantAsync(tenantId, CancellationToken.None).ConfigureAwait(false) != null) throw new InvalidOperationException(settings.Type + " platform cleanup left an onboarding request.");
             }
         }
 

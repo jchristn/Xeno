@@ -239,6 +239,40 @@ namespace Xeno.Core.Database.Sqlite
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (DbTransaction transaction = await connection.BeginTransactionAsync(token).ConfigureAwait(false))
+                {
+                    using (SqliteCommand childCommand = connection.CreateCommand())
+                    {
+                        childCommand.Transaction = (SqliteTransaction)transaction;
+                        childCommand.CommandText = "DELETE FROM model_definition_labels WHERE model_definition_id IN (SELECT id FROM model_definitions WHERE tenant_id = @tenant_id);";
+                        childCommand.Parameters.AddWithValue("@tenant_id", tenantId);
+                        await childCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    int rows;
+                    using (SqliteCommand command = connection.CreateCommand())
+                    {
+                        command.Transaction = (SqliteTransaction)transaction;
+                        command.CommandText = "DELETE FROM model_definitions WHERE tenant_id = @tenant_id;";
+                        command.Parameters.AddWithValue("@tenant_id", tenantId);
+                        rows = await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    await transaction.CommitAsync(token).ConfigureAwait(false);
+                    return rows;
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<bool> ExistsAsync(string tenantId, string id, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return false;

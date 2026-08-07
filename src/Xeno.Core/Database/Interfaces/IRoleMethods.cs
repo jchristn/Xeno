@@ -66,6 +66,14 @@ namespace Xeno.Core.Database.Interfaces
         Task<bool> DeleteAsync(string tenantId, string id, CancellationToken token = default);
 
         /// <summary>
+        /// Delete every role owned by a tenant (and its role-permission rows) in a single set-based operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of role rows deleted.</returns>
+        Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default);
+
+        /// <summary>
         /// Determine whether a role exists.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>

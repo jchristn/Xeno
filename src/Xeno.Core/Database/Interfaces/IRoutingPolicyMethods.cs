@@ -67,6 +67,15 @@ namespace Xeno.Core.Database.Interfaces
         Task<bool> DeleteAsync(string tenantId, string id, CancellationToken token = default);
 
         /// <summary>
+        /// Delete every routing policy owned by a tenant (and its filter/ranking child rows) in a single
+        /// set-based operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of routing policy rows deleted.</returns>
+        Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default);
+
+        /// <summary>
         /// Determine whether a routing policy exists for a tenant.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>

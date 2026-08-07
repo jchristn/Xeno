@@ -103,6 +103,15 @@ namespace Xeno.Core.Database.Interfaces
         Task<bool> DeleteAsync(string tenantId, string id, CancellationToken token = default);
 
         /// <summary>
+        /// Delete every client owned by a tenant (and their advertised provider/model child rows) in a single
+        /// set-based operation.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of client rows deleted.</returns>
+        Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default);
+
+        /// <summary>
         /// Determine whether a client exists within a tenant.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>

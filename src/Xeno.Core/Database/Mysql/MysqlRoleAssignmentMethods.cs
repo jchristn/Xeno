@@ -239,6 +239,45 @@ namespace Xeno.Core.Database.Mysql
             }
         }
 
+        /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (MySqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM role_assignments WHERE tenant_id = @tenant_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> DeleteByPrincipalAsync(string tenantId, Xeno.Core.Enums.PrincipalTypeEnum principalType, string principalId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            if (String.IsNullOrWhiteSpace(principalId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (MySqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM role_assignments WHERE tenant_id = @tenant_id AND principal_type = @principal_type AND principal_id = @principal_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    command.Parameters.AddWithValue("@principal_type", principalType.ToString());
+                    command.Parameters.AddWithValue("@principal_id", principalId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
         #endregion
 
         #region Private-Methods

@@ -231,6 +231,44 @@ namespace Xeno.Core.Database.Postgresql
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM credentials WHERE tenant_id = @tenant_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> DeleteByUserAsync(string tenantId, string userId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            if (String.IsNullOrWhiteSpace(userId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM credentials WHERE tenant_id = @tenant_id AND user_id = @user_id;";
+                    command.Parameters.AddWithValue("@tenant_id", tenantId);
+                    command.Parameters.AddWithValue("@user_id", userId);
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<bool> ExistsAsync(string tenantId, string id, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return false;

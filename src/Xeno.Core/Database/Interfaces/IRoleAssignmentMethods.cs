@@ -3,6 +3,7 @@ namespace Xeno.Core.Database.Interfaces
     using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Enums;
     using Xeno.Core.Models;
 
     /// <summary>
@@ -73,6 +74,24 @@ namespace Xeno.Core.Database.Interfaces
         /// <param name="token">Cancellation token.</param>
         /// <returns>True when a row was deleted.</returns>
         Task<bool> DeleteAsync(string tenantId, string id, CancellationToken token = default);
+
+        /// <summary>
+        /// Delete every role assignment owned by a tenant in a single set-based statement.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of rows deleted.</returns>
+        Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default);
+
+        /// <summary>
+        /// Delete every role assignment bound to a specific principal in a single set-based statement.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="principalType">Principal type (user or credential).</param>
+        /// <param name="principalId">Principal identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of rows deleted.</returns>
+        Task<int> DeleteByPrincipalAsync(string tenantId, PrincipalTypeEnum principalType, string principalId, CancellationToken token = default);
 
         /// <summary>
         /// Delete all role assignments for a tenant that bind the given role.

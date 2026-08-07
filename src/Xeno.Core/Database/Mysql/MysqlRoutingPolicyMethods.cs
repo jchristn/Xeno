@@ -269,6 +269,48 @@ namespace Xeno.Core.Database.Mysql
         }
 
         /// <inheritdoc />
+        public async Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(tenantId)) return 0;
+            token.ThrowIfCancellationRequested();
+
+            using (MySqlConnection connection = new MySqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (MySqlTransaction transaction = (MySqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false))
+                {
+                    using (MySqlCommand filterCommand = connection.CreateCommand())
+                    {
+                        filterCommand.Transaction = transaction;
+                        filterCommand.CommandText = "DELETE FROM routing_policy_filters WHERE policy_id IN (SELECT id FROM (SELECT id FROM routing_policies WHERE tenant_id = @tenant_id) AS matched);";
+                        filterCommand.Parameters.AddWithValue("@tenant_id", tenantId);
+                        await filterCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    using (MySqlCommand rankingCommand = connection.CreateCommand())
+                    {
+                        rankingCommand.Transaction = transaction;
+                        rankingCommand.CommandText = "DELETE FROM routing_policy_ranking_rules WHERE policy_id IN (SELECT id FROM (SELECT id FROM routing_policies WHERE tenant_id = @tenant_id) AS matched);";
+                        rankingCommand.Parameters.AddWithValue("@tenant_id", tenantId);
+                        await rankingCommand.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    int rows;
+                    using (MySqlCommand command = connection.CreateCommand())
+                    {
+                        command.Transaction = transaction;
+                        command.CommandText = "DELETE FROM routing_policies WHERE tenant_id = @tenant_id;";
+                        command.Parameters.AddWithValue("@tenant_id", tenantId);
+                        rows = await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    }
+
+                    await transaction.CommitAsync(token).ConfigureAwait(false);
+                    return rows;
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task<bool> ExistsAsync(string tenantId, string id, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) return false;

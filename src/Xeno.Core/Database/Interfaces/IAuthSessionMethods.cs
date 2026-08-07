@@ -74,6 +74,14 @@ namespace Xeno.Core.Database.Interfaces
         Task<bool> DeleteAsync(string tenantId, string id, CancellationToken token = default);
 
         /// <summary>
+        /// Delete every auth session owned by a tenant in a single set-based statement.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of rows deleted.</returns>
+        Task<int> DeleteByTenantAsync(string tenantId, CancellationToken token = default);
+
+        /// <summary>
         /// Delete all sessions owned by a tenant for a given user.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>
