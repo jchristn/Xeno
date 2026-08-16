@@ -507,6 +507,133 @@ namespace Xeno.Sdk.Tests
             }
         }
 
+        [Fact]
+        public void Constructor_NullOptions_ThrowsArgumentNullException()
+        {
+            Assert.Throws<ArgumentNullException>(() => new XenoClient((XenoClientOptions)null!));
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData(null)]
+        public void Constructor_MissingBaseUrl_ThrowsArgumentException(string? baseUrl)
+        {
+            Assert.Throws<ArgumentException>(() => new XenoClient(new XenoClientOptions { BaseUrl = baseUrl! }));
+        }
+
+        [Theory]
+        [InlineData("https://xeno.local")]
+        [InlineData("https://xeno.local/")]
+        [InlineData("https://xeno.local///")]
+        public async Task Constructor_NormalizesTrailingSlashesInBaseUrl(string baseUrl)
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient(baseUrl, httpClient: httpClient))
+            {
+                await client.GetHealthAsync();
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                Assert.Equal("https://xeno.local/health", request.Uri?.ToString());
+            }
+        }
+
+        [Fact]
+        public async Task ApiError_NonJsonBody_SurfacesRawBodyAsMessage()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StringContent("upstream boom", Encoding.UTF8, "text/plain")
+            });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                XenoApiException exception = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await client.ListClientsAsync());
+
+                Assert.Equal(HttpStatusCode.BadGateway, exception.StatusCode);
+                Assert.Equal("/v1.0/api/clients", exception.Endpoint);
+                Assert.Equal("upstream boom", exception.Message);
+                Assert.Equal("upstream boom", exception.ResponseBody);
+            }
+        }
+
+        [Fact]
+        public async Task ApiError_EmptyBody_FallsBackToStatusMessage()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            {
+                Content = new StringContent(String.Empty, Encoding.UTF8, "application/json")
+            });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                XenoApiException exception = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await client.ListClientsAsync());
+
+                Assert.Equal(HttpStatusCode.InternalServerError, exception.StatusCode);
+                Assert.Contains("InternalServerError", exception.Message);
+                Assert.Equal(String.Empty, exception.ResponseBody);
+            }
+        }
+
+        [Fact]
+        public async Task SuccessResponse_MalformedJson_ThrowsWithOkStatus()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("this is not json", Encoding.UTF8, "application/json")
+            });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                XenoApiException exception = await Assert.ThrowsAsync<XenoApiException>(
+                    async () => await client.GetHealthAsync());
+
+                Assert.Equal(HttpStatusCode.OK, exception.StatusCode);
+                Assert.Equal("/health", exception.Endpoint);
+                Assert.Contains("could not be deserialized", exception.Message);
+            }
+        }
+
+        [Fact]
+        public async Task QueryString_AllEmptyFilters_OmitsQueryString()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{\"items\":[],\"total\":0,\"page\":1,\"pageSize\":100}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))
+            {
+                await client.ListRequestHistoryAsync(new Dictionary<string, string> { ["model"] = "", ["client"] = "   " });
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                Assert.Equal("https://xeno.local/v1.0/api/request-history", request.Uri?.ToString());
+            }
+        }
+
+        [Fact]
+        public async Task Dispose_IsIdempotentAndLeavesCallerOwnedHttpClientUsable()
+        {
+            RecordingHandler handler = new RecordingHandler(_ => JsonResponse("{}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            {
+                XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient);
+
+                // Disposing twice must not throw; the second call is a no-op.
+                client.Dispose();
+                client.Dispose();
+
+                // A caller-owned HttpClient must not be disposed by the client and remains usable.
+                using (HttpResponseMessage response = await httpClient.GetAsync("health"))
+                {
+                    Assert.True(response.IsSuccessStatusCode);
+                }
+
+                RecordedRequest request = Assert.Single(handler.Requests);
+                Assert.Equal("https://xeno.local/health", request.Uri?.ToString());
+            }
+        }
+
         private static HttpResponseMessage JsonResponse(string json)
         {
             return new HttpResponseMessage(HttpStatusCode.OK)
