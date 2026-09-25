@@ -6,8 +6,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SyslogLogging" Version="2.2.1" />
-    <PackageReference Include="Watson" Version="7.1.0" />
+    <PackageReference Include="SyslogLogging" Version="2.2.2" />
+    <PackageReference Include="Watson" Version="7.2.0" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -27,6 +27,10 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <ApplicationIcon>..\..\assets\logo.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Test.Shared" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />

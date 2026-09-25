@@ -5161,6 +5161,26 @@ namespace Test.Shared
                         executeAsync: delegate { return RunRelayStreamingSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "Relay",
+                        "OpenAiStreamingBurstRetainsStreamStart",
+                        "Streaming responses whose start, chunks, and completion arrive back to back still take the streaming path",
+                        executeAsync: delegate { return RunRelayStreamingBurstAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "PendingResponsePrefersStreamStart",
+                        "Pending client responses prefer a completed stream start over a final message that completes immediately after it",
+                        executeAsync: delegate { return RunPendingResponsePrefersStreamStartAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "PendingResponseReturnsFinalWithoutStart",
+                        "Pending client responses return the final message when a client never starts a stream",
+                        executeAsync: delegate { return RunPendingResponseReturnsFinalWithoutStartAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "PendingResponseCancellationFaultsWaiter",
+                        "Pending client response waiters observe cancellation instead of a response",
+                        executeAsync: delegate { return RunPendingResponseCancellationFaultsWaiterAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
                         "ModelPerformanceTestComparesNativeAndHairpin",
                         "Dashboard model performance test dispatches native and hairpin benchmark legs over WebSockets",
                         executeAsync: delegate { return RunModelPerformanceTestSmokeAsync(); }),
@@ -8358,6 +8378,176 @@ namespace Test.Shared
             }
         }
 
+        private static async Task RunPendingResponsePrefersStreamStartAsync()
+        {
+            int iterations = 4000;
+            int workers = Math.Max(2, Environment.ProcessorCount);
+            int inversions = 0;
+            List<Task> tasks = new List<Task>();
+            for (int w = 0; w < workers; w++)
+            {
+                tasks.Add(Task.Run(async delegate
+                {
+                    for (int i = 0; i < iterations / workers; i++)
+                    {
+                        PendingClientResponse pending = new PendingClientResponse();
+                        Task<ClientResponseMessage> first = pending.WaitForFirstResponseAsync();
+                        pending.SetStart(new ClientResponseMessage { Type = "client.response.start", RequestId = "req_start" });
+                        pending.SetFinal(new ClientResponseMessage { Type = "client.response.complete", RequestId = "req_start" });
+                        ClientResponseMessage result = await first.ConfigureAwait(false);
+                        if (!String.Equals(result.Type, "client.response.start", StringComparison.Ordinal)) Interlocked.Increment(ref inversions);
+                    }
+                }));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            if (inversions > 0) throw new InvalidOperationException("Pending client response returned the final message instead of the stream start " + inversions + " times.");
+        }
+
+        private static async Task RunPendingResponseReturnsFinalWithoutStartAsync()
+        {
+            PendingClientResponse pending = new PendingClientResponse();
+            Task<ClientResponseMessage> first = pending.WaitForFirstResponseAsync();
+            if (first.IsCompleted) throw new InvalidOperationException("Pending client response completed before any client message arrived.");
+            pending.SetFinal(new ClientResponseMessage { Type = "client.response", RequestId = "req_final" });
+            Task winner = await Task.WhenAny(first, Task.Delay(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+            if (winner != first) throw new InvalidOperationException("Pending client response did not complete from a final message.");
+            ClientResponseMessage result = await first.ConfigureAwait(false);
+            if (!String.Equals(result.Type, "client.response", StringComparison.Ordinal)) throw new InvalidOperationException("Pending client response did not return the final message for a non-streaming client.");
+        }
+
+        private static async Task RunPendingResponseCancellationFaultsWaiterAsync()
+        {
+            using (CancellationTokenSource cancellation = new CancellationTokenSource())
+            {
+                PendingClientResponse pending = new PendingClientResponse();
+                Task<ClientResponseMessage> first = pending.WaitForFirstResponseAsync();
+                cancellation.Cancel();
+                pending.Cancel(cancellation.Token);
+                try
+                {
+                    await first.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    pending.SetStart(new ClientResponseMessage { Type = "client.response.start", RequestId = "req_late" });
+                    if (pending.Start.Task.IsCompletedSuccessfully) throw new InvalidOperationException("Cancelled pending client response accepted a late stream start.");
+                    return;
+                }
+
+                throw new InvalidOperationException("Cancelled pending client response returned a message.");
+            }
+        }
+
+        private static async Task RunRelayStreamingBurstAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-relay-burst-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings
+                {
+                    Hostname = "127.0.0.1",
+                    Port = port,
+                    Ssl = false
+                },
+                Database = TestDatabase.Settings(dbFile)
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+
+                    using (ClientWebSocket socket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(socket);
+                        await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        Task clientTask = FakeClientLoopAsync(socket, clientTokenSource.Token, burstStreaming: true);
+
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_touchstone",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "touchstone-client",
+                            inventory = new
+                            {
+                                runners = new[]
+                                {
+                                    new
+                                    {
+                                        name = "touchstone-runner",
+                                        apiType = "OpenAICompatible",
+                                        endpoint = "http://127.0.0.1:1",
+                                        models = new[]
+                                        {
+                                            new { name = "llama3.2:latest", supportsCompletions = true, supportsEmbeddings = false }
+                                        }
+                                    }
+                                }
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+
+                        await WaitForRegisteredClientAsync(port).ConfigureAwait(false);
+
+                        using (HttpClient httpClient = new HttpClient())
+                        {
+                            await AuthenticateSeedAdminAsync(httpClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
+                            for (int i = 0; i < 10; i++)
+                            {
+                                using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/v1/chat/completions"))
+                                {
+                                    request.Content = new StringContent(
+                                        "{\"model\":\"llama3.2:latest\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}",
+                                        Encoding.UTF8,
+                                        "application/json");
+
+                                    using (HttpResponseMessage response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+                                    {
+                                        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Burst streaming relay " + i + " returned " + (int)response.StatusCode + ": " + body);
+                                        if (!body.Contains("stream-", StringComparison.Ordinal) || !body.Contains("\"ok\"", StringComparison.Ordinal)) throw new InvalidOperationException("Burst streaming relay " + i + " body mismatch: " + body);
+
+                                        string historyId = HeaderValue(response, "X-Xeno-Request-ID");
+                                        if (String.IsNullOrWhiteSpace(historyId)) throw new InvalidOperationException("Burst streaming relay " + i + " did not include request trace header.");
+
+                                        using (HttpResponseMessage historyResponse = await httpClient.GetAsync("http://127.0.0.1:" + port + "/api/v1/requesthistory/" + Uri.EscapeDataString(historyId)).ConfigureAwait(false))
+                                        {
+                                            string historyJson = await historyResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                            if (!historyResponse.IsSuccessStatusCode) throw new InvalidOperationException("Burst streaming request history lookup failed: " + historyJson);
+                                            RequestHistoryEntry root = DeserializeRequired<RequestHistoryEntry>(historyJson);
+                                            if (!root.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientResponseStart)) throw new InvalidOperationException("Burst streaming relay " + i + " took the non-streaming path; timeline did not retain client response start.");
+                                            if (!root.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientResponseComplete)) throw new InvalidOperationException("Burst streaming relay " + i + " timeline did not retain client response completion.");
+                                            if (root.Timeline.Any(item => item.Stage == RequestHistoryTimelineStageEnum.ClientResponse)) throw new InvalidOperationException("Burst streaming relay " + i + " recorded a buffered client response stage.");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        clientTokenSource.Cancel();
+                        try
+                        {
+                            await clientTask.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
         private static async Task RunLoginCredentialConnectSmokeAsync()
         {
             int port = GetFreePort();
@@ -8843,7 +9033,7 @@ namespace Test.Shared
             }
         }
 
-        private static async Task FakeClientLoopAsync(ClientWebSocket socket, CancellationToken token)
+        private static async Task FakeClientLoopAsync(ClientWebSocket socket, CancellationToken token, bool burstStreaming = false)
         {
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
@@ -8910,7 +9100,7 @@ namespace Test.Shared
                             byteCount = Encoding.UTF8.GetByteCount(first),
                             contentBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(first))
                         }, token).ConfigureAwait(false);
-                        await Task.Delay(25, token).ConfigureAwait(false);
+                        if (!burstStreaming) await Task.Delay(25, token).ConfigureAwait(false);
                         await SendWebSocketJsonAsync(socket, new
                         {
                             type = "client.response.chunk",

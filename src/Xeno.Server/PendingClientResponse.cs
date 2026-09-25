@@ -58,6 +58,20 @@ namespace Xeno.Server
         }
 
         /// <summary>
+        /// Wait for the first client response: a stream start, or a final response from a client that does not stream.
+        /// </summary>
+        /// <returns>The stream start message when one was received; otherwise the final message.</returns>
+        public async Task<ClientResponseMessage> WaitForFirstResponseAsync()
+        {
+            Task<ClientResponseMessage> completed = await Task.WhenAny(Start.Task, Final.Task).ConfigureAwait(false);
+
+            // Client messages are processed in order, so a completed start always precedes the final message.
+            // WhenAny can still observe Final first because both sources run continuations asynchronously.
+            if (Start.Task.IsCompletedSuccessfully) return Start.Task.Result;
+            return await completed.ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Cancel all waiters.
         /// </summary>
         /// <param name="token">Cancellation token that caused cancellation.</param>

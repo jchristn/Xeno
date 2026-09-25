@@ -3719,8 +3719,7 @@ namespace Xeno.Server
                 timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, requestTimeoutMs)));
                 using (timeout.Token.Register(delegate { pending.Cancel(timeout.Token); }))
                 {
-                    Task<ClientResponseMessage> completed = await Task.WhenAny(pending.Start.Task, pending.Final.Task).ConfigureAwait(false);
-                    return await completed.ConfigureAwait(false);
+                    return await pending.WaitForFirstResponseAsync().ConfigureAwait(false);
                 }
             }
         }
