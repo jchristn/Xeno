@@ -1,6 +1,6 @@
 # Xeno Python SDK
 
-The Xeno Python SDK is a standard-library HTTP client for Xeno v0.1.0 alpha.
+The Xeno Python SDK is a standard-library HTTP client for Xeno v0.1.1 alpha.
 
 ## Install
 
@@ -119,4 +119,4 @@ than wrapped by the server SDKs.
 
 ## Alpha Notice
 
-Xeno v0.1.0 is alpha software. API shapes may change before a stable release.
+Xeno v0.1.1 is alpha software. API shapes may change before a stable release.

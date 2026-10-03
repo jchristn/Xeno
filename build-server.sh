@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -z "${1:-}" ]; then
+    echo "Usage: build-server.sh <docker-image-tag>"
+    echo "Example: build-server.sh v0.1.0"
+    exit 1
+fi
+
+TAG="$1"
+IMAGE=jchristn77/xeno-server
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+echo "Building and pushing ${IMAGE}:latest and ${IMAGE}:${TAG}..."
+docker buildx build \
+    --builder cloud-jchristn77-jchristn77 \
+    --platform linux/amd64,linux/arm64/v8 \
+    -t "${IMAGE}:latest" \
+    -t "${IMAGE}:${TAG}" \
+    -f src/Xeno.Server/Dockerfile \
+    --push \
+    .
+
+echo "Pulling ${IMAGE} into the local registry..."
+docker pull "${IMAGE}:${TAG}"
+docker pull "${IMAGE}:latest"
+
+echo "Done."

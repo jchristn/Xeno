@@ -28,7 +28,7 @@ namespace Xeno.Client
     /// </summary>
     public static class Program
     {
-        private const string ClientVersion = "0.1.0";
+        private const string ClientVersion = "0.1.1";
         private const int DefaultConnectTimeoutMs = 30000;
         private const int DefaultStopTimeoutMs = 10000;
         private const int DefaultPingCount = 5;

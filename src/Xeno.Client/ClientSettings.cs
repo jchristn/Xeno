@@ -153,7 +153,7 @@ namespace Xeno.Client
                 machineName = Environment.MachineName,
                 processorCount = Environment.ProcessorCount,
                 totalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
-                clientVersion = "0.1.0",
+                clientVersion = "0.1.1",
                 providers = Runners.ConvertAll(runner => new
                 {
                     name = runner.Name,

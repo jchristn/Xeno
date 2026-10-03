@@ -99,6 +99,21 @@ namespace Test.Shared
                 {
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "EntityCacheReadThroughHitsAndInvalidates",
+                        displayName: "Entity cache loads on miss, serves hits without reloading, and reloads after invalidate or clear",
+                        executeAsync: delegate { return RunEntityCacheReadThroughAsync(); }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "EntityCacheEvictsLeastRecentlyUsed",
+                        displayName: "Entity cache evicts the least-recently-used entry when capacity is exceeded",
+                        executeAsync: delegate { return RunEntityCacheEvictsLeastRecentlyUsedAsync(); }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
+                        caseId: "EntityCacheRejectsInvalidArguments",
+                        displayName: "Entity cache rejects empty keys, null loaders, and null values and does not cache null loads",
+                        executeAsync: delegate { return RunEntityCacheRejectsInvalidArgumentsAsync(); }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "DefaultSettingsContainRequiredSections",
                         displayName: "Default settings contain required sections",
                         executeAsync: delegate
@@ -8376,6 +8391,99 @@ namespace Test.Shared
                     await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
                 }
             }
+        }
+
+        private static async Task RunEntityCacheReadThroughAsync()
+        {
+            Xeno.Core.Caching.EntityCache<string> cache = new Xeno.Core.Caching.EntityCache<string>(10, 60);
+            int loads = 0;
+            Func<CancellationToken, Task<string?>> loader = delegate
+            {
+                loads++;
+                return Task.FromResult<string?>("value-" + loads.ToString(CultureInfo.InvariantCulture));
+            };
+
+            string? first = await cache.GetOrLoadAsync("key", loader).ConfigureAwait(false);
+            string? second = await cache.GetOrLoadAsync("key", loader).ConfigureAwait(false);
+            if (first != "value-1" || second != "value-1") throw new InvalidOperationException("Entity cache did not serve the cached value on a hit.");
+            if (loads != 1) throw new InvalidOperationException("Entity cache invoked the loader on a hit.");
+
+            cache.Invalidate("key");
+            string? third = await cache.GetOrLoadAsync("key", loader).ConfigureAwait(false);
+            if (third != "value-2" || loads != 2) throw new InvalidOperationException("Entity cache did not reload after invalidate.");
+
+            cache.Put("key", "put-value");
+            string? fourth = await cache.GetOrLoadAsync("key", loader).ConfigureAwait(false);
+            if (fourth != "put-value" || loads != 2) throw new InvalidOperationException("Entity cache did not serve a value inserted with Put.");
+
+            cache.Clear();
+            string? fifth = await cache.GetOrLoadAsync("key", loader).ConfigureAwait(false);
+            if (fifth != "value-3" || loads != 3) throw new InvalidOperationException("Entity cache did not reload after clear.");
+        }
+
+        private static async Task RunEntityCacheEvictsLeastRecentlyUsedAsync()
+        {
+            Xeno.Core.Caching.EntityCache<string> cache = new Xeno.Core.Caching.EntityCache<string>(2, 60);
+            List<string> loadedKeys = new List<string>();
+            Func<string, Func<CancellationToken, Task<string?>>> loaderFor = delegate (string key)
+            {
+                return delegate
+                {
+                    loadedKeys.Add(key);
+                    return Task.FromResult<string?>(key);
+                };
+            };
+
+            await cache.GetOrLoadAsync("a", loaderFor("a")).ConfigureAwait(false);
+            await cache.GetOrLoadAsync("b", loaderFor("b")).ConfigureAwait(false);
+            await cache.GetOrLoadAsync("a", loaderFor("a")).ConfigureAwait(false);
+            await cache.GetOrLoadAsync("c", loaderFor("c")).ConfigureAwait(false);
+
+            if (loadedKeys.Count != 3) throw new InvalidOperationException("Entity cache reloaded a recently used entry before capacity was exceeded.");
+
+            await cache.GetOrLoadAsync("a", loaderFor("a")).ConfigureAwait(false);
+            if (loadedKeys.Count != 3) throw new InvalidOperationException("Entity cache evicted the most recently used entry.");
+
+            await cache.GetOrLoadAsync("b", loaderFor("b")).ConfigureAwait(false);
+            if (loadedKeys.Count != 4 || loadedKeys[3] != "b") throw new InvalidOperationException("Entity cache did not evict the least-recently-used entry.");
+        }
+
+        private static async Task RunEntityCacheRejectsInvalidArgumentsAsync()
+        {
+            Xeno.Core.Caching.EntityCache<string> cache = new Xeno.Core.Caching.EntityCache<string>(0, 0, 0);
+            Func<CancellationToken, Task<string?>> nullLoader = delegate { return Task.FromResult<string?>(null); };
+
+            bool threw = false;
+            try { await cache.GetOrLoadAsync("", nullLoader).ConfigureAwait(false); }
+            catch (ArgumentNullException) { threw = true; }
+            if (!threw) throw new InvalidOperationException("Entity cache accepted an empty key.");
+
+            threw = false;
+            try { await cache.GetOrLoadAsync("key", null!).ConfigureAwait(false); }
+            catch (ArgumentNullException) { threw = true; }
+            if (!threw) throw new InvalidOperationException("Entity cache accepted a null loader.");
+
+            threw = false;
+            try { cache.Put("key", null!); }
+            catch (ArgumentNullException) { threw = true; }
+            if (!threw) throw new InvalidOperationException("Entity cache accepted a null value.");
+
+            int loads = 0;
+            Func<CancellationToken, Task<string?>> countingNullLoader = delegate
+            {
+                loads++;
+                return Task.FromResult<string?>(null);
+            };
+            string? first = await cache.GetOrLoadAsync("missing", countingNullLoader).ConfigureAwait(false);
+            string? second = await cache.GetOrLoadAsync("missing", countingNullLoader).ConfigureAwait(false);
+            if (first != null || second != null) throw new InvalidOperationException("Entity cache returned a value for a null load.");
+            if (loads != 2) throw new InvalidOperationException("Entity cache cached a null load result.");
+
+            cache.Invalidate("");
+            cache.Put("one", "1");
+            cache.Put("two", "2");
+            string? two = await cache.GetOrLoadAsync("two", nullLoader).ConfigureAwait(false);
+            if (two != "2") throw new InvalidOperationException("Entity cache with clamped capacity did not retain the latest entry.");
         }
 
         private static async Task RunPendingResponsePrefersStreamStartAsync()

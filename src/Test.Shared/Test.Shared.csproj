@@ -9,7 +9,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Touchstone.Core" Version="0.1.12" />
+    <PackageReference Include="Touchstone.Core" Version="0.2.0" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -17,7 +17,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
   </PropertyGroup>
 
 </Project>

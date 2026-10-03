@@ -5,7 +5,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Joel Christner</Authors>
     <Company>Joel Christner</Company>
     <Product>Xeno</Product>
@@ -22,9 +22,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Caching" Version="5.0.1" />
+    <PackageReference Include="Caching" Version="5.1.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.0" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <PackageReference Include="MySql.Data" Version="26.7.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="OpenTelemetry" Version="1.19.1" />
@@ -32,7 +32,7 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
     <PackageReference Include="PrettyId" Version="2.0.1" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="SyslogLogging" Version="2.2.2" />
+    <PackageReference Include="SyslogLogging" Version="2.3.1" />
   </ItemGroup>
 
 </Project>
