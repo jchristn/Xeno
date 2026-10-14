@@ -37,6 +37,7 @@
 - The terminal app keeps one empty column between every pane border and its content (text, tables, charts, buttons, and fields), and needs a terminal of at least 120x36. Smaller windows show TUIKit's "Terminal too small" screen.
 - The desktop and terminal Logs pages roll up runs of `server.telemetry.request` and `server.telemetry.ack` messages into one line each, for example `Server message: server.telemetry.ack (5 since 11:16:39)`.
 - The terminal app uses TUIKit 1.6.0 and renders its detail views (request details, provider models, About) as Markdown with TUIKit's width-aware renderer: bordered tables sized from their content, styled headings, and code blocks for headers and bodies. `XenoMarkdown` and `RequestDetailFormatter.ToMarkdown` (`Xeno.Client.Core`) build the Markdown and escape or fence every value, so request and response content renders verbatim.
+- The mouse works throughout the terminal app. Clicking a menu item now runs it (the open menu used to pass clicks to the page underneath), page dropdowns such as chart ranges open a popup under the field (their one-row panes had no room for the list, by mouse or keyboard), confirmation and follow-up dialogs have clickable, themed buttons, clicks inside form dialogs reach their fields, and status bar key hints run their key when clicked.
 - Renamed pages:
   - In the sidebar, Host Telemetry and Provider Telemetry are now **Host** and **Provider** under the Telemetry heading. Menus and page headers keep the full names.
   - Server & Account is now **General**.

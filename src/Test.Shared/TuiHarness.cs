@@ -116,6 +116,73 @@ namespace Test.Shared
         /// Render and return the screen as text.
         /// </summary>
         /// <returns>Screen text.</returns>
+        /// <summary>
+        /// Left-click a cell, as a terminal would send it, and let the app settle.
+        /// </summary>
+        /// <param name="x">Column.</param>
+        /// <param name="y">Row.</param>
+        public void Click(int x, int y)
+        {
+            App.RenderOnce();
+            Backend.FeedClick(x, y);
+            Settle();
+        }
+
+        /// <summary>
+        /// Double-click a cell and let the app settle.
+        /// </summary>
+        /// <param name="x">Column.</param>
+        /// <param name="y">Row.</param>
+        public void DoubleClick(int x, int y)
+        {
+            App.RenderOnce();
+            Backend.FeedDoubleClick(x, y);
+            Settle();
+        }
+
+        /// <summary>
+        /// Turn the mouse wheel over a cell and let the app settle.
+        /// </summary>
+        /// <param name="x">Column.</param>
+        /// <param name="y">Row.</param>
+        /// <param name="down">True to scroll down.</param>
+        public void Wheel(int x, int y, bool down)
+        {
+            App.RenderOnce();
+            Backend.FeedWheel(x, y, down ? 1 : -1);
+            Settle();
+        }
+
+        /// <summary>
+        /// Click the first occurrence of text on screen, searching rows from the top (or from a starting row).
+        /// </summary>
+        /// <param name="text">Text to click.</param>
+        /// <param name="fromRow">First row to search.</param>
+        /// <exception cref="InvalidOperationException">The text is not on screen.</exception>
+        public void ClickText(string text, int fromRow = 0)
+        {
+            TUIKit.Point at = Find(text, fromRow) ?? throw new InvalidOperationException("'" + text + "' is not on screen:" + Environment.NewLine + Screen());
+            Click(at.X, at.Y);
+        }
+
+        /// <summary>
+        /// Position of the first occurrence of text on screen, or null.
+        /// </summary>
+        /// <param name="text">Text.</param>
+        /// <param name="fromRow">First row to search.</param>
+        /// <returns>Column and row of the first character, or null.</returns>
+        public TUIKit.Point? Find(string text, int fromRow = 0)
+        {
+            string[] rows = Screen().Replace("\r", String.Empty).Split('\n');
+            for (int y = Math.Max(0, fromRow); y < rows.Length; y++)
+            {
+                int x = rows[y].IndexOf(text, StringComparison.Ordinal);
+                if (x >= 0) return new TUIKit.Point(x, y);
+            }
+
+            return null;
+        }
+
         public string Screen()
         {
             App.RenderOnce();

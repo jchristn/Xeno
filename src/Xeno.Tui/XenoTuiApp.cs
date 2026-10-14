@@ -18,6 +18,7 @@ namespace Xeno.Tui
     using Xeno.Client.Hosting;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
+    using Xeno.Tui.Modals;
     using Xeno.Tui.Pages;
     using Xeno.Tui.Shell;
 
@@ -88,6 +89,7 @@ namespace Xeno.Tui
         #region Private-Members
 
         private const string MainRegion = "main";
+        private const int MenuRow = 1;
         private const int SpinnerIntervalMs = 100;
         private const string SidebarRegion = "sidebar";
         private readonly TuiApplication _App;
@@ -98,6 +100,7 @@ namespace Xeno.Tui
         private readonly SidebarView _Sidebar = new SidebarView();
         private readonly PageHost _PageHost = new PageHost();
         private readonly StatusBar _StatusBar = new StatusBar();
+        private readonly StatusBarHost _StatusHost;
         private readonly MessageBar _MessageBar;
         private readonly Dictionary<XenoPageEnum, TuiPage> _Pages = new Dictionary<XenoPageEnum, TuiPage>();
         private readonly Dictionary<XenoCommandEnum, MenuItem> _MenuItems = new Dictionary<XenoCommandEnum, MenuItem>();
@@ -129,6 +132,7 @@ namespace Xeno.Tui
             };
 
             _MessageBar = new MessageBar(Context);
+            _StatusHost = new StatusBarHost(_StatusBar);
             CurrentPage = options.StartPage ?? preferences.TerminalLastPage;
             BuildCommands();
             Wire();
@@ -341,7 +345,7 @@ namespace Xeno.Tui
             // The main region's minimum extents set the layout's minimum size; below it TUIKit shows "terminal too small".
             _App.Layout = Layout.Create()
                 .Add("header", r => r.FillWidth().TopAnchored(0, 1).WithPadding(0))
-                .Add("menu", r => r.FillWidth().TopAnchored(1, 1).WithPadding(0))
+                .Add("menu", r => r.FillWidth().TopAnchored(MenuRow, 1).WithPadding(0))
                 .Add(SidebarRegion, r => r.LeftAnchored(0, 24).FillHeight(2, 2).WithBorder(BorderStyle.Rounded, "Xeno").WithPadding(0))
                 .Add(MainRegion, r => r.Horizontal(AxisConstraint.Stretch(24, 0, MinimumWidth - 24)).Vertical(AxisConstraint.Stretch(2, 2, MinimumHeight - 4)).WithPadding(0))
                 .Add("message", r => r.FillWidth().BottomAnchored(1, 1).WithPadding(0))
@@ -354,7 +358,7 @@ namespace Xeno.Tui
             _App.Bind("header", _Header);
             _App.Bind("menu", _MenuHost);
             _App.Bind("message", _MessageBar);
-            _App.Bind("status", _StatusBar);
+            _App.Bind("status", _StatusHost);
             _App.HighlightFocusedRegion = true;
             _App.CtrlCPolicy = CtrlCPolicy.DoubleTapToExit;
             _Sidebar.PageChosen += Navigate;
@@ -368,30 +372,111 @@ namespace Xeno.Tui
 
             _App.KeyFilter = key =>
             {
-                if (MenuBar.IsOpen)
-                {
-                    MenuBar.HandleKey(key);
-                    return true;
-                }
-
                 if (key.Code == KeyCode.F10)
                 {
-                    MenuBar.HandleKey(KeyEvent.Special(KeyCode.Enter));
+                    OpenMenu();
                     return true;
                 }
 
                 return false;
             };
+            _MenuHost.Opened = ShowMenu;
+            _StatusHost.HintClicked = RunHint;
+            Context.Locate = Locate;
 
             _App.RenderOverlay = surface =>
             {
                 _Header.Status = Context.Status;
                 _Header.Busy = Context.Busy;
-                if (MenuBar.IsOpen && surface.Size.Height > 2)
-                {
-                    MenuBar.Render(new SurfaceView(surface, new Rect(0, 1, surface.Size.Width, surface.Size.Height - 1)));
-                }
             };
+        }
+
+        private void RunHint(KeyHint hint)
+        {
+            // A clicked hint runs its key as if it were pressed: F10 and app commands first, then the focused pane.
+            KeyEvent? parsed = KeyOf(hint);
+            if (parsed == null) return;
+            KeyEvent key = parsed.Value;
+            if (key.Code == KeyCode.F10)
+            {
+                OpenMenu();
+                return;
+            }
+
+            KeyChord chord = KeyChord.FromKeyEvent(key);
+            Command? command = _Commands.FirstOrDefault(item => item.Chord != null && item.Chord.Value.Equals(chord));
+            if (command != null)
+            {
+                if (command.IsEnabled) command.Handler();
+                return;
+            }
+
+            if (_App.FocusedRegion == SidebarRegion) _Sidebar.HandleKey(key);
+            else _PageHost.HandleKey(key);
+        }
+
+        private static KeyEvent? KeyOf(KeyHint hint)
+        {
+            KeyChord chord;
+            if (hint.Chord != null) chord = hint.Chord.Value;
+            else
+            {
+                try
+                {
+                    chord = KeyChord.Parse(hint.Key);
+                }
+                catch (FormatException)
+                {
+                    return null;
+                }
+                catch (ArgumentException)
+                {
+                    return null;
+                }
+            }
+
+            return new KeyEvent(chord.Code, chord.Rune, chord.Modifiers);
+        }
+
+        private void OpenMenu()
+        {
+            if (!MenuBar.IsOpen) MenuBar.HandleKey(KeyEvent.Special(KeyCode.Enter));
+            ShowMenu();
+        }
+
+        private void ShowMenu()
+        {
+            // While a menu is open it is a modal, so clicks on its drop-down never reach the page underneath.
+            if (!MenuBar.IsOpen || _App.Modals.IsActive) return;
+            _ = _App.ShowAsync(new MenuBarModal(MenuBar, MenuRow));
+        }
+
+        private Rect? Locate(IWidget target)
+        {
+            Rect? bounds = _App.GetRegionContentBounds(MainRegion);
+            if (bounds == null) return null;
+            return Locate(CurrentView.Root, bounds.Value, target);
+        }
+
+        private static Rect? Locate(IWidget node, Rect rect, IWidget target)
+        {
+            if (ReferenceEquals(node, target)) return rect;
+            if (node is FramedStack stack)
+            {
+                foreach (IWidget child in stack.Children)
+                {
+                    Rect content = stack.ContentRectOf(child);
+                    if (content.Width <= 0 || content.Height <= 0) continue;
+                    Rect? found = Locate(child, new Rect(rect.X + content.X, rect.Y + content.Y, content.Width, content.Height), target);
+                    if (found != null) return found;
+                }
+
+                return null;
+            }
+
+            IWidget? inner = node is Inset inset ? inset.Child : node is FocusInset focusInset ? focusInset.Child : null;
+            if (inner == null) return null;
+            return Locate(inner, new Rect(rect.X + Inset.Columns, rect.Y, Math.Max(0, rect.Width - Inset.Columns * 2), rect.Height), target);
         }
 
         private void BuildCommands()

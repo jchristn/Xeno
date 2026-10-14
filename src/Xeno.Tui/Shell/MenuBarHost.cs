@@ -18,6 +18,11 @@ namespace Xeno.Tui.Shell
         /// </summary>
         public MenuBar Bar { get; set; } = new MenuBar();
 
+        /// <summary>
+        /// Called after a click opens a menu.
+        /// </summary>
+        public System.Action? Opened { get; set; } = null;
+
         #endregion
 
         #region Public-Methods
@@ -48,7 +53,9 @@ namespace Xeno.Tui.Shell
         /// <returns>True when handled.</returns>
         public bool HandleMouse(MouseEvent mouse)
         {
-            return Bar.HandleMouse(mouse);
+            bool handled = Bar.HandleMouse(mouse);
+            if (handled && Bar.IsOpen) Opened?.Invoke();
+            return handled;
         }
 
         #endregion

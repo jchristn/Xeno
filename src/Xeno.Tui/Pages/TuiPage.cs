@@ -108,15 +108,24 @@ namespace Xeno.Tui.Pages
 
         /// <summary>
         /// Add a pane to a framed stack with one empty column between its frame and its content on each side (see
-        /// <see cref="Inset"/>). Nested framed stacks are added as they are.
+        /// <see cref="Inset"/>). Nested framed stacks are added as they are. A dropdown is wrapped in a
+        /// <see cref="DropdownPicker"/>, which shows its choices as a popup, since a one-row pane has no room for the list.
         /// </summary>
         /// <param name="stack">Stack.</param>
         /// <param name="child">Pane content.</param>
         /// <param name="size">Size along the stack.</param>
         /// <param name="title">Frame title, or null.</param>
-        protected static void Frame(FramedStack stack, IWidget child, StackSize size, string? title = null)
+        protected void Frame(FramedStack stack, IWidget child, StackSize size, string? title = null)
         {
             ArgumentNullException.ThrowIfNull(stack);
+            ArgumentNullException.ThrowIfNull(child);
+            if (child is Dropdown<string> dropdown)
+            {
+                DropdownPicker picker = new DropdownPicker(dropdown);
+                picker.Open = item => _ = Context.ChooseAsync(item);
+                child = picker;
+            }
+
             stack.Add(Inset.Around(child), size, title);
         }
 

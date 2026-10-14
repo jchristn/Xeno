@@ -203,6 +203,11 @@ Arrow keys, Page Up/Down, Home, End, and the mouse wheel scroll; Esc closes.
 | Ctrl+N | Add a provider. |
 | Ctrl+Q, or Ctrl+C twice | Quit. |
 
+The mouse works everywhere: click a menu title to open it and an item to run it (a click elsewhere closes the
+menu), click the sidebar to change pages, click buttons, rows (double-click opens), checkboxes, and fields, click a
+page dropdown (such as a chart range) to pick from a popup, click buttons in confirmations, rows in the command
+palette, and the key hints in the status bar, and scroll lists, logs, and viewers with the wheel.
+
 Each page also has single-letter actions that work when a text field isn't focused. For example, on Providers: `a`
 add, `e` edit, `t` test, `m` add model, `d` delete. On Overview: `s` start or stop, `r` restart, `w` web dashboard.
 Forms move between fields with Tab, save with Ctrl+S, and cancel with Esc.

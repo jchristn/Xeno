@@ -311,6 +311,95 @@ namespace Test.Shared
                     Check(!rows.Contains("##", StringComparison.Ordinal) && !rows.Contains("```", StringComparison.Ordinal), "Markup leaked into the output: " + rows);
                     Check(viewer.RenderedRows(80).All(row => row.Length <= 80), "A row is wider than the viewer.");
                 }),
+                Case(suite, "MouseOpensAndRunsMenus", "Clicking a menu title opens it, clicking an item runs it, and clicking elsewhere closes it", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
+                    {
+                        tui.ClickText(" View", 1);
+                        Check(tui.Tui.MenuBar.IsOpen, "Clicking View should open the menu.");
+                        tui.ClickText("Providers", 2);
+                        Check(tui.Tui.CurrentPage == XenoPageEnum.Providers, "Clicking View > Providers should open Providers.");
+                        Check(!tui.Tui.MenuBar.IsOpen && !tui.App.Modals.IsActive, "The menu should close after running an item.");
+                        tui.ClickText(" File", 1);
+                        tui.ClickText(" Help", 1);
+                        Check(tui.Tui.MenuBar.IsOpen, "Clicking another title should switch menus.");
+                        tui.ClickText(" Help", 1);
+                        Check(!tui.Tui.MenuBar.IsOpen && !tui.App.Modals.IsActive, "Clicking the open title should close the menu.");
+                        tui.ClickText(" View", 1);
+                        tui.Click(110, 30);
+                        Check(!tui.Tui.MenuBar.IsOpen && !tui.App.Modals.IsActive, "Clicking outside should close the menu.");
+                        Check(tui.Tui.CurrentPage == XenoPageEnum.Providers, "A click that closes the menu should not reach the page.");
+                        tui.Press("f10");
+                        Check(tui.Tui.MenuBar.IsOpen && tui.App.Modals.IsActive, "F10 should open the menu.");
+                        tui.Press("escape");
+                        Check(!tui.Tui.MenuBar.IsOpen && !tui.App.Modals.IsActive, "Escape should close the menu.");
+                    }
+                }),
+                Case(suite, "MouseWorksOnPages", "Clicks navigate the sidebar, press buttons, open rows, toggle settings, and pick from page dropdowns", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
+                    {
+                        tui.ClickText("Last hour");
+                        Contains(tui.Screen(), "Last day");
+                        tui.ClickText("Last day");
+                        Contains(tui.Screen(), "Requests, last day");
+                        tui.ClickText("Add Provider ]");
+                        Check(tui.App.Modals.IsActive, "Clicking Add Provider should open the form.");
+                        tui.Press("escape");
+                        tui.ClickText("Providers", 2);
+                        Check(tui.Tui.CurrentPage == XenoPageEnum.Providers, "Clicking the sidebar should navigate.");
+                        TUIKit.Point row = tui.Find("local-ollama", 3) ?? throw new InvalidOperationException("No provider row.");
+                        tui.DoubleClick(row.X, row.Y);
+                        Check(tui.App.Modals.IsActive, "Double-clicking a provider should open it.");
+                        tui.Press("escape");
+                        tui.Tui.Navigate(XenoPageEnum.Requests);
+                        tui.Settle();
+                        tui.ClickText("All outcomes");
+                        tui.ClickText("  Failed ");
+                        Check(!tui.Screen().Contains("All outcomes", StringComparison.Ordinal), "Picking Failed should change the outcome filter.");
+                        tui.Tui.Navigate(XenoPageEnum.Settings);
+                        tui.Settle();
+                        TUIKit.Point box = tui.Find("[x] Web dashboard: Serve") ?? throw new InvalidOperationException("No checkbox.");
+                        tui.Click(box.X + 1, box.Y);
+                        Contains(tui.Screen(), "[ ] Web dashboard: Serve");
+                    }
+                }),
+                Case(suite, "MouseWorksInDialogs", "Clicks reach form fields, confirmation buttons, the command palette, and status bar hints", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
+                    {
+                        tui.Press("ctrl+n");
+                        TUIKit.Point label = tui.Find("Endpoint") ?? throw new InvalidOperationException("No Endpoint field.");
+                        tui.Click(label.X + 2, label.Y + 1);
+                        tui.Press("ctrl+a");
+                        tui.Type("QQ");
+                        string[] rows = tui.Screen().Split('\n');
+                        Check(rows[label.Y + 1].Contains("QQ", StringComparison.Ordinal), "Typing should land in the clicked field.");
+                        TUIKit.Point apiType = tui.Find("API type") ?? throw new InvalidOperationException("No API type field.");
+                        tui.Click(apiType.X + 2, apiType.Y + 1);
+                        TUIKit.Point vllm = tui.Find("vLLM", apiType.Y + 2) ?? throw new InvalidOperationException("Clicking API type should open its list:" + Environment.NewLine + tui.Screen());
+                        tui.Click(vllm.X, vllm.Y);
+                        Check(tui.Screen().Split('\n')[apiType.Y + 1].Contains("vLLM", StringComparison.Ordinal), "Clicking vLLM should choose it.");
+                        tui.Press("escape");
+                        tui.Tui.Navigate(XenoPageEnum.Providers);
+                        tui.Settle();
+                        tui.Press("d");
+                        TUIKit.Point cancel = tui.Find("[ Cancel ]") ?? throw new InvalidOperationException("No confirmation.");
+                        tui.Click(cancel.X + 2, cancel.Y);
+                        Check(!tui.App.Modals.IsActive, "Clicking Cancel should close the confirmation.");
+                        Contains(tui.Screen(), "local-ollama");
+                        tui.Press("ctrl+k");
+                        tui.Type("Overview");
+                        TUIKit.Point item = tui.Find("Overview  View") ?? throw new InvalidOperationException("No palette row.");
+                        tui.Click(item.X, item.Y);
+                        Check(tui.Tui.CurrentPage == XenoPageEnum.Overview, "Clicking a palette row should run it.");
+                        tui.ClickText("F1 Help", 38);
+                        Check(tui.App.Modals.IsActive, "Clicking the F1 hint should open key help.");
+                        tui.Press("escape");
+                        tui.ClickText("F10 Menu", 38);
+                        Check(tui.Tui.MenuBar.IsOpen, "Clicking the F10 hint should open the menu.");
+                    }
+                }),
                 Case(suite, "AppearancePersists", "Choosing an appearance updates the theme and preferences", () =>
                 {
                     using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Overview))

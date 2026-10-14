@@ -4,12 +4,15 @@ namespace Xeno.Tui
     using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
+    using TUIKit;
     using TUIKit.Hosting;
     using TUIKit.Modals;
     using TUIKit.Theming;
+    using TUIKit.Widgets;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
     using Xeno.Tui.Modals;
+    using Xeno.Tui.Shell;
 
     /// <summary>
     /// Services shared by the terminal app's shell and pages: the TUIKit host, the workspace, the latest status, and
@@ -300,7 +303,8 @@ namespace Xeno.Tui
             List<string> buttons = new List<string>();
             if (followUp.Command != null && !String.IsNullOrEmpty(followUp.ActionText)) buttons.Add(followUp.ActionText);
             buttons.Add(buttons.Count == 0 ? "OK" : "Not Now");
-            MessageModal modal = new MessageModal(followUp.Title, followUp.Message, buttons);
+            ChoiceDialog modal = new ChoiceDialog(followUp.Title, followUp.Message, buttons);
+            modal.ApplyTheme(Theme);
             object? result = await App.ShowAsync(modal).ConfigureAwait(false);
             if (followUp.Command != null && buttons.Count > 1 && result is int index && index == 0)
             {
@@ -318,9 +322,42 @@ namespace Xeno.Tui
         /// <returns>True when confirmed.</returns>
         public async Task<bool> ConfirmAsync(string title, string message, string confirmLabel)
         {
-            MessageModal modal = new MessageModal(title, message, new List<string> { confirmLabel, "Cancel" });
+            ChoiceDialog modal = new ChoiceDialog(title, message, new List<string> { confirmLabel, "Cancel" });
+            modal.ApplyTheme(Theme);
             object? result = await App.ShowAsync(modal).ConfigureAwait(false);
             return result is int index && index == 0;
+        }
+
+        /// <summary>
+        /// Finds where a widget was last drawn on screen, or null. Set by the app.
+        /// </summary>
+        public Func<IWidget, Rect?>? Locate { get; set; } = null;
+
+        /// <summary>
+        /// Show a page dropdown's choices as a popup under it, marking the current choice. Picking one (with Enter or
+        /// a click) selects it; Esc or a click outside leaves the selection alone.
+        /// </summary>
+        /// <param name="picker">Picker.</param>
+        /// <returns>Task that completes when the popup closes.</returns>
+        public Task ChooseAsync(DropdownPicker picker)
+        {
+            ArgumentNullException.ThrowIfNull(picker);
+            Dropdown<string> dropdown = picker.Dropdown;
+            List<MenuItem> items = new List<MenuItem>();
+            for (int i = 0; i < dropdown.Items.Count; i++)
+            {
+                int index = i;
+                string marker = i == dropdown.SelectedIndex ? "• " : "  ";
+                items.Add(new MenuItem(marker + dropdown.Items[i] + " ", () => dropdown.SelectedIndex = index));
+            }
+
+            if (items.Count == 0) return Task.CompletedTask;
+            Rect? at = Locate?.Invoke(picker);
+            int x = at == null ? 30 : Math.Max(0, at.Value.X - 1);
+            int y = at == null ? 6 : at.Value.Y + 1;
+            ContextMenu menu = new ContextMenu(items, x, y);
+            menu.ApplyTheme(Theme);
+            return App.ShowAsync(menu);
         }
 
         /// <summary>

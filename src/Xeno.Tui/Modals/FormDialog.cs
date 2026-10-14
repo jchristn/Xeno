@@ -121,6 +121,23 @@ namespace Xeno.Tui.Modals
             return false;
         }
 
+        /// <summary>
+        /// Route clicks and the wheel to the form, so a click focuses a field, toggles a checkbox, or opens a choice.
+        /// </summary>
+        /// <param name="mouse">Mouse event in screen coordinates.</param>
+        /// <returns>True.</returns>
+        public override bool HandleMouse(MouseEvent mouse)
+        {
+            if (mouse == null || _Submitting) return true;
+            Rect content = ContentBounds;
+            int top = content.Y + IntroLines(content.Width).Count;
+            int x = mouse.X - content.X;
+            int y = mouse.Y - top;
+            if (x < 0 || x >= content.Width || y < 0) return true;
+            _Form.HandleMouse(new MouseEvent(mouse.Kind, mouse.Button, x, y, mouse.Modifiers, mouse.ClickCount));
+            return true;
+        }
+
         #endregion
 
         #region Protected-Methods
