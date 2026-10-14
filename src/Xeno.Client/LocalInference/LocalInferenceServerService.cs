@@ -12,6 +12,7 @@ namespace Xeno.Client.LocalInference
     using WatsonWebserver;
     using WatsonWebserver.Core;
     using Xeno.Client.LocalInference.Models;
+    using Xeno.Client.Services;
     using Xeno.Core.Models;
     using Xeno.Core.Serialization;
 
@@ -107,12 +108,7 @@ namespace Xeno.Client.LocalInference
         /// <exception cref="ArgumentException">Thrown when the host is not loopback-only.</exception>
         public static void ValidateLoopbackHost(string host)
         {
-            if (String.IsNullOrWhiteSpace(host)) throw new ArgumentException("Local inference server host cannot be empty.", nameof(host));
-            if (String.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "::1", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "[::1]", StringComparison.OrdinalIgnoreCase)) return;
-            throw new ArgumentException("Local inference server host must be localhost, 127.0.0.1, ::1, or [::1]. Configured host: " + host, nameof(host));
+            LocalSettingsEditor.ValidateLocalInferenceHost(host);
         }
 
         private async Task PreflightRouteAsync(HttpContextBase context)

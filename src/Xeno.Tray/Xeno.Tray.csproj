@@ -1,8 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <ItemGroup>
-    <ProjectReference Include="..\Xeno.Client\Xeno.Client.csproj" />
-  </ItemGroup>
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>xeno-tray</AssemblyName>
+    <RootNamespace>Xeno.Tray</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+    <Version>0.1.1</Version>
+    <Authors>Joel Christner</Authors>
+    <Company>Joel Christner</Company>
+    <Product>Xeno</Product>
+    <Description>Xeno Agent: a tray app that shows the client's status, controls the background worker, and launches the web dashboard, the desktop app, and the terminal app.</Description>
+    <ApplicationIcon>..\..\assets\logo.ico</ApplicationIcon>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <EnableAvaloniaXamlCompilation>false</EnableAvaloniaXamlCompilation>
+  </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.3" />
@@ -11,18 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="..\..\assets\logo.ico" Link="Assets\logo.ico" />
+    <ProjectReference Include="..\Xeno.Client.Core\Xeno.Client.Core.csproj" />
+    <ProjectReference Include="..\Xeno.Desktop.Common\Xeno.Desktop.Common.csproj" />
+    <!-- Referenced so xeno (the CLI and background worker) builds into the same folder as xeno-tray. -->
+    <ProjectReference Include="..\Xeno.Client\Xeno.Client.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <AssemblyName>xeno-tray</AssemblyName>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <Version>0.1.1</Version>
-    <ApplicationIcon>..\..\assets\logo.ico</ApplicationIcon>
-    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
-  </PropertyGroup>
 
 </Project>

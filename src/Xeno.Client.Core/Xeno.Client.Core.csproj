@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>Xeno.Client</RootNamespace>
+    <Version>0.1.1</Version>
+    <Authors>Joel Christner</Authors>
+    <Company>Joel Christner</Company>
+    <Product>Xeno</Product>
+    <Description>Shared client library for Xeno: settings, state, local history, telemetry, and the services used by the CLI, local dashboard, desktop app, terminal app, and tray agent.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logo.png</PackageIcon>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\logo.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="xeno" />
+    <InternalsVisibleTo Include="Test.Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Xeno.Core\Xeno.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+  </ItemGroup>
+
+</Project>

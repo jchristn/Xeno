@@ -1,0 +1,273 @@
+# Xeno Desktop, Terminal, and Tray Apps
+
+The Xeno client runs as a background worker (`xeno start`) that connects this machine to the Xeno network. You can
+manage it from five front ends. They all read and write the same `~/.xeno` files, so a change made in one shows up in
+the others:
+
+| Front end | Executable | Best for |
+|---|---|---|
+| Command line | `xeno` | Scripts, automation, and quick one-off changes. |
+| Local web dashboard | served by the worker at `http://127.0.0.1:9343` | A browser view of this machine while the client runs. |
+| Desktop app | `xeno-desktop` | A full native window on Windows, macOS, and Linux. |
+| Terminal app | `xeno tui` | Everything the desktop app does, in a terminal or over SSH. |
+| Tray agent | `xeno-tray` | Status at a glance, start and stop, and launching the other apps. |
+
+The desktop app and the terminal app have the same pages, menus, forms, and settings. Neither one needs the worker
+to be running: both read the configuration and the local history database directly, and they start and stop the worker
+for you.
+
+## Running from source
+
+The scripts in [scripts/](scripts/README.md) build and run each app. Use `scripts/linux/` on Linux and
+`scripts\windows\*.bat` on Windows:
+
+```bash
+scripts/macos/run-desktop.sh     # desktop app (also starts the tray agent)
+scripts/macos/run-tui.sh         # terminal app in this terminal
+scripts/macos/run-tray.sh        # tray agent
+scripts/macos/run-local.sh tui   # local server + web dashboard + terminal app, isolated from ~/.xeno
+scripts/macos/install.sh         # xeno tool, plus Xeno.app (macOS) or the Linux/Windows app folder
+```
+
+To run the apps by hand, build the solution once. The desktop app's output folder also contains `xeno` and
+`xeno-tray`, so the three find each other:
+
+```bash
+dotnet build src/Xeno.sln
+src/Xeno.Desktop/bin/Debug/net10.0/xeno-desktop
+src/Xeno.Desktop/bin/Debug/net10.0/xeno tui
+```
+
+With the `xeno` .NET tool installed, run the terminal app with `xeno tui`.
+
+The desktop app and the terminal app accept the same options:
+
+| Option | Meaning |
+|---|---|
+| `--page <page>` | Open a page: `overview`, `models`, `providers`, `requests`, `logs`, `hosttelemetry`, `providertelemetry`, `server`, or `settings`. |
+| `--server <cloud\|url\|host[:port]>` | Point this client at a Xeno server and save it. See [Choosing the Xeno server](#choosing-the-xeno-server). |
+| `--home <dir>` | Use a different client home directory instead of `~/.xeno` (the same as setting `XENO_CLIENT_HOME`). |
+
+## Choosing the Xeno server
+
+Every client app talks to one central Xeno server: the CLI, the worker, the desktop app, the terminal app, and the
+tray agent. By default that is the **Xeno cloud** (`https://app.xenocloud.ai:9000`, WebSocket `wss://app.xenocloud.ai:9000/ws/v1/clients`). To use your own
+server, for example one you run on your network or with `scripts/*/run-server.sh`, point the client at it in any of
+these ways. They all save the same setting (`Server.Url`, and `Server.RestUrl` when set) in `~/.xeno/client.json`:
+
+| From | How |
+|---|---|
+| Desktop app | **General** page (under Configuration), **Edit Connection**, then set the WebSocket URL (and optionally the REST URL). |
+| Terminal app | **General** page (Alt+8), press `e`, then set the WebSocket URL. |
+| Launching either app | `xeno-desktop --server <server>` or `xeno tui --server <server>`. |
+| Command line | `xeno server use <server>`, then `xeno server show` to check. |
+| Sign-in | `xeno login -u <user> --server <rest-url>` (the CLI) or the **Server** field of the Sign In form. |
+
+`<server>` can be any of these:
+
+- `cloud`: the Xeno cloud server, which is the default.
+- `http://host:port` or `https://host`: the server's REST address. The WebSocket address
+  (`ws://host:port/ws/v1/clients`, or `wss://` for `https`) is derived from it.
+- `ws://host:port` or `wss://host`: the server's WebSocket address. If the path is missing, `/ws/v1/clients` is
+  added.
+- `host` or `host:port`: shorthand for `http://host:9000` or `http://host:port`.
+
+If you paste a full URL, such as one copied from the browser's network tab, only the scheme, host, and port are used.
+The Xeno cloud accepts only HTTPS and WSS. The apps upgrade an old `ws://` or `http://` cloud address saved in
+`client.json` automatically.
+
+```bash
+xeno server use http://10.0.0.20:9000      # a server on your network
+xeno-desktop --server https://xeno.example.com
+xeno tui --server cloud                    # back to the Xeno cloud
+```
+
+The header of the terminal app and the status card of the desktop app show the server in use: **Xeno cloud**, or the
+server's host and port. The Overview and General pages show the full URLs.
+
+Things to know:
+
+- A running client worker keeps its connection until it restarts. After changing servers, choose **Restart Client**
+  (or run `xeno restart`). The apps remind you.
+- Credentials belong to one server. After switching servers, sign in again on the **General** page.
+- To switch between servers without signing in again each time, give each server its own client home. Every app
+  accepts `--home`, and `XENO_CLIENT_HOME` works too:
+
+  ```bash
+  xeno-desktop --home ~/.xeno-lab --server http://lab-server:9000
+  xeno tui --home ~/.xeno-lab
+  ```
+
+  `scripts/*/run-local.sh` works this way: it uses `~/.xeno-local` for the local server, so `~/.xeno` keeps its
+  Xeno cloud sign-in.
+
+## Pages
+
+| Page | What it shows and does |
+|---|---|
+| Overview | Client status with Start, Stop, Restart, and Sign In; requests served, failures, and latency; a requests-over-time chart with a range (last hour, day, week, or month); how many models are served here and offered by the network; local services; recent requests. |
+| Models | One catalog of the models this machine serves and the models the Xeno network offers it, with where each is available (this machine, the network, or both). Add, edit, rename, move, and delete local models. |
+| Providers | Local inference endpoints (Ollama, vLLM, OpenAI-compatible), their models, and a connection test. Add, edit, and delete providers. |
+| Requests | Requests this machine served for the network, with a requests-over-time chart, range, outcome, and text filters, and full request details (timeline, headers, and stored bodies). Delete one request or clear the history. |
+| Logs | The worker log or error log, with tail length, severity filter, and live follow. Routine server messages are rolled up (see below). |
+| Host (Telemetry) | CPU, memory, disk, and GPU readings; CPU, memory, and GPU charts over a range; stored samples; and Collect Now. |
+| Provider (Telemetry) | Health, loaded and available models, queue depth, and throughput per provider; a chart of the chosen metric over a range; and stored samples. |
+| General (Configuration) | The server connection, sign-in (username and password, or an access key), sign-out, connectivity checks, and what the network offers this tenant. |
+| Settings | Appearance and every local setting: the web dashboard, the local inference server, request history retention, and telemetry. Saved to `client.json`; listener changes apply after a restart. |
+
+The sidebar groups pages under section headings (Client, Models, Activity, Telemetry, Configuration), so the
+telemetry pages are just **Host** and **Provider** there. Menus, the command palette, and page headers use the full
+names (Host Telemetry, Provider Telemetry).
+
+### Charts
+
+The desktop and terminal apps draw the same charts as the local web dashboard, built once in
+`XenoCharts` (`Xeno.Client.Core`):
+
+| Page | Charts |
+|---|---|
+| Overview and Requests | Requests over time: succeeded and failed requests per interval. |
+| Host Telemetry | CPU, memory, and GPU utilization over time. |
+| Provider Telemetry | The chosen provider metric over time, for one provider or all of them. |
+
+Every chart has a range (last hour, day, week, or month), a heading such as "Requests, last hour", a legend, its
+peak value, and time labels. When there's no data, the chart says why instead of drawing an empty axis: for example,
+no requests yet, telemetry is collected only while the client runs, or GPU telemetry needs an NVIDIA GPU. In the
+desktop app, hover over a column to see its values.
+
+### Log rollup
+
+The worker logs a debug line for every `server.telemetry.request` and `server.telemetry.ack` message, about once a
+minute. On a lightly used machine those lines bury everything else, so the Logs page in both apps rolls up each
+uninterrupted run of them into one line per message type with a count and the local time of the first, for example
+`Server message: server.telemetry.ack (5 since 11:16:39)`. Any other line ends the run. The log file itself, `xeno logs`,
+and the web dashboard still show every line.
+
+## Desktop app
+
+The window has a sidebar with the pages and a status card that starts, stops, or signs in, a page header with the
+page's actions, and a status bar with the latest result. Signing in shows a confirmation that names the server and
+tenant and offers **Start Client** (or **Restart Client** when the client is already running).
+
+Menus:
+
+- **macOS:** the menu bar shows **Xeno** (About Xeno, Settings), **File**, **Edit**, **View**, **Client**,
+  **Window**, and **Help**, with standard Cmd shortcuts.
+- **Windows and Linux:** the same File, View, Client, and Help menus appear at the top of the window and use Ctrl.
+
+| Shortcut (Cmd on macOS, Ctrl elsewhere) | Action |
+|---|---|
+| 1 to 9 | Go to a page (Overview through Settings). |
+| N / Shift+N | Add a provider / add a model. |
+| K | Command palette. |
+| R | Refresh. |
+| Shift+D | Open the local web dashboard. |
+| Shift+T | Open the terminal app in a new terminal window. |
+| , | Settings. |
+| / | Keyboard shortcuts. |
+
+Tables sort by clicking a column header. Double-click or press Enter to open a row, and right-click for row actions.
+
+Only one desktop app runs per client home directory. The desktop app also starts the tray agent if it isn't
+running; set `XENO_AGENT_AUTOSTART=0` to turn that off. Preferences (appearance, last page) are stored in
+`~/.xeno/frontend.json`.
+
+## Terminal app
+
+The terminal app (`xeno tui`) has a header, a menu bar, a navigation sidebar, the current page, a message line, and a
+status bar that lists the keys that work in the focused area.
+
+It is designed for a large terminal: it needs at least **120 columns by 36 rows**. In a smaller window it shows
+TUIKit's "Terminal too small" screen with the size it needs, and returns as soon as the window is big enough.
+
+The **message line**, above the key hints, reports everything the app does: a spinner while something runs (starting
+the client, signing in, pinging the server, collecting telemetry), then the result with the time, marked ✓ for
+success, ! for a warning, or ✗ for an error (errors also pop up a notice). After signing in, a confirmation names
+the server and tenant and offers **Start Client** (or **Restart Client**).
+
+Detail views (a request's details, provider models on Provider Telemetry, and Help > About) are Markdown laid out by
+TUIKit 1.6's width-aware renderer: tables get borders and are sized from their content, headings and links are
+styled, and headers and bodies sit in code blocks (JSON is highlighted). The Markdown is built in `Xeno.Client.Core`
+with `XenoMarkdown`, which escapes values and fences bodies, so request and response content always shows verbatim.
+Arrow keys, Page Up/Down, Home, End, and the mouse wheel scroll; Esc closes.
+
+| Key | Action |
+|---|---|
+| F10 | Open the menu bar (arrow keys to move, Enter to choose, Esc to close). |
+| Ctrl+K | Command palette. |
+| F1 | Keyboard shortcuts, including each page's single-key actions. |
+| Alt+1 to Alt+9 | Go to a page. |
+| Tab / Shift+Tab | Move between the page's controls and the sidebar. |
+| Enter | Open the selected row or page. |
+| F5 | Refresh. |
+| Ctrl+N | Add a provider. |
+| Ctrl+Q, or Ctrl+C twice | Quit. |
+
+Each page also has single-letter actions that work when a text field isn't focused. For example, on Providers: `a`
+add, `e` edit, `t` test, `m` add model, `d` delete. On Overview: `s` start or stop, `r` restart, `w` web dashboard.
+Forms move between fields with Tab, save with Ctrl+S, and cancel with Esc.
+
+**File > Open client.json** opens the settings file in `$VISUAL` or `$EDITOR` when one is set, and returns to the app
+when the editor exits.
+
+## Tray agent
+
+The tray agent (`xeno-tray`, shown as **Xeno Agent**) lives in the macOS menu bar or the Windows and Linux
+notification area. Its menu shows the client status and offers:
+
+- Open Xeno (the desktop app)
+- Open Xeno Terminal (the terminal app, in a new terminal window)
+- Open Web Dashboard
+- Start Client, Stop Client, and Restart Client
+- About Xeno Agent and Quit Xeno Agent
+
+On Windows and Linux, clicking the icon opens the desktop app. On macOS, the agent has its own application menu and
+shows in the Dock only while one of its windows is open. Only one agent runs per client home directory. Quitting the
+agent doesn't stop the client.
+
+## How the apps find each other
+
+Each launcher looks for the executable in this order:
+
+1. An environment variable: `XENO_CLI`, `XENO_DESKTOP`, or `XENO_TRAY` (a file or a folder).
+2. The folder of the app that's launching it.
+3. For `xeno` only: `PATH`, then `~/.dotnet/tools`.
+4. On macOS: `/Applications/Xeno.app/Contents/MacOS` and `~/Applications/Xeno.app/Contents/MacOS`.
+5. The newest build under `src/<Project>/bin` in a source checkout above the current folder.
+
+The terminal app opens in a new window as follows:
+
+- **macOS:** Terminal.app, using a temporary `.command` script (no automation permission is needed).
+- **Windows:** a new `cmd.exe` window.
+- **Linux:** the first terminal found among x-terminal-emulator, gnome-terminal, konsole, xfce4-terminal, kitty,
+  alacritty, and xterm.
+
+## Architecture
+
+All five front ends share one client library, so behavior and validation stay identical everywhere:
+
+| Project | Contents |
+|---|---|
+| `src/Xeno.Client.Core` | Settings and state (`client.json`, `state.json`), the local history database, telemetry, and the shared services: `XenoWorkspace` (the facade the desktop and terminal apps use), `ProviderConfiguration`, `ClientWorkerController` (start and stop), `ClientStatusSnapshot`, `ModelCatalogBuilder` (local plus network models), `XenoServerClient` (sign-in, ping, network model list), `ClientLogReader` and `ClientLogRollup`, `LocalSettingsEditor`, and `XenoAppLauncher` with `XenoExecutableLocator` and `TerminalLaunchPlanner`. The `Presentation` namespace holds what the UIs render: the navigation catalog, the menu layout, command availability, form specs, the settings catalog, charts (`XenoCharts`), follow-ups after actions (`XenoClientActions.AfterSignIn`), and table rows. |
+| `src/Xeno.Client` | The `xeno` CLI, the background worker, the local web dashboard, and the local inference server. It hosts the terminal app as `xeno tui`. |
+| `src/Xeno.Desktop.Common` | Avalonia building blocks shared by the desktop app and the tray agent: the theme, native menus built from the shared layout, the About window, dialogs, the form dialog, and tables. |
+| `src/Xeno.Desktop` | The desktop app. |
+| `src/Xeno.Tray` | The tray agent. |
+| `src/Xeno.Tui` | The terminal app, built on TUIKit. |
+
+Two things in the shared library prepare for routing each model either locally or through the network:
+
+- `ModelCatalog` already records, for every model, whether this machine serves it, whether the network offers it, or
+  both.
+- The desktop and terminal Models pages show that view.
+
+## Testing
+
+The shared library, the tray and desktop logic, and the terminal app are covered by Touchstone suites in
+`src/Test.Shared`: `SharedClient`, `Tray`, `Desktop`, and `Tui`. The terminal app tests run the real app on TUIKit's
+headless backend and assert on rendered frames. Set `XENO_TUI_SNAPSHOT_DIR` to a folder to save each page's frame at
+80x24 and 140x45 while the `Tui` suite runs:
+
+```bash
+dotnet run --project src/Test.Automated -- --suite Tui
+```

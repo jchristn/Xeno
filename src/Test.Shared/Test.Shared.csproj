@@ -3,7 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Xeno.Core\Xeno.Core.csproj" />
     <ProjectReference Include="..\Xeno.Client\Xeno.Client.csproj" />
-    <ProjectReference Include="..\Xeno.Tray\Xeno.Tray.csproj" />
+    <ProjectReference Include="..\Xeno.Client.Core\Xeno.Client.Core.csproj" />
+    <ProjectReference Include="..\Xeno.Tui\Xeno.Tui.csproj" />
     <ProjectReference Include="..\Xeno.Server\Xeno.Server.csproj" />
     <ProjectReference Include="..\Xeno.Email\Xeno.Email.csproj" />
   </ItemGroup>

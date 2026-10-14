@@ -15,6 +15,7 @@ namespace Xeno.Client.LocalDashboard
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
     using Xeno.Client.LocalInference;
+    using Xeno.Client.Services;
     using Xeno.Client.Telemetry.Models;
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Serialization;
@@ -113,18 +114,7 @@ namespace Xeno.Client.LocalDashboard
 
         private static void ValidateHost(string host)
         {
-            if (String.IsNullOrWhiteSpace(host)) throw new ArgumentException("Local dashboard host cannot be empty.");
-            if (String.Equals(host, "+", StringComparison.OrdinalIgnoreCase) || String.Equals(host, "*", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException("Local dashboard host must be an explicit address such as 127.0.0.1 or 0.0.0.0.");
-            }
-
-            if (String.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "::1", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "[::1]", StringComparison.OrdinalIgnoreCase)) return;
-            if (String.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase)) return;
-            throw new ArgumentException("Local dashboard host is not a valid host or IP address: " + host);
+            LocalSettingsEditor.ValidateLocalDashboardHost(host);
         }
 
         private async Task PreflightRouteAsync(HttpContextBase context)
@@ -356,7 +346,7 @@ namespace Xeno.Client.LocalDashboard
             {
                 int tail = ParseInt(context.Request.Query.Elements.Get("tail"), 100);
                 string severity = context.Request.Query.Elements.Get("severity") ?? "all";
-                await SendJsonAsync(context, new LocalDashboardLogResponse { LogFile = ClientConnectionState.LogFile, Lines = ReadLogTail(ClientConnectionState.LogFile, tail, severity) }).ConfigureAwait(false);
+                await SendJsonAsync(context, new LocalDashboardLogResponse { LogFile = ClientConnectionState.LogFile, Lines = ClientLogReader.ReadTail(ClientConnectionState.LogFile, tail, severity) }).ConfigureAwait(false);
                 return;
             }
 
@@ -369,7 +359,7 @@ namespace Xeno.Client.LocalDashboard
             if (method == "POST" && String.Equals(path, "/api/v1/providers", StringComparison.OrdinalIgnoreCase))
             {
                 LocalProviderUpsertRequest request = ReadJson<LocalProviderUpsertRequest>(context);
-                ClientRunnerSettings provider = UpsertProvider(request, null);
+                ClientRunnerSettings provider = ProviderConfiguration.UpsertProvider(_Settings, request, null);
                 await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, LocalSecretRedactor.RedactProvider(provider)).ConfigureAwait(false);
                 return;
@@ -388,13 +378,13 @@ namespace Xeno.Client.LocalDashboard
                 if (method == "PUT")
                 {
                     LocalProviderUpsertRequest request = ReadJson<LocalProviderUpsertRequest>(context);
-                    ClientRunnerSettings provider = UpsertProvider(request, name);
+                    ClientRunnerSettings provider = ProviderConfiguration.UpsertProvider(_Settings, request, name);
                     await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
                     await SendJsonAsync(context, LocalSecretRedactor.RedactProvider(provider)).ConfigureAwait(false);
                     return;
                 }
 
-                int removed = _Settings.Runners.RemoveAll(item => String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+                int removed = ProviderConfiguration.DeleteProvider(_Settings, name);
                 await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed, RemovedOne = removed > 0 }).ConfigureAwait(false);
                 return;
@@ -411,14 +401,14 @@ namespace Xeno.Client.LocalDashboard
 
             if (method == "GET" && String.Equals(path, "/api/v1/models", StringComparison.OrdinalIgnoreCase))
             {
-                await SendJsonAsync(context, BuildModelList()).ConfigureAwait(false);
+                await SendJsonAsync(context, ProviderConfiguration.BuildModelList(_Settings)).ConfigureAwait(false);
                 return;
             }
 
             if (method == "POST" && String.Equals(path, "/api/v1/models", StringComparison.OrdinalIgnoreCase))
             {
                 LocalModelUpsertRequest request = ReadJson<LocalModelUpsertRequest>(context);
-                LocalModelEntry model = UpsertModel(request, null, null);
+                LocalModelEntry model = ProviderConfiguration.UpsertModel(_Settings, request, null, null);
                 await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, model).ConfigureAwait(false);
                 return;
@@ -431,13 +421,13 @@ namespace Xeno.Client.LocalDashboard
                 if (method == "PUT")
                 {
                     LocalModelUpsertRequest request = ReadJson<LocalModelUpsertRequest>(context);
-                    LocalModelEntry model = UpsertModel(request, parts[0], parts[1]);
+                    LocalModelEntry model = ProviderConfiguration.UpsertModel(_Settings, request, parts[0], parts[1]);
                     await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
                     await SendJsonAsync(context, model).ConfigureAwait(false);
                     return;
                 }
 
-                int removed = DeleteModel(parts[0], parts[1]);
+                int removed = ProviderConfiguration.DeleteModel(_Settings, parts[0], parts[1]);
                 await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
                 await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed, RemovedOne = removed > 0 }).ConfigureAwait(false);
                 return;
@@ -454,8 +444,8 @@ namespace Xeno.Client.LocalDashboard
             {
                 DateTime toUtc = DateTime.UtcNow;
                 string range = context.Request.Query.Elements.Get("range") ?? "hour";
-                DateTime fromUtc = SummaryStartUtc(range, toUtc);
-                int bucketMinutes = ParseInt(context.Request.Query.Elements.Get("bucketMinutes"), DefaultBucketMinutes(range));
+                DateTime fromUtc = HistoryRanges.StartUtc(HistoryRanges.Parse(range), toUtc);
+                int bucketMinutes = ParseInt(context.Request.Query.Elements.Get("bucketMinutes"), HistoryRanges.DefaultBucketMinutes(HistoryRanges.Parse(range)));
                 LocalRequestHistorySummaryResponse response = new LocalRequestHistorySummaryResponse
                 {
                     Buckets = (await _History.SummarizeAsync(fromUtc, toUtc, bucketMinutes, token).ConfigureAwait(false)).ToList()
@@ -540,19 +530,7 @@ namespace Xeno.Client.LocalDashboard
             if (method == "PUT" && String.Equals(path, "/api/v1/settings", StringComparison.OrdinalIgnoreCase))
             {
                 LocalClientSettingsUpdateRequest request = ReadJson<LocalClientSettingsUpdateRequest>(context);
-                ValidateHost(request.Host);
-                ClientLocalInferenceServerSettings localInferenceServer = request.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
-                LocalInferenceServerService.ValidateLoopbackHost(localInferenceServer.Host);
-                _Settings.ValidateLocalInferenceProviderEndpoints(localInferenceServer);
-                _Settings.LocalDashboard.Enabled = request.Enabled;
-                _Settings.LocalDashboard.Host = request.Host;
-                _Settings.LocalDashboard.Port = Math.Max(1, request.Port);
-                _Settings.LocalDashboard.OpenBrowserOnStart = request.OpenBrowserOnStart;
-                _Settings.LocalDashboard.RequireLocalToken = request.RequireLocalToken;
-                _Settings.LocalDashboard.Database = request.Database ?? new ClientLocalDatabaseSettings();
-                _Settings.LocalDashboard.HistoryRetention = request.HistoryRetention ?? new ClientLocalHistorySettings();
-                _Settings.LocalInferenceServer = localInferenceServer;
-                _Settings.Telemetry = request.Telemetry ?? new ClientTelemetrySettings();
+                LocalSettingsEditor.Apply(_Settings, request);
                 _Settings.Save();
                 await SendJsonAsync(context, new LocalDashboardSettingsResponse { Settings = RedactedSettings(), SettingsFile = ClientSettings.SettingsFile, RestartRequired = true }).ConfigureAwait(false);
                 return;
@@ -579,27 +557,7 @@ namespace Xeno.Client.LocalDashboard
 
         private ClientSettings RedactedSettings()
         {
-            ClientSettings copy = new ClientSettings
-            {
-                ClientId = _Settings.ClientId,
-                TenantId = _Settings.TenantId,
-                Name = _Settings.Name,
-                UseColors = _Settings.UseColors,
-                Server = new ClientServerSettings
-                {
-                    Url = _Settings.Server.Url,
-                    RestUrl = _Settings.Server.RestUrl,
-                    AccessKey = _Settings.Server.AccessKey,
-                    SecretKey = null,
-                    Token = _Settings.Server.Token
-                },
-                LocalDashboard = _Settings.LocalDashboard,
-                LocalInferenceServer = _Settings.LocalInferenceServer,
-                Telemetry = _Settings.Telemetry,
-                Providers = _Settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList()
-            };
-            copy.Server.Token = String.IsNullOrWhiteSpace(copy.Server.Token) ? null : "configured";
-            return copy;
+            return ProviderConfiguration.Redact(_Settings);
         }
 
         private void ApplyRuntimeTelemetryStatus(ClientTelemetryPersistenceStatus status)
@@ -631,7 +589,7 @@ namespace Xeno.Client.LocalDashboard
         {
             DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
             request.ToUtc = toUtc;
-            request.FromUtc ??= SummaryStartUtc(context.Request.Query.Elements.Get("range") ?? "hour", toUtc);
+            request.FromUtc ??= HistoryRanges.StartUtc(HistoryRanges.Parse(context.Request.Query.Elements.Get("range")), toUtc);
             request.Limit = Math.Clamp(request.Limit, 1, 1000);
             request.Offset = Math.Max(0, request.Offset);
         }
@@ -641,15 +599,15 @@ namespace Xeno.Client.LocalDashboard
             DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
             string range = context.Request.Query.Elements.Get("range") ?? "hour";
             request.ToUtc = toUtc;
-            request.FromUtc ??= SummaryStartUtc(range, toUtc);
-            if (request.BucketMinutes <= 0) request.BucketMinutes = DefaultBucketMinutes(range);
+            request.FromUtc ??= HistoryRanges.StartUtc(HistoryRanges.Parse(range), toUtc);
+            if (request.BucketMinutes <= 0) request.BucketMinutes = HistoryRanges.DefaultBucketMinutes(HistoryRanges.Parse(range));
         }
 
         private static void ApplyProviderTelemetryRangeDefaults(ClientProviderTelemetrySearchRequest request, HttpContextBase context)
         {
             DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
             request.ToUtc = toUtc;
-            request.FromUtc ??= SummaryStartUtc(context.Request.Query.Elements.Get("range") ?? "hour", toUtc);
+            request.FromUtc ??= HistoryRanges.StartUtc(HistoryRanges.Parse(context.Request.Query.Elements.Get("range")), toUtc);
             request.Limit = Math.Clamp(request.Limit, 1, 1000);
             request.Offset = Math.Max(0, request.Offset);
         }
@@ -659,8 +617,8 @@ namespace Xeno.Client.LocalDashboard
             DateTime toUtc = request.ToUtc ?? DateTime.UtcNow;
             string range = context.Request.Query.Elements.Get("range") ?? "hour";
             request.ToUtc = toUtc;
-            request.FromUtc ??= SummaryStartUtc(range, toUtc);
-            if (request.BucketMinutes <= 0) request.BucketMinutes = DefaultBucketMinutes(range);
+            request.FromUtc ??= HistoryRanges.StartUtc(HistoryRanges.Parse(range), toUtc);
+            if (request.BucketMinutes <= 0) request.BucketMinutes = HistoryRanges.DefaultBucketMinutes(HistoryRanges.Parse(range));
         }
 
         private async Task<LocalDashboardDatabaseResponse> BuildDatabaseResponseAsync(CancellationToken token)
@@ -689,136 +647,11 @@ namespace Xeno.Client.LocalDashboard
             ClientConnectionState.MarkInventoryUpdateRequested();
         }
 
-        private ClientRunnerSettings UpsertProvider(LocalProviderUpsertRequest request, string? routeName)
-        {
-            string name = String.IsNullOrWhiteSpace(routeName) ? request.Name : routeName;
-            if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Provider name is required.");
-            if (String.IsNullOrWhiteSpace(request.Endpoint)) throw new ArgumentException("Provider endpoint is required.");
-            _Settings.ValidateProviderEndpointAgainstLocalInference(name, request.Endpoint);
-            ClientRunnerSettings? provider = _Settings.Runners.FirstOrDefault(item => String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (provider == null)
-            {
-                provider = new ClientRunnerSettings { Name = name, Models = new List<ClientModelSettings>() };
-                _Settings.Runners.Add(provider);
-            }
-
-            provider.ApiType = String.IsNullOrWhiteSpace(request.ApiType) ? provider.ApiType : request.ApiType;
-            provider.Endpoint = request.Endpoint;
-            provider.TimeoutMs = Math.Max(1000, request.TimeoutMs);
-            if (request.ClearCredential) provider.Credential = null;
-            else if (!String.IsNullOrWhiteSpace(request.Credential)) provider.Credential = request.Credential;
-            bool requestedModelManagement = request.AllowModelManagement ?? provider.AllowModelManagement;
-            if (requestedModelManagement && !String.Equals(provider.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException("Model management can only be enabled for Ollama providers.");
-            }
-
-            provider.AllowModelManagement = String.Equals(provider.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) && requestedModelManagement;
-            return provider;
-        }
-
-        private static DateTime SummaryStartUtc(string range, DateTime toUtc)
-        {
-            if (String.Equals(range, "day", StringComparison.OrdinalIgnoreCase)) return toUtc.AddDays(-1);
-            if (String.Equals(range, "week", StringComparison.OrdinalIgnoreCase)) return toUtc.AddDays(-7);
-            if (String.Equals(range, "month", StringComparison.OrdinalIgnoreCase)) return toUtc.AddDays(-30);
-            return toUtc.AddHours(-1);
-        }
-
-        private static int DefaultBucketMinutes(string range)
-        {
-            if (String.Equals(range, "day", StringComparison.OrdinalIgnoreCase)) return 15;
-            if (String.Equals(range, "week", StringComparison.OrdinalIgnoreCase)) return 120;
-            if (String.Equals(range, "month", StringComparison.OrdinalIgnoreCase)) return 480;
-            return 1;
-        }
-
         private async Task<LocalProviderTestResponse> TestProviderAsync(string name, CancellationToken token)
         {
             if (String.IsNullOrWhiteSpace(name)) throw new ArgumentException("Provider name is required.");
-            ClientRunnerSettings provider = _Settings.Runners.FirstOrDefault(item => String.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))
-                ?? throw new KeyNotFoundException("Provider not found.");
-            LocalProviderTestResponse response = new LocalProviderTestResponse
-            {
-                Name = provider.Name,
-                Endpoint = provider.Endpoint
-            };
-
-            try
-            {
-                using (HttpClient httpClient = new HttpClient())
-                {
-                    httpClient.Timeout = TimeSpan.FromSeconds(5);
-                    using (HttpRequestMessage request = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, provider.Endpoint))
-                    using (HttpResponseMessage httpResponse = await httpClient.SendAsync(request, token).ConfigureAwait(false))
-                    {
-                        response.StatusCode = (int)httpResponse.StatusCode;
-                        response.Success = (int)httpResponse.StatusCode >= 200 && (int)httpResponse.StatusCode < 500;
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is InvalidOperationException)
-            {
-                response.Success = false;
-                response.Error = ex.Message;
-            }
-
-            return response;
-        }
-
-        private LocalModelEntry UpsertModel(LocalModelUpsertRequest request, string? routeProvider, string? routeModel)
-        {
-            string providerName = String.IsNullOrWhiteSpace(routeProvider) ? request.Provider : routeProvider;
-            string modelName = String.IsNullOrWhiteSpace(routeModel) ? request.Name : routeModel;
-            if (String.IsNullOrWhiteSpace(providerName)) throw new ArgumentException("Provider name is required.");
-            if (String.IsNullOrWhiteSpace(modelName)) throw new ArgumentException("Model name is required.");
-            ClientRunnerSettings provider = _Settings.Runners.FirstOrDefault(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase))
-                ?? throw new KeyNotFoundException("Provider not found.");
-            ClientModelSettings? model = provider.Models.FirstOrDefault(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
-            if (model == null)
-            {
-                model = new ClientModelSettings { Name = modelName };
-                provider.Models.Add(model);
-            }
-
-            model.SupportsCompletions = request.SupportsCompletions;
-            model.SupportsEmbeddings = request.SupportsEmbeddings;
-            return ToModelEntry(provider, model);
-        }
-
-        private int DeleteModel(string providerName, string modelName)
-        {
-            ClientRunnerSettings provider = _Settings.Runners.FirstOrDefault(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase))
-                ?? throw new KeyNotFoundException("Provider not found.");
-            return provider.Models.RemoveAll(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private LocalModelListResponse BuildModelList()
-        {
-            LocalModelListResponse response = new LocalModelListResponse();
-            foreach (ClientRunnerSettings provider in _Settings.Runners)
-            {
-                foreach (ClientModelSettings model in provider.Models)
-                {
-                    response.Models.Add(ToModelEntry(provider, model));
-                }
-            }
-
-            return response;
-        }
-
-        private static LocalModelEntry ToModelEntry(ClientRunnerSettings provider, ClientModelSettings model)
-        {
-            return new LocalModelEntry
-            {
-                Provider = provider.Name,
-                ApiType = provider.ApiType,
-                Endpoint = provider.Endpoint,
-                Name = model.Name,
-                SupportsCompletions = model.SupportsCompletions,
-                SupportsEmbeddings = model.SupportsEmbeddings,
-                ModelManagementAllowed = String.Equals(provider.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) && provider.AllowModelManagement
-            };
+            ClientRunnerSettings provider = ProviderConfiguration.FindProvider(_Settings, name) ?? throw new KeyNotFoundException("Provider not found.");
+            return await ProviderConfiguration.TestProviderAsync(provider, false, 5000, token).ConfigureAwait(false);
         }
 
         private void EnsureAuthorized(HttpContextBase context)
@@ -847,27 +680,6 @@ namespace Xeno.Client.LocalDashboard
         {
             if (Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)) return parsed;
             return defaultValue;
-        }
-
-        private static List<string> ReadLogTail(string filename, int tail, string severity)
-        {
-            List<string> lines = new List<string>();
-            if (!File.Exists(filename) || tail <= 0) return lines;
-            string filter = severity ?? "all";
-            using (FileStream stream = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (StreamReader reader = new StreamReader(stream))
-            {
-                while (!reader.EndOfStream)
-                {
-                    string? line = reader.ReadLine();
-                    if (line == null) break;
-                    if (!String.Equals(filter, "all", StringComparison.OrdinalIgnoreCase) && line.IndexOf("[" + filter.ToUpperInvariant() + "]", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    lines.Add(line);
-                    if (lines.Count > tail) lines.RemoveAt(0);
-                }
-            }
-
-            return lines;
         }
 
         private static string DecodePathSegment(string value)

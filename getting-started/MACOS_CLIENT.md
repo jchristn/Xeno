@@ -8,7 +8,8 @@ This guide installs and runs the Xeno client on macOS.
 - Client state: `~/.xeno/state.json`
 - Local dashboard: `http://127.0.0.1:9343`
 - Optional local inference listener: `http://127.0.0.1:11434` when `LocalInferenceServer.Enabled` is true
-- Default cloud WebSocket URL: `ws://app.xenocloud.ai:9000/ws/v1/clients`
+- Default cloud server: `https://app.xenocloud.ai:9000` (HTTPS only; plain `http://` on port 9000 is rejected)
+- Default cloud WebSocket URL: `wss://app.xenocloud.ai:9000/ws/v1/clients`
 - Local Docker server WebSocket URL: `ws://localhost:9000/ws/v1/clients`
 - Local Docker server REST URL: `http://localhost:9000`
 - Dashboard login for seeded Docker server: `admin@xeno` / `password`
@@ -59,11 +60,10 @@ XENO="dotnet $(pwd)/src/Xeno.Client/bin/Debug/net10.0/xeno.dll"
 $XENO init
 ```
 
-5. If you are connecting to a local Docker server, set the server URLs.
+5. New clients connect to the Xeno cloud. If you are connecting to your own server instead, such as a local Docker server, point the client at it. `$XENO server show` prints the server in use, and `$XENO server use cloud` switches back.
 
 ```bash
-$XENO server set-url ws://localhost:9000/ws/v1/clients
-$XENO server set-rest-url http://localhost:9000
+$XENO server use http://localhost:9000
 ```
 
 6. Log in to the server and store a client access key.
@@ -148,6 +148,34 @@ $XENO stop
 ```
 
 To have the client start automatically, use **Start On Login** (when you sign in) or **Start On Boot** (headless, no sign-in).
+
+### Use the desktop, terminal, and tray apps
+
+Instead of the commands above, you can manage the client from an app. All of them share `~/.xeno` with the CLI.
+
+```bash
+# Desktop app (it also starts the Xeno Agent in the menu bar)
+scripts/macos/run-desktop.sh
+
+# Terminal app
+scripts/macos/run-tui.sh          # or: $XENO tui
+
+# Xeno Agent menu bar app on its own
+scripts/macos/run-tray.sh
+
+# Install Xeno.app in ~/Applications, plus the xeno tool
+scripts/macos/install.sh
+```
+
+The apps use the server in `~/.xeno/client.json`, which is the Xeno cloud unless you changed it. To point them at
+another server, pass `--server`, for example `scripts/macos/run-desktop.sh --server http://localhost:9000`. You can
+also change it on the **General** page. To try everything against a throwaway local server without touching
+`~/.xeno`, run `scripts/macos/run-local.sh` (desktop app) or `scripts/macos/run-local.sh tui`.
+
+On macOS the desktop app appears as **Xeno** in the menu bar, with an application menu (About Xeno, Settings), plus
+File, Edit, View, Client, Window, and Help menus. The Xeno Agent's menu bar icon opens the desktop app, opens the
+terminal app in a new Terminal window, opens the web dashboard, and starts or stops the client. See
+[DESKTOP_AND_TERMINAL.md](../DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
 
 ## Start On Login
 

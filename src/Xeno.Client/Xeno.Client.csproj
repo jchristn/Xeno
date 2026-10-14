@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Xeno.Core\Xeno.Core.csproj" />
+    <ProjectReference Include="..\Xeno.Client.Core\Xeno.Client.Core.csproj" />
+    <ProjectReference Include="..\Xeno.Tui\Xeno.Tui.csproj" />
   </ItemGroup>
 
   <ItemGroup>

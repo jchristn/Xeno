@@ -217,17 +217,29 @@ Run the server locally:
 dotnet run --project src/Xeno.Server -- xeno.json
 ```
 
-Install the client as a global `xeno` tool on Windows:
+### Scripts
 
-```powershell
-install-tool.bat
+[scripts/](scripts/README.md) has a folder for each platform (`macos/`, `linux/`, `windows/`). Its scripts run each
+part of Xeno from source and install, update, or remove it:
+
+| Script (`.sh` on macOS and Linux, `.bat` on Windows) | What it does |
+|---|---|
+| `run-desktop`, `run-tui`, `run-tray` | Build and run the desktop app, the terminal app, or the tray agent. |
+| `run-cli <args>`, `run-client` | Run any `xeno` command, or the client worker in the foreground. |
+| `run-server`, `run-dashboard` | Run a local Xeno server (port 9000) or the server web dashboard (port 9100). |
+| `run-local [desktop\|tui\|tray\|client]` | Run a local server, the web dashboard, and a client app together, using `~/.xeno-local` so your real `~/.xeno` is untouched. |
+| `install`, `reinstall`, `update`, `remove` | Manage the `xeno` tool and the installed desktop and tray apps (`Xeno.app` on macOS). |
+| `factory-reset` | Clear the client's history, logs, and state (`--all` also deletes `client.json`). |
+| `build`, `test` | Build the solution, or run the Touchstone suites. |
+
+```bash
+scripts/macos/run-local.sh tui       # local server + dashboard + terminal app
+scripts/macos/run-desktop.sh         # desktop app against the server in ~/.xeno/client.json
+scripts/macos/install.sh             # xeno tool + ~/Applications/Xeno.app
 ```
 
-Remove it later with:
-
-```powershell
-remove-tool.bat
-```
+The older `install-tool.bat` and `remove-tool.bat` in the repository root still install and remove only the `xeno`
+tool on Windows.
 
 ## Using The Xeno Client
 
@@ -289,6 +301,61 @@ inventory update when a client worker is already connected. If you edit
 re-advertise updated provider/model inventory on the next heartbeat. For the
 full walkthrough, see the platform-specific guides in
 [getting-started/](getting-started/).
+
+### Desktop, Terminal, and Tray Apps
+
+Besides the CLI and the local web dashboard, the client has three more front ends. All of them share the same
+configuration and history, so you can use whichever fits:
+
+- `xeno-desktop`: a desktop app for Windows, macOS, and Linux.
+- `xeno tui`: a terminal app with the same pages, charts, and actions, for terminals and SSH sessions. It needs a
+  terminal of at least 120 columns by 36 rows.
+- `xeno-tray`: the Xeno Agent tray app. It shows status, starts and stops the client, and opens the desktop app, the
+  terminal app, or the web dashboard.
+
+Every front end shows the models this machine serves and the models the Xeno network offers it in one Models view.
+See [DESKTOP_AND_TERMINAL.md](DESKTOP_AND_TERMINAL.md) for pages, menus, keyboard shortcuts, and how the apps find
+each other.
+
+```bash
+scripts/macos/run-desktop.sh      # or scripts/linux/..., scripts\windows\run-desktop.bat
+scripts/macos/run-tui.sh
+xeno tui                          # with the xeno tool installed
+```
+
+#### Choosing the Xeno server
+
+The desktop app, the terminal app, the tray agent, and the CLI all use the server in `~/.xeno/client.json`. New
+clients point at the **Xeno cloud** (`https://app.xenocloud.ai:9000`, WebSocket `wss://app.xenocloud.ai:9000/ws/v1/clients`). To use your own central server
+instead, change it in any of these ways:
+
+- **Desktop app:** on the **General** page (under Configuration), click **Edit...** on the Connection card.
+- **Terminal app:** on the **General** page (Alt+8), press `e`.
+- **When launching an app:** pass `--server`:
+
+  ```bash
+  xeno-desktop --server http://10.0.0.20:9000
+  xeno tui --server https://xeno.example.com
+  xeno tui --server cloud                       # back to the Xeno cloud
+  ```
+
+- **From the command line:**
+
+  ```bash
+  xeno server use http://10.0.0.20:9000
+  xeno server show
+  ```
+
+- **When signing in:** use the **Server** field of the Sign In form, or `xeno login --server <url>`. Signing in to a
+  different server points the client at it.
+
+A server can be given as `cloud`, `http(s)://host:port`, `ws(s)://host:port`, or `host[:port]`, which means
+port 9000 when the port is left out.
+
+Restart the client after switching so the worker reconnects. Sign in again, because credentials belong to one server.
+To keep separate sign-ins for several servers, give each one its own client home with `--home <dir>` or
+`XENO_CLIENT_HOME`. See
+[Choosing the Xeno server](DESKTOP_AND_TERMINAL.md#choosing-the-xeno-server) for details.
 
 ### Local Client Dashboard
 
@@ -587,6 +654,8 @@ Developer documentation:
 - [MODEL_ROUTING.md](MODEL_ROUTING.md)
 - [getting-started/](getting-started/)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
+- [DESKTOP_AND_TERMINAL.md](DESKTOP_AND_TERMINAL.md)
+- [scripts/README.md](scripts/README.md)
 - [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md)
 - [OBSERVABILITY.md](OBSERVABILITY.md)
 - [CHANGELOG.md](CHANGELOG.md)
@@ -605,8 +674,10 @@ Archived planning and audit documents are in [archive](archive).
   WEBSOCKETS_API.md
   CLIENT_GETTING_STARTED.md
   CLIENT_TELEMETRY.md
+  DESKTOP_AND_TERMINAL.md
   Xeno.postman_collection.json
   getting-started/
+  scripts/
   build-all.bat
   build-server.bat
   build-dashboard.bat
@@ -621,6 +692,9 @@ Archived planning and audit documents are in [archive](archive).
 Key directories:
 
 - `src/` contains the C# solution, server, client, core library, tests, and SDKs.
+- `src/Xeno.Client.Core` is the shared client library behind the CLI, local dashboard, desktop app, terminal app, and tray agent.
+- `src/Xeno.Desktop`, `src/Xeno.Desktop.Common`, `src/Xeno.Tray`, and `src/Xeno.Tui` contain the desktop app, its shared Avalonia controls, the tray agent, and the terminal app.
+- `scripts/` contains per-platform scripts to run, install, update, remove, and reset Xeno from source (see [scripts/README.md](scripts/README.md)).
 - `dashboard/` contains the React/Vite dashboard.
 - `docker/` contains compose assets, server settings, database initialization scripts, and factory reset scripts.
 - `assets/` contains shared logo and icon assets.

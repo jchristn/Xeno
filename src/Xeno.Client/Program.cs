@@ -13,8 +13,11 @@ namespace Xeno.Client
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Client.Hosting;
     using Xeno.Client.LocalDashboard;
     using Xeno.Client.LocalInference;
+    using Xeno.Client.Presentation;
+    using Xeno.Client.Services;
     using Xeno.Client.Telemetry.Providers;
     using Xeno.Client.Telemetry.Services;
     using Xeno.Core.Enums;
@@ -22,6 +25,7 @@ namespace Xeno.Client
     using Xeno.Core.Models;
     using Xeno.Core.Models.Telemetry;
     using Xeno.Core.Serialization;
+    using Xeno.Tui;
 
     /// <summary>
     /// Xeno client CLI entry point.
@@ -50,6 +54,12 @@ namespace Xeno.Client
         /// <returns>Exit code.</returns>
         public static async Task<int> Main(string[] args)
         {
+            // The terminal app owns the whole screen, so it runs before console output wrapping and global options.
+            if (args.Length > 0 && String.Equals(args[0], "tui", StringComparison.OrdinalIgnoreCase))
+            {
+                return await HandleTuiAsync(args).ConfigureAwait(false);
+            }
+
             TrailingBlankLineTextWriter output = new TrailingBlankLineTextWriter(Console.Out);
             Console.SetOut(output);
             try
@@ -68,6 +78,54 @@ namespace Xeno.Client
                     Console.SetOut(output.Inner);
                 }
             }
+        }
+
+        private static async Task<int> HandleTuiAsync(string[] args)
+        {
+            XenoLaunchOptions launch = XenoLaunchOptions.Parse(args, 1);
+            if (launch.ShowHelp)
+            {
+                PrintTuiHelp();
+                return 0;
+            }
+
+            if (launch.Error != null || launch.Remaining.Count > 0)
+            {
+                Console.Error.WriteLine(launch.Error ?? "Unknown tui option: " + launch.Remaining[0]);
+                PrintTuiHelp();
+                return 1;
+            }
+
+            if (Console.IsOutputRedirected || Console.IsInputRedirected)
+            {
+                Console.Error.WriteLine("xeno tui needs an interactive terminal.");
+                return 1;
+            }
+
+            launch.ApplyHome();
+            TuiStartOptions options = new TuiStartOptions { StartPage = launch.StartPage };
+            if (launch.Server != null)
+            {
+                using (XenoWorkspace workspace = new XenoWorkspace())
+                {
+                    options.StartupMessage = await launch.ApplyServerAsync(workspace, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+
+            return await XenoTuiApp.RunConsoleAsync(options, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        private static void PrintTuiHelp()
+        {
+            Console.WriteLine("Usage: xeno tui [--page <page>] [--server <url>] [--home <dir>]");
+            Console.WriteLine();
+            Console.WriteLine("Open the Xeno terminal app: client status, models served here and on the Xeno network,");
+            Console.WriteLine("providers, requests, logs, telemetry, server account, and settings.");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            foreach (string line in XenoLaunchOptions.Usage) Console.WriteLine(line);
+            Console.WriteLine();
+            Console.WriteLine("Keys: F10 menu, Ctrl+K command palette, F1 help, Tab next pane, Ctrl+Q quit.");
         }
 
         private static async Task<int> RunAsync(string[] args)
@@ -345,8 +403,12 @@ namespace Xeno.Client
                 return 0;
             }
 
-            await PrintLogTailAsync(logFile, tailLines, token).ConfigureAwait(false);
-            if (follow) await FollowLogAsync(logFile, token).ConfigureAwait(false);
+            foreach (string line in await ClientLogReader.ReadTailAsync(logFile, tailLines, null, token).ConfigureAwait(false))
+            {
+                Console.WriteLine(line);
+            }
+
+            if (follow) await ClientLogReader.FollowAsync(logFile, Console.WriteLine, token).ConfigureAwait(false);
             return 0;
         }
 
@@ -412,7 +474,7 @@ namespace Xeno.Client
                 pingSettings.Server.RestUrl = serverUrl;
             }
 
-            Uri endpoint = BuildRestUri(pingSettings, "/v1.0/api/ping");
+            Uri endpoint = ServerEndpoints.BuildRestUri(pingSettings, "/v1.0/api/ping");
             string target = endpoint.Host;
             List<long> responseTimes = new List<long>();
             List<object> attempts = new List<object>();
@@ -424,81 +486,52 @@ namespace Xeno.Client
                 Console.WriteLine();
             }
 
-            using (HttpClient httpClient = new HttpClient())
+            using (XenoServerClient server = new XenoServerClient())
             {
                 for (int sequence = 1; sequence <= count; sequence++)
                 {
-                    DateTime clientSentUtc = DateTime.UtcNow;
-                    Uri requestUri = BuildPingUri(endpoint, sequence, clientSentUtc);
-                    Stopwatch stopwatch = Stopwatch.StartNew();
-                    try
+                    PingAttemptResult attempt = await server.PingAsync(pingSettings, sequence, timeoutMs, CancellationToken.None).ConfigureAwait(false);
+                    if (attempt.Success)
                     {
-                        using (CancellationTokenSource timeout = new CancellationTokenSource(timeoutMs))
-                        using (HttpResponseMessage response = await httpClient.GetAsync(requestUri, timeout.Token).ConfigureAwait(false))
+                        received++;
+                        responseTimes.Add(attempt.ElapsedMs);
+                        if (!_UseJson)
                         {
-                            string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            stopwatch.Stop();
-                            long elapsedMs = stopwatch.ElapsedMilliseconds;
-                            int bytes = Encoding.UTF8.GetByteCount(responseBody);
-                            string status = TryReadJsonProperty(responseBody, "status");
-                            string serverUtc = TryReadJsonProperty(responseBody, "serverUtc");
-                            bool success = response.IsSuccessStatusCode;
-                            if (success)
-                            {
-                                received++;
-                                responseTimes.Add(elapsedMs);
-                                if (!_UseJson)
-                                {
-                                    Console.WriteLine("Reply from " + target + ": bytes=" + bytes.ToString(CultureInfo.InvariantCulture) + " time=" + FormatPingTime(elapsedMs) + " seq=" + sequence.ToString(CultureInfo.InvariantCulture) + " status=" + DisplayValue(status, "ok") + " serverUtc=" + DisplayValue(serverUtc, "unknown"));
-                                }
-                            }
-                            else if (!_UseJson)
-                            {
-                                Console.WriteLine("Reply from " + target + ": HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + " " + response.ReasonPhrase + " time=" + FormatPingTime(elapsedMs));
-                            }
-
-                            attempts.Add(new
-                            {
-                                sequence,
-                                success,
-                                statusCode = (int)response.StatusCode,
-                                bytes,
-                                elapsedMs,
-                                status,
-                                serverUtc
-                            });
+                            Console.WriteLine("Reply from " + target + ": bytes=" + attempt.Bytes.ToString(CultureInfo.InvariantCulture) + " time=" + FormatPingTime(attempt.ElapsedMs) + " seq=" + sequence.ToString(CultureInfo.InvariantCulture) + " status=" + DisplayValue(attempt.Status, "ok") + " serverUtc=" + DisplayValue(attempt.ServerUtc, "unknown"));
                         }
                     }
-                    catch (OperationCanceledException)
+                    else if (!_UseJson)
                     {
-                        stopwatch.Stop();
-                        if (!_UseJson) Console.WriteLine("Request timed out.");
+                        if (attempt.Error == "Timeout") Console.WriteLine("Request timed out.");
+                        else if (attempt.Error != null) Console.WriteLine("Request failed: " + attempt.Error);
+                        else Console.WriteLine("Reply from " + target + ": HTTP " + attempt.StatusCode.ToString(CultureInfo.InvariantCulture) + " " + attempt.ReasonPhrase + " time=" + FormatPingTime(attempt.ElapsedMs));
+                    }
+
+                    if (attempt.Error == null)
+                    {
                         attempts.Add(new
                         {
                             sequence,
-                            success = false,
-                            statusCode = 0,
-                            bytes = 0,
-                            elapsedMs = timeoutMs,
-                            status = String.Empty,
-                            serverUtc = String.Empty,
-                            error = "Timeout"
+                            success = attempt.Success,
+                            statusCode = attempt.StatusCode,
+                            bytes = attempt.Bytes,
+                            elapsedMs = attempt.ElapsedMs,
+                            status = attempt.Status,
+                            serverUtc = attempt.ServerUtc
                         });
                     }
-                    catch (HttpRequestException ex)
+                    else
                     {
-                        stopwatch.Stop();
-                        if (!_UseJson) Console.WriteLine("Request failed: " + ex.Message);
                         attempts.Add(new
                         {
                             sequence,
                             success = false,
                             statusCode = 0,
                             bytes = 0,
-                            elapsedMs = stopwatch.ElapsedMilliseconds,
+                            elapsedMs = attempt.ElapsedMs,
                             status = String.Empty,
                             serverUtc = String.Empty,
-                            error = ex.Message
+                            error = attempt.Error
                         });
                     }
 
@@ -564,39 +597,33 @@ namespace Xeno.Client
                 return 1;
             }
 
-            ClientConnectionState state = ClientConnectionState.Load();
-            if (state.ProcessId == null || !state.IsRecordedProcessRunning())
+            ClientStopResult result = await ClientWorkerController.StopAsync(force, DefaultStopTimeoutMs, CancellationToken.None).ConfigureAwait(false);
+            if (!result.WasRunning)
             {
                 if (_UseJson) WriteJson(new { stopped = true, reason = "not-running" });
                 else WriteInfo("Xeno client is not running.");
                 return 0;
             }
 
-            ClientConnectionState.RequestStop();
-            bool stopped = await WaitForProcessExitAsync(state.ProcessId.Value, DefaultStopTimeoutMs).ConfigureAwait(false);
-            if (!stopped && force)
-            {
-                stopped = KillProcess(state.ProcessId.Value);
-            }
-
+            int processId = result.ProcessId ?? 0;
             if (_UseJson)
             {
                 WriteJson(new
                 {
-                    stopped,
-                    processId = state.ProcessId.Value,
+                    stopped = result.Stopped,
+                    processId,
                     force
                 });
-                return stopped ? 0 : 1;
+                return result.Stopped ? 0 : 1;
             }
 
-            if (stopped)
+            if (result.Stopped)
             {
-                WriteSuccess("Stopped Xeno client process " + state.ProcessId.Value + ".");
+                WriteSuccess("Stopped Xeno client process " + processId + ".");
                 return 0;
             }
 
-            WriteWarning("Stop was requested, but process " + state.ProcessId.Value + " is still running. Use 'xeno stop --force' to terminate it.");
+            WriteWarning("Stop was requested, but process " + processId + " is still running. Use 'xeno stop --force' to terminate it.");
             return 1;
         }
 
@@ -648,7 +675,7 @@ namespace Xeno.Client
             }
 
             ClientSettings reloaded = ClientSettings.Load();
-            string clientId = EnsureClientId(reloaded);
+            string clientId = ServerEndpoints.EnsureClientId(reloaded);
             ClientConnectionState.MarkInventoryUpdateRequested();
             ClientConnectionState state = ClientConnectionState.Load();
             bool connected = state.IsConnected && state.IsRegistered && state.IsRecordedProcessRunning();
@@ -799,6 +826,36 @@ namespace Xeno.Client
                 return 0;
             }
 
+            if (args.Length >= 3 && args[1] == "use")
+            {
+                ServerTarget target;
+                try
+                {
+                    target = ServerTargets.Resolve(args[2]);
+                }
+                catch (ArgumentException ex)
+                {
+                    WriteError(ex.Message);
+                    return 1;
+                }
+
+                settings.Server.Url = target.WebSocketUrl;
+                settings.Server.RestUrl = target.RestUrl;
+                settings.Save();
+                WriteSuccess("Using " + target.Label + ": " + target.WebSocketUrl);
+                if (ClientStatusSnapshot.Capture().Running) WriteWarning("Restart the client to connect to the new server: xeno restart");
+                return 0;
+            }
+
+            if (args.Length == 2 && args[1] == "show")
+            {
+                ServerTarget current = ServerTargets.FromSettings(settings);
+                Console.WriteLine("  Server:     " + DisplayFormat.OrDash(current.Label));
+                Console.WriteLine("  WebSocket:  " + settings.Server.Url);
+                Console.WriteLine("  REST:       " + DisplayFormat.OrDash(ServerEndpoints.TryBuildRestBaseUrl(settings)));
+                return 0;
+            }
+
             if (args.Length >= 3 && args[1] == "set-url")
             {
                 settings.Server.Url = args[2];
@@ -929,9 +986,17 @@ namespace Xeno.Client
                 return 1;
             }
 
-            if (!String.IsNullOrWhiteSpace(serverUrl))
+            try
             {
-                settings.Server.RestUrl = serverUrl;
+                if (ServerTargets.ApplySignInServer(settings, serverUrl))
+                {
+                    WriteInfo("Signing in to " + ServerTargets.FromSettings(settings).Label + " (" + settings.Server.Url + ").");
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                WriteError(ex.Message);
+                return 1;
             }
 
             string password = ReadSecret("Password: ");
@@ -941,45 +1006,16 @@ namespace Xeno.Client
                 return 1;
             }
 
-            string clientId = EnsureClientId(settings);
-            Uri endpoint = BuildRestUri(settings, "/v1.0/api/auth/login");
-            using (HttpClient httpClient = new HttpClient())
-            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, endpoint))
+            LoginResult login;
+            using (XenoServerClient server = new XenoServerClient())
             {
-                request.Headers.Add("x-tenant-guid", tenantId);
-                request.Content = new StringContent(JsonUtil.Serialize(new
-                {
-                    username,
-                    password,
-                    tenantId,
-                    clientId,
-                    label = settings.Name
-                }), Encoding.UTF8, "application/json");
+                login = await server.LoginAsync(settings, username, password, tenantId, CancellationToken.None).ConfigureAwait(false);
+            }
 
-                using (HttpResponseMessage response = await httpClient.SendAsync(request).ConfigureAwait(false))
-                {
-                    string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        WriteError("Login failed: " + FormatHttpError(response, responseBody));
-                        return 1;
-                    }
-
-                    LoginCredentialResponse? credential = JsonUtil.Deserialize<LoginCredentialResponse>(responseBody);
-                    string? accessKey = credential?.AccessKey;
-                    string? returnedTenantId = credential?.TenantId;
-                    if (String.IsNullOrWhiteSpace(accessKey))
-                    {
-                        WriteError("Login response did not include a client credential.");
-                        return 1;
-                    }
-
-                    settings.TenantId = String.IsNullOrWhiteSpace(returnedTenantId) ? tenantId : returnedTenantId;
-                    settings.Server.AccessKey = accessKey;
-                    settings.Server.SecretKey = null;
-                    settings.Server.Token = null;
-                    settings.Save();
-                }
+            if (!login.Success)
+            {
+                WriteError(login.StatusCode == null || login.Error == "Login response did not include a client credential." ? (login.Error ?? "Login failed.") : "Login failed: " + login.Error);
+                return 1;
             }
 
             WriteSuccess("Login succeeded. Stored a tenant-bound client credential in " + ClientSettings.SettingsFile + ".");
@@ -1015,14 +1051,14 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                ClientRunnerSettings? runner = ProviderConfiguration.FindProvider(settings, runnerName);
                 if (runner == null)
                 {
                     WriteError("Provider endpoint not found: " + runnerName);
                     return 1;
                 }
 
-                bool success = await TestRunnerAsync(runner, CancellationToken.None).ConfigureAwait(false);
+                bool success = (await ProviderConfiguration.TestProviderAsync(runner, true, null, CancellationToken.None).ConfigureAwait(false)).Success;
                 if (success) WriteSuccess("Provider endpoint reachable: " + runner.Name);
                 else WriteError("Provider endpoint did not respond successfully: " + runner.Name);
                 return success ? 0 : 2;
@@ -1043,7 +1079,7 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                int removed = settings.Runners.RemoveAll(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
+                int removed = ProviderConfiguration.DeleteProvider(settings, runnerName);
                 if (removed == 0)
                 {
                     WriteError("Provider endpoint not found: " + runnerName);
@@ -1126,34 +1162,25 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                ClientRunnerSettings? runner = settings.Runners.Find(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase));
-                if (runner == null)
+                ClientRunnerSettings runner;
+                try
                 {
-                    WriteError("Provider endpoint not found: " + runnerName);
+                    runner = ProviderConfiguration.UpdateProvider(settings, runnerName, new ProviderUpdateRequest
+                    {
+                        NewName = newName,
+                        ApiType = apiType,
+                        Endpoint = endpoint,
+                        Credential = credential,
+                        ClearCredential = clearCredential,
+                        AllowModelManagement = allowModelManagement,
+                        TimeoutMs = timeoutMs
+                    });
+                }
+                catch (Exception ex) when (ex is KeyNotFoundException || ex is ArgumentException)
+                {
+                    WriteError(ex.Message);
                     return 1;
                 }
-
-                if (!String.IsNullOrWhiteSpace(newName) && !String.Equals(newName, runner.Name, StringComparison.OrdinalIgnoreCase) &&
-                    settings.Runners.Exists(item => String.Equals(item.Name, newName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    WriteError("Provider endpoint already exists: " + newName);
-                    return 1;
-                }
-
-                if (!String.IsNullOrWhiteSpace(newName)) runner.Name = newName;
-                if (!String.IsNullOrWhiteSpace(apiType)) runner.ApiType = apiType;
-                if (!String.IsNullOrWhiteSpace(endpoint)) runner.Endpoint = endpoint;
-                if (timeoutMs != null) runner.TimeoutMs = timeoutMs.Value;
-                if (clearCredential) runner.Credential = null;
-                else if (credential != null) runner.Credential = credential;
-                if (allowModelManagement != null) runner.AllowModelManagement = allowModelManagement.Value;
-                if (runner.AllowModelManagement && !IsOllamaApiType(runner.ApiType))
-                {
-                    WriteError("Model management can only be enabled for Ollama providers.");
-                    return 1;
-                }
-
-                if (!IsOllamaApiType(runner.ApiType)) runner.AllowModelManagement = false;
 
                 SaveInventorySettings(settings);
                 WriteSuccess("Updated provider endpoint '" + runner.Name + "'.");
@@ -1229,7 +1256,7 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                if (runner.AllowModelManagement && !IsOllamaApiType(runner.ApiType))
+                if (runner.AllowModelManagement && !ProviderConfiguration.IsOllamaApiType(runner.ApiType))
                 {
                     WriteError("Model management can only be enabled for Ollama providers.");
                     return 1;
@@ -1237,22 +1264,21 @@ namespace Xeno.Client
 
                 if (usedLegacyProviderOption) WriteWarning("--provider is deprecated for 'xeno provider add'; use --type for the upstream API type.");
 
-                ClientRunnerSettings? duplicate = FindDuplicateProvider(settings, runner);
-                if (duplicate != null)
+                ProviderAddResult addResult = ProviderConfiguration.AddProvider(settings, runner);
+                if (!addResult.Added)
                 {
-                    if (String.Equals(duplicate.Name, runner.Name, StringComparison.OrdinalIgnoreCase))
+                    if (addResult.NameConflict)
                     {
-                        WriteInfo("Provider endpoint '" + duplicate.Name + "' already exists; no changes made.");
+                        WriteInfo("Provider endpoint '" + addResult.Provider.Name + "' already exists; no changes made.");
                     }
                     else
                     {
-                        WriteInfo("Provider endpoint '" + duplicate.Name + "' already uses " + duplicate.Endpoint + "; no changes made.");
+                        WriteInfo("Provider endpoint '" + addResult.Provider.Name + "' already uses " + addResult.Provider.Endpoint + "; no changes made.");
                     }
 
                     return 0;
                 }
 
-                settings.Runners.Add(runner);
                 SaveInventorySettings(settings);
                 WriteSuccess("Added provider endpoint '" + runner.Name + "'.");
                 return 0;
@@ -1411,26 +1437,23 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                ClientRunnerSettings? runner = FindModelAddProvider(settings, runnerName);
-                if (runner == null)
+                ClientRunnerSettings runner;
+                try
                 {
-                    WriteError("Provider endpoint not found: " + runnerName);
+                    runner = ProviderConfiguration.AddModel(settings, runnerName, modelName, supportsCompletions, supportsEmbeddings);
+                }
+                catch (KeyNotFoundException ex)
+                {
+                    WriteError(ex.Message);
                     return 1;
                 }
-
-                if (!supportsCompletions && !supportsEmbeddings)
+                catch (ArgumentException ex)
                 {
-                    WriteError("Model must support completions, embeddings, or both.");
+                    WriteError(ex.Message);
                     PrintModelHelp();
                     return 1;
                 }
 
-                runner.Models.Add(new ClientModelSettings
-                {
-                    Name = modelName,
-                    SupportsCompletions = supportsCompletions,
-                    SupportsEmbeddings = supportsEmbeddings
-                });
                 SaveInventorySettings(settings);
                 WriteSuccess("Added model '" + modelName + "' to provider endpoint '" + runner.Name + "'.");
                 return 0;
@@ -1554,81 +1577,33 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                ClientRunnerSettings? sourceRunner = null;
-                ClientModelSettings? model = null;
-                int matches = 0;
-                foreach (ClientRunnerSettings runner in settings.Runners)
+                ModelUpdateResult updated;
+                try
                 {
-                    if (!String.IsNullOrWhiteSpace(runnerName) && !String.Equals(runner.Name, runnerName, StringComparison.OrdinalIgnoreCase)) continue;
-                    foreach (ClientModelSettings candidate in runner.Models)
+                    updated = ProviderConfiguration.UpdateModel(settings, new ModelUpdateRequest
                     {
-                        if (!String.Equals(candidate.Name, modelName, StringComparison.OrdinalIgnoreCase)) continue;
-                        sourceRunner = runner;
-                        model = candidate;
-                        matches++;
-                    }
+                        Provider = runnerName,
+                        Name = modelName,
+                        NewProvider = newRunnerName,
+                        NewName = newModelName,
+                        SupportsCompletions = supportsCompletions,
+                        SupportsEmbeddings = supportsEmbeddings
+                    });
                 }
-
-                if (matches == 0)
+                catch (KeyNotFoundException ex)
                 {
-                    WriteError("Model not found: " + modelName);
+                    WriteError(ex.Message);
+                    return 1;
+                }
+                catch (ArgumentException ex)
+                {
+                    WriteError(ex.Message);
+                    if (ex.Message.StartsWith("Model must support", StringComparison.Ordinal)) PrintModelHelp();
                     return 1;
                 }
 
-                if (matches > 1 && String.IsNullOrWhiteSpace(runnerName))
-                {
-                    WriteError("Model name exists in multiple providers. Specify --provider.");
-                    return 1;
-                }
-
-                if (sourceRunner == null || model == null)
-                {
-                    WriteError("Model not found: " + modelName);
-                    return 1;
-                }
-
-                ClientRunnerSettings targetRunner = sourceRunner;
-                if (!String.IsNullOrWhiteSpace(newRunnerName))
-                {
-                    ClientRunnerSettings? foundRunner = settings.Runners.Find(item => String.Equals(item.Name, newRunnerName, StringComparison.OrdinalIgnoreCase));
-                    if (foundRunner == null)
-                    {
-                        WriteError("Provider endpoint not found: " + newRunnerName);
-                        return 1;
-                    }
-
-                    targetRunner = foundRunner;
-                }
-
-                string targetModelName = String.IsNullOrWhiteSpace(newModelName) ? model.Name : newModelName;
-                bool moving = !Object.ReferenceEquals(sourceRunner, targetRunner);
-                bool renaming = !String.Equals(model.Name, targetModelName, StringComparison.OrdinalIgnoreCase);
-                if ((moving || renaming) && targetRunner.Models.Exists(item => String.Equals(item.Name, targetModelName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    WriteError("Model already exists in provider endpoint '" + targetRunner.Name + "': " + targetModelName);
-                    return 1;
-                }
-
-                bool finalSupportsCompletions = supportsCompletions ?? model.SupportsCompletions;
-                bool finalSupportsEmbeddings = supportsEmbeddings ?? model.SupportsEmbeddings;
-                if (!finalSupportsCompletions && !finalSupportsEmbeddings)
-                {
-                    WriteError("Model must support completions, embeddings, or both.");
-                    PrintModelHelp();
-                    return 1;
-                }
-
-                if (moving)
-                {
-                    sourceRunner.Models.Remove(model);
-                    targetRunner.Models.Add(model);
-                }
-
-                model.Name = targetModelName;
-                model.SupportsCompletions = finalSupportsCompletions;
-                model.SupportsEmbeddings = finalSupportsEmbeddings;
                 SaveInventorySettings(settings);
-                WriteSuccess("Updated model '" + model.Name + "' in provider endpoint '" + targetRunner.Name + "'.");
+                WriteSuccess("Updated model '" + updated.Model.Name + "' in provider endpoint '" + updated.Provider.Name + "'.");
                 return 0;
             }
 
@@ -1649,17 +1624,15 @@ namespace Xeno.Client
                     return 1;
                 }
 
-                if (!String.IsNullOrWhiteSpace(runnerName) && !settings.Runners.Exists(item => String.Equals(item.Name, runnerName, StringComparison.OrdinalIgnoreCase)))
+                int removed;
+                try
                 {
-                    WriteError("Provider endpoint not found: " + runnerName);
-                    return 1;
+                    removed = ProviderConfiguration.DeleteModel(settings, runnerName, modelName);
                 }
-
-                int removed = 0;
-                foreach (ClientRunnerSettings runner in settings.Runners)
+                catch (KeyNotFoundException ex)
                 {
-                    if (!String.IsNullOrWhiteSpace(runnerName) && !String.Equals(runner.Name, runnerName, StringComparison.OrdinalIgnoreCase)) continue;
-                    removed += runner.Models.RemoveAll(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
+                    WriteError(ex.Message);
+                    return 1;
                 }
 
                 if (removed == 0)
@@ -1684,17 +1657,17 @@ namespace Xeno.Client
         private static async Task<int> StartBackgroundConnectAsync(ClientSettings settings, int timeoutMs, CancellationToken token)
         {
             settings.ValidateLocalInferenceProviderEndpoints();
-            EnsureClientId(settings);
-            if (!HasWebSocketCredential(settings))
+            ServerEndpoints.EnsureClientId(settings);
+            if (!ServerEndpoints.HasWebSocketCredential(settings))
             {
                 throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key before connecting.");
             }
 
             ClientConnectionState existing = ClientConnectionState.Load();
-            if (existing.IsConnected
-                && existing.IsRegistered
-                && existing.IsRecordedProcessRunning()
-                && existing.HasFreshActivity(DateTime.UtcNow, settings.Server.LivenessTimeoutMs))
+            if (!ClientWorkerController.IsHealthyWorkerRunning(settings, existing)) WriteConnectionAttempt(settings);
+            ClientStartResult result = await ClientWorkerController.StartAsync(settings, XenoExecutableLocator.CurrentProcess(typeof(Program).Assembly), timeoutMs, token).ConfigureAwait(false);
+            ClientConnectionState state = result.State;
+            if (result.Outcome == ClientStartOutcomeEnum.AlreadyRunning)
             {
                 if (_UseJson)
                 {
@@ -1703,71 +1676,63 @@ namespace Xeno.Client
                         connected = true,
                         alreadyRunning = true,
                         websocketUrl = settings.Server.Url,
-                        restUrl = BuildRestBaseUrl(settings),
-                        processId = existing.ProcessId ?? 0,
-                        logFile = existing.LogFilePath ?? ClientConnectionState.LogFile,
-                        localDashboard = BuildLocalDashboardJson(existing),
-                        localInferenceServer = BuildLocalInferenceJson(existing, settings)
+                        restUrl = ServerEndpoints.BuildRestBaseUrl(settings),
+                        processId = result.ProcessId,
+                        logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
+                        localDashboard = BuildLocalDashboardJson(state),
+                        localInferenceServer = BuildLocalInferenceJson(state, settings)
                     });
                 }
                 else
                 {
                     WriteInfo("Xeno client is already connected.");
                     PrintServerAccess(settings);
-                    PrintStartField("Process ID", existing.ProcessId == null ? "(none)" : existing.ProcessId.Value.ToString(CultureInfo.InvariantCulture));
-                    PrintStartField("Log file", DisplayValue(existing.LogFilePath, ClientConnectionState.LogFile));
-                    PrintLocalDashboardAccess(existing);
-                    PrintLocalInferenceAccess(existing, settings);
+                    PrintStartField("Process ID", result.ProcessId == 0 ? "(none)" : result.ProcessId.ToString(CultureInfo.InvariantCulture));
+                    PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                    PrintLocalDashboardAccess(state);
+                    PrintLocalInferenceAccess(state, settings);
                 }
 
                 return 0;
             }
 
-            WriteConnectionAttempt(settings);
-            ClientConnectionState.ClearStopRequest();
-            ProcessStartInfo startInfo = CreateBackgroundStartInfo();
-            using (Process process = new Process { StartInfo = startInfo })
+            bool registered = result.Outcome == ClientStartOutcomeEnum.Started;
+            if (_UseJson)
             {
-                if (!process.Start()) throw new InvalidOperationException("Unable to start Xeno client background process.");
-                bool registered = await WaitForRegisteredStateAsync(process.Id, timeoutMs, token).ConfigureAwait(false);
-                ClientConnectionState state = await WaitForLocalDashboardStateAsync(process.Id, settings, registered, token).ConfigureAwait(false);
-                if (_UseJson)
+                WriteJson(new
                 {
-                    WriteJson(new
-                    {
-                        connected = registered,
-                        websocketUrl = settings.Server.Url,
-                        restUrl = BuildRestBaseUrl(settings),
-                        processId = process.Id,
-                        logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
-                        errorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
-                        reason = state.LastDisconnectReason ?? String.Empty,
-                        localDashboard = BuildLocalDashboardJson(state),
-                        localInferenceServer = BuildLocalInferenceJson(state, settings)
-                    });
-                }
-                else if (registered)
-                {
-                    WriteSuccess("Xeno client connected in the background.");
-                    PrintServerAccess(settings);
-                    PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
-                    PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
-                    PrintLocalDashboardAccess(state);
-                    PrintLocalInferenceAccess(state, settings);
-                }
-                else
-                {
-                    WriteError("Xeno client did not register within " + timeoutMs + "ms.");
-                    PrintServerAccess(settings);
-                    PrintStartField("Process ID", process.Id.ToString(CultureInfo.InvariantCulture));
-                    PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
-                    PrintLocalDashboardAccess(state);
-                    PrintLocalInferenceAccess(state, settings);
-                    PrintStartField("Last reason", DisplayValue(state.LastDisconnectReason, "(none)"));
-                }
-
-                return registered ? 0 : 1;
+                    connected = registered,
+                    websocketUrl = settings.Server.Url,
+                    restUrl = ServerEndpoints.BuildRestBaseUrl(settings),
+                    processId = result.ProcessId,
+                    logFile = state.LogFilePath ?? ClientConnectionState.LogFile,
+                    errorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
+                    reason = state.LastDisconnectReason ?? String.Empty,
+                    localDashboard = BuildLocalDashboardJson(state),
+                    localInferenceServer = BuildLocalInferenceJson(state, settings)
+                });
             }
+            else if (registered)
+            {
+                WriteSuccess("Xeno client connected in the background.");
+                PrintServerAccess(settings);
+                PrintStartField("Process ID", result.ProcessId.ToString(CultureInfo.InvariantCulture));
+                PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                PrintLocalDashboardAccess(state);
+                PrintLocalInferenceAccess(state, settings);
+            }
+            else
+            {
+                WriteError("Xeno client did not register within " + timeoutMs + "ms.");
+                PrintServerAccess(settings);
+                PrintStartField("Process ID", result.ProcessId.ToString(CultureInfo.InvariantCulture));
+                PrintStartField("Log file", DisplayValue(state.LogFilePath, ClientConnectionState.LogFile));
+                PrintLocalDashboardAccess(state);
+                PrintLocalInferenceAccess(state, settings);
+                PrintStartField("Last reason", DisplayValue(state.LastDisconnectReason, "(none)"));
+            }
+
+            return registered ? 0 : 1;
         }
 
         private static async Task RunForegroundConnectAsync(ClientSettings settings, bool worker, CancellationToken token)
@@ -1818,8 +1783,8 @@ namespace Xeno.Client
 
         private static async Task ConnectAsync(ClientSettings settings, CancellationToken token)
         {
-            EnsureClientId(settings);
-            if (!HasWebSocketCredential(settings))
+            ServerEndpoints.EnsureClientId(settings);
+            if (!ServerEndpoints.HasWebSocketCredential(settings))
             {
                 throw new InvalidOperationException("Run 'xeno login -u <username>' or configure an access key before connecting.");
             }
@@ -3432,16 +3397,9 @@ namespace Xeno.Client
             socket.Options.SetRequestHeader("x-tenant-guid", settings.TenantId);
         }
 
-        private static bool HasWebSocketCredential(ClientSettings settings)
-        {
-            return !String.IsNullOrWhiteSpace(settings.Server.AccessKey);
-        }
-
         private static void SaveInventorySettings(ClientSettings settings)
         {
-            settings.ValidateLocalInferenceProviderEndpoints();
-            settings.Save();
-            ClientConnectionState.MarkInventoryUpdateRequested();
+            ProviderConfiguration.SaveInventory(settings);
         }
 
         private static ClientSettings LoadRuntimeSettingsForConnectedSession(ClientSettings connectedSettings)
@@ -3450,65 +3408,6 @@ namespace Xeno.Client
             if (!String.IsNullOrWhiteSpace(connectedSettings.ClientId)) latestSettings.ClientId = connectedSettings.ClientId;
             if (!String.IsNullOrWhiteSpace(connectedSettings.TenantId)) latestSettings.TenantId = connectedSettings.TenantId;
             return latestSettings;
-        }
-
-        private static string EnsureClientId(ClientSettings settings)
-        {
-            if (String.IsNullOrWhiteSpace(settings.ClientId))
-            {
-                settings.ClientId = IdGenerator.NewId("xcl_");
-                settings.Save();
-            }
-
-            return settings.ClientId;
-        }
-
-        private static Uri BuildRestUri(ClientSettings settings, string path)
-        {
-            string source = String.IsNullOrWhiteSpace(settings.Server.RestUrl) ? settings.Server.Url : settings.Server.RestUrl;
-            UriBuilder builder = new UriBuilder(source);
-            if (String.Equals(builder.Scheme, "ws", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "http";
-            if (String.Equals(builder.Scheme, "wss", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "https";
-            builder.Path = path.TrimStart('/');
-            builder.Query = String.Empty;
-            return builder.Uri;
-        }
-
-        private static Uri BuildPingUri(Uri endpoint, int sequence, DateTime clientSentUtc)
-        {
-            UriBuilder builder = new UriBuilder(endpoint);
-            string sequenceValue = sequence.ToString(CultureInfo.InvariantCulture);
-            string sentValue = Uri.EscapeDataString(clientSentUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
-            builder.Query = "sequence=" + sequenceValue + "&clientSentUtc=" + sentValue;
-            return builder.Uri;
-        }
-
-        private static string BuildRestBaseUrl(ClientSettings settings)
-        {
-            string source = String.IsNullOrWhiteSpace(settings.Server.RestUrl) ? settings.Server.Url : settings.Server.RestUrl;
-            UriBuilder builder = new UriBuilder(source);
-            if (String.Equals(builder.Scheme, "ws", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "http";
-            if (String.Equals(builder.Scheme, "wss", StringComparison.OrdinalIgnoreCase)) builder.Scheme = "https";
-            builder.Path = String.Empty;
-            builder.Query = String.Empty;
-            return builder.Uri.ToString().TrimEnd('/');
-        }
-
-        private static string TryReadJsonProperty(string json, string propertyName)
-        {
-            if (String.IsNullOrWhiteSpace(json)) return String.Empty;
-            if (!JsonUtil.TryDeserialize<ClientPingResponse>(json, out ClientPingResponse? response) || response == null) return String.Empty;
-            if (String.Equals(propertyName, "status", StringComparison.OrdinalIgnoreCase))
-            {
-                return response.Status;
-            }
-
-            if (String.Equals(propertyName, "serverUtc", StringComparison.OrdinalIgnoreCase))
-            {
-                return response.ServerUtc;
-            }
-
-            return String.Empty;
         }
 
         private static string ReadSecret(string prompt)
@@ -3537,38 +3436,6 @@ namespace Xeno.Client
             }
 
             return builder.ToString();
-        }
-
-        private static async Task<bool> TestRunnerAsync(ClientRunnerSettings runner, CancellationToken token)
-        {
-            string relativePath = String.Equals(runner.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) ? "/api/tags" : "/v1/models";
-            string endpoint = runner.Endpoint.TrimEnd('/') + relativePath;
-            using (HttpClient httpClient = new HttpClient())
-            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, endpoint))
-            {
-                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
-                if (!String.IsNullOrWhiteSpace(runner.Credential))
-                {
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
-                }
-
-                try
-                {
-                    HttpResponseMessage result = await httpClient.SendAsync(request, token).ConfigureAwait(false);
-                    using (result)
-                    {
-                        return result.IsSuccessStatusCode;
-                    }
-                }
-                catch (HttpRequestException)
-                {
-                    return false;
-                }
-                catch (TaskCanceledException)
-                {
-                    return false;
-                }
-            }
         }
 
         private static async Task SendMessageAsync(ClientWebSocket socket, object value, CancellationToken token)
@@ -3935,90 +3802,6 @@ namespace Xeno.Client
             return formattedTimestamp + " [" + severity + "] ";
         }
 
-        private static ProcessStartInfo CreateBackgroundStartInfo()
-        {
-            string? processPath = Environment.ProcessPath;
-            if (String.IsNullOrWhiteSpace(processPath))
-            {
-                using (Process process = Process.GetCurrentProcess())
-                {
-                    processPath = process.MainModule?.FileName;
-                }
-            }
-
-            if (String.IsNullOrWhiteSpace(processPath)) throw new InvalidOperationException("Unable to determine the current executable path.");
-            string processName = Path.GetFileNameWithoutExtension(processPath);
-            bool isDotnetHost = String.Equals(processName, "dotnet", StringComparison.OrdinalIgnoreCase);
-            bool isWindows = OperatingSystem.IsWindows();
-            ProcessStartInfo startInfo = new ProcessStartInfo
-            {
-                FileName = processPath,
-                CreateNoWindow = true,
-                RedirectStandardError = !isWindows,
-                RedirectStandardOutput = !isWindows,
-                UseShellExecute = isWindows,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                WorkingDirectory = Environment.CurrentDirectory
-            };
-
-            if (isDotnetHost) startInfo.ArgumentList.Add(typeof(Program).Assembly.Location);
-            startInfo.ArgumentList.Add("--no-color");
-            startInfo.ArgumentList.Add("connect");
-            startInfo.ArgumentList.Add("--foreground");
-            startInfo.ArgumentList.Add("--worker");
-
-            if (!isWindows)
-            {
-                string? clientHome = Environment.GetEnvironmentVariable("XENO_CLIENT_HOME");
-                if (!String.IsNullOrWhiteSpace(clientHome)) startInfo.Environment["XENO_CLIENT_HOME"] = clientHome;
-                startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
-                startInfo.Environment["XENO_CLIENT_BACKGROUND"] = "1";
-            }
-
-            return startInfo;
-        }
-
-        private static async Task<bool> WaitForRegisteredStateAsync(int processId, int timeoutMs, CancellationToken token)
-        {
-            DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-            while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
-            {
-                ClientConnectionState state = ClientConnectionState.Load();
-                if (state.ProcessId == processId && state.IsConnected && state.IsRegistered) return true;
-                if (!IsProcessRunning(processId)) return false;
-                await Task.Delay(250, token).ConfigureAwait(false);
-            }
-
-            return false;
-        }
-
-        private static async Task<ClientConnectionState> WaitForLocalDashboardStateAsync(int processId, ClientSettings settings, bool registered, CancellationToken token)
-        {
-            ClientConnectionState state = ClientConnectionState.Load();
-            bool waitForDashboard = settings.LocalDashboard.Enabled && registered;
-            bool waitForInference = settings.LocalInferenceServer.Enabled;
-            if (!waitForDashboard && !waitForInference) return state;
-
-            DateTime deadline = DateTime.UtcNow.AddSeconds(5);
-            while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
-            {
-                state = ClientConnectionState.Load();
-                bool dashboardReady = !waitForDashboard ||
-                    (state.LocalDashboardEnabled && (state.LocalDashboardListening || !String.IsNullOrWhiteSpace(state.LocalDashboardLastError)));
-                bool inferenceReady = !waitForInference ||
-                    (state.LocalInferenceServerEnabled && (state.LocalInferenceServerListening || !String.IsNullOrWhiteSpace(state.LocalInferenceServerLastError)));
-                if (state.ProcessId == processId && dashboardReady && inferenceReady)
-                {
-                    return state;
-                }
-
-                if (!IsProcessRunning(processId)) return state;
-                await Task.Delay(100, token).ConfigureAwait(false);
-            }
-
-            return ClientConnectionState.Load();
-        }
-
         private static async Task MonitorStopFileAsync(CancellationTokenSource target, CancellationToken token)
         {
             while (!token.IsCancellationRequested)
@@ -4030,57 +3813,6 @@ namespace Xeno.Client
                 }
 
                 await Task.Delay(500, token).ConfigureAwait(false);
-            }
-        }
-
-        private static async Task<bool> WaitForProcessExitAsync(int processId, int timeoutMs)
-        {
-            try
-            {
-                using (Process process = Process.GetProcessById(processId))
-                {
-                    using (CancellationTokenSource timeout = new CancellationTokenSource(timeoutMs))
-                    {
-                        try
-                        {
-                            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-                            return true;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            return process.HasExited;
-                        }
-                    }
-                }
-            }
-            catch (ArgumentException)
-            {
-                return true;
-            }
-            catch (InvalidOperationException)
-            {
-                return true;
-            }
-        }
-
-        private static bool KillProcess(int processId)
-        {
-            try
-            {
-                using (Process process = Process.GetProcessById(processId))
-                {
-                    process.Kill(true);
-                    process.WaitForExit(DefaultStopTimeoutMs);
-                    return process.HasExited;
-                }
-            }
-            catch (ArgumentException)
-            {
-                return true;
-            }
-            catch (InvalidOperationException)
-            {
-                return true;
             }
         }
 
@@ -4117,48 +3849,6 @@ namespace Xeno.Client
             catch (InvalidOperationException)
             {
                 return false;
-            }
-        }
-
-        private static async Task PrintLogTailAsync(string logFile, int tailLines, CancellationToken token)
-        {
-            if (tailLines == 0) return;
-            List<string> lines = new List<string>();
-            using (FileStream stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (StreamReader reader = new StreamReader(stream))
-            {
-                while (!token.IsCancellationRequested)
-                {
-                    string? line = await reader.ReadLineAsync(token).ConfigureAwait(false);
-                    if (line == null) break;
-                    lines.Add(line);
-                    if (lines.Count > tailLines) lines.RemoveAt(0);
-                }
-            }
-
-            foreach (string line in lines)
-            {
-                Console.WriteLine(line);
-            }
-        }
-
-        private static async Task FollowLogAsync(string logFile, CancellationToken token)
-        {
-            using (FileStream stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (StreamReader reader = new StreamReader(stream))
-            {
-                stream.Seek(0, SeekOrigin.End);
-                while (!token.IsCancellationRequested)
-                {
-                    string? line = await reader.ReadLineAsync(token).ConfigureAwait(false);
-                    if (line != null)
-                    {
-                        Console.WriteLine(line);
-                        continue;
-                    }
-
-                    await Task.Delay(250, token).ConfigureAwait(false);
-                }
             }
         }
 
@@ -4382,8 +4072,8 @@ namespace Xeno.Client
                     tenantId = settings.TenantId,
                     websocketUrl = settings.Server.Url,
                     restUrl = settings.Server.RestUrl,
-                    authenticated = HasWebSocketCredential(settings),
-                    auth = DescribeAuth(settings),
+                    authenticated = ServerEndpoints.HasWebSocketCredential(settings),
+                    auth = ServerEndpoints.DescribeAuth(settings),
                     providerCount = settings.Runners.Count,
                     colors = settings.UseColors,
                     connection = new
@@ -4439,7 +4129,7 @@ namespace Xeno.Client
             Console.WriteLine("  Tenant:     " + settings.TenantId);
             Console.WriteLine("  WebSocket:  " + settings.Server.Url);
             Console.WriteLine("  REST:       " + DisplayValue(settings.Server.RestUrl, "(derived from WebSocket URL)"));
-            Console.WriteLine("  Auth:       " + DescribeAuth(settings));
+            Console.WriteLine("  Auth:       " + ServerEndpoints.DescribeAuth(settings));
             Console.WriteLine("  Providers:  " + settings.Runners.Count);
             Console.WriteLine("  Colors:     " + FormatBool(settings.UseColors));
             WritePlainHeading("Connection");
@@ -4541,7 +4231,7 @@ namespace Xeno.Client
         private static void PrintServerAccess(ClientSettings settings)
         {
             PrintStartField("Server WebSocket", settings.Server.Url);
-            PrintStartField("Server REST", BuildRestBaseUrl(settings));
+            PrintStartField("Server REST", ServerEndpoints.BuildRestBaseUrl(settings));
         }
 
         private static void PrintStartField(string label, string value)
@@ -4603,8 +4293,8 @@ namespace Xeno.Client
                     apiType = runner.ApiType,
                     endpoint = runner.Endpoint,
                     timeoutMs = runner.TimeoutMs,
-                    allowModelManagement = IsModelManagementAllowed(runner),
-                    modelManagementAllowed = IsModelManagementAllowed(runner),
+                    allowModelManagement = ProviderConfiguration.IsModelManagementAllowed(runner),
+                    modelManagementAllowed = ProviderConfiguration.IsModelManagementAllowed(runner),
                     credentialConfigured = !String.IsNullOrWhiteSpace(runner.Credential),
                     models = runner.Models.ConvertAll(model => new
                     {
@@ -4632,7 +4322,7 @@ namespace Xeno.Client
                 Console.WriteLine("    Endpoint:   " + runner.Endpoint);
                 Console.WriteLine("    Timeout:    " + runner.TimeoutMs + " ms");
                 Console.WriteLine("    Credential: " + (String.IsNullOrWhiteSpace(runner.Credential) ? "not configured" : "configured"));
-                Console.WriteLine("    Model management allowed: " + FormatBool(IsModelManagementAllowed(runner)));
+                Console.WriteLine("    Model management allowed: " + FormatBool(ProviderConfiguration.IsModelManagementAllowed(runner)));
                 Console.WriteLine("    Models:     " + runner.Models.Count);
                 if (includeModelDetails && runner.Models.Count > 0)
                 {
@@ -4660,7 +4350,7 @@ namespace Xeno.Client
                             name = model.Name,
                             providerName = runner.Name,
                             apiType = runner.ApiType,
-                            modelManagementAllowed = IsModelManagementAllowed(runner),
+                            modelManagementAllowed = ProviderConfiguration.IsModelManagementAllowed(runner),
                             supportsCompletions = model.SupportsCompletions,
                             supportsEmbeddings = model.SupportsEmbeddings
                         });
@@ -4688,47 +4378,6 @@ namespace Xeno.Client
             }
 
             if (!any) WriteInfoHeading("No models are configured.");
-        }
-
-        private static ClientRunnerSettings? FindDuplicateProvider(ClientSettings settings, ClientRunnerSettings candidate)
-        {
-            string candidateEndpoint = NormalizeEndpoint(candidate.Endpoint);
-            foreach (ClientRunnerSettings existing in settings.Runners)
-            {
-                if (String.Equals(existing.Name, candidate.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return existing;
-                }
-
-                if (!String.IsNullOrWhiteSpace(candidateEndpoint) &&
-                    String.Equals(NormalizeEndpoint(existing.Endpoint), candidateEndpoint, StringComparison.OrdinalIgnoreCase))
-                {
-                    return existing;
-                }
-            }
-
-            return null;
-        }
-
-        private static ClientRunnerSettings? FindModelAddProvider(ClientSettings settings, string providerName)
-        {
-            return settings.Runners.Find(item => String.Equals(item.Name, providerName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static string NormalizeEndpoint(string? endpoint)
-        {
-            return String.IsNullOrWhiteSpace(endpoint) ? String.Empty : endpoint.Trim().TrimEnd('/');
-        }
-
-        private static string DescribeAuth(ClientSettings settings)
-        {
-            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey))
-            {
-                return "access key " + settings.Server.AccessKey;
-            }
-
-            if (!String.IsNullOrWhiteSpace(settings.Server.Token)) return "REST token only";
-            return "not configured";
         }
 
         private static string DisplayValue(string? value, string emptyText)
@@ -4783,32 +4432,6 @@ namespace Xeno.Client
             return value.ToString("0.##") + " " + units[unit];
         }
 
-        private static string FormatHttpError(HttpResponseMessage response, string responseBody)
-        {
-            string? message = TryGetErrorMessage(responseBody);
-            if (String.IsNullOrWhiteSpace(message)) message = responseBody.Trim();
-            if (String.IsNullOrWhiteSpace(message)) message = response.ReasonPhrase ?? "Request failed";
-            if (message.Length > 300) message = message.Substring(0, 300) + "...";
-            return ((int)response.StatusCode) + " " + response.ReasonPhrase + " - " + message;
-        }
-
-        private static string? TryGetErrorMessage(string responseBody)
-        {
-            if (String.IsNullOrWhiteSpace(responseBody)) return null;
-            try
-            {
-                ClientErrorResponse? error = JsonUtil.Deserialize<ClientErrorResponse>(responseBody);
-                return error?.Message
-                    ?? error?.Error
-                    ?? error?.Title
-                    ?? error?.Detail;
-            }
-            catch (InvalidDataException)
-            {
-                return null;
-            }
-        }
-
         private static bool IsHelp(string value)
         {
             return String.Equals(value, "help", StringComparison.OrdinalIgnoreCase) ||
@@ -4847,16 +4470,6 @@ namespace Xeno.Client
                    String.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsOllamaApiType(string? value)
-        {
-            return String.Equals(value, "Ollama", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsModelManagementAllowed(ClientRunnerSettings runner)
-        {
-            return runner != null && IsOllamaApiType(runner.ApiType) && runner.AllowModelManagement;
-        }
-
         private static bool ParseBooleanLiteral(string value)
         {
             return String.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
@@ -4879,6 +4492,11 @@ namespace Xeno.Client
         private static void PrintServerHelp()
         {
             WriteInfoHeading("Server commands");
+            Console.WriteLine("  xeno server show");
+            Console.WriteLine("      Show the Xeno server this client points at.");
+            Console.WriteLine("  xeno server use <cloud|url|host[:port]>");
+            Console.WriteLine("      Point this client at a Xeno server. cloud is the Xeno cloud server (the default);");
+            Console.WriteLine("      http(s)://host:port or ws(s)://host:port also work, and host[:port] uses port 9000.");
             Console.WriteLine("  xeno server set-url <websocket-url>");
             Console.WriteLine("      Set the Xeno server WebSocket endpoint.");
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
@@ -5139,6 +4757,8 @@ namespace Xeno.Client
             Console.WriteLine("  xeno config show");
             Console.WriteLine("  xeno config colors on");
             Console.WriteLine("  xeno config colors off");
+            Console.WriteLine("  xeno server show");
+            Console.WriteLine("  xeno server use <cloud|url|host[:port]>");
             Console.WriteLine("  xeno server set-url <websocket-url>");
             Console.WriteLine("  xeno server set-rest-url <rest-url>");
             WritePlainHeading("Authentication:");
@@ -5172,6 +4792,13 @@ namespace Xeno.Client
             Console.WriteLine();
             Console.WriteLine("When LocalDashboard.Enabled is true, 'xeno connect', 'xeno status', and 'xeno dashboard' show the local dashboard URL.");
             Console.WriteLine("When LocalInferenceServer.Enabled is true, 'xeno connect' and 'xeno status' show the local OpenAI/Ollama-compatible listener URL.");
+            WritePlainHeading("Apps:");
+            Console.WriteLine("  xeno tui [--page <page>] [--server <url>] [--home <dir>]");
+            Console.WriteLine("      Terminal app with every client page and action.");
+            Console.WriteLine("  xeno-desktop [--page <page>] [--server <url>] [--home <dir>]");
+            Console.WriteLine("      Desktop app (installed beside xeno).");
+            Console.WriteLine("  xeno-tray");
+            Console.WriteLine("      Xeno Agent tray app: status, start/stop, and launchers.");
             WritePlainHeading("Global options:");
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");

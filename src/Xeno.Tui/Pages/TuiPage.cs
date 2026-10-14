@@ -1,0 +1,153 @@
+namespace Xeno.Tui.Pages
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Threading.Tasks;
+    using TUIKit.Input;
+    using TUIKit.Layout;
+    using TUIKit.Widgets;
+    using Xeno.Client.Presentation;
+    using Xeno.Client.Services;
+    using Xeno.Tui.Shell;
+
+    /// <summary>
+    /// Base class for terminal app pages. A page builds its widget tree once, refreshes data in the background, and
+    /// applies results on the loop thread.
+    /// </summary>
+    internal abstract class TuiPage
+    {
+        #region Public-Members
+
+        /// <summary>
+        /// Page.
+        /// </summary>
+        public abstract XenoPageEnum Page { get; }
+
+        /// <summary>
+        /// Root widget bound into the main region.
+        /// </summary>
+        public abstract IWidget Root { get; }
+
+        /// <summary>
+        /// Page key hints for the status bar.
+        /// </summary>
+        public virtual IReadOnlyList<KeyHint> Hints
+        {
+            get { return new List<KeyHint>(); }
+        }
+
+        /// <summary>
+        /// True when the page should refresh on the status timer.
+        /// </summary>
+        public virtual bool RefreshWithStatus
+        {
+            get { return false; }
+        }
+
+        #endregion
+
+        #region Protected-Members
+
+        /// <summary>
+        /// Context.
+        /// </summary>
+        protected TuiContext Context { get; }
+
+        /// <summary>
+        /// Workspace.
+        /// </summary>
+        protected XenoWorkspace Workspace
+        {
+            get { return Context.Workspace; }
+        }
+
+        #endregion
+
+        #region Constructors-and-Factories
+
+        /// <summary>
+        /// Create a page.
+        /// </summary>
+        /// <param name="context">Context.</param>
+        protected TuiPage(TuiContext context)
+        {
+            Context = context ?? throw new ArgumentNullException(nameof(context));
+        }
+
+        #endregion
+
+        #region Public-Methods
+
+        /// <summary>
+        /// Reload data.
+        /// </summary>
+        /// <returns>Task.</returns>
+        public abstract Task RefreshAsync();
+
+        /// <summary>
+        /// Handle a page-level key that the focused widget did not use.
+        /// </summary>
+        /// <param name="key">Key.</param>
+        /// <returns>True when handled.</returns>
+        public virtual bool HandleKey(KeyEvent key)
+        {
+            return false;
+        }
+
+        /// <summary>
+        /// Called on the loop thread when the client status changes.
+        /// </summary>
+        /// <param name="status">Status.</param>
+        public virtual void OnStatusChanged(ClientStatusSnapshot status)
+        {
+        }
+
+        #endregion
+
+        #region Protected-Methods
+
+        /// <summary>
+        /// Add a pane to a framed stack with one empty column between its frame and its content on each side (see
+        /// <see cref="Inset"/>). Nested framed stacks are added as they are.
+        /// </summary>
+        /// <param name="stack">Stack.</param>
+        /// <param name="child">Pane content.</param>
+        /// <param name="size">Size along the stack.</param>
+        /// <param name="title">Frame title, or null.</param>
+        protected static void Frame(FramedStack stack, IWidget child, StackSize size, string? title = null)
+        {
+            ArgumentNullException.ThrowIfNull(stack);
+            stack.Add(Inset.Around(child), size, title);
+        }
+
+        /// <summary>
+        /// Create a data table with standard styling and an empty-state message.
+        /// </summary>
+        /// <typeparam name="T">Row type.</typeparam>
+        /// <param name="emptyText">Empty-state text.</param>
+        /// <param name="key">Row identity for keeping the selection across refreshes.</param>
+        /// <returns>Table.</returns>
+        protected static DataTable<T> Table<T>(string emptyText, Func<T, string> key)
+        {
+            return new DataTable<T> { EmptyText = emptyText, KeySelector = key, StretchLastColumn = true };
+        }
+
+        /// <summary>
+        /// Add a sortable column with a fixed width.
+        /// </summary>
+        /// <typeparam name="T">Row type.</typeparam>
+        /// <param name="table">Table.</param>
+        /// <param name="name">Header.</param>
+        /// <param name="value">Cell text.</param>
+        /// <param name="width">Width in columns, or 0 to share the remaining width.</param>
+        /// <returns>The table.</returns>
+        protected static DataTable<T> Column<T>(DataTable<T> table, string name, Func<T, string> value, int width)
+        {
+            DataColumn<T> column = new DataColumn<T>(name, value, true);
+            if (width > 0) column.Width = width;
+            return table.Column(column);
+        }
+
+        #endregion
+    }
+}

@@ -1,31 +1,55 @@
 namespace Xeno.Tray
 {
+    using System;
     using Avalonia;
     using Avalonia.Controls;
-    using Avalonia.Controls.ApplicationLifetimes;
+    using Xeno.Client.Hosting;
+    using Xeno.Desktop.Common;
 
     /// <summary>
-    /// Xeno tray application entry point.
+    /// Entry point for xeno-tray, the Xeno Agent.
     /// </summary>
     public static class Program
     {
         /// <summary>
-        /// Run the tray application.
+        /// Run the tray agent. Only one instance runs per client home directory.
         /// </summary>
-        /// <param name="args">Command-line arguments.</param>
-        public static void Main(string[] args)
+        /// <param name="args">Arguments: --home &lt;dir&gt; uses a different client home directory.</param>
+        /// <returns>Exit code.</returns>
+        [STAThread]
+        public static int Main(string[] args)
         {
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
+            XenoLaunchOptions options = XenoLaunchOptions.Parse(args);
+            if (options.Error != null)
+            {
+                Console.Error.WriteLine(options.Error);
+                return 1;
+            }
+
+            options.ApplyHome();
+            using (SingleInstanceLock? instance = SingleInstanceLock.TryAcquire(XenoAppLauncher.TrayLockName))
+            {
+                if (instance == null)
+                {
+                    Console.Error.WriteLine("Xeno Agent is already running.");
+                    return 0;
+                }
+
+                XenoDialogs.HideDockWhenIdle = true;
+                return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
+            }
         }
 
         /// <summary>
-        /// Build the Avalonia app builder.
+        /// Build the Avalonia application. The agent lives in the menu bar or notification area and appears in the
+        /// macOS Dock only while one of its windows is open.
         /// </summary>
-        /// <returns>Avalonia app builder.</returns>
+        /// <returns>Builder.</returns>
         public static AppBuilder BuildAvaloniaApp()
         {
             return AppBuilder.Configure<App>()
                 .UsePlatformDetect()
+                .With(new MacOSPlatformOptions { ShowInDock = false })
                 .LogToTrace();
         }
     }

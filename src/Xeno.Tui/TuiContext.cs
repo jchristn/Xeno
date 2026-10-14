@@ -1,0 +1,374 @@
+namespace Xeno.Tui
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using TUIKit.Hosting;
+    using TUIKit.Modals;
+    using TUIKit.Theming;
+    using Xeno.Client.Presentation;
+    using Xeno.Client.Services;
+    using Xeno.Tui.Modals;
+
+    /// <summary>
+    /// Services shared by the terminal app's shell and pages: the TUIKit host, the workspace, the latest status, and
+    /// helpers for background work, modals, and notifications. UI state is touched only on the loop thread; background
+    /// results return through <see cref="Post(Action)"/>.
+    /// </summary>
+    internal sealed class TuiContext
+    {
+        #region Public-Members
+
+        /// <summary>
+        /// TUIKit host.
+        /// </summary>
+        public TuiApplication App { get; }
+
+        /// <summary>
+        /// Workspace.
+        /// </summary>
+        public XenoWorkspace Workspace { get; }
+
+        /// <summary>
+        /// Preferences.
+        /// </summary>
+        public XenoFrontEndPreferences Preferences { get; }
+
+        /// <summary>
+        /// Preferences file, or null for the default.
+        /// </summary>
+        public string? PreferencesPath { get; }
+
+        /// <summary>
+        /// Latest status, or null before the first refresh.
+        /// </summary>
+        public ClientStatusSnapshot? Status { get; set; } = null;
+
+        /// <summary>
+        /// True while a client operation runs.
+        /// </summary>
+        public bool Busy { get; set; } = false;
+
+        /// <summary>
+        /// Latest message shown on the message line.
+        /// </summary>
+        public string Message { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Severity of <see cref="Message"/>.
+        /// </summary>
+        public NotificationSeverity MessageSeverity { get; private set; } = NotificationSeverity.Info;
+
+        /// <summary>
+        /// When <see cref="Message"/> was set (UTC), or null before the first message.
+        /// </summary>
+        public DateTime? MessageUtc { get; private set; } = null;
+
+        /// <summary>
+        /// True while the work described by <see cref="Message"/> is still running.
+        /// </summary>
+        public bool Working { get; private set; } = false;
+
+        /// <summary>
+        /// Active theme.
+        /// </summary>
+        public Theme Theme
+        {
+            get { return App.Theme; }
+        }
+
+        /// <summary>
+        /// Executes shared menu commands.
+        /// </summary>
+        public Action<XenoCommandEnum> Execute { get; set; } = command => { };
+
+        /// <summary>
+        /// Navigates to a page.
+        /// </summary>
+        public Action<XenoPageEnum> Navigate { get; set; } = page => { };
+
+        /// <summary>
+        /// Background work in flight, for tests that wait for quiet.
+        /// </summary>
+        public int Pending
+        {
+            get { return Volatile.Read(ref _Pending); }
+        }
+
+        #endregion
+
+        #region Private-Members
+
+        private int _Pending = 0;
+
+        #endregion
+
+        #region Constructors-and-Factories
+
+        /// <summary>
+        /// Create a context.
+        /// </summary>
+        /// <param name="app">TUIKit host.</param>
+        /// <param name="workspace">Workspace.</param>
+        /// <param name="preferences">Preferences.</param>
+        /// <param name="preferencesPath">Preferences file, or null.</param>
+        public TuiContext(TuiApplication app, XenoWorkspace workspace, XenoFrontEndPreferences preferences, string? preferencesPath)
+        {
+            App = app ?? throw new ArgumentNullException(nameof(app));
+            Workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
+            Preferences = preferences ?? throw new ArgumentNullException(nameof(preferences));
+            PreferencesPath = preferencesPath;
+        }
+
+        #endregion
+
+        #region Public-Methods
+
+        /// <summary>
+        /// Run an action on the loop thread.
+        /// </summary>
+        /// <param name="action">Action.</param>
+        public void Post(Action action)
+        {
+            App.Post(action);
+        }
+
+        /// <summary>
+        /// Show an informational message on the message line.
+        /// </summary>
+        /// <param name="message">Message.</param>
+        public void Report(string message)
+        {
+            SetMessage(message, NotificationSeverity.Info, false);
+        }
+
+        /// <summary>
+        /// Show work in progress on the message line, with a spinner, until the next message replaces it.
+        /// </summary>
+        /// <param name="message">What is happening, for example "Starting the client...".</param>
+        public void Progress(string message)
+        {
+            SetMessage(message, NotificationSeverity.Info, true);
+        }
+
+        /// <summary>
+        /// Show the outcome of an action on the message line, colored by severity. Errors also raise a toast.
+        /// </summary>
+        /// <param name="message">Message.</param>
+        /// <param name="severity">Severity.</param>
+        public void Notify(string message, NotificationSeverity severity)
+        {
+            SetMessage(message, severity, false);
+            if (severity == NotificationSeverity.Error) App.Notify(message ?? String.Empty, severity);
+        }
+
+        /// <summary>
+        /// Severity of an outcome message from a shared action: errors for messages that report a failure, success
+        /// otherwise.
+        /// </summary>
+        /// <param name="message">Message.</param>
+        /// <returns>Severity.</returns>
+        public static NotificationSeverity SeverityOf(string? message)
+        {
+            if (String.IsNullOrWhiteSpace(message)) return NotificationSeverity.Info;
+            if (message.StartsWith("Could not", StringComparison.Ordinal)
+                || message.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("did not", StringComparison.OrdinalIgnoreCase)) return NotificationSeverity.Error;
+            return NotificationSeverity.Success;
+        }
+
+        /// <summary>
+        /// Fetch data in the background, then apply it on the loop thread. Known failures become an error toast.
+        /// </summary>
+        /// <typeparam name="T">Data type.</typeparam>
+        /// <param name="fetch">Background fetch.</param>
+        /// <param name="apply">Applies the result on the loop thread.</param>
+        /// <returns>Task that completes after the result is posted.</returns>
+        public async Task LoadAsync<T>(Func<CancellationToken, Task<T>> fetch, Action<T> apply)
+        {
+            Interlocked.Increment(ref _Pending);
+            try
+            {
+                T result = await Task.Run(() => fetch(CancellationToken.None)).ConfigureAwait(false);
+                Post(() => apply(result));
+            }
+            catch (Exception ex) when (IsReportable(ex))
+            {
+                Post(() => Notify(ex.Message, NotificationSeverity.Error));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _Pending);
+            }
+        }
+
+        /// <summary>
+        /// Run background work that returns a message, then report it.
+        /// </summary>
+        /// <param name="work">Work.</param>
+        /// <param name="after">Optional follow-up on the loop thread.</param>
+        /// <returns>Task.</returns>
+        public Task RunAsync(Func<CancellationToken, Task<string>> work, Action? after = null)
+        {
+            return LoadAsync(work, message =>
+            {
+                Notify(message, SeverityOf(message));
+                after?.Invoke();
+            });
+        }
+
+        /// <summary>
+        /// Show a form dialog and return the values, or null when cancelled.
+        /// </summary>
+        /// <param name="title">Title.</param>
+        /// <param name="intro">Intro text.</param>
+        /// <param name="fields">Fields.</param>
+        /// <param name="validator">Optional validator run in the background.</param>
+        /// <returns>Values, or null.</returns>
+        /// <param name="submitText">Submit action, for the footer hint.</param>
+        /// <param name="progressText">Shown while the validator runs.</param>
+        public async Task<Dictionary<string, string>?> FormAsync(string title, string intro, IEnumerable<XenoFormFieldSpec> fields, Func<Dictionary<string, string>, Task<string?>>? validator, string submitText = "Save", string progressText = "Saving...")
+        {
+            FormDialog dialog = new FormDialog(title, intro, fields, validator, Post, submitText, progressText);
+            dialog.ApplyTheme(Theme);
+            object? result = await App.ShowAsync(dialog).ConfigureAwait(false);
+            return result as Dictionary<string, string>;
+        }
+
+        /// <summary>
+        /// Show a shared form, run its submit action (keeping the form open on errors), and report success.
+        /// </summary>
+        /// <param name="spec">Form, or null to do nothing.</param>
+        /// <param name="after">Optional follow-up on the loop thread after success.</param>
+        /// <returns>Task.</returns>
+        public async Task FormAsync(XenoFormSpec? spec, Action? after = null)
+        {
+            if (spec == null) return;
+            Dictionary<string, string>? values = await FormAsync(spec.Title, spec.Intro, spec.Fields, form => spec.SubmitAsync(form, CancellationToken.None), spec.SubmitText, spec.ProgressText).ConfigureAwait(false);
+            if (values == null)
+            {
+                Post(() => Report(spec.Title + ": cancelled, nothing changed."));
+                return;
+            }
+
+            string message = spec.SuccessMessage(values);
+            Post(() =>
+            {
+                Notify(message, NotificationSeverity.Success);
+                after?.Invoke();
+            });
+        }
+
+        /// <summary>
+        /// Sign in through the shared form, then confirm the result in a dialog that offers the next step (start the
+        /// client, or restart it when it is running with the previous credential).
+        /// </summary>
+        /// <param name="after">Optional follow-up on the loop thread after a successful sign-in, before the dialog.</param>
+        /// <returns>Task that completes when the confirmation closes.</returns>
+        public async Task SignInAsync(Action? after = null)
+        {
+            XenoFormSpec spec = XenoForms.SignIn(Workspace);
+            Dictionary<string, string>? values = await FormAsync(spec.Title, spec.Intro, spec.Fields, form => spec.SubmitAsync(form, CancellationToken.None), spec.SubmitText, spec.ProgressText).ConfigureAwait(false);
+            if (values == null)
+            {
+                Post(() => Report("Sign-in cancelled. Nothing changed."));
+                return;
+            }
+
+            ClientStatusSnapshot status = await Task.Run(() => Workspace.GetStatus()).ConfigureAwait(false);
+            XenoFollowUp followUp = XenoClientActions.AfterSignIn(status);
+            TaskCompletionSource<bool> shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(() =>
+            {
+                Status = status;
+                Notify(spec.SuccessMessage(values), NotificationSeverity.Success);
+                after?.Invoke();
+                _ = ShowFollowUpAsync(followUp).ContinueWith(task => shown.TrySetResult(true), TaskScheduler.Default);
+            });
+            await shown.Task.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Show a follow-up dialog and run its next step when chosen.
+        /// </summary>
+        /// <param name="followUp">Follow-up.</param>
+        /// <returns>Task that completes when the dialog closes.</returns>
+        public async Task ShowFollowUpAsync(XenoFollowUp followUp)
+        {
+            ArgumentNullException.ThrowIfNull(followUp);
+            List<string> buttons = new List<string>();
+            if (followUp.Command != null && !String.IsNullOrEmpty(followUp.ActionText)) buttons.Add(followUp.ActionText);
+            buttons.Add(buttons.Count == 0 ? "OK" : "Not Now");
+            MessageModal modal = new MessageModal(followUp.Title, followUp.Message, buttons);
+            object? result = await App.ShowAsync(modal).ConfigureAwait(false);
+            if (followUp.Command != null && buttons.Count > 1 && result is int index && index == 0)
+            {
+                XenoCommandEnum command = followUp.Command.Value;
+                Post(() => Execute(command));
+            }
+        }
+
+        /// <summary>
+        /// Ask for confirmation.
+        /// </summary>
+        /// <param name="title">Title.</param>
+        /// <param name="message">Message.</param>
+        /// <param name="confirmLabel">Confirm button label.</param>
+        /// <returns>True when confirmed.</returns>
+        public async Task<bool> ConfirmAsync(string title, string message, string confirmLabel)
+        {
+            MessageModal modal = new MessageModal(title, message, new List<string> { confirmLabel, "Cancel" });
+            object? result = await App.ShowAsync(modal).ConfigureAwait(false);
+            return result is int index && index == 0;
+        }
+
+        /// <summary>
+        /// Show Markdown in a scrollable viewer, laid out at the viewer's width.
+        /// </summary>
+        /// <param name="title">Title.</param>
+        /// <param name="markdown">Markdown. Build it with <see cref="Xeno.Client.Presentation.XenoMarkdown"/> so values render verbatim.</param>
+        /// <returns>Task that completes when the viewer closes.</returns>
+        public Task ShowMarkdownAsync(string title, string markdown)
+        {
+            MarkdownViewerModal modal = new MarkdownViewerModal(title, markdown);
+            modal.ApplyTheme(Theme);
+            return App.ShowAsync(modal);
+        }
+
+        /// <summary>
+        /// Save preferences.
+        /// </summary>
+        public void SavePreferences()
+        {
+            Preferences.Save(PreferencesPath);
+        }
+
+        #endregion
+
+        #region Private-Methods
+
+        private void SetMessage(string message, NotificationSeverity severity, bool working)
+        {
+            Message = message ?? String.Empty;
+            MessageSeverity = severity;
+            MessageUtc = DateTime.UtcNow;
+            Working = working;
+            App.RequestRender();
+        }
+
+        private static bool IsReportable(Exception ex)
+        {
+            return ex is ArgumentException
+                || ex is KeyNotFoundException
+                || ex is InvalidOperationException
+                || ex is System.IO.IOException
+                || ex is UnauthorizedAccessException
+                || ex is System.Net.Http.HttpRequestException
+                || ex is Microsoft.Data.Sqlite.SqliteException
+                || ex is OperationCanceledException;
+        }
+
+        #endregion
+    }
+}

@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+- Added the Xeno desktop app (`xeno-desktop`, Avalonia) with Overview, Models, Providers, Requests, Logs, Host and Provider (telemetry), General, and Settings pages, a command palette, light and dark appearance, and a native macOS menu bar named "Xeno" (File, Edit, View, Client, Window, Help) with an in-window menu on Windows and Linux.
+- Added the Xeno terminal app (`xeno tui`, TUIKit) with the same pages, menus, forms, and settings as the desktop app, plus a menu bar (F10), command palette (Ctrl+K), key help (F1), Alt+digit page navigation, and single-key page actions.
+- Reworked the tray app into the Xeno Agent: it now launches the desktop app, the terminal app (in a new terminal window), and the local web dashboard, starts, stops, and restarts the client in-process, has its own macOS application name and menu, and appears in the Dock only while a window is open.
+- Added a unified model catalog that shows, for every model, whether this machine serves it, whether the Xeno network offers it, or both, using the server's `/v1/models` list with the client's access key.
+- Added `src/Xeno.Client.Core`, a shared client library used by the CLI, local dashboard, desktop app, terminal app, and tray agent: settings, state, the local history database, telemetry, provider and model configuration, worker start and stop, server sign-in and ping, log reading, settings validation, executable discovery, terminal launching, and the shared navigation, menus, forms, and settings catalog. The CLI and local dashboard now call these shared services instead of their own copies, with unchanged command output and API behavior.
+- Added `DESKTOP_AND_TERMINAL.md` and desktop, terminal, and tray sections to the getting-started guides, and Touchstone `SharedClient`, `Tray`, `Desktop`, and headless `Tui` suites.
+- Added `scripts/` with `macos/`, `linux/`, and `windows/` folders:
+  - Run from source: `run-desktop`, `run-tui`, `run-tray`, `run-cli`, `run-client`, `run-server`, `run-dashboard`, and `run-local`. `run-local` runs a local server, the web dashboard, and a client app together in an isolated client home.
+  - Manage installs: `install`, `reinstall`, `update`, `remove`, and `factory-reset`. Installs include `Xeno.app` on macOS, built by `macos/build-app.sh`.
+  - `build` and `test`.
+  - Local servers run from `artifacts/local-server`, so they no longer change the tracked `xeno.json`.
+- The desktop app and terminal app can point at any central Xeno server, and the Xeno cloud stays the default:
+  - `--server <cloud|url|host[:port]>` and `--home <dir>` on `xeno-desktop` and `xeno tui`.
+  - `xeno server use` and `xeno server show`.
+  - The server in use is shown in the desktop status card and the terminal app header.
+  - When the desktop or terminal app opens the terminal app or the tray agent, it passes on the client home directory.
+  - The installed app folders on Windows and Linux are added to the app search path.
+- Restyled the desktop app, the tray agent's windows, and the terminal app in the Xeno logo colors (green `#42dc7d` and `#21964e`, purple `#4a2054`). The desktop app uses a purple sidebar with a green highlight on the current page. The terminal app gets its own light and dark themes (`XenoTuiTheme`), with a purple header, selections, and menu bar and green accents and focus. The brand colors are defined once in `XenoBrand`.
+- Fixed sign-in and connection to the Xeno cloud:
+  - The client default is now `https://app.xenocloud.ai:9000` (WebSocket `wss://app.xenocloud.ai:9000/ws/v1/clients`). The old `ws://` and `http://` default was rejected by the cloud ("The plain HTTP request was sent to HTTPS port").
+  - Older `client.json` files with the plain-HTTP cloud address are upgraded when loaded.
+  - A server that requires HTTPS now produces a clear error that suggests the `https://` address.
+- Fixed the NU1902/NU1903 build warnings by pinning `System.Security.Cryptography.Pkcs` to 10.0.13 in `Xeno.Core`. This fixes GHSA-846f-f764-76mx and GHSA-2fmv-rv2c-59x7 in the 9.0.18 version that `Microsoft.Data.SqlClient` 7.1.1 brings in.
+- Charts in the desktop and terminal apps now match the local web dashboard. They are built once in `XenoCharts` (`Xeno.Client.Core`):
+  - Requests over time on Overview and Requests, with a range picker on both pages.
+  - CPU, memory, and GPU charts on Host Telemetry, replacing the single metric picker.
+  - The chosen metric on Provider Telemetry.
+  - Every chart has a heading with its range, a legend, its peak, time labels, and, in the desktop app, a tooltip per column.
+  - An empty chart says why (for example, "No requests in the last hour") instead of drawing a bare `0`.
+- The terminal app reports what it is doing and what it did:
+  - A message line above the key hints shows a spinner while work runs, then the outcome with the time and a ✓, !, or ✗ marker. Errors also raise a notice.
+  - Signing in, in both apps, shows "Signing in...", then a confirmation that names the server and tenant and offers Start Client (or Restart Client).
+- The terminal app keeps one empty column between every pane border and its content (text, tables, charts, buttons, and fields), and needs a terminal of at least 120x36. Smaller windows show TUIKit's "Terminal too small" screen.
+- The desktop and terminal Logs pages roll up runs of `server.telemetry.request` and `server.telemetry.ack` messages into one line each, for example `Server message: server.telemetry.ack (5 since 11:16:39)`.
+- The terminal app uses TUIKit 1.6.0 and renders its detail views (request details, provider models, About) as Markdown with TUIKit's width-aware renderer: bordered tables sized from their content, styled headings, and code blocks for headers and bodies. `XenoMarkdown` and `RequestDetailFormatter.ToMarkdown` (`Xeno.Client.Core`) build the Markdown and escape or fence every value, so request and response content renders verbatim.
+- Renamed pages:
+  - In the sidebar, Host Telemetry and Provider Telemetry are now **Host** and **Provider** under the Telemetry heading. Menus and page headers keep the full names.
+  - Server & Account is now **General**.
+- Fixed macOS memory telemetry: it recorded only total memory, so memory utilization was always empty. It now counts active, wired, and compressed pages from `vm_stat`.
+- Fixed signing in to a different server: the desktop and terminal Sign In form and `xeno login --server` changed only the REST URL, so the worker kept connecting its WebSocket to the old server. They now point the whole connection at the new server.
+
 ## 0.1.1
 
 - Updated NuGet dependencies: Caching 5.1.2, Microsoft.Data.SqlClient 7.1.1, SyslogLogging 2.3.1, Watson 7.2.2, SendWithMailgun 1.2.0, Touchstone 0.2.0 (Core, Cli, Xunit and NUnit adapters), NUnit 5.0.0, and coverlet.collector 10.1.0.

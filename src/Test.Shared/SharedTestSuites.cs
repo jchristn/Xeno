@@ -42,7 +42,6 @@ namespace Test.Shared
     using Xeno.Email.Workflows;
     using Xeno.Server;
     using Xeno.Server.Services;
-    using Xeno.Tray;
 
     /// <summary>
     /// Shared Touchstone test suites for Xeno.
@@ -79,7 +78,10 @@ namespace Test.Shared
                     RoutingSuite(),
                     TenantIsolationSuite(),
                     ClientCliSuite(),
-                    TraySuite(),
+                    FrontEndTestSuites.SharedClientSuite(),
+                    FrontEndTestSuites.TraySuite(),
+                    FrontEndTestSuites.DesktopSuite(),
+                    TuiTestSuites.TuiSuite(),
                     ManagementApiSuite(),
                     RelaySuite()
                 };
@@ -2415,97 +2417,6 @@ namespace Test.Shared
                         executeAsync: async delegate
                         {
                             await RunClientModelPullPersistsModelAsync().ConfigureAwait(false);
-                        })
-                });
-        }
-
-        /// <summary>
-        /// Tray companion suite.
-        /// </summary>
-        /// <returns>Suite descriptor.</returns>
-        public static TestSuiteDescriptor TraySuite()
-        {
-            return new TestSuiteDescriptor(
-                suiteId: "Tray",
-                displayName: "Tray",
-                cases: new List<TestCaseDescriptor>
-                {
-                    new TestCaseDescriptor(
-                        suiteId: "Tray",
-                        caseId: "TrayCommandBuilderUsesJsonStartAndStop",
-                        displayName: "Tray command builder uses JSON start and stop commands",
-                        executeAsync: delegate
-                        {
-                            IReadOnlyList<string> start = XenoTrayCommandBuilder.BuildStartArguments();
-                            IReadOnlyList<string> stop = XenoTrayCommandBuilder.BuildStopArguments();
-                            if (start.Count != 2 || start[0] != "--json" || start[1] != "start") throw new InvalidOperationException("Start command arguments were not stable.");
-                            if (stop.Count != 2 || stop[0] != "--json" || stop[1] != "stop") throw new InvalidOperationException("Stop command arguments were not stable.");
-                            return Task.CompletedTask;
-                        }),
-                    new TestCaseDescriptor(
-                        suiteId: "Tray",
-                        caseId: "ConnectedTrayStatusDisablesStartAndEnablesOperations",
-                        displayName: "Connected tray status disables start and enables operations",
-                        executeAsync: delegate
-                        {
-                            XenoTrayStatus status = new XenoTrayStatus
-                            {
-                                Running = true,
-                                Connected = true,
-                                Registered = true,
-                                LocalDashboardListening = true,
-                                LocalDashboardUrl = "http://127.0.0.1:9343"
-                            };
-                            XenoTrayMenuState menu = XenoTrayStatusFormatter.BuildMenuState(status);
-                            if (menu.StatusHeader != "Status: Connected") throw new InvalidOperationException("Connected status header mismatch.");
-                            if (menu.StartEnabled) throw new InvalidOperationException("Start should be disabled for a running client.");
-                            if (!menu.OpenDashboardEnabled) throw new InvalidOperationException("Dashboard should be enabled when listening.");
-                            if (!menu.ExitClientEnabled) throw new InvalidOperationException("Exit client should be enabled when running.");
-                            return Task.CompletedTask;
-                        }),
-                    new TestCaseDescriptor(
-                        suiteId: "Tray",
-                        caseId: "StoppedTrayStatusEnablesStart",
-                        displayName: "Stopped tray status enables start",
-                        executeAsync: delegate
-                        {
-                            XenoTrayStatus status = new XenoTrayStatus();
-                            XenoTrayMenuState menu = XenoTrayStatusFormatter.BuildMenuState(status);
-                            if (menu.StatusHeader != "Status: Stopped") throw new InvalidOperationException("Stopped status header mismatch.");
-                            if (!menu.StartEnabled) throw new InvalidOperationException("Start should be enabled for a stopped client.");
-                            if (menu.OpenDashboardEnabled) throw new InvalidOperationException("Dashboard should be disabled when not listening.");
-                            if (menu.ExitClientEnabled) throw new InvalidOperationException("Exit client should be disabled when stopped.");
-                            return Task.CompletedTask;
-                        }),
-                    new TestCaseDescriptor(
-                        suiteId: "Tray",
-                        caseId: "TrayStatisticsTextIncludesLocalRequestCounts",
-                        displayName: "Tray statistics text includes local request counts",
-                        executeAsync: delegate
-                        {
-                            XenoTrayStatus status = new XenoTrayStatus
-                            {
-                                Name = "THINKPAD",
-                                ClientId = "xcl_test",
-                                WebSocketUrl = "ws://localhost:9000/ws/v1/clients",
-                                Running = true,
-                                Connected = true,
-                                Registered = true,
-                                ProcessId = 1234
-                            };
-                            XenoTrayStatistics statistics = new XenoTrayStatistics
-                            {
-                                Requests = 12,
-                                Failures = 1,
-                                StreamingRequests = 3,
-                                AverageLatencyMs = 42.5
-                            };
-                            string text = XenoTrayStatusFormatter.BuildStatisticsText(status, statistics);
-                            if (!text.Contains("Status: Connected", StringComparison.Ordinal)) throw new InvalidOperationException("Statistics text did not include status.");
-                            if (!text.Contains("Requests: 12", StringComparison.Ordinal)) throw new InvalidOperationException("Statistics text did not include requests.");
-                            if (!text.Contains("Failures: 1", StringComparison.Ordinal)) throw new InvalidOperationException("Statistics text did not include failures.");
-                            if (!text.Contains("Average latency: 42.5 ms", StringComparison.Ordinal)) throw new InvalidOperationException("Statistics text did not include latency.");
-                            return Task.CompletedTask;
                         })
                 });
         }
@@ -10202,7 +10113,7 @@ namespace Test.Shared
 
             ClientSettings settings = DeserializeRequired<ClientSettings>(File.ReadAllText(settingsFile));
             if (!String.Equals(settings.TenantId, Constants.DefaultTenantId, StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default tenant.");
-            if (!String.Equals(settings.Server.Url, "ws://app.xenocloud.ai:9000/ws/v1/clients", StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default client server URL.");
+            if (!String.Equals(settings.Server.Url, Xeno.Client.Services.ServerTargets.CloudWebSocketUrl, StringComparison.Ordinal)) throw new InvalidOperationException("Reset did not restore the default client server URL.");
             if (settings.Providers.Count == 0)
             {
                 throw new InvalidOperationException("Reset did not restore the default provider endpoint.");

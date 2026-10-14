@@ -8,7 +8,8 @@ This guide installs and runs the Xeno client on Windows.
 - Client state: `%USERPROFILE%\.xeno\state.json`
 - Local dashboard: `http://127.0.0.1:9343`
 - Optional local inference listener: `http://127.0.0.1:11434` when `LocalInferenceServer.Enabled` is true
-- Default cloud WebSocket URL: `ws://app.xenocloud.ai:9000/ws/v1/clients`
+- Default cloud server: `https://app.xenocloud.ai:9000` (HTTPS only; plain `http://` on port 9000 is rejected)
+- Default cloud WebSocket URL: `wss://app.xenocloud.ai:9000/ws/v1/clients`
 - Local Docker server WebSocket URL: `ws://localhost:9000/ws/v1/clients`
 - Local Docker server REST URL: `http://localhost:9000`
 - Dashboard login for seeded Docker server: `admin@xeno` / `password`
@@ -73,11 +74,10 @@ cd ..
 xeno init
 ```
 
-4. If you are connecting to a local Docker server, set the server URLs.
+4. New clients connect to the Xeno cloud. If you are connecting to your own server instead, such as a local Docker server, point the client at it. `xeno server show` prints the server in use, and `xeno server use cloud` switches back.
 
 ```powershell
-xeno server set-url ws://localhost:9000/ws/v1/clients
-xeno server set-rest-url http://localhost:9000
+xeno server use http://localhost:9000
 ```
 
 5. Log in to the server and store a client access key.
@@ -163,25 +163,28 @@ xeno stop
 
 To have the client start automatically, use **Start On Login** (when you sign in) or **Start On Boot** (headless, no sign-in).
 
-### Run the Windows tray app
+### Use the desktop, terminal, and tray apps
 
-The tray app is a convenient interactive option on a Windows workstation, letting you start, stop, inspect, and reopen the client without keeping a terminal nearby. It uses the `xeno.exe` built beside it, so build the solution first.
+Instead of the commands above, you can manage the client from an app. All of them share `%USERPROFILE%\.xeno` with the CLI. Build the solution first; the desktop app's output folder also contains `xeno.exe` and `xeno-tray.exe`.
 
-1. Build the tray app and its sibling client executable.
-
-```powershell
-dotnet build .\src\Xeno.sln
-```
-
-2. Start the tray app.
+1. Start the desktop app. It also starts the Xeno Agent in the notification area. The script builds the apps first.
 
 ```powershell
-Start-Process .\src\Xeno.Tray\bin\Debug\net10.0\xeno-tray.exe
+scripts\windows\run-desktop.bat
 ```
 
-3. Use the tray icon menu to start or stop the Xeno client, open the local dashboard, show client statistics, or quit the tray app. To restart a tray-managed client after configuration changes, select **Stop Client**, then select **Start Client**.
+2. Or start the terminal app, or the Xeno Agent on its own.
 
-The statistics window uses the normal Windows title bar close button. If you rebuild while the tray app or the client it started is still running from `src\Xeno.Tray\bin\Debug\net10.0`, stop both processes first so the build can replace `xeno-tray.exe`, `xeno.exe`, and their referenced assemblies.
+```powershell
+scripts\windows\run-tui.bat
+scripts\windows\run-tray.bat
+```
+
+3. To install the apps in `%LOCALAPPDATA%\Programs\Xeno` with Start menu shortcuts, along with the `xeno` tool, run `scripts\windows\install.bat`.
+
+The apps use the server in `%USERPROFILE%\.xeno\client.json`, which is the Xeno cloud unless you changed it. To point them at another server, pass `--server`, for example `scripts\windows\run-desktop.bat --server http://localhost:9000`. You can also change it on the **General** page. To try everything against a throwaway local server without touching `%USERPROFILE%\.xeno`, run `scripts\windows\run-local.bat`.
+
+Click the Xeno Agent icon to open the desktop app. Right-click it for **Open Xeno Terminal**, **Open Web Dashboard**, **Start Client**, **Stop Client**, **Restart Client**, and **Quit Xeno Agent**. Quitting the agent leaves the client running. If you rebuild while the apps or a client they started are running from the build folder, stop them first so the build can replace `xeno-desktop.exe`, `xeno-tray.exe`, `xeno.exe`, and their assemblies. See [DESKTOP_AND_TERMINAL.md](../DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
 
 ## Start On Login
 
