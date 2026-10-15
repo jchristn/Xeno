@@ -167,7 +167,18 @@ namespace Test.Shared
                         tui.Press("escape");
                     }
                 }),
-                Case(suite, "AltDigitsNavigatePages", "Alt+digit opens the matching page", () =>
+                Case(suite, "OverviewFocusesActionsFirst", "Overview starts with focus on its action buttons", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Overview))
+                    {
+                        TUIKit.Widgets.Button? focused = tui.App.CurrentFocusPath.Leaf as TUIKit.Widgets.Button;
+                        Check(focused != null, "Overview should focus an action button first, not " + tui.App.CurrentFocusPath.Leaf?.GetType().Name + ".");
+                        tui.Press("alt+3");
+                        tui.Press("alt+1");
+                        Check(tui.App.CurrentFocusPath.Leaf is TUIKit.Widgets.Button, "Returning to Overview should focus an action button.");
+                    }
+                }),
+                Case(suite, "AltDigitsNavigatePages","Alt+digit opens the matching page", () =>
                 {
                     using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Overview))
                     {

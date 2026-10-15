@@ -152,6 +152,10 @@ namespace Xeno.Tui.Pages
             if (status == null)
             {
                 _Status.Set("Status", "checking...");
+
+                // Show the actions that do not depend on status, so Actions is never empty and hidden: the page takes
+                // focus before the first status arrives, and an empty Actions would send it to the range picker.
+                if (_Actions.FocusedLeaf == null) AddCommonActions();
                 return;
             }
 
@@ -179,6 +183,11 @@ namespace Xeno.Tui.Pages
 
             Button web = _Actions.Add("Web Dashboard", () => Context.Execute(XenoCommandEnum.OpenWebDashboard));
             web.IsEnabled = status.CanOpenLocalDashboard;
+            AddCommonActions();
+        }
+
+        private void AddCommonActions()
+        {
             _Actions.Add("Add Provider", () => Context.Execute(XenoCommandEnum.NewProvider));
             _Actions.Add("Models", () => Context.Navigate(XenoPageEnum.Models));
         }

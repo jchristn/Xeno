@@ -106,6 +106,7 @@ namespace Xeno.Server
         private long _EmailFailureCount;
         private long _EmailLastFailureTicks;
         private bool _Disposed;
+        private readonly object _StopLock = new object();
 
         /// <summary>
         /// Instantiate the server.
@@ -348,25 +349,31 @@ namespace Xeno.Server
         }
 
         /// <summary>
-        /// Stop the server.
+        /// Stop the server. Safe to call more than once and from several threads; calls run one at a time.
         /// </summary>
         public void Stop()
         {
-            _Logging?.Info(_Header + "shutting down");
-            _TelemetryCollectionCancellation?.Cancel();
-            _WebSocketMaintenanceCancellation?.Cancel();
-            _RequestHistoryRetentionCancellation?.Cancel();
-            _Ledger?.Stop();
-            _NetLedgerTenantSubordinate?.Dispose();
-            try
+            // StartAsync stops the server when its token is cancelled, and callers often cancel and call Stop at the
+            // same time. Watson's Stop is not safe to run concurrently: with WebSocket sessions open, both calls pass
+            // its "already stopped" check and one throws NullReferenceException while disposing its token source.
+            lock (_StopLock)
             {
-                _Webserver.Stop();
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("already stopped", StringComparison.OrdinalIgnoreCase))
-            {
-            }
+                _Logging?.Info(_Header + "shutting down");
+                _TelemetryCollectionCancellation?.Cancel();
+                _WebSocketMaintenanceCancellation?.Cancel();
+                _RequestHistoryRetentionCancellation?.Cancel();
+                _Ledger?.Stop();
+                _NetLedgerTenantSubordinate?.Dispose();
+                try
+                {
+                    _Webserver.Stop();
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("already stopped", StringComparison.OrdinalIgnoreCase))
+                {
+                }
 
-            _Logging?.Info(_Header + "stopped");
+                _Logging?.Info(_Header + "stopped");
+            }
         }
 
         /// <summary>

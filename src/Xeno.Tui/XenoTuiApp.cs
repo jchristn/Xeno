@@ -602,20 +602,23 @@ namespace Xeno.Tui
         private async Task RefreshStatusAndPageAsync(bool includePage)
         {
             ClientStatusSnapshot status = await Task.Run(() => Context.Workspace.GetStatus()).ConfigureAwait(false);
-            TaskCompletionSource<bool> applied = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<Task> applied = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
             _App.Post(() =>
             {
                 Context.Status = status;
                 RefreshMenuState();
                 CurrentView.OnStatusChanged(status);
                 if (String.IsNullOrWhiteSpace(Context.Message)) Context.Report(status.StatusDetail);
-                applied.TrySetResult(true);
+
+                // Start the page refresh here, on the loop thread: pages update their widgets before the first await,
+                // and doing that from a pool thread races the renderer ("Collection was modified").
+                applied.TrySetResult(includePage ? CurrentView.RefreshAsync() : Task.CompletedTask);
             });
 
             if (includePage)
             {
-                await applied.Task.ConfigureAwait(false);
-                await CurrentView.RefreshAsync().ConfigureAwait(false);
+                Task pageRefresh = await applied.Task.ConfigureAwait(false);
+                await pageRefresh.ConfigureAwait(false);
             }
         }
 
