@@ -81,7 +81,7 @@ namespace Xeno.Tui.Pages
         /// <inheritdoc />
         public override Task RefreshAsync()
         {
-            return Context.LoadAsync(token => Task.FromResult(Workspace.GetProviders()), rows =>
+            return LoadAsync(token => Task.FromResult(Workspace.GetProviders()), rows =>
             {
                 _Rows = rows;
                 _Providers.Bind(rows);

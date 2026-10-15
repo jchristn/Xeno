@@ -187,8 +187,9 @@ namespace Xeno.Tui
         /// <typeparam name="T">Data type.</typeparam>
         /// <param name="fetch">Background fetch.</param>
         /// <param name="apply">Applies the result on the loop thread.</param>
+        /// <param name="failed">Optional, called on the loop thread with the error message after a known failure.</param>
         /// <returns>Task that completes after the result is posted.</returns>
-        public async Task LoadAsync<T>(Func<CancellationToken, Task<T>> fetch, Action<T> apply)
+        public async Task LoadAsync<T>(Func<CancellationToken, Task<T>> fetch, Action<T> apply, Action<string>? failed = null)
         {
             Interlocked.Increment(ref _Pending);
             try
@@ -198,7 +199,11 @@ namespace Xeno.Tui
             }
             catch (Exception ex) when (IsReportable(ex))
             {
-                Post(() => Notify(ex.Message, NotificationSeverity.Error));
+                Post(() =>
+                {
+                    Notify(ex.Message, NotificationSeverity.Error);
+                    failed?.Invoke(ex.Message);
+                });
             }
             finally
             {

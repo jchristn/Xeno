@@ -13,14 +13,30 @@ namespace Xeno.Tui.Modals
     using Xeno.Client.Presentation;
 
     /// <summary>
-    /// A modal form: labeled text, secret, number, toggle, and choice fields. Tab moves between fields, Enter moves to
-    /// the next field and submits from the last one, Ctrl+S submits, and Esc cancels. An optional validator can keep
-    /// the dialog open with an error. Completes with a dictionary of values keyed by field key, or null when cancelled.
+    /// A modal form: labeled text, secret, number, toggle, and choice fields, each with its help text underneath. Tab
+    /// moves between fields, Enter moves to the next field and submits from the last one, Ctrl+S submits, Ctrl+R shows
+    /// a secret as typed, and Esc cancels. A missing required value or a malformed number is shown under its field; an
+    /// optional validator can keep the dialog open with an error. Completes with a dictionary of values keyed by field
+    /// key, or null when cancelled.
     /// </summary>
     internal sealed class FormDialog : DialogModal, IThemeable
     {
+        #region Protected-Members
+
+        /// <summary>
+        /// Pastes go to the focused field.
+        /// </summary>
+        protected override IPasteTarget? PasteTarget
+        {
+            get { return _Form; }
+        }
+
+        #endregion
+
         #region Private-Members
 
+        private static readonly KeyChord SubmitChord = KeyChord.Parse("ctrl+s");
+        private static readonly KeyChord RevealChord = KeyChord.Parse("ctrl+r");
         private readonly Form _Form = new Form();
         private readonly List<XenoFormFieldSpec> _Fields;
         private readonly Dictionary<string, IWidget> _Inputs = new Dictionary<string, IWidget>(StringComparer.Ordinal);
@@ -49,19 +65,27 @@ namespace Xeno.Tui.Modals
         public FormDialog(string title, string intro, IEnumerable<XenoFormFieldSpec> fields, Func<Dictionary<string, string>, Task<string?>>? validator, Action<Action> post, string submitText = "Save", string progressText = "Saving...")
         {
             Title = " " + title + " ";
-            FooterHint = " Tab next field  Ctrl+S " + (String.IsNullOrWhiteSpace(submitText) ? "save" : submitText.ToLowerInvariant()) + "  Esc cancel ";
             _ProgressText = String.IsNullOrWhiteSpace(progressText) ? "Saving..." : progressText;
             _Intro = intro ?? String.Empty;
             _Fields = fields.ToList();
             _Validator = validator;
             _Post = post ?? throw new ArgumentNullException(nameof(post));
+            FooterHint = " Tab next field  Ctrl+S " + (String.IsNullOrWhiteSpace(submitText) ? "save" : submitText.ToLowerInvariant())
+                + (_Fields.Any(field => field.Secret) ? "  Ctrl+R show" : String.Empty) + "  Esc cancel ";
             MinContentWidth = 56;
             MaxContentWidth = 76;
             _Form.WrapFocus = true;
+            _Form.ShowFieldErrors = true;
+            _Form.ValidationMode = FormValidationMode.OnSubmit;
+            _Form.SubmitKey = SubmitChord;
+            _Form.CancelKey = new KeyChord(KeyCode.Escape, 0, KeyModifiers.None);
+            _Form.SubmitRequested += (sender, args) => Submit();
+            _Form.CancelRequested += (sender, args) => RequestClose(null);
             foreach (XenoFormFieldSpec field in _Fields)
             {
                 IWidget input = AddField(field);
                 _Inputs[field.Key] = input;
+                if (!String.IsNullOrWhiteSpace(field.Help)) _Form.SetFieldHint(_Form.FieldCount - 1, field.Help);
             }
         }
 
@@ -81,44 +105,20 @@ namespace Xeno.Tui.Modals
         }
 
         /// <summary>
-        /// Handle keys: Esc cancels, Ctrl+S submits, Enter advances or submits, everything else goes to the form.
+        /// Handle keys: the form takes Tab, Ctrl+S, Esc, and field keys; Enter advances or submits.
         /// </summary>
         /// <param name="key">Key.</param>
-        /// <returns>True when handled.</returns>
+        /// <returns>True.</returns>
         public override bool HandleKey(KeyEvent key)
         {
-            if (key.Code == KeyCode.Escape) return RequestClose(null);
-            if (key.Code == KeyCode.Character && (key.Modifiers & KeyModifiers.Ctrl) != 0 && (key.Rune == 's' || key.Rune == 'S'))
-            {
-                Submit();
-                return true;
-            }
-
             if (_Form.HandleKey(key)) return true;
             if (key.Code == KeyCode.Enter)
             {
-                if (_Form.FocusedIndex >= _Form.FieldCount - 1) Submit();
+                if (_Form.FocusedIndex >= _Form.FieldCount - 1) _Form.Submit();
                 else _Form.MoveFocus(true);
-                return true;
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Insert pasted text into the focused text field.
-        /// </summary>
-        /// <param name="text">Text.</param>
-        /// <returns>True when handled.</returns>
-        public override bool HandlePaste(string text)
-        {
-            if (_Form.FocusedLeaf is TextField field)
-            {
-                field.Insert(text);
-                return true;
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -200,11 +200,16 @@ namespace Xeno.Tui.Modals
                     Dropdown<string> dropdown = new Dropdown<string>(field.Choices);
                     int index = field.Choices.FindIndex(item => String.Equals(item, field.Value, StringComparison.OrdinalIgnoreCase));
                     dropdown.SelectedIndex = Math.Max(0, index);
-                    return _Form.Add(label, dropdown);
+                    return _Form.Add(label, dropdown, () => Check(field, dropdown.SelectedItem ?? String.Empty));
                 default:
-                    TextField text = new TextField { Value = field.Value, Placeholder = String.IsNullOrEmpty(field.Placeholder) ? null : field.Placeholder };
-                    if (field.Secret) text.MaskChar = '*';
-                    return _Form.Add(label, text);
+                    TextField text = new TextField { Value = field.Value, Placeholder = String.IsNullOrEmpty(field.Placeholder) ? null : field.Placeholder, UseLineEditingKeys = true };
+                    if (field.Secret)
+                    {
+                        text.MaskChar = '*';
+                        text.RevealKey = RevealChord;
+                    }
+
+                    return _Form.Add(label, text, () => Check(field, text.Value));
             }
         }
 
@@ -227,22 +232,6 @@ namespace Xeno.Tui.Modals
         {
             if (_Submitting) return;
             Dictionary<string, string> values = Collect();
-            foreach (XenoFormFieldSpec field in _Fields)
-            {
-                string value = values[field.Key];
-                if (field.Required && String.IsNullOrWhiteSpace(value))
-                {
-                    _Error = field.Label + " is required.";
-                    return;
-                }
-
-                if (field.Kind == XenoSettingKindEnum.Number && !String.IsNullOrWhiteSpace(value) && !Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
-                {
-                    _Error = field.Label + " must be a whole number.";
-                    return;
-                }
-            }
-
             if (_Validator == null)
             {
                 RequestClose(values);
@@ -270,6 +259,13 @@ namespace Xeno.Tui.Modals
                     else _Error = error;
                 });
             });
+        }
+
+        private static string? Check(XenoFormFieldSpec field, string value)
+        {
+            if (field.Required && String.IsNullOrWhiteSpace(value)) return field.Label + " is required.";
+            if (field.Kind == XenoSettingKindEnum.Number && !String.IsNullOrWhiteSpace(value) && !Int32.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) return field.Label + " must be a whole number.";
+            return null;
         }
 
         private List<string> IntroLines(int width)

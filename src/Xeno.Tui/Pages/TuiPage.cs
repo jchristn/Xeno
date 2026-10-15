@@ -2,6 +2,7 @@ namespace Xeno.Tui.Pages
 {
     using System;
     using System.Collections.Generic;
+    using System.Threading;
     using System.Threading.Tasks;
     using TUIKit.Input;
     using TUIKit.Layout;
@@ -60,6 +61,12 @@ namespace Xeno.Tui.Pages
         {
             get { return Context.Workspace; }
         }
+
+        #endregion
+
+        #region Private-Members
+
+        private readonly List<Action<string>> _LoadFailed = new List<Action<string>>();
 
         #endregion
 
@@ -130,15 +137,39 @@ namespace Xeno.Tui.Pages
         }
 
         /// <summary>
-        /// Create a data table with standard styling and an empty-state message.
+        /// Fetch the page's data in the background, then apply it on the loop thread. A failure is reported on the
+        /// message line, and a table still waiting for its first rows shows the error instead of "Loading...".
+        /// </summary>
+        /// <typeparam name="T">Data type.</typeparam>
+        /// <param name="fetch">Background fetch.</param>
+        /// <param name="apply">Applies the result on the loop thread.</param>
+        /// <returns>Task that completes after the result is posted.</returns>
+        protected Task LoadAsync<T>(Func<CancellationToken, Task<T>> fetch, Action<T> apply)
+        {
+            return Context.LoadAsync(fetch, apply, message =>
+            {
+                foreach (Action<string> failed in _LoadFailed) failed(message);
+            });
+        }
+
+        /// <summary>
+        /// Create a data table with standard styling and an empty-state message. The table shows "Loading..." until
+        /// the page binds its first rows (see <see cref="LoadAsync"/>), so the empty-state message never appears
+        /// before the data has been read.
         /// </summary>
         /// <typeparam name="T">Row type.</typeparam>
         /// <param name="emptyText">Empty-state text.</param>
         /// <param name="key">Row identity for keeping the selection across refreshes.</param>
         /// <returns>Table.</returns>
-        protected static DataTable<T> Table<T>(string emptyText, Func<T, string> key)
+        protected DataTable<T> Table<T>(string emptyText, Func<T, string> key)
         {
-            return new DataTable<T> { EmptyText = emptyText, KeySelector = key, StretchLastColumn = true };
+            DataTable<T> table = new DataTable<T> { EmptyText = emptyText, KeySelector = key, StretchLastColumn = true };
+            table.SetLoading();
+            _LoadFailed.Add(message =>
+            {
+                if (table.State == DataTableState.Loading) table.SetError(message);
+            });
+            return table;
         }
 
         /// <summary>

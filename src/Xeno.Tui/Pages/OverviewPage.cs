@@ -93,7 +93,7 @@ namespace Xeno.Tui.Pages
         public override Task RefreshAsync()
         {
             HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
-            return Context.LoadAsync(async token =>
+            return LoadAsync(async token =>
             {
                 LocalDashboardStatisticsResponse statistics = await Workspace.GetStatisticsAsync(token).ConfigureAwait(false);
                 List<LocalRequestHistorySummaryBucket> buckets = await Workspace.SummarizeRequestsAsync(range, token).ConfigureAwait(false);

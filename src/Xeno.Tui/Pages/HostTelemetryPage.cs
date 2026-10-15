@@ -89,7 +89,7 @@ namespace Xeno.Tui.Pages
         public override Task RefreshAsync()
         {
             HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
-            return Context.LoadAsync(async token =>
+            return LoadAsync(async token =>
             {
                 ClientTelemetrySampleDetail? latest = await Workspace.GetLatestHostTelemetryAsync(token).ConfigureAwait(false);
                 ClientTelemetryPersistenceStatus status = await Workspace.GetHostTelemetryStatusAsync(token).ConfigureAwait(false);

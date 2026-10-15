@@ -84,7 +84,7 @@ namespace Xeno.Tui.Pages
         /// <inheritdoc />
         public override Task RefreshAsync()
         {
-            return Context.LoadAsync(token => Workspace.GetModelCatalogAsync(true, token), catalog =>
+            return LoadAsync(token => Workspace.GetModelCatalogAsync(true, token), catalog =>
             {
                 _Catalog = catalog;
                 Apply();

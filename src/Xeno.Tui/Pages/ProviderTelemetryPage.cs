@@ -90,7 +90,7 @@ namespace Xeno.Tui.Pages
             string? provider = _Provider.SelectedItem == AllProviders ? null : _Provider.SelectedItem;
             HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
             ClientProviderTelemetryMetricEnum metric = Enum.TryParse(_Metric.SelectedItem, out ClientProviderTelemetryMetricEnum parsed) ? parsed : ClientProviderTelemetryMetricEnum.ActiveRequests;
-            return Context.LoadAsync(async token =>
+            return LoadAsync(async token =>
             {
                 List<ProviderSampleRow> latest = await Workspace.GetLatestProviderTelemetryAsync(token).ConfigureAwait(false);
                 List<ClientProviderTelemetryRollupBucket> buckets = await Workspace.RollupProviderTelemetryAsync(metric, provider, range, token).ConfigureAwait(false);
@@ -141,7 +141,7 @@ namespace Xeno.Tui.Pages
 
         #region Private-Methods
 
-        private static DataTable<ProviderSampleRow> BuildTable(string empty, Func<ProviderSampleRow, string> key)
+        private DataTable<ProviderSampleRow> BuildTable(string empty, Func<ProviderSampleRow, string> key)
         {
             DataTable<ProviderSampleRow> table = Table(empty, key);
             Column(table, "Collected", row => row.Collected, 20);

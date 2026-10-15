@@ -361,6 +361,8 @@ namespace Xeno.Tui
             _App.Bind("status", _StatusHost);
             _App.HighlightFocusedRegion = true;
             _App.CtrlCPolicy = CtrlCPolicy.DoubleTapToExit;
+            // A paste outside a dialog goes to the focused search field.
+            _App.RoutePasteToFocus = true;
             _Sidebar.PageChosen += Navigate;
 
             KeyHintResolver hints = _App.BindKeyHints(_StatusBar);

@@ -257,11 +257,66 @@ namespace Test.Shared
                     using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Providers))
                     {
                         tui.Press("a");
+                        Contains(tui.Screen(), "Base URL of the provider.");
                         tui.Press("ctrl+s");
                         Check(tui.App.Modals.IsActive, "The form should stay open.");
-                        Contains(tui.Screen(), "Name is required.");
+                        Contains(tui.Screen(), "! Name is required.");
                         tui.Press("escape");
                         Check(!tui.App.Modals.IsActive, "Escape should cancel the form.");
+                    }
+                }),
+                Case(suite, "FormTakesPastesAndRevealsSecrets", "Form dialogs take pastes into the focused field and show a secret on Ctrl+R", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Providers))
+                    {
+                        tui.Press("a");
+                        tui.Backend.FeedInput("\u001b[200~pasted-provider\u001b[201~");
+                        tui.Settle();
+                        Contains(tui.Screen(), "pasted-provider");
+                        tui.Press("tab");
+                        tui.Press("tab");
+                        tui.Press("tab");
+                        tui.Type("s3cret");
+                        Check(!tui.Screen().Contains("s3cret", StringComparison.Ordinal), "A secret should be masked.");
+                        tui.Press("ctrl+r");
+                        Contains(tui.Screen(), "s3cret");
+                        tui.Press("escape");
+                    }
+                }),
+                Case(suite, "SettingsShowsSectionsAndHelp", "The Settings page groups fields under section headings with their help text", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Settings))
+                    {
+                        string screen = tui.Screen();
+                        Contains(screen, "Web dashboard");
+                        Contains(screen, "The browser dashboard for this machine");
+                        Check(!screen.Contains("Web dashboard: ", StringComparison.Ordinal), "Labels should not repeat the section name.");
+                    }
+                }),
+                Case(suite, "TablesLeaveLoadingState", "Tables say Loading... until their page's data arrives, then show rows or their empty message", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
+                    {
+                        foreach (XenoPageEnum page in new[] { XenoPageEnum.Overview, XenoPageEnum.Providers, XenoPageEnum.Models, XenoPageEnum.Requests, XenoPageEnum.HostTelemetry, XenoPageEnum.ProviderTelemetry })
+                        {
+                            tui.Tui.Navigate(page);
+                            WaitFor(() => !tui.Screen().Contains("Loading...", StringComparison.Ordinal), tui, page + " stayed in its loading state.");
+                        }
+
+                        Contains(tui.Screen(), "No samples in this range.");
+                    }
+                }),
+                Case(suite, "PasteReachesFocusedSearch", "A paste outside a dialog goes to the focused search field", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Models))
+                    {
+                        TUIKit.Point? search = tui.Find("type to filter by name");
+                        Check(search != null, "The model filter was not shown.");
+                        tui.Click(search!.Value.X, search.Value.Y);
+                        tui.Backend.FeedInput("\u001b[200~llama\u001b[201~");
+                        tui.Settle();
+                        Contains(tui.Screen(), "llama");
+                        Check(!tui.Screen().Contains("type to filter by name", StringComparison.Ordinal), "The paste did not reach the filter.");
                     }
                 }),
                 Case(suite, "SettingsPageSavesThroughSharedCatalog", "The Settings page saves through the shared settings catalog", () =>
@@ -321,6 +376,21 @@ namespace Test.Shared
                     Check(rows.Contains("**bold**", StringComparison.Ordinal), "Code block did not render verbatim: " + rows);
                     Check(!rows.Contains("##", StringComparison.Ordinal) && !rows.Contains("```", StringComparison.Ordinal), "Markup leaked into the output: " + rows);
                     Check(viewer.RenderedRows(80).All(row => row.Length <= 80), "A row is wider than the viewer.");
+
+                    using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Overview))
+                    {
+                        List<string> lines = new List<string>();
+                        for (int i = 1; i <= 80; i++) lines.Add("- line " + i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        _ = tui.Tui.Context.ShowMarkdownAsync("Long", String.Join("\n", lines));
+                        tui.Settle();
+                        Contains(tui.Screen(), "line 1");
+                        tui.Press("end");
+                        Contains(tui.Screen(), "line 80");
+                        tui.Press("home");
+                        Contains(tui.Screen(), "line 1");
+                        tui.Press("escape");
+                        Check(!tui.App.Modals.IsActive, "Escape should close the viewer.");
+                    }
                 }),
                 Case(suite, "MouseOpensAndRunsMenus", "Clicking a menu title opens it, clicking an item runs it, and clicking elsewhere closes it", () =>
                 {
@@ -370,9 +440,9 @@ namespace Test.Shared
                         Check(!tui.Screen().Contains("All outcomes", StringComparison.Ordinal), "Picking Failed should change the outcome filter.");
                         tui.Tui.Navigate(XenoPageEnum.Settings);
                         tui.Settle();
-                        TUIKit.Point box = tui.Find("[x] Web dashboard: Serve") ?? throw new InvalidOperationException("No checkbox.");
+                        TUIKit.Point box = tui.Find("[x] Serve the local web dashboard") ?? throw new InvalidOperationException("No checkbox.");
                         tui.Click(box.X + 1, box.Y);
-                        Contains(tui.Screen(), "[ ] Web dashboard: Serve");
+                        Contains(tui.Screen(), "[ ] Serve the local web dashboard");
                     }
                 }),
                 Case(suite, "MouseWorksInDialogs", "Clicks reach form fields, confirmation buttons, the command palette, and status bar hints", () =>

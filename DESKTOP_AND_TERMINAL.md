@@ -186,7 +186,7 @@ success, ! for a warning, or ✗ for an error (errors also pop up a notice). Aft
 the server and tenant and offers **Start Client** (or **Restart Client**).
 
 Detail views (a request's details, provider models on Provider Telemetry, and Help > About) are Markdown laid out by
-TUIKit 1.6's width-aware renderer: tables get borders and are sized from their content, headings and links are
+TUIKit's width-aware renderer in the app's theme colors: tables get borders and are sized from their content, headings and links are
 styled, and headers and bodies sit in code blocks (JSON is highlighted). The Markdown is built in `Xeno.Client.Core`
 with `XenoMarkdown`, which escapes values and fences bodies, so request and response content always shows verbatim.
 Arrow keys, Page Up/Down, Home, End, and the mouse wheel scroll; Esc closes.
@@ -210,7 +210,11 @@ palette, and the key hints in the status bar, and scroll lists, logs, and viewer
 
 Each page also has single-letter actions that work when a text field isn't focused. For example, on Providers: `a`
 add, `e` edit, `t` test, `m` add model, `d` delete. On Overview: `s` start or stop, `r` restart, `w` web dashboard.
-Forms move between fields with Tab, save with Ctrl+S, and cancel with Esc.
+Forms move between fields with Tab, save with Ctrl+S, and cancel with Esc. Each field's help is shown under it, a
+missing or malformed value is explained under its field, Ctrl+R shows a secret as typed, and Ctrl+A, Ctrl+E,
+Ctrl+U, Ctrl+K, and Ctrl+W edit the line. A paste goes into the focused field, in a form or a page's filter box. The
+Settings page groups its fields under the same section headings as the desktop app. A table says "Loading..." until
+its page's data arrives, and shows the error in place of its rows if the first load fails.
 
 **File > Open client.json** opens the settings file in `$VISUAL` or `$EDITOR` when one is set, and returns to the app
 when the editor exits.

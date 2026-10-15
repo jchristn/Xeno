@@ -4,6 +4,7 @@ namespace Xeno.Tui.Pages
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
+    using TUIKit;
     using TUIKit.Input;
     using TUIKit.Layout;
     using TUIKit.Modals;
@@ -40,6 +41,7 @@ namespace Xeno.Tui.Pages
 
         #region Private-Members
 
+        private const int FormWidth = 96;
         private readonly FramedStack _Root = new FramedStack(SplitOrientation.Vertical);
         private readonly Form _Form = new Form { WrapFocus = false };
         private readonly ScrollView _Scroll;
@@ -65,9 +67,16 @@ namespace Xeno.Tui.Pages
             };
             _Form.Add("Appearance", _Appearance);
             Dictionary<string, string> values = XenoSettingsCatalog.Read(Workspace.LoadSettings());
+            string section = String.Empty;
             foreach (XenoSettingField field in XenoSettingsCatalog.Fields)
             {
-                string label = field.Section + ": " + field.Label;
+                if (!String.Equals(field.Section, section, StringComparison.Ordinal))
+                {
+                    section = field.Section;
+                    _Form.AddSection(section);
+                }
+
+                string label = field.Label;
                 string value = values.TryGetValue(field.Key, out string? current) ? current : String.Empty;
                 IWidget input;
                 if (field.Kind == XenoSettingKindEnum.Toggle)
@@ -87,9 +96,12 @@ namespace Xeno.Tui.Pages
                 }
 
                 _Inputs[field.Key] = input;
+                if (!String.IsNullOrWhiteSpace(field.Help)) _Form.SetFieldHint(_Form.FieldCount - 1, field.Help);
             }
 
-            _Scroll = new ScrollView(_Form, 96, Math.Max(1, _Form.ContentHeight)) { ForwardKeys = true, ShowHorizontalScrollbar = false };
+            // Lay the form out once at the scroll width so wrapped help text counts toward the scrollable height.
+            _Form.Render(new BufferSurface(new CellBuffer(FormWidth, 1000)));
+            _Scroll = new ScrollView(_Form, FormWidth, Math.Max(1, _Form.ContentHeight)) { ForwardKeys = true, ShowHorizontalScrollbar = false };
             _Actions.Add("Save", () => _ = SaveAsync());
             _Actions.Add("Revert", Revert);
             Frame(_Root, _Scroll, StackSize.Weighted(1, 4), "Settings (client.json)");

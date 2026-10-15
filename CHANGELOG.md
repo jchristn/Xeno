@@ -41,6 +41,12 @@
 - The terminal app's Overview opens with focus on its Actions buttons instead of the chart range. Page refreshes now always start on the UI thread; a refresh started from a background thread could change a page while it was being drawn ("Collection was modified").
 - `XenoServer.Stop` is now safe to call from several threads. Cancelling the server and calling `Stop` at the same moment could run Watson's `Stop` twice at once, which throws `NullReferenceException` while WebSocket clients are connected.
 - Updated `Caching` to 5.1.4, which orders LRU and FIFO eviction by an internal sequence instead of timestamps. Entries used within the same clock tick could be evicted out of order, so the routing-policy cache could drop the policy it had just used.
+- Updated the terminal app to TUIKit 1.10.0 and moved onto what 1.7 to 1.10 added:
+  - Form dialogs use TUIKit's form validation and submit. Each field's help text (previously shown only in the desktop app) appears under it, required and number errors appear under their field, pastes go to the focused field, Ctrl+R reveals a secret, and line-editing keys work.
+  - The Settings page uses form sections and shows each setting's help, matching the desktop app.
+  - The Markdown viewer uses `MarkdownView`'s own scrolling and theme following instead of its own scroll handling.
+  - Tables show "Loading..." until their page's first load arrives (instead of the empty-state message), and the error if that load fails.
+  - A paste outside a dialog goes to the focused filter box.
 - Renamed pages:
   - In the sidebar, Host Telemetry and Provider Telemetry are now **Host** and **Provider** under the Telemetry heading. Menus and page headers keep the full names.
   - Server & Account is now **General**.

@@ -11,8 +11,9 @@ namespace Xeno.Tui.Modals
 
     /// <summary>
     /// A scrollable, read-only Markdown viewer for request details, About, and other long text. The Markdown is laid
-    /// out at the dialog's width by TUIKit (tables sized from content, wrapped lists, highlighted code). Arrow keys,
-    /// Page Up, Page Down, Home, End, and the mouse wheel scroll; Esc, Enter, or q closes.
+    /// out at the dialog's width by TUIKit (tables sized from content, wrapped lists, highlighted code) and follows the
+    /// app theme. TUIKit's <see cref="MarkdownView"/> scrolls on the arrow keys, Page Up, Page Down, Home, End, and the
+    /// mouse wheel; Esc, Enter, or q closes.
     /// </summary>
     internal sealed class MarkdownViewerModal : DialogModal, IThemeable
     {
@@ -32,10 +33,7 @@ namespace Xeno.Tui.Modals
 
         private const int MinimumWidth = 60;
         private const int MaximumWidth = 120;
-        private const int WheelRows = 3;
         private readonly MarkdownView _View;
-        private int _Visible = 10;
-        private int _Width = MinimumWidth;
 
         #endregion
 
@@ -49,8 +47,9 @@ namespace Xeno.Tui.Modals
         public MarkdownViewerModal(string title, string markdown)
         {
             Title = " " + title + " ";
-            FooterHint = " ↑↓ PgUp PgDn scroll  Esc close ";
-            _View = new MarkdownView(markdown ?? String.Empty, Options(XenoTuiTheme.Dark));
+            FooterHint = " ↑↓ PgUp PgDn Home End scroll  Esc close ";
+            _View = new MarkdownView(markdown ?? String.Empty, Options()) { UseThemeStyles = true, ShowKeyHints = false };
+            _View.ApplyTheme(XenoTuiTheme.Dark);
             MinContentWidth = MinimumWidth;
             MaxContentWidth = MaximumWidth;
         }
@@ -60,15 +59,13 @@ namespace Xeno.Tui.Modals
         #region Public-Methods
 
         /// <summary>
-        /// Render options for Markdown in the terminal app: theme colors, rounded table borders, and tables that stay
-        /// grids (a long value such as a file path wraps inside a column of at most 64 cells).
+        /// Render options for Markdown in the terminal app: rounded table borders, and tables that stay grids (a long
+        /// value such as a file path wraps inside a column of at most 64 cells). The viewer adds the theme's colors.
         /// </summary>
-        /// <param name="theme">Theme.</param>
         /// <returns>Options.</returns>
-        public static MarkdownRenderOptions Options(Theme theme)
+        public static MarkdownRenderOptions Options()
         {
             MarkdownRenderOptions options = new MarkdownRenderOptions();
-            options.Styles = MarkdownStyles.FromTheme(theme ?? XenoTuiTheme.Dark);
             options.Table.Glyphs = MarkdownTableGlyphs.Rounded;
             options.Table.MaxColumnWidth = 64;
             options.Table.MaxRowLines = 6;
@@ -92,47 +89,32 @@ namespace Xeno.Tui.Modals
         public void ApplyTheme(Theme theme)
         {
             Theme applied = theme ?? XenoTuiTheme.Dark;
-            _View.Options = Options(applied);
+            _View.ApplyTheme(applied);
             ApplyFocusTheme(applied);
         }
 
         /// <summary>
-        /// Scroll or close.
+        /// Close on Esc, Enter, or q; the view scrolls on the other keys.
         /// </summary>
         /// <param name="key">Key.</param>
         /// <returns>True.</returns>
         public override bool HandleKey(KeyEvent key)
         {
-            switch (key.Code)
-            {
-                case KeyCode.Escape:
-                case KeyCode.Enter:
-                    return RequestClose(null);
-                case KeyCode.Up: return Scroll(-1);
-                case KeyCode.Down: return Scroll(1);
-                case KeyCode.PageUp: return Scroll(-_Visible);
-                case KeyCode.PageDown: return Scroll(_Visible);
-                case KeyCode.Home: return Scroll(Int32.MinValue / 2);
-                case KeyCode.End: return Scroll(Int32.MaxValue / 2);
-                case KeyCode.Character:
-                    if (key.Rune == 'q') return RequestClose(null);
-                    return true;
-                default:
-                    return true;
-            }
+            if (key.Code == KeyCode.Escape || key.Code == KeyCode.Enter || (key.Code == KeyCode.Character && key.Rune == 'q')) return RequestClose(null);
+            _View.HandleKey(key);
+            return true;
         }
 
         /// <summary>
         /// Scroll on the mouse wheel.
         /// </summary>
-        /// <param name="mouse">Mouse event.</param>
-        /// <returns>True when the wheel scrolled.</returns>
+        /// <param name="mouse">Mouse event in screen coordinates.</param>
+        /// <returns>True when the view used the event.</returns>
         public override bool HandleMouse(MouseEvent mouse)
         {
             if (mouse == null) return false;
-            if (mouse.Button == MouseButton.WheelUp) return Scroll(-WheelRows);
-            if (mouse.Button == MouseButton.WheelDown) return Scroll(WheelRows);
-            return false;
+            Rect content = ContentBounds;
+            return _View.HandleMouse(new MouseEvent(mouse.Kind, mouse.Button, mouse.X - content.X, mouse.Y - content.Y, mouse.Modifiers, mouse.ClickCount));
         }
 
         #endregion
@@ -166,21 +148,7 @@ namespace Xeno.Tui.Modals
         /// <param name="content">Surface.</param>
         protected override void RenderContent(ISurface content)
         {
-            _Visible = Math.Max(1, content.Size.Height);
-            _Width = Math.Max(1, content.Size.Width);
             _View.Render(content);
-        }
-
-        #endregion
-
-        #region Private-Methods
-
-        private bool Scroll(int rows)
-        {
-            int max = Math.Max(0, _View.RowsAt(_Width).Count - _Visible);
-            long top = (long)Math.Min(_View.ScrollOffset, max) + rows;
-            _View.ScrollOffset = (int)Math.Clamp(top, 0, max);
-            return true;
         }
 
         #endregion
