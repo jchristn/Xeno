@@ -219,8 +219,8 @@ dotnet run --project src/Xeno.Server -- xeno.json
 
 ### Scripts
 
-[scripts/](scripts/README.md) has a folder for each platform (`macos/`, `linux/`, `windows/`). Its scripts run each
-part of Xeno from source and install, update, or remove it:
+[scripts/](scripts/README.md) has a folder for each platform (`macos/`, `linux/`, `windows/`, and `wsl/` and `wsl2/`
+for WSL 1 and WSL 2). Its scripts run each part of Xeno from source and install, update, or remove it:
 
 | Script (`.sh` on macOS and Linux, `.bat` on Windows) | What it does |
 |---|---|

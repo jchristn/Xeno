@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+# Installs xeno as a global .NET tool in this distro, plus the desktop app and tray agent. WSL 1 counterpart of scripts/linux/install.sh.
+# WSL 1 has no GUI, so the desktop app and tray agent are skipped (--no-apps). A Windows npm is not used for the dashboard build.
+set -eu
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
+WSL_FLAVOR=wsl   # "wsl" in scripts/wsl, "wsl2" in scripts/wsl2
+# shellcheck source=SCRIPTDIR/_wsl-common.sh
+. "$SCRIPT_DIR/_wsl-common.sh"
+wsl_require
+wsl_sanitize_path
+wsl_check_repo "$REPO_ROOT"
+wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.microsoft.com/dotnet/core/install/linux"
+
+case " $* " in
+    *" --no-apps "*) ;;
+    *) wsl_log "WSL 1 cannot run GUI apps; installing only the xeno tool (--no-apps)."
+       set -- "$@" --no-apps ;;
+esac
+# Put ~/.dotnet/tools on the PATH now, so the scripts find xeno right after dotnet tool install.
+mkdir -p "$HOME/.dotnet/tools"
+case ":$PATH:" in *":$HOME/.dotnet/tools:"*) ;; *) PATH="$HOME/.dotnet/tools:$PATH"; export PATH ;; esac
+wsl_run "$SCRIPT_DIR/../linux/install.sh" "$@"

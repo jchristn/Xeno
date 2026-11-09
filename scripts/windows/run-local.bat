@@ -13,10 +13,8 @@ setlocal
 call "%~dp0env.bat"
 
 set "APP=desktop"
-if /i "%~1"=="desktop" (set "APP=desktop" & shift)
-if /i "%~1"=="tui" (set "APP=tui" & shift)
-if /i "%~1"=="tray" (set "APP=tray" & shift)
-if /i "%~1"=="client" (set "APP=client" & shift)
+for %%A in (desktop tui tray client) do if /i "%~1"=="%%A" set "APP=%%A"
+if /i "%~1"=="%APP%" shift
 set "APP_ARGS="
 :collect
 if "%~1"=="" goto :run
@@ -39,7 +37,8 @@ call "%~dp0build-apps.bat" run-local || exit /b 1
 
 set "SERVER_PID="
 set "DASHBOARD_PID="
-%PS% -Action wait -ProcessId 0 >nul 2>nul
+set "EXIT_CODE=0"
+%PS% -Action probe >nul 2>nul
 if not errorlevel 1 (
     echo [run-local] A Xeno server is already answering at %XENO_LOCAL_SERVER%; using it.
     goto :dashboard
@@ -51,6 +50,7 @@ echo [run-local] Waiting for %XENO_LOCAL_SERVER%...
 %PS% -Action wait -ProcessId %SERVER_PID%
 if errorlevel 1 (
     echo [run-local] ERROR: the server did not become healthy. See %XENO_LOCAL_SERVER_DIR%\logs\run-local-server.log.
+    set "EXIT_CODE=1"
     goto :cleanup
 )
 echo [run-local] Server healthy at %XENO_LOCAL_SERVER%.
@@ -76,6 +76,7 @@ if "%APP%"=="desktop" "%XENO_APP_DIR%\xeno-desktop.exe" %APP_ARGS%
 if "%APP%"=="tui" "%XENO%" tui %APP_ARGS%
 if "%APP%"=="tray" "%XENO_APP_DIR%\xeno-tray.exe" %APP_ARGS%
 if "%APP%"=="client" "%XENO%" connect --foreground %APP_ARGS%
+set "EXIT_CODE=%ERRORLEVEL%"
 
 :cleanup
 if defined DASHBOARD_PID taskkill /T /F /PID %DASHBOARD_PID% >nul 2>nul
@@ -83,4 +84,4 @@ if defined SERVER_PID (
     echo [run-local] Stopping the Xeno server...
     taskkill /T /F /PID %SERVER_PID% >nul 2>nul
 )
-exit /b 0
+exit /b %EXIT_CODE%

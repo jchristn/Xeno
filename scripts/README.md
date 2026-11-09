@@ -4,6 +4,7 @@ These scripts build, run, install, and reset Xeno from a source checkout. Each p
 
 - `scripts/macos/` and `scripts/linux/`: thin wrappers around the shared bash scripts in `scripts/common/`.
 - `scripts/windows/`: `.bat` equivalents.
+- `scripts/wsl/` (WSL 1) and `scripts/wsl2/` (WSL 2): the Linux scripts, adjusted for WSL (see below).
 
 Run them from anywhere; they find the repository root themselves. On Windows, use `scripts\windows\<name>.bat`
 instead of `scripts/macos/<name>.sh`.
@@ -99,5 +100,21 @@ A fresh install points at the Xeno cloud. An existing `client.json` is kept, alo
 | `XENO_LOCAL_HOME` | `~/.xeno-local` | `run-local` |
 | `XENO_SKIP_DASHBOARD` | unset | `run-local` (`1` skips the web dashboard) |
 | `XENO_AGENT_AUTOSTART` | unset | The desktop app (`0` stops it from starting the tray agent) |
+
+## WSL
+
+Inside a WSL distro, use `scripts/wsl2/` (WSL 2) or `scripts/wsl/` (WSL 1) instead of `scripts/linux/`. They run the
+Linux scripts after fixing what usually breaks them under WSL:
+
+- Windows entries are dropped from `PATH`, so a Windows `dotnet`, `npm`, or `node` is never used by mistake. Install
+  the .NET 10 SDK (and Node.js, for the dashboards) inside the distro. `~/.dotnet` and `~/.dotnet/tools` are added.
+- Scripts checked out with Windows (CRLF) line endings are reported with the fix. Clone into the Linux file system
+  (for example `~/src`), not `/mnt/c`, for speed and to avoid Windows file locks.
+- The desktop app and the tray agent need WSLg on WSL 2 (`wsl --update`), and WSLg has no notification area for the
+  tray icon. WSL 1 cannot run them: `install.sh`, `reinstall.sh`, and `update.sh` add `--no-apps`, and `run-desktop.sh`,
+  `run-tray.sh`, and `run-local.sh desktop|tray` stop with a message (use `run-local.sh tui`).
+- On WSL 2, a `--server http://localhost:...` URL is pointed at the Windows host when the server runs on Windows.
+
+The WSL installation is separate from a Windows one: it uses `~/.xeno` inside the distro.
 
 The repository-root `build-*.sh`/`.bat` scripts build and push the Docker images; they are separate from these.

@@ -5,8 +5,9 @@
 #   local-stack.ps1 -Action start-server      prints the server process id
 #   local-stack.ps1 -Action start-dashboard   prints the dashboard process id
 #   local-stack.ps1 -Action wait -ProcessId <id>
+#   local-stack.ps1 -Action probe             exits 0 when a server already answers (checks once)
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('start-server', 'start-dashboard', 'wait')][string]$Action,
+    [Parameter(Mandatory = $true)][ValidateSet('start-server', 'start-dashboard', 'wait', 'probe')][string]$Action,
     [int]$ProcessId = 0
 )
 
@@ -42,5 +43,14 @@ switch ($Action) {
             }
         }
         exit 1
+    }
+    'probe' {
+        $url = $env:XENO_LOCAL_SERVER.TrimEnd('/') + '/'
+        try {
+            Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 | Out-Null
+            exit 0
+        } catch {
+            exit 1
+        }
     }
 }
