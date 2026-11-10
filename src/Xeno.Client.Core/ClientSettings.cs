@@ -15,6 +15,7 @@ namespace Xeno.Client
     /// </summary>
     public class ClientSettings
     {
+        private static readonly object _FileLock = new object();
         private int _DefaultMaxConcurrentRequests = 4;
 
         /// <summary>
@@ -130,6 +131,16 @@ namespace Xeno.Client
         /// <returns>Settings.</returns>
         public static ClientSettings Load()
         {
+            // One load at a time in this process: a first load creates the file and a migrating load rewrites it, and
+            // concurrent front-end refreshes would otherwise race each other on the same file.
+            lock (_FileLock)
+            {
+                return LoadLocked();
+            }
+        }
+
+        private static ClientSettings LoadLocked()
+        {
             if (!File.Exists(SettingsFile))
             {
                 ClientSettings created = new ClientSettings();
@@ -138,7 +149,7 @@ namespace Xeno.Client
                 return created;
             }
 
-            string json = File.ReadAllText(SettingsFile);
+            string json = ClientFileIo.ReadAllText(SettingsFile);
             ClientSettings settings = JsonUtil.Deserialize<ClientSettings>(json) ?? new ClientSettings();
             ClientSettingsDefaultProbe probe = JsonUtil.Deserialize<ClientSettingsDefaultProbe>(json) ?? new ClientSettingsDefaultProbe();
             bool rewritten = settings.ApplyDefaults(probe);
@@ -164,8 +175,11 @@ namespace Xeno.Client
         /// </summary>
         public void Save()
         {
-            Directory.CreateDirectory(SettingsDirectory);
-            File.WriteAllText(SettingsFile, JsonUtil.Serialize(this, true));
+            string json = JsonUtil.Serialize(this, true);
+            lock (_FileLock)
+            {
+                ClientFileIo.WriteAllTextAtomic(SettingsFile, json);
+            }
         }
 
         /// <summary>

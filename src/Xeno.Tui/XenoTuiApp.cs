@@ -604,7 +604,20 @@ namespace Xeno.Tui
 
         private async Task RefreshStatusAndPageAsync(bool includePage)
         {
-            ClientStatusSnapshot status = await Task.Run(() => Context.Workspace.GetStatus()).ConfigureAwait(false);
+            ClientStatusSnapshot? status = null;
+            for (int attempt = 1; status == null; attempt++)
+            {
+                try
+                {
+                    status = await Task.Run(() => Context.Workspace.GetStatus()).ConfigureAwait(false);
+                }
+                catch (Exception ex) when ((ex is System.IO.IOException || ex is UnauthorizedAccessException || ex is System.Text.Json.JsonException) && attempt < 3)
+                {
+                    // Another process may be rewriting client.json; a failed first read must not leave the app without status.
+                    await Task.Delay(200 * attempt).ConfigureAwait(false);
+                }
+            }
+
             TaskCompletionSource<Task> applied = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
             _App.Post(() =>
             {

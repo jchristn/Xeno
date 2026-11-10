@@ -4,6 +4,7 @@ namespace Xeno.Client
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
+    using Xeno.Client.Services;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -285,7 +286,7 @@ namespace Xeno.Client
 
             try
             {
-                ClientConnectionState state = JsonUtil.Deserialize<ClientConnectionState>(File.ReadAllText(StateFile)) ?? new ClientConnectionState();
+                ClientConnectionState state = JsonUtil.Deserialize<ClientConnectionState>(ClientFileIo.ReadAllText(StateFile)) ?? new ClientConnectionState();
                 if ((state.IsConnected || state.IsRegistered) && !state.IsProcessRunning())
                 {
                     state.IsConnected = false;
@@ -309,10 +310,7 @@ namespace Xeno.Client
         /// </summary>
         public void Save()
         {
-            Directory.CreateDirectory(ClientSettings.SettingsDirectory);
-            string tempFile = StateFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(tempFile, JsonUtil.Serialize(this, true));
-            File.Move(tempFile, StateFile, true);
+            ClientFileIo.WriteAllTextAtomic(StateFile, JsonUtil.Serialize(this, true));
         }
 
         /// <summary>

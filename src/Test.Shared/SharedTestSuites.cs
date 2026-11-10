@@ -4935,18 +4935,20 @@ namespace Test.Shared
                             RoutingService routing = new RoutingService(database, new RoutingSettings { LoadBalancingMode = LoadBalancingModeEnum.LeastRecentlyUsed });
                             const int requestCount = 64;
                             List<Task<RoutingDecision>> tasks = new List<Task<RoutingDecision>>();
-                            using (ManualResetEventSlim gate = new ManualResetEventSlim(false))
+                            // Release every request at once without blocking thread-pool threads: blocking waits starve the
+                            // database driver's async I/O on small CI runners, and MySQL then drops the stalled connections.
+                            TaskCompletionSource<bool> gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                             {
                                 for (int i = 0; i < requestCount; i++)
                                 {
-                                    tasks.Add(Task.Run(delegate
+                                    tasks.Add(Task.Run(async delegate
                                     {
-                                        gate.Wait();
-                                        return routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "gpt-oss:20b", false).GetAwaiter().GetResult();
+                                        await gate.Task.ConfigureAwait(false);
+                                        return await routing.RouteAsync(new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true }, "gpt-oss:20b", false).ConfigureAwait(false);
                                     }));
                                 }
 
-                                gate.Set();
+                                gate.SetResult(true);
                                 RoutingDecision[] decisions = await Task.WhenAll(tasks).ConfigureAwait(false);
                                 int failed = decisions.Count(item => !item.Success);
                                 if (failed > 0) throw new InvalidOperationException("Concurrent least-recently-used routing failed for " + failed + " request(s).");
@@ -7418,7 +7420,7 @@ namespace Test.Shared
                     clientSettings.LocalDashboard.Database.Filename = Path.Combine(clientHome, "local-dashboard.db");
                     File.WriteAllText(Path.Combine(clientHome, "client.json"), JsonUtil.Serialize(clientSettings, true));
 
-                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "30000" }, clientHome).ConfigureAwait(false);
                     if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
                     if (!connect.StandardOutput.Contains("Xeno client connected in the background", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not report connected: " + connect.StandardOutput);
                     if (!connect.StandardOutput.Contains("Server WebSocket: ws://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture) + settings.WebSocket.Path, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Background start did not include server WebSocket URL: " + connect.StandardOutput);
@@ -7550,7 +7552,7 @@ namespace Test.Shared
                 });
                 File.WriteAllText(settingsFile, JsonUtil.Serialize(clientSettings, true));
 
-                ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "30000" }, clientHome).ConfigureAwait(false);
                 if (connect.ExitCode != 0) throw new InvalidOperationException("Background connect failed: " + connect.StandardError + connect.StandardOutput);
                 await WaitForServerClientModelManagementAsync(port, clientName, providerName, modelName, false, "initial connection").ConfigureAwait(false);
 
@@ -7640,7 +7642,7 @@ namespace Test.Shared
                     });
                     File.WriteAllText(settingsFile, JsonUtil.Serialize(clientSettings, true));
 
-                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "15000" }, clientHome).ConfigureAwait(false);
+                    ClientCommandResult connect = await RunXenoClientAsync(new[] { "start", "--timeout", "30000" }, clientHome).ConfigureAwait(false);
                     if (connect.ExitCode != 0) throw new InvalidOperationException("Background client start failed: " + connect.StandardError + connect.StandardOutput);
                     await WaitForRegisteredClientAsync(port, "model-pull-touchstone").ConfigureAwait(false);
 
@@ -8739,7 +8741,12 @@ namespace Test.Shared
                                     using (HttpResponseMessage response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
                                     {
                                         string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Burst streaming relay " + i + " returned " + (int)response.StatusCode + ": " + body);
+                                        if (!response.IsSuccessStatusCode)
+                                        {
+                                            // Include the client's connection and slot state so an intermittent failure explains itself.
+                                            string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/v1.0/api/clients").ConfigureAwait(false);
+                                            throw new InvalidOperationException("Burst streaming relay " + i + " returned " + (int)response.StatusCode + ": " + body + " Clients: " + clients);
+                                        }
                                         if (!body.Contains("stream-", StringComparison.Ordinal) || !body.Contains("\"ok\"", StringComparison.Ordinal)) throw new InvalidOperationException("Burst streaming relay " + i + " body mismatch: " + body);
 
                                         string historyId = HeaderValue(response, "X-Xeno-Request-ID");

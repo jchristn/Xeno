@@ -619,7 +619,9 @@ namespace Test.Shared
                             string detail;
                             try
                             {
-                                detail = "Capturing status directly works: " + tui.Workspace.GetStatus().StatusText;
+                                detail = "Capturing status directly works: " + tui.Workspace.GetStatus().StatusText
+                                    + ". Startup task: " + tui.Tui.StartupTask.Status
+                                    + (tui.Tui.StartupTask.Exception == null ? String.Empty : " " + tui.Tui.StartupTask.Exception.GetBaseException());
                             }
                             catch (Exception ex)
                             {

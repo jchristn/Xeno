@@ -198,7 +198,16 @@ namespace Test.Shared
                             Check((int)response.StatusCode == 200, "Local request failed.");
                         }
 
-                        LocalInferenceRequestRecord record = LocalInferenceRequestLog.Read(0, 10).Single();
+                        // The record is written in post-routing, after the response reached the caller.
+                        List<LocalInferenceRequestRecord> records = LocalInferenceRequestLog.Read(0, 10);
+                        for (int i = 0; i < 50 && records.Count == 0; i++)
+                        {
+                            await Task.Delay(100).ConfigureAwait(false);
+                            records = LocalInferenceRequestLog.Read(0, 10);
+                        }
+
+                        Check(records.Count == 1, "Expected one request record, found " + records.Count + ".");
+                        LocalInferenceRequestRecord record = records[0];
                         Check(record.Model == "llama3.1:8b" && record.Route == "local:ollama" && record.StatusCode == 200 && record.Reason == "preferLocal", "Record metadata is wrong.");
                         Check(record.PromptTokens == 11 && record.CompletionTokens == 22 && record.LatencyMs > 0 && record.FirstByteMs.HasValue, "Record usage or timing is missing.");
                         Check(!File.ReadAllText(LocalInferenceRequestLog.FilePath).Contains(sentinel, StringComparison.Ordinal), "Content was written to the request log.");

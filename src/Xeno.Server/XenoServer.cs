@@ -2640,6 +2640,7 @@ namespace Xeno.Server
             XenoClientModel? selectedModel = FindSelectedModel(client, decision, embeddings);
             client.InFlightRequests++;
             await _Database!.Clients!.AdjustInFlightAsync(client.TenantId, client.Id, 1, token).ConfigureAwait(false);
+            ClientInFlightSlot slot = new ClientInFlightSlot(_Database!.Clients!, client);
             DateTime? clientRequestStartedUtc = null;
             bool requestDispatched = false;
             string dispatchedMethod = context.Request.Method.ToString().ToUpperInvariant();
@@ -2696,13 +2697,13 @@ namespace Xeno.Server
                     }
                     else if (IsClientResponseStart(firstResponse))
                     {
-                        await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, requestWaitSource.Token).ConfigureAwait(false);
+                        await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, slot, requestWaitSource.Token).ConfigureAwait(false);
                     }
                     else
                     {
                         decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
                         decision.Timeline.Add("ClientResponse");
-                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, firstResponse, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
+                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, firstResponse, requestBodyJson, capturedRequestHeaders, slot, requestWaitSource.Token).ConfigureAwait(false);
                     }
                 }
                 else
@@ -2717,7 +2718,7 @@ namespace Xeno.Server
                     else
                     {
                         decision.Timeline.Add("ClientResponse");
-                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
+                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, slot, requestWaitSource.Token).ConfigureAwait(false);
                     }
                 }
             }
@@ -2756,8 +2757,7 @@ namespace Xeno.Server
             }
             finally
             {
-                client.InFlightRequests = Math.Max(0, client.InFlightRequests - 1);
-                await _Database!.Clients!.AdjustInFlightAsync(client.TenantId, client.Id, -1, CancellationToken.None).ConfigureAwait(false);
+                await slot.ReleaseAsync().ConfigureAwait(false);
                 lock (_PendingResponsesLock)
                 {
                     _PendingClientResponses.Remove(requestId);
@@ -2784,8 +2784,11 @@ namespace Xeno.Server
             ClientResponseMessage response,
             string requestBodyJson,
             Dictionary<string, string> requestHeaders,
+            ClientInFlightSlot slot,
             CancellationToken token)
         {
+            // The client is done with this request; free its slot before bookkeeping.
+            await slot.ReleaseAsync().ConfigureAwait(false);
             bool success = response.Success;
             int statusCode = response.StatusCode ?? (success ? 200 : 502);
 
@@ -2823,6 +2826,7 @@ namespace Xeno.Server
             string requestBodyJson,
             Dictionary<string, string> requestHeaders,
             DateTime clientRequestStartedUtc,
+            ClientInFlightSlot slot,
             CancellationToken token)
         {
             bool success = startMessage.Success;
@@ -2862,6 +2866,9 @@ namespace Xeno.Server
                     }
 
                     ClientResponseMessage finalMessage = await pending.Final.Task.ConfigureAwait(false);
+
+                    // The client is done with this request; free its slot before history, ledger, and the final chunk.
+                    await slot.ReleaseAsync().ConfigureAwait(false);
                     decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc).TotalMilliseconds);
                     decision.Timeline.Add("ClientResponseComplete");
 
