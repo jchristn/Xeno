@@ -27,17 +27,27 @@ namespace Xeno.Client.Routing
             bool discover = settings.LocalInferenceServer?.DiscoverLocalModels ?? true;
             List<LocalOpenAiModel> models = new List<LocalOpenAiModel>();
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (ClientRunnerSettings provider in LocalInferenceRouter.RoutableProviders(settings))
+            List<ClientRunnerSettings> providers = LocalInferenceRouter.RoutableProviders(settings)
+                .Where(provider => !statuses.Any(item => String.Equals(item.Provider, provider.Name, StringComparison.OrdinalIgnoreCase) && item.Healthy == false))
+                .ToList();
+
+            // Configured models first, so a model is listed under the provider that is set up to serve it.
+            foreach (ClientRunnerSettings provider in providers)
+            {
+                foreach (ClientModelSettings model in (provider.Models ?? new List<ClientModelSettings>()).Where(item => item != null && !String.IsNullOrWhiteSpace(item.Name)))
+                {
+                    if (seen.Add(LocalModelNameNormalizer.Normalize(model.Name))) models.Add(new LocalOpenAiModel { Id = model.Name, OwnedBy = provider.Name });
+                }
+            }
+
+            if (!discover) return models;
+            foreach (ClientRunnerSettings provider in providers)
             {
                 LocalBackendStatus? status = statuses.FirstOrDefault(item => String.Equals(item.Provider, provider.Name, StringComparison.OrdinalIgnoreCase));
-                if (status != null && status.Healthy == false) continue;
-                IEnumerable<string> names = (provider.Models ?? new List<ClientModelSettings>()).Where(item => item != null).Select(item => item.Name);
-                if (discover && status != null) names = names.Concat(status.DiscoveredModels);
-                foreach (string name in names)
+                foreach (string name in status?.DiscoveredModels ?? new List<string>())
                 {
                     if (String.IsNullOrWhiteSpace(name)) continue;
-                    if (!seen.Add(LocalModelNameNormalizer.Normalize(name))) continue;
-                    models.Add(new LocalOpenAiModel { Id = name, OwnedBy = provider.Name });
+                    if (seen.Add(LocalModelNameNormalizer.Normalize(name))) models.Add(new LocalOpenAiModel { Id = name, OwnedBy = provider.Name });
                 }
             }
 

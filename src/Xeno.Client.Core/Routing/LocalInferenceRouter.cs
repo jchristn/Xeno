@@ -171,9 +171,20 @@ namespace Xeno.Client.Routing
 
         private static List<ClientRunnerSettings> LocalCandidates(ClientSettings settings, ClientLocalInferenceServerSettings listener, IReadOnlyCollection<LocalBackendStatus> statuses, string model, bool embeddings)
         {
-            return RoutableProviders(settings).Where(item => Serves(settings, item, statuses, model, embeddings)).ToList();
+            List<ClientRunnerSettings> routable = RoutableProviders(settings);
+            List<ClientRunnerSettings> configured = routable.Where(item => IsConfigured(item, model, embeddings)).ToList();
+            List<ClientRunnerSettings> discovered = routable.Where(item => !configured.Contains(item) && Serves(settings, item, statuses, model, embeddings)).ToList();
+            return configured.Concat(discovered).ToList();
         }
 
+        private static bool IsConfigured(ClientRunnerSettings provider, string model, bool embeddings)
+        {
+            ClientModelSettings? configured = (provider.Models ?? new List<ClientModelSettings>()).FirstOrDefault(item => item != null && LocalModelNameNormalizer.AreEqual(item.Name, model));
+            return configured != null && (embeddings ? configured.SupportsEmbeddings : configured.SupportsCompletions);
+        }
+
+        // Candidates arrive with providers that have the model configured first, then providers that only reported it,
+        // each group in configured order. A gateway can list every model while serving only some of them.
         private static ClientRunnerSettings Choose(List<ClientRunnerSettings> candidates, IReadOnlyCollection<LocalBackendStatus> statuses, LocalInferenceApiShapeEnum shape)
         {
             ClientRunnerSettings? best = candidates.FirstOrDefault(item => !IsUnhealthy(item, statuses) && SupportsShape(item, shape));

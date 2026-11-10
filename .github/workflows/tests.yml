@@ -103,12 +103,16 @@ jobs:
           - provider: mysql
             port: 3306
             user: root
+            database: xeno_test
           - provider: postgresql
             port: 5432
             user: postgres
+            database: xeno_test
           - provider: sqlserver
             port: 1433
             user: sa
+            # The SQL Server image creates no database; the suites create their own from master.
+            database: master
     services:
       mysql:
         image: ${{ matrix.provider == 'mysql' && 'mysql:8.4' || '' }}
@@ -144,7 +148,7 @@ jobs:
       XENO_TEST_DB_PROVIDER: ${{ matrix.provider }}
       XENO_TEST_DB_HOST: 127.0.0.1
       XENO_TEST_DB_PORT: ${{ matrix.port }}
-      XENO_TEST_DB_NAME: xeno_test
+      XENO_TEST_DB_NAME: ${{ matrix.database }}
       XENO_TEST_DB_USER: ${{ matrix.user }}
       XENO_TEST_DB_PASSWORD: Test_Passw0rd
     steps:

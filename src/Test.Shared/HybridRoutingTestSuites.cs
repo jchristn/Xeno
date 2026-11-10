@@ -305,6 +305,15 @@ namespace Test.Shared
                     LocalInferenceRouteDecision allDown = LocalInferenceRouter.Resolve(settings, statuses, "llama3.1:8b", LocalInferenceApiShapeEnum.OpenAi, false);
                     Check(allDown.Target == LocalInferenceRouteTargetKindEnum.Local && allDown.Reason == "localUnhealthy" && !allDown.FallbackToNetwork, "All-unhealthy without a rule must stay local and not fall back.");
                 }),
+                Case(suite, "RouterPrefersConfiguredOverDiscovered", "A provider with the model configured beats an earlier provider that only reported it", () =>
+                {
+                    ClientSettings settings = RouterSettings();
+                    settings.Providers[1].Models.Add(new ClientModelSettings { Name = "gpt-oss:20b" });
+                    List<LocalBackendStatus> statuses = new List<LocalBackendStatus> { new LocalBackendStatus { Provider = "ollama", Healthy = true, DiscoveredModels = new List<string> { "gpt-oss:20b" } } };
+                    Check(LocalInferenceRouter.Resolve(settings, statuses, "gpt-oss:20b", LocalInferenceApiShapeEnum.OpenAi, false).ProviderName == "vllm", "A discovered match beat a configured one.");
+                    LocalOpenAiModel listed = LocalModelListingBuilder.LocalOpenAiModels(settings, statuses).Single(item => item.Id == "gpt-oss:20b");
+                    Check(listed.OwnedBy == "vllm", "The listing named the discovering provider instead of the configured one.");
+                }),
                 Case(suite, "RouterSkipsProvidersNotRoutable", "Providers with local requests turned off are never chosen", () =>
                 {
                     ClientSettings settings = RouterSettings();

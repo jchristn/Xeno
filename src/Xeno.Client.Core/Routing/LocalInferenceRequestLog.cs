@@ -130,7 +130,7 @@ namespace Xeno.Client.Routing
                 }
             }
 
-            return records;
+            return records.OrderByDescending(item => item.ReceivedUtc).ToList();
         }
 
         private static List<string> ReadLines()
