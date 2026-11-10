@@ -11,6 +11,7 @@ set -euo pipefail
 
 # shellcheck source=scripts/common/lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
 
 xeno_build_apps run-cli >&2
 exec "$(xeno_exe xeno)" "$@"

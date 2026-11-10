@@ -23,8 +23,10 @@ set -euo pipefail
 APP="desktop"
 case "${1:-}" in
     desktop|tui|tray|client) APP="$1"; shift ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
 esac
+xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
+xeno_require_cmd curl "Install curl (it checks that the local server is healthy)."
 
 HEALTH_URL="${XENO_LOCAL_SERVER%/}/"
 export XENO_CLIENT_HOME="${XENO_LOCAL_HOME}"
@@ -75,7 +77,7 @@ fi
 XENO="$(xeno_exe xeno)"
 "${XENO}" server use "${XENO_LOCAL_SERVER}" >/dev/null
 echo "[run-local] Client home: ${XENO_CLIENT_HOME} (server ${XENO_LOCAL_SERVER})"
-echo "[run-local] Sign in from the General page, or: XENO_CLIENT_HOME=${XENO_CLIENT_HOME} ${XENO} login -u <user>"
+echo "[run-local] Sign in from the General page with admin@xeno / password."
 
 case "${APP}" in
     desktop) "$(xeno_exe xeno-desktop)" "$@" ;;

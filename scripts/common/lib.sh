@@ -15,10 +15,31 @@ XENO_FRAMEWORK="${XENO_FRAMEWORK:-net10.0}"
 XENO_LOCAL_SERVER="${XENO_LOCAL_SERVER:-http://localhost:9000}"
 XENO_LOCAL_HOME="${XENO_LOCAL_HOME:-${HOME}/.xeno-local}"
 XENO_DESKTOP_PROJECT="${XENO_REPO_ROOT}/src/Xeno.Desktop/Xeno.Desktop.csproj"
+# shellcheck disable=SC2034 # used by the scripts that source this file
 XENO_CLIENT_PROJECT="${XENO_REPO_ROOT}/src/Xeno.Client/Xeno.Client.csproj"
+# shellcheck disable=SC2034 # used by the scripts that source this file
 XENO_SERVER_PROJECT="${XENO_REPO_ROOT}/src/Xeno.Server/Xeno.Server.csproj"
+# shellcheck disable=SC2034 # used by the scripts that source this file
 XENO_TOOL_PACKAGES="${XENO_REPO_ROOT}/artifacts/tools"
 XENO_LOCAL_SERVER_DIR="${XENO_REPO_ROOT}/artifacts/local-server"
+
+# Print a script's header comment (the lines after the shebang, up to the first non-comment line) as its help.
+# Usage: xeno_usage "${BASH_SOURCE[0]}"
+xeno_usage() {
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$1"
+}
+
+# Fail with an install hint when a required command is missing. Usage: xeno_require_cmd <name> <hint>
+xeno_require_cmd() {
+    command -v "$1" >/dev/null 2>&1 && return 0
+    echo "ERROR: '$1' was not found on PATH. $2" >&2
+    exit 1
+}
+
+# True when the xeno global tool is installed (package id xeno, or Xeno.Client from older checkouts).
+xeno_tool_installed() {
+    dotnet tool list --global 2>/dev/null | awk 'tolower($1) == "xeno" || tolower($1) == "xeno.client" { found = 1 } END { exit !found }'
+}
 
 # Prepare the local server's working folder (artifacts/local-server, ignored by git): settings, SQLite database, and
 # logs live there, so running a local server never changes the tracked xeno.json. The settings are copied from the

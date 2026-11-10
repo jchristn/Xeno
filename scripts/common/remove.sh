@@ -11,6 +11,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common/lib.sh
 . "${SCRIPT_DIR}/lib.sh"
 
+for arg in "$@"; do
+    case "${arg}" in
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+        *) echo "[remove] Unknown argument: ${arg} (this script takes no arguments)" >&2; exit 2 ;;
+    esac
+done
+
 CLI="$(xeno_any_cli)"
 if [ -n "${CLI}" ]; then
     echo "[remove] Stopping the client worker if it is running..."
@@ -22,8 +29,18 @@ pkill -x xeno-desktop 2>/dev/null || true
 pkill -x xeno-tray 2>/dev/null || true
 
 echo "[remove] Uninstalling the xeno global tool if present..."
-dotnet tool uninstall --global xeno >/dev/null 2>&1 || true
-dotnet tool uninstall --global Xeno.Client >/dev/null 2>&1 || true
+if ! command -v dotnet >/dev/null 2>&1; then
+    echo "[remove] WARNING: dotnet was not found, so the xeno tool uninstall was skipped. Install the .NET SDK and run remove again to uninstall it." >&2
+elif xeno_tool_installed; then
+    dotnet tool uninstall --global xeno >/dev/null 2>&1 || true
+    dotnet tool uninstall --global Xeno.Client >/dev/null 2>&1 || true
+    if xeno_tool_installed; then
+        echo "[remove] ERROR: could not uninstall the xeno global tool. Close every xeno process (xeno tui, xeno connect) and try again." >&2
+        exit 1
+    fi
+else
+    echo "[remove] The xeno global tool is not installed; nothing to uninstall."
+fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
     if [ -d "${HOME}/Applications/Xeno.app" ]; then

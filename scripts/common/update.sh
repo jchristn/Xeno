@@ -9,6 +9,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common/lib.sh
 . "${SCRIPT_DIR}/lib.sh"
 
+for arg in "$@"; do
+    case "${arg}" in
+        --no-apps|--no-dashboard) ;;
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+        *) echo "[update] Unknown argument: ${arg}" >&2; exit 2 ;;
+    esac
+done
+
 WAS_RUNNING=0
 if [ -n "$(xeno_worker_pid)" ]; then
     WAS_RUNNING=1
@@ -19,5 +27,7 @@ fi
 if [ "${WAS_RUNNING}" -eq 1 ]; then
     echo
     echo "[update] Starting the client worker again..."
-    "$(xeno_any_cli)" start
+    CLI="$(xeno_any_cli)"
+    [ -n "${CLI}" ] || { echo "[update] ERROR: xeno was not found after the reinstall; start the worker with: xeno start" >&2; exit 1; }
+    "${CLI}" start
 fi

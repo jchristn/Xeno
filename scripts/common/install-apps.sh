@@ -24,6 +24,8 @@ esac
 TARGET="$(xeno_linux_install_dir)"
 echo
 echo "[install-apps] Publishing xeno-desktop and xeno-tray (${RID}) to ${TARGET}..."
+pkill -x xeno-desktop 2>/dev/null || true
+pkill -x xeno-tray 2>/dev/null || true
 rm -rf "${TARGET}"
 mkdir -p "${TARGET}"
 dotnet publish "${XENO_DESKTOP_PROJECT}" -c Release -r "${RID}" --self-contained false --nologo -v quiet -o "${TARGET}"

@@ -15,6 +15,14 @@ set -euo pipefail
 # shellcheck source=scripts/common/lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
+case "${1:-}" in
+    -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+esac
+if [ $# -gt 1 ]; then
+    echo "[run-server] Unexpected argument: $2 (this script takes at most a settings file)" >&2
+    exit 2
+fi
+xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
 SETTINGS="${1:-xeno.json}"
 xeno_prepare_local_server
 

@@ -13,7 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common/lib.sh
 . "${SCRIPT_DIR}/../common/lib.sh"
 
-[ "$(uname -s)" = "Darwin" ] || { echo "[build-app] build-app.sh runs on macOS only." >&2; exit 2; }
+die() { echo "Error: $*" >&2; exit 1; }
+
+[ "$(uname -s)" = "Darwin" ] || die "This script is for macOS. Use scripts/linux on Linux, scripts/wsl2 (or scripts/wsl) on WSL, or scripts\\windows on Windows."
 
 INSTALL=0
 OUTPUT="${XENO_REPO_ROOT}/artifacts/macos"
@@ -23,10 +25,12 @@ while [ $# -gt 0 ]; do
         --install) INSTALL=1; shift ;;
         --output) OUTPUT="${2:?--output requires a directory}"; shift 2 ;;
         --self-contained) SELF_CONTAINED=true; shift ;;
-        -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "[build-app] Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
 
 case "$(uname -m)" in
     arm64) RID="osx-arm64" ;;

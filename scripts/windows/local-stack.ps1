@@ -19,14 +19,26 @@ New-Item -ItemType Directory -Force -Path $logs | Out-Null
 
 switch ($Action) {
     'start-server' {
-        $dll = Join-Path $repo ("src\Xeno.Server\bin\{0}\net10.0\Xeno.Server.dll" -f $env:XENO_CONFIGURATION)
+        $framework = if ($env:XENO_FRAMEWORK) { $env:XENO_FRAMEWORK } else { 'net10.0' }
+        $dll = Join-Path $repo ("src\Xeno.Server\bin\{0}\{1}\Xeno.Server.dll" -f $env:XENO_CONFIGURATION, $framework)
         $process = Start-Process -FilePath 'dotnet' -ArgumentList @("`"$dll`"", 'xeno.json') -WorkingDirectory $serverDir `
             -RedirectStandardOutput (Join-Path $logs 'run-local-server.log') -RedirectStandardError (Join-Path $logs 'run-local-server.err.log') `
             -WindowStyle Hidden -PassThru
         Write-Output $process.Id
     }
     'start-dashboard' {
-        $process = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory (Join-Path $repo 'dashboard') `
+        # npm can be npm.cmd, npm.exe, or only an npm.ps1 shim; Start-Process cannot run a .ps1 directly.
+        $npm = Get-Command npm -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($npm) {
+            $file = $npm.Source
+            $npmArgs = @('run', 'dev')
+        } else {
+            $script = Get-Command npm -CommandType ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $script) { throw 'npm was not found on PATH (install Node.js 20 or later).' }
+            $file = (Get-Process -Id $PID).Path
+            $npmArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$($script.Source)`"", 'run', 'dev')
+        }
+        $process = Start-Process -FilePath $file -ArgumentList $npmArgs -WorkingDirectory (Join-Path $repo 'dashboard') `
             -RedirectStandardOutput (Join-Path $logs 'run-local-dashboard.log') -RedirectStandardError (Join-Path $logs 'run-local-dashboard.err.log') `
             -WindowStyle Hidden -PassThru
         Write-Output $process.Id

@@ -2,7 +2,7 @@
 # Install Xeno from this checkout:
 #   1. builds the client's local web dashboard (dashboard/dist-local) so it is embedded in xeno,
 #   2. packs src/Xeno.Client and installs it as the global .NET tool "xeno" (which includes "xeno tui"),
-#   3. installs the desktop app and the tray agent:
+#   3. installs the desktop app and the tray agent (stopping the client worker and the apps first):
 #        macOS: ~/Applications/Xeno.app (xeno-desktop, xeno-tray, and xeno inside), see scripts/macos/build-app.sh
 #        Linux: ~/.local/share/xeno/app plus "Xeno" and "Xeno Agent" launcher entries
 # Your client configuration in ~/.xeno is kept. New installs point at the Xeno cloud server.
@@ -22,10 +22,21 @@ for arg in "$@"; do
     case "${arg}" in
         --no-apps) INSTALL_APPS=0 ;;
         --no-dashboard) BUILD_DASHBOARD=0 ;;
-        -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "[install] Unknown argument: ${arg}" >&2; exit 2 ;;
     esac
 done
+
+xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
+
+# A running worker or app keeps using the old files; stop them before replacing the tool and the apps.
+CLI="$(xeno_any_cli)"
+if [ -n "${CLI}" ]; then
+    echo "[install] Stopping the client worker if it is running..."
+    "${CLI}" stop >/dev/null 2>&1 || true
+fi
+pkill -x xeno-desktop 2>/dev/null || true
+pkill -x xeno-tray 2>/dev/null || true
 
 if [ "${BUILD_DASHBOARD}" -eq 1 ]; then
     if command -v npm >/dev/null 2>&1; then
@@ -47,6 +58,10 @@ echo
 echo "[install] Installing the xeno global tool..."
 dotnet tool uninstall --global xeno >/dev/null 2>&1 || true
 dotnet tool uninstall --global Xeno.Client >/dev/null 2>&1 || true
+if xeno_tool_installed; then
+    echo "[install] ERROR: could not uninstall the xeno global tool. Close every xeno process (xeno tui, xeno connect) and try again." >&2
+    exit 1
+fi
 dotnet tool install --global xeno --add-source "${XENO_TOOL_PACKAGES}"
 
 if [ "${INSTALL_APPS}" -eq 1 ]; then

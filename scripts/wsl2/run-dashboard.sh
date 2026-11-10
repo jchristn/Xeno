@@ -1,14 +1,41 @@
-#!/usr/bin/env sh
-# Runs the server web dashboard (Vite) at http://localhost:9100. WSL 2 counterpart of scripts/linux/run-dashboard.sh.
-# Needs Node.js inside WSL (a Windows npm on the PATH is ignored). Windows browsers reach it at localhost through WSL's localhost forwarding.
-set -eu
-SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
-WSL_FLAVOR=wsl2   # "wsl" in scripts/wsl, "wsl2" in scripts/wsl2
-# shellcheck source=SCRIPTDIR/_wsl-common.sh
+#!/usr/bin/env bash
+# Run the Xeno server web dashboard (dashboard/, Vite dev server) in the foreground at http://localhost:9100.
+# Use it to sign in to a server, manage tenants, users, and access keys, and watch clients and requests.
+# This is the server's dashboard; the client's local dashboard is served by the client worker
+# (http://127.0.0.1:9343 when enabled in Settings).
+# WSL 2 version: needs Node.js inside this distro (a Windows npm is not used). localhost inside WSL 2 reaches Windows through localhost forwarding, so Windows can open it at the same URL.
+#
+# Usage: run-dashboard.sh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+die() { echo "[run-dashboard] ERROR: $*" >&2; exit 1; }
+
+# shellcheck disable=SC2034 # read by _wsl-common.sh
+WSL_FLAVOR=wsl2
+# shellcheck source=_wsl-common.sh
 . "$SCRIPT_DIR/_wsl-common.sh"
 wsl_require
 wsl_sanitize_path
 wsl_check_repo "$REPO_ROOT"
-wsl_require_cmd npm "Install Node.js 20 or later inside WSL (for example with nvm: https://github.com/nvm-sh/nvm)."
-wsl_run "$SCRIPT_DIR/../linux/run-dashboard.sh" "$@"
+# shellcheck source=../common/lib.sh
+. "$REPO_ROOT/scripts/common/lib.sh"
+
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+        *) echo "[run-dashboard] Unknown argument: $arg (this script takes no arguments)" >&2; exit 2 ;;
+    esac
+done
+wsl_require_cmd npm "Install Node.js 20 or later inside WSL (https://nodejs.org/en/download, or your distro's packages)."
+
+cd "$XENO_REPO_ROOT/dashboard"
+if [ ! -d node_modules ]; then
+    echo "[run-dashboard] Installing dashboard packages..."
+    npm install
+fi
+
+echo "[run-dashboard] Starting the dashboard at http://localhost:9100 (Ctrl+C to stop)..."
+exec npm run dev

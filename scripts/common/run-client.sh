@@ -14,11 +14,14 @@ set -euo pipefail
 SERVER=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --server) SERVER="${2:?--server requires a value}"; shift 2 ;;
-        -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --server)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "[run-client] --server requires a value." >&2; exit 2; }
+            SERVER="$2"; shift 2 ;;
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "[run-client] Unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
 
 xeno_build_apps run-client
 XENO="$(xeno_exe xeno)"

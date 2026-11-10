@@ -1,19 +1,37 @@
-#!/usr/bin/env sh
-# Builds and runs the Xeno Agent tray app (xeno-tray). WSL 2 counterpart of scripts/linux/run-tray.sh.
-# WSL 2 needs WSLg; WSL 1 cannot run GUI apps.
-set -eu
-SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
-WSL_FLAVOR=wsl2   # "wsl" in scripts/wsl, "wsl2" in scripts/wsl2
-# shellcheck source=SCRIPTDIR/_wsl-common.sh
+#!/usr/bin/env bash
+# Build and run the Xeno Agent tray app (xeno-tray) from source in the foreground.
+# WSL 2 version: refuses to run, because WSLg has no notification area, so the tray icon
+# cannot appear. Use run-desktop.sh or run-tui.sh here, or scripts\windows\run-tray.bat for a Windows client.
+# XENO_WSL_FORCE_TRAY=1 starts it anyway (for example under your own X desktop that has a tray).
+#
+# Usage: run-tray.sh [--home <dir>]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+die() { echo "[run-tray] ERROR: $*" >&2; exit 1; }
+
+# shellcheck disable=SC2034 # read by _wsl-common.sh
+WSL_FLAVOR=wsl2
+# shellcheck source=_wsl-common.sh
 . "$SCRIPT_DIR/_wsl-common.sh"
 wsl_require
 wsl_sanitize_path
 wsl_check_repo "$REPO_ROOT"
+# shellcheck source=../common/lib.sh
+. "$REPO_ROOT/scripts/common/lib.sh"
 
-if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
-    wsl_die "The tray agent needs WSLg, but no display is set (DISPLAY/WAYLAND_DISPLAY). WSLg ships with Windows 11 and the Store version of WSL: run 'wsl --update' from Windows, then 'wsl --shutdown'. Or use scripts/windows/run-tray.bat, or scripts/wsl2/run-tui.sh for the terminal app."
-fi
-wsl_log "Note: WSLg has no notification area, so the Xeno Agent tray icon may not appear. The terminal app (run-tui.sh) and the Windows tray agent (scripts/windows/run-tray.bat) are alternatives."
+case "${1:-}" in
+    -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+esac
 wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.microsoft.com/dotnet/core/install/linux"
-wsl_run "$SCRIPT_DIR/../linux/run-tray.sh" "$@"
+if [ "${XENO_WSL_FORCE_TRAY:-0}" != 1 ]; then
+    die "WSLg has no notification area, so the Xeno Agent tray icon cannot appear. Use scripts/wsl2/run-desktop.sh or scripts/wsl2/run-tui.sh in this distro, or scripts\\windows\\run-tray.bat for a Windows client. Set XENO_WSL_FORCE_TRAY=1 to start it anyway (for example with your own X desktop that has a tray)."
+fi
+if [ -z "${DISPLAY:-}" ]; then
+    die "DISPLAY is not set. The tray agent uses X11 and needs WSLg, which sets DISPLAY (Windows 11, or Windows 10 with the Microsoft Store WSL). From Windows run wsl --update, then wsl --shutdown, and reopen this shell. Or run scripts\\windows\\run-tray.bat from Windows, or scripts/wsl2/run-tui.sh for the terminal app."
+fi
+
+xeno_build_apps run-tray
+echo "[run-tray] Starting xeno-tray..."
+exec "$(xeno_exe xeno-tray)" "$@"

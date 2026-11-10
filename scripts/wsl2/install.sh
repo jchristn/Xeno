@@ -1,17 +1,149 @@
-#!/usr/bin/env sh
-# Installs xeno as a global .NET tool in this distro, plus the desktop app and tray agent. WSL 2 counterpart of scripts/linux/install.sh.
-# With WSLg, the "Xeno" and "Xeno Agent" launcher entries also appear in the Windows Start menu. A Windows npm is not used for the dashboard build.
-set -eu
-SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
-WSL_FLAVOR=wsl2   # "wsl" in scripts/wsl, "wsl2" in scripts/wsl2
-# shellcheck source=SCRIPTDIR/_wsl-common.sh
+#!/usr/bin/env bash
+# Install Xeno in this WSL distro from this checkout:
+#   1. builds the client's local web dashboard (dashboard/dist-local) so it is embedded in xeno,
+#   2. packs src/Xeno.Client and installs it as the global .NET tool "xeno" (which includes "xeno tui"),
+#   3. installs the desktop app and the tray agent (stopping the client worker and the apps first) into
+#      ~/.local/share/xeno/app plus a "Xeno" launcher entry (WSLg; no "Xeno Agent" entry, since WSLg has no
+#      notification area).
+# WSL 2 version: uses the Linux dotnet and npm in this distro (never Windows ones) and installs into this distro
+# only; use scripts\windows\install.bat for Windows. Without a display (WSLg) only the tool is installed.
+# Your client configuration in ~/.xeno is kept. New installs point at the Xeno cloud server.
+#
+# Usage: install.sh [--no-apps] [--no-dashboard]
+#   --no-apps        install only the xeno tool
+#   --no-dashboard   skip the local dashboard build (keeps whatever dashboard/dist-local holds)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+die() { echo "[install] ERROR: $*" >&2; exit 1; }
+
+# shellcheck disable=SC2034 # read by _wsl-common.sh
+WSL_FLAVOR=wsl2
+# shellcheck source=_wsl-common.sh
 . "$SCRIPT_DIR/_wsl-common.sh"
 wsl_require
+# Create ~/.dotnet/tools first so wsl_sanitize_path puts it on PATH for the post-install check.
+mkdir -p "$HOME/.dotnet/tools"
 wsl_sanitize_path
 wsl_check_repo "$REPO_ROOT"
+# shellcheck source=../common/lib.sh
+. "$REPO_ROOT/scripts/common/lib.sh"
+
+
+INSTALL_APPS=1
+BUILD_DASHBOARD=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-apps) INSTALL_APPS=0 ;;
+        --no-dashboard) BUILD_DASHBOARD=0 ;;
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+        *) echo "[install] Unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
 wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.microsoft.com/dotnet/core/install/linux"
-# Put ~/.dotnet/tools on the PATH now, so the scripts find xeno right after dotnet tool install.
-mkdir -p "$HOME/.dotnet/tools"
-case ":$PATH:" in *":$HOME/.dotnet/tools:"*) ;; *) PATH="$HOME/.dotnet/tools:$PATH"; export PATH ;; esac
-wsl_run "$SCRIPT_DIR/../linux/install.sh" "$@"
+wsl_require_cmd pkill "Install procps inside WSL (for example: sudo apt install procps)."
+
+# The desktop app needs a display: WSLg on WSL 2, an X server on Windows on WSL 1.
+if [ "$INSTALL_APPS" -eq 1 ] && [ -z "${DISPLAY:-}" ]; then
+    echo "[install] DISPLAY is not set, so WSLg is not available and only the xeno tool is installed. For the desktop app, run wsl --update and then wsl --shutdown from Windows, reopen this shell, and install again. Pass --no-apps to skip this note." >&2
+    INSTALL_APPS=0
+fi
+
+# Builds the local dashboard, installs the xeno global tool and, with INSTALL_APPS=1, the desktop app.
+# Reads INSTALL_APPS and BUILD_DASHBOARD.
+do_install() {
+    local cli rid target applications exec_line
+    # A running worker or app keeps using the old files; stop them before replacing the tool and the apps.
+    cli="$(xeno_any_cli)"
+    if [ -n "$cli" ]; then
+        echo "[install] Stopping the client worker if it is running..."
+        "$cli" stop >/dev/null 2>&1 || true
+    fi
+    pkill -x xeno-desktop 2>/dev/null || true
+    pkill -x xeno-tray 2>/dev/null || true
+
+    if [ "$BUILD_DASHBOARD" -eq 1 ]; then
+        if command -v npm >/dev/null 2>&1; then
+            echo
+            echo "[install] Building the local web dashboard..."
+            (cd "$XENO_REPO_ROOT/dashboard" && npm install --silent && npm run build:local)
+        elif PATH="$WSL_ORIGINAL_PATH" command -v npm >/dev/null 2>&1; then
+            echo "[install] WARNING: npm is only installed on the Windows side, so the local web dashboard will not be embedded in xeno. Install Node.js 20 or later inside WSL to include it." >&2
+        else
+            echo "[install] WARNING: npm not found; the local web dashboard will not be embedded in xeno. Install Node.js 20 or later inside WSL to include it." >&2
+        fi
+    fi
+
+    echo
+    echo "[install] Packing the xeno tool (Release)..."
+    mkdir -p "$XENO_TOOL_PACKAGES"
+    rm -f "$XENO_TOOL_PACKAGES"/xeno*.nupkg "$XENO_TOOL_PACKAGES"/Xeno.Client*.nupkg
+    dotnet pack "$XENO_CLIENT_PROJECT" -c Release --nologo -v quiet -o "$XENO_TOOL_PACKAGES"
+
+    echo
+    echo "[install] Installing the xeno global tool..."
+    dotnet tool uninstall --global xeno >/dev/null 2>&1 || true
+    dotnet tool uninstall --global Xeno.Client >/dev/null 2>&1 || true
+    if xeno_tool_installed; then
+        echo "[install] ERROR: could not uninstall the xeno global tool. Close every xeno process (xeno tui, xeno connect) and try again." >&2
+        exit 1
+    fi
+    dotnet tool install --global xeno --add-source "$XENO_TOOL_PACKAGES"
+
+    if [ "$INSTALL_APPS" -eq 1 ]; then
+        case "$(uname -m)" in
+            aarch64|arm64) rid="linux-arm64" ;;
+            *) rid="linux-x64" ;;
+        esac
+        target="$(xeno_linux_install_dir)"
+        applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+        echo
+        echo "[install-apps] Publishing xeno-desktop and xeno-tray ($rid) to $target..."
+        rm -rf "$target"
+        mkdir -p "$target"
+        dotnet publish "$XENO_DESKTOP_PROJECT" -c Release -r "$rid" --self-contained false --nologo -v quiet -o "$target"
+        cp "$XENO_REPO_ROOT/assets/logo.png" "$target/xeno.png"
+        # WSLg has no notification area, so there is no "Xeno Agent" entry, and the desktop app does not start the
+        # tray agent. The entry passes DOTNET_ROOT because a launcher does not read ~/.bashrc.
+        rm -f "$applications/xeno-agent.desktop"
+        exec_line="env XENO_AGENT_AUTOSTART=0"
+        if [ -n "${DOTNET_ROOT:-}" ]; then exec_line="$exec_line DOTNET_ROOT=$DOTNET_ROOT"; fi
+        mkdir -p "$applications"
+        {
+            echo "[Desktop Entry]"
+            echo "Type=Application"
+            echo "Name=Xeno"
+            echo "Comment=Manage this machine on the Xeno network"
+            echo "Exec=$exec_line \"$target/xeno-desktop\""
+            echo "Icon=$target/xeno.png"
+            echo "Terminal=false"
+            echo "Categories=Network;Utility;"
+        } > "$applications/xeno.desktop"
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database "$applications" >/dev/null 2>&1 || true
+        fi
+        echo "[install-apps] Installed. Start the desktop app from your app launcher (Xeno) or run: $exec_line \"$target/xeno-desktop\""
+    fi
+
+    echo
+    echo "[install] Completed."
+    # dotnet tool install -g puts xeno in ~/.dotnet/tools, and a user-local .NET in ~/.dotnet also needs
+    # DOTNET_ROOT, or new shells cannot run xeno.
+    case ":$WSL_ORIGINAL_PATH:" in
+        *":$HOME/.dotnet/tools:"*) ;;
+        *)
+            echo "[install] $HOME/.dotnet/tools is not on your PATH, so new shells will not find xeno. Add this line to ~/.bashrc (or ~/.profile):"
+            # shellcheck disable=SC2016 # printed literally for the user to copy
+            echo '  export PATH="$PATH:$HOME/.dotnet/tools"' ;;
+    esac
+    if [ -z "$WSL_ORIGINAL_DOTNET_ROOT" ] && [ "$(command -v dotnet)" = "$HOME/.dotnet/dotnet" ]; then
+        echo "[install] .NET is installed in ~/.dotnet, so xeno also needs DOTNET_ROOT. Add this line to ~/.bashrc (or ~/.profile):"
+        # shellcheck disable=SC2016 # printed literally for the user to copy
+        echo '  export DOTNET_ROOT="$HOME/.dotnet"'
+    fi
+    echo "[install] Try: xeno status | xeno tui | xeno server show"
+    echo "[install] This installs Xeno in this WSL distro only (client home $(xeno_client_home)); use scripts\\windows\\install.bat for Windows."
+}
+
+do_install

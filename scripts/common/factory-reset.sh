@@ -17,6 +17,7 @@ for arg in "$@"; do
     case "${arg}" in
         -y|--yes|--force) FORCE=1 ;;
         --all) WIPE_ALL=1 ;;
+        -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "[factory-reset] Unknown argument: ${arg}" >&2
            echo "Usage: factory-reset.sh [-y|--yes|--force] [--all]" >&2
            exit 2 ;;
@@ -40,7 +41,7 @@ if [ "${FORCE}" -ne 1 ]; then
     fi
     echo
     printf 'Type YES to continue: '
-    read -r CONFIRM
+    read -r CONFIRM || CONFIRM=""
     if [ "${CONFIRM}" != "YES" ]; then
         echo "[factory-reset] Aborted."
         exit 1
