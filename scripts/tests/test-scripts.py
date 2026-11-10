@@ -50,7 +50,8 @@ if name == 'apt-cache':
     print('libicu-dev\nlibicu74\nlibicu72'); sys.exit(0)
 if name == 'apt-get':
     log([name, *args])
-    if args[:1] == ['install']: pathlib.Path(env['APT_STATE']).write_text('1')
+    # The installer passes -o options before the command, so look for it anywhere.
+    if 'install' in args: pathlib.Path(env['APT_STATE']).write_text('1')
     sys.exit(0)
 if name == 'curl':
     ok = [u for u in env.get('MOCK_CURL_OK', '').split(',') if u]
@@ -183,7 +184,9 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
                  'apt-get', 'apt-cache']:
         (bin_dir / name).write_text(FAKE)
         (bin_dir / name).chmod(0o755)
-    (bin_dir / 'sudo').write_text('#!/bin/sh\nexec "$@"\n')
+    # sudo -v (refresh the credentials) succeeds and is logged; anything else runs the command.
+    (bin_dir / 'sudo').write_text('#!/bin/sh\nif [ "$1" = -v ]; then echo \'["sudo", "-v"]\' >> "$CALL_LOG"; exit 0; fi\n'
+                                  'exec "$@"\n')
     (bin_dir / 'sudo').chmod(0o755)
     apt_state = temp / 'apt-installed'
     tools = temp / 'bin-tools'   # clipboard and browser tools; left out of PATH where a test needs them missing
@@ -509,13 +512,17 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
                 fresh_home()
                 extra = ['--no-apps'] if plat == 'macos' else []
                 p, calls = run(plat, script, *args, *extra, **dict(lib_env(fake), PATH=no_tools_path))
-                installs = [c for c in calls if c[:2] == ['apt-get', 'install']]
+                installs = [c for c in calls if c[0] == 'apt-get' and 'install' in c]
                 check(p.returncode == 0, plat, script, fake, p.stderr)
                 if not native:
                     check(not installs, plat, script, calls)
                     continue
-                pkgs = [x for c in installs for x in c[2:] if not x.startswith('-')]
-                check(set(want) <= set(pkgs) and ['apt-get', 'update', '-qq'] in calls, plat, script, pkgs)
+                pkgs = [x for c in installs for x in c[c.index('install') + 1:] if not x.startswith('-')]
+                updates = [c for c in calls if c[0] == 'apt-get' and 'update' in c]
+                check(set(want) <= set(pkgs) and updates and ['sudo', '-v'] in calls, plat, script, pkgs, calls)
+                check(all('DPkg::Lock::Timeout=300' in c for c in updates + installs)
+                      and all(c[c.index('install') + 1] == '-y' for c in installs)
+                      and calls.index(['sudo', '-v']) < calls.index(updates[0]) < calls.index(installs[0]), plat, script, calls)
                 check(('xclip' in pkgs) == (not have_clip), plat, script, pkgs)
                 check(('wslu' in pkgs and 'xdg-utils' in pkgs) == plat.startswith('wsl'), plat, script, pkgs)
                 # Packages come first: before the tool is packed or the old install removed.
