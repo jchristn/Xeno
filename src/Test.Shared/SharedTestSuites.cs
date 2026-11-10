@@ -48,7 +48,7 @@ namespace Test.Shared
     /// </summary>
     public static class SharedTestSuites
     {
-        private const string _DockerUnavailableSkipReason = "Docker is not available on this machine.";
+        private const string _DockerUnavailableSkipReason = "Docker with Linux containers is not available on this machine (Windows runners run Windows containers).";
         private static readonly Lazy<bool> _DockerAvailable = new Lazy<bool>(CheckDockerAvailable);
         private static readonly SyslogLogging.LoggingModule _TestLogging = CreateQuietLogging();
 
@@ -10054,8 +10054,8 @@ namespace Test.Shared
         {
             try
             {
-                ProcessCommandResult result = RunProcessAsync("docker", new List<string> { "info", "--format", "{{.ServerVersion}}" }, null, CancellationToken.None).GetAwaiter().GetResult();
-                return result.ExitCode == 0;
+                ProcessCommandResult result = RunProcessAsync("docker", new List<string> { "info", "--format", "{{.OSType}}" }, null, CancellationToken.None).GetAwaiter().GetResult();
+                return result.ExitCode == 0 && result.StandardOutput.Trim().Equals("linux", StringComparison.OrdinalIgnoreCase);
             }
             catch (InvalidOperationException)
             {

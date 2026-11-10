@@ -609,8 +609,7 @@ namespace Test.Shared
                     {
                         Check(!tui.Tui.CanExecute(XenoCommandEnum.StartClient), "Start should be disabled before sign-in.");
                         tui.Tui.Execute(XenoCommandEnum.StartClient);
-                        tui.Settle();
-                        Check(tui.Tui.Context.Message.Contains("Sign in", StringComparison.Ordinal), "The status bar should explain sign-in.");
+                        WaitFor(() => tui.Tui.Context.Message.Contains("Sign in", StringComparison.Ordinal), tui, "The status bar should explain sign-in. It said: " + tui.Tui.Context.Message);
                     }
                 })
             });

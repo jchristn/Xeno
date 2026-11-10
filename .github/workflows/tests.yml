@@ -30,6 +30,21 @@ jobs:
         with:
           python-version: '3.12'
 
+      # The client embeds dashboard/dist-local, so the dashboards build before the .NET projects.
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Check dashboard translations
+        working-directory: dashboard
+        run: npm test
+
+      - name: Build dashboards
+        working-directory: dashboard
+        run: |
+          npm run build
+          npm run build:local
+
       - name: Restore
         run: dotnet restore src/Xeno.sln
 
@@ -55,20 +70,6 @@ jobs:
       - name: Run Python SDK tests
         working-directory: src/sdk/python
         run: python -m unittest discover -s tests
-
-      - name: Install dashboard dependencies
-        working-directory: dashboard
-        run: npm ci
-
-      - name: Check dashboard translations
-        working-directory: dashboard
-        run: npm test
-
-      - name: Build dashboards
-        working-directory: dashboard
-        run: |
-          npm run build
-          npm run build:local
 
       - name: Install Playwright browser
         working-directory: dashboard
@@ -158,6 +159,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the local dashboard the client embeds
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build:local
 
       # The shared suites open more connections than the images allow by default (PostgreSQL 100, MySQL 151).
       - name: Raise PostgreSQL connection limit
