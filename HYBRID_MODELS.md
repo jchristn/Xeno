@@ -2,7 +2,7 @@
 
 The Xeno client's local endpoint gives apps on your machine one address for two kinds of models:
 
-- **Local models** run on your own providers (Ollama, vLLM, OpenAI-compatible). Requests go straight to them.
+- **Local models** run on your own machine (Ollama, vLLM, OpenAI-compatible). Requests go straight to them.
 - **Network models** are served by other machines on the Xeno network. Requests go through the Xeno server.
 
 ## 1. Turn on the local endpoint
@@ -26,7 +26,23 @@ xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:
 xeno model add --provider local-ollama --name llama3.1:8b --type completion
 ```
 
-To keep a provider for your own use and never share it with the network (for example a paid cloud account), add `--local-only`.
+Or add them to the same `~/.xeno/client.json` (restart the client after editing):
+
+```json
+"Providers": [
+  {
+    "Name": "local-ollama",
+    "ApiType": "Ollama",
+    "Endpoint": "http://127.0.0.1:11434",
+    "ShareWithNetwork": true,
+    "Models": [
+      { "Name": "llama3.1:8b", "SupportsCompletions": true }
+    ]
+  }
+]
+```
+
+To keep a provider for your own use and never share it with the network (for example a paid cloud account), add `--local-only` or set `"ShareWithNetwork": false`.
 
 ## 3. Start the client and point your apps at it
 

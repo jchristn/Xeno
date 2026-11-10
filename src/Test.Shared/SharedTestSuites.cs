@@ -8158,7 +8158,8 @@ namespace Test.Shared
             };
 
             using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
-            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            // One budget covers every connection below; slow Windows runners need more than 10 s for all of them.
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
             {
                 XenoServer server = new XenoServer(settings);
                 Task serverTask = server.StartAsync(serverTokenSource.Token);
