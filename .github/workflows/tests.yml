@@ -1,0 +1,178 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Full suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore
+        run: dotnet restore src/Xeno.sln
+
+      - name: Build
+        run: dotnet build src/Xeno.sln --no-restore
+
+      - name: Run console tests
+        run: dotnet run --project src/Test.Automated --no-build -- --results results-automated.json
+
+      - name: Run xUnit tests
+        run: dotnet test src/Test.Xunit --no-build
+
+      - name: Run NUnit tests
+        run: dotnet test src/Test.Nunit --no-build
+
+      - name: Run C# SDK tests
+        run: dotnet test src/sdk/csharp/Xeno.Sdk.Tests
+
+      - name: Run JavaScript SDK tests
+        working-directory: src/sdk/javascript
+        run: npm test
+
+      - name: Run Python SDK tests
+        working-directory: src/sdk/python
+        run: python -m unittest discover -s tests
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Check dashboard translations
+        working-directory: dashboard
+        run: npm test
+
+      - name: Build dashboards
+        working-directory: dashboard
+        run: |
+          npm run build
+          npm run build:local
+
+      - name: Install Playwright browser
+        working-directory: dashboard
+        run: npx playwright install --with-deps chromium
+
+      - name: Run local dashboard tests
+        working-directory: dashboard
+        run: npx playwright test --config playwright.local.config.mjs
+
+      - name: Run server dashboard tests
+        working-directory: dashboard
+        run: npx playwright test --config playwright.config.mjs
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            results-*.json
+            dashboard/test-results/
+
+  providers:
+    # Service containers only run on Linux runners. Each matrix entry starts only its own container,
+    # because an empty image skips the service. The suites read the XENO_TEST_DB_* variables.
+    name: Provider matrix (${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: mysql
+            port: 3306
+            user: root
+          - provider: postgresql
+            port: 5432
+            user: postgres
+          - provider: sqlserver
+            port: 1433
+            user: sa
+    services:
+      mysql:
+        image: ${{ matrix.provider == 'mysql' && 'mysql:8.4' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: Test_Passw0rd
+          MYSQL_DATABASE: xeno_test
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pTest_Passw0rd"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      postgresql:
+        image: ${{ matrix.provider == 'postgresql' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_PASSWORD: Test_Passw0rd
+          POSTGRES_DB: xeno_test
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      sqlserver:
+        image: ${{ matrix.provider == 'sqlserver' && 'mcr.microsoft.com/mssql/server:2022-latest' || '' }}
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Test_Passw0rd
+        ports:
+          - 127.0.0.1:1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S 127.0.0.1 -U sa -P Test_Passw0rd -Q 'SELECT 1' -b"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    env:
+      XENO_TEST_DB_PROVIDER: ${{ matrix.provider }}
+      XENO_TEST_DB_HOST: 127.0.0.1
+      XENO_TEST_DB_PORT: ${{ matrix.port }}
+      XENO_TEST_DB_NAME: xeno_test
+      XENO_TEST_DB_USER: ${{ matrix.user }}
+      XENO_TEST_DB_PASSWORD: Test_Passw0rd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The shared suites open more connections than the images allow by default (PostgreSQL 100, MySQL 151).
+      - name: Raise PostgreSQL connection limit
+        if: matrix.provider == 'postgresql'
+        run: |
+          docker exec ${{ job.services.postgresql.id }} psql -U postgres -c "ALTER SYSTEM SET max_connections = 500;"
+          docker restart ${{ job.services.postgresql.id }}
+          for i in $(seq 1 30); do docker exec ${{ job.services.postgresql.id }} pg_isready -h 127.0.0.1 -U postgres && break; sleep 2; done
+
+      - name: Raise MySQL connection limit
+        if: matrix.provider == 'mysql'
+        run: docker exec ${{ job.services.mysql.id }} mysql -h 127.0.0.1 -uroot -pTest_Passw0rd -e "SET GLOBAL max_connections = 1000;"
+
+      - name: Run shared suites against ${{ matrix.provider }}
+        run: dotnet run --project src/Test.Automated -- --results results-provider-${{ matrix.provider }}.json
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-provider-${{ matrix.provider }}
+          path: results-provider-${{ matrix.provider }}.json

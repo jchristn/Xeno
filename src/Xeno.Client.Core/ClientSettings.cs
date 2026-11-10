@@ -15,6 +15,8 @@ namespace Xeno.Client
     /// </summary>
     public class ClientSettings
     {
+        private int _DefaultMaxConcurrentRequests = 4;
+
         /// <summary>
         /// Settings directory.
         /// </summary>
@@ -81,6 +83,27 @@ namespace Xeno.Client
         public ClientTelemetrySettings Telemetry { get; set; } = new ClientTelemetrySettings();
 
         /// <summary>
+        /// Listener port this load migrated away from, when the stored port was the pre-0.2.0 default. Null when no migration happened during this load. Not persisted; the one-time notice is recorded in client state.
+        /// </summary>
+        [JsonIgnore]
+        public int? LocalInferencePortMigratedFrom { get; private set; } = null;
+
+        /// <summary>
+        /// Default maximum concurrent requests per provider, used when a provider sets no limit. Shared by network requests and local listener requests. Default is 4. Minimum 1, maximum 256; out-of-range values are clamped.
+        /// </summary>
+        public int DefaultMaxConcurrentRequests
+        {
+            get
+            {
+                return _DefaultMaxConcurrentRequests;
+            }
+            set
+            {
+                _DefaultMaxConcurrentRequests = Math.Min(256, Math.Max(1, value));
+            }
+        }
+
+        /// <summary>
         /// Provider endpoint settings.
         /// </summary>
         public List<ClientRunnerSettings> Providers { get; set; } = new List<ClientRunnerSettings>();
@@ -128,6 +151,11 @@ namespace Xeno.Client
             }
 
             if (rewritten) settings.Save();
+            if (settings.LocalInferencePortMigratedFrom.HasValue)
+            {
+                ClientConnectionState.RecordLocalInferencePortMigration(settings.LocalInferencePortMigratedFrom.Value, settings.LocalInferenceServer.Port);
+            }
+
             return settings;
         }
 
@@ -141,7 +169,7 @@ namespace Xeno.Client
         }
 
         /// <summary>
-        /// Build advertised inventory.
+        /// Build advertised inventory. Providers with ShareWithNetwork set to false are left out.
         /// </summary>
         /// <returns>Inventory object.</returns>
         /// <exception cref="InvalidOperationException">A provider endpoint points at the enabled local inference listener.</exception>
@@ -155,8 +183,8 @@ namespace Xeno.Client
                 machineName = Environment.MachineName,
                 processorCount = Environment.ProcessorCount,
                 totalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
-                clientVersion = "0.1.1",
-                providers = Runners.ConvertAll(runner => new
+                clientVersion = "0.2.0",
+                providers = Runners.FindAll(runner => runner != null && runner.ShareWithNetwork).ConvertAll(runner => new
                 {
                     name = runner.Name,
                     apiType = runner.ApiType,
@@ -174,7 +202,7 @@ namespace Xeno.Client
         }
 
         /// <summary>
-        /// Build typed inventory protocol message.
+        /// Build typed inventory protocol message. Providers with ShareWithNetwork set to false are left out.
         /// </summary>
         /// <returns>Inventory message.</returns>
         /// <exception cref="InvalidOperationException">A provider endpoint points at the enabled local inference listener.</exception>
@@ -184,6 +212,7 @@ namespace Xeno.Client
             ClientInventoryMessage inventory = new ClientInventoryMessage();
             foreach (ClientRunnerSettings runner in Runners)
             {
+                if (runner == null || !runner.ShareWithNetwork) continue;
                 ClientInventorySourceMessage source = new ClientInventorySourceMessage
                 {
                     Name = runner.Name,
@@ -296,16 +325,37 @@ namespace Xeno.Client
             if (probe.Server == null) rewritten = true;
             if (probe.LocalDashboard == null) rewritten = true;
             if (probe.LocalInferenceServer == null) rewritten = true;
-            else if (!probe.LocalInferenceServer.RequestTimeoutMs.HasValue) rewritten = true;
-            else if (probe.LocalInferenceServer.RequestTimeoutMs.Value == 120000)
+            else
             {
-                LocalInferenceServer.RequestTimeoutMs = 300000;
-                rewritten = true;
+                ClientLocalInferenceServerSettingsProbe inference = probe.LocalInferenceServer;
+                if (!inference.RequestTimeoutMs.HasValue) rewritten = true;
+                else if (inference.RequestTimeoutMs.Value == 120000)
+                {
+                    LocalInferenceServer.RequestTimeoutMs = 300000;
+                    rewritten = true;
+                }
+
+                if (inference.Port.HasValue && inference.Port.Value == ClientLocalInferenceServerSettings.LegacyDefaultPort)
+                {
+                    LocalInferenceServer.Port = ClientLocalInferenceServerSettings.DefaultPort;
+                    LocalInferencePortMigratedFrom = ClientLocalInferenceServerSettings.LegacyDefaultPort;
+                    rewritten = true;
+                }
+
+                if (!inference.Port.HasValue) rewritten = true;
+                if (String.IsNullOrWhiteSpace(inference.RoutingMode)) rewritten = true;
+                if (inference.Routes == null) rewritten = true;
+                if (!inference.DiscoverLocalModels.HasValue) rewritten = true;
+                if (!inference.HealthCheckIntervalMs.HasValue) rewritten = true;
+                if (!inference.LocalQueueTimeoutMs.HasValue) rewritten = true;
             }
+
+            if (!probe.DefaultMaxConcurrentRequests.HasValue) rewritten = true;
 
             if (probe.Telemetry == null) rewritten = true;
             if (probe.Providers == null) rewritten = true;
             else if (HasOllamaProviderMissingModelManagement(probe.Providers)) rewritten = true;
+            else if (HasProviderMissingRoutingFlags(probe.Providers)) rewritten = true;
             return rewritten;
         }
 
@@ -315,6 +365,16 @@ namespace Xeno.Client
             {
                 string apiType = String.IsNullOrWhiteSpace(provider.ApiType) ? provider.Provider ?? String.Empty : provider.ApiType;
                 if (IsOllamaProvider(apiType) && !provider.AllowModelManagement.HasValue) return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasProviderMissingRoutingFlags(List<ClientRunnerSettingsProbe> providers)
+        {
+            foreach (ClientRunnerSettingsProbe provider in providers)
+            {
+                if (!provider.ShareWithNetwork.HasValue || !provider.RouteLocalRequests.HasValue) return true;
             }
 
             return false;

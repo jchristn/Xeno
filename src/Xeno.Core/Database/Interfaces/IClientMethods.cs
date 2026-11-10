@@ -94,6 +94,17 @@ namespace Xeno.Core.Database.Interfaces
         Task AdjustInFlightAsync(string tenantId, string id, int delta, CancellationToken token = default);
 
         /// <summary>
+        /// Set a client's reported network capacity (the max_parallel_requests column) without touching its child rows.
+        /// Clients report the slots their shared providers have left after this machine's own local requests.
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier.</param>
+        /// <param name="id">Client identifier.</param>
+        /// <param name="maxParallelRequests">Reported capacity. Minimum 1; smaller values are stored as 1, because 0 means unlimited.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        Task UpdateCapacityAsync(string tenantId, string id, int maxParallelRequests, CancellationToken token = default);
+
+        /// <summary>
         /// Delete a client and its provider and model child rows within a tenant.
         /// </summary>
         /// <param name="tenantId">Tenant identifier.</param>

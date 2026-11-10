@@ -1,6 +1,6 @@
 # Xeno JavaScript SDK
 
-The Xeno JavaScript SDK is a dependency-free ESM client for Xeno v0.1.1 alpha.
+The Xeno JavaScript SDK is a dependency-free ESM client for Xeno v0.2.0 alpha.
 
 ## Install
 
@@ -122,4 +122,4 @@ than wrapped by the server SDKs.
 
 ## Alpha Notice
 
-Xeno v0.1.1 is alpha software. API shapes may change before a stable release.
+Xeno v0.2.0 is alpha software. API shapes may change before a stable release.

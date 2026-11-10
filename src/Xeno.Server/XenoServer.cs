@@ -2488,6 +2488,7 @@ namespace Xeno.Server
             bool requestedStream = stream || body.Stream.GetValueOrDefault();
             string? model = body.Model;
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, false, token).ConfigureAwait(false);
+            ApiProviderTypeEnum? routedProvider = null;
 
             if (!decision.Success)
             {
@@ -2497,7 +2498,7 @@ namespace Xeno.Server
                 return;
             }
 
-            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, false, requestedStream, token).ConfigureAwait(false);
+            await RelayWithBusyRetryAsync(context, requestContext, path, decision, requestBodyJson, false, requestedStream, model, routedProvider, token).ConfigureAwait(false);
         }
 
         private async Task HandleEmbeddingAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
@@ -2506,6 +2507,7 @@ namespace Xeno.Server
             OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
             string? model = body.Model;
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, model, true, token).ConfigureAwait(false);
+            ApiProviderTypeEnum? routedProvider = null;
 
             if (!decision.Success)
             {
@@ -2515,7 +2517,7 @@ namespace Xeno.Server
                 return;
             }
 
-            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, true, false, token).ConfigureAwait(false);
+            await RelayWithBusyRetryAsync(context, requestContext, path, decision, requestBodyJson, true, false, model, routedProvider, token).ConfigureAwait(false);
         }
 
         private async Task HandleOllamaCompletionAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
@@ -2524,6 +2526,8 @@ namespace Xeno.Server
             OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
             bool requestedStream = body.Stream.GetValueOrDefault();
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, body.Model, false, ApiProviderTypeEnum.Ollama, token).ConfigureAwait(false);
+            ApiProviderTypeEnum? routedProvider = ApiProviderTypeEnum.Ollama;
+            string? model = body.Model;
 
             if (!decision.Success)
             {
@@ -2533,7 +2537,7 @@ namespace Xeno.Server
                 return;
             }
 
-            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, false, requestedStream, token).ConfigureAwait(false);
+            await RelayWithBusyRetryAsync(context, requestContext, path, decision, requestBodyJson, false, requestedStream, model, routedProvider, token).ConfigureAwait(false);
         }
 
         private async Task HandleOllamaEmbeddingAsync(HttpContextBase context, RequestContext requestContext, string path, CancellationToken token)
@@ -2541,6 +2545,8 @@ namespace Xeno.Server
             string requestBodyJson = ReadBodyJson(context);
             OpenAiRequestBody body = ReadJsonBody<OpenAiRequestBody>(context);
             RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, body.Model, true, ApiProviderTypeEnum.Ollama, token).ConfigureAwait(false);
+            ApiProviderTypeEnum? routedProvider = ApiProviderTypeEnum.Ollama;
+            string? model = body.Model;
 
             if (!decision.Success)
             {
@@ -2550,10 +2556,10 @@ namespace Xeno.Server
                 return;
             }
 
-            await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, true, false, token).ConfigureAwait(false);
+            await RelayWithBusyRetryAsync(context, requestContext, path, decision, requestBodyJson, true, false, model, routedProvider, token).ConfigureAwait(false);
         }
 
-        private async Task RelayClientRequestAsync(
+        private async Task RelayWithBusyRetryAsync(
             HttpContextBase context,
             RequestContext requestContext,
             string path,
@@ -2561,8 +2567,41 @@ namespace Xeno.Server
             string requestBodyJson,
             bool embeddings,
             bool stream,
+            string? model,
+            ApiProviderTypeEnum? provider,
             CancellationToken token)
         {
+            bool busy = await RelayClientRequestAsync(context, requestContext, path, decision, requestBodyJson, embeddings, stream, token, true).ConfigureAwait(false);
+            if (!busy) return;
+            RoutingDecision retry = await RequireRouting().RouteAsync(requestContext, model, embeddings, provider, token, decision.SelectedClientId).ConfigureAwait(false);
+            retry.Timeline.Insert(0, "ClientBusyRetry");
+            if (!retry.Success)
+            {
+                retry.HttpStatusCode = 503;
+                retry.OutcomeCode = "AllClientsBusy";
+                retry.Message = "Every client that serves this model is at its concurrency limit. Try again shortly.";
+                RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, retry, token).ConfigureAwait(false);
+                ApplyRoutingTraceHeaders(context, requestContext, retry, null, null, history);
+                context.Response.Headers.Add("Retry-After", "1");
+                await SendStatusJsonAsync(context, retry.HttpStatusCode, new { error = retry.OutcomeCode, message = retry.Message }).ConfigureAwait(false);
+                return;
+            }
+
+            await RelayClientRequestAsync(context, requestContext, path, retry, requestBodyJson, embeddings, stream, token, false).ConfigureAwait(false);
+        }
+
+        private async Task<bool> RelayClientRequestAsync(
+            HttpContextBase context,
+            RequestContext requestContext,
+            string path,
+            RoutingDecision decision,
+            string requestBodyJson,
+            bool embeddings,
+            bool stream,
+            CancellationToken token,
+            bool allowBusyRetry = false)
+        {
+            bool busyRetry = false;
             XenoClientRecord? client = await ResolveSelectedClientAsync(requestContext.TenantId, decision.SelectedClientId, token).ConfigureAwait(false);
             if (client == null)
             {
@@ -2574,7 +2613,7 @@ namespace Xeno.Server
                 RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
                 ApplyRoutingTraceHeaders(context, requestContext, decision, null, null, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
-                return;
+                return false;
             }
 
             ClientConnection? connection = GetClientConnection(decision.SelectedClientId);
@@ -2588,7 +2627,7 @@ namespace Xeno.Server
                 RequestHistoryEntry history = await RecordAndSaveHistoryAsync(requestContext, context.Request.Method.ToString().ToUpperInvariant(), path, decision, token).ConfigureAwait(false);
                 ApplyRoutingTraceHeaders(context, requestContext, decision, client, null, history);
                 await SendStatusJsonAsync(context, decision.HttpStatusCode, new { error = decision.OutcomeCode, message = decision.Message }).ConfigureAwait(false);
-                return;
+                return false;
             }
 
             string requestId = requestContext.RequestId;
@@ -2650,7 +2689,12 @@ namespace Xeno.Server
                 if (stream)
                 {
                     ClientResponseMessage firstResponse = await WaitForClientFirstResponseAsync(requestId, pending, EffectiveRequestTimeoutMs(decision), requestWaitSource.Token).ConfigureAwait(false);
-                    if (IsClientResponseStart(firstResponse))
+                    if (allowBusyRetry && firstResponse.Busy)
+                    {
+                        decision.Timeline.Add("ClientBusy");
+                        busyRetry = true;
+                    }
+                    else if (IsClientResponseStart(firstResponse))
                     {
                         await StreamClientResponseAsync(context, requestContext, path, decision, client, selectedModel, pending, firstResponse, requestBodyJson, capturedRequestHeaders, clientRequestStartedUtc.Value, requestWaitSource.Token).ConfigureAwait(false);
                     }
@@ -2665,8 +2709,16 @@ namespace Xeno.Server
                 {
                     ClientResponseMessage response = await WaitForClientResponseAsync(requestId, pending, EffectiveRequestTimeoutMs(decision), requestWaitSource.Token).ConfigureAwait(false);
                     decision.ClientRoundTripMs = Math.Max(0, (long)(DateTime.UtcNow - clientRequestStartedUtc.Value).TotalMilliseconds);
-                    decision.Timeline.Add("ClientResponse");
-                    await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
+                    if (allowBusyRetry && response.Busy)
+                    {
+                        decision.Timeline.Add("ClientBusy");
+                        busyRetry = true;
+                    }
+                    else
+                    {
+                        decision.Timeline.Add("ClientResponse");
+                        await SendClientResponseAsync(context, requestContext, path, decision, client, selectedModel, response, requestBodyJson, capturedRequestHeaders, requestWaitSource.Token).ConfigureAwait(false);
+                    }
                 }
             }
             catch (OperationCanceledException) when (callerDisconnectedSource != null && callerDisconnectedSource.IsCancellationRequested)
@@ -2715,6 +2767,8 @@ namespace Xeno.Server
                 callerDisconnectedSource?.Dispose();
                 await _Database!.Clients!.UpdateAsync(client, CancellationToken.None).ConfigureAwait(false);
             }
+
+            return busyRetry;
         }
 
         private async Task SendClientResponseAsync(
@@ -3858,7 +3912,7 @@ namespace Xeno.Server
             if (String.Equals(type, "client.heartbeat", StringComparison.OrdinalIgnoreCase))
             {
                 ClientHeartbeatMessage? message = JsonUtil.Deserialize<ClientHeartbeatMessage>(json);
-                await UpdateClientHeartbeatAsync(message?.ClientId, session, requestContext, token).ConfigureAwait(false);
+                await UpdateClientHeartbeatAsync(message?.ClientId, session, requestContext, token, message?.NetworkCapacity).ConfigureAwait(false);
                 return "server.heartbeat";
             }
 
@@ -4069,7 +4123,8 @@ namespace Xeno.Server
         private async Task RelayClientLocalInferenceRequestAsync(WebSocketSession originSession, ClientLocalInferenceRequestMessage request, RequestContext requestContext, CancellationToken token)
         {
             ApiProviderTypeEnum? provider = String.Equals(request.ProviderFamily, "ollama", StringComparison.OrdinalIgnoreCase) ? ApiProviderTypeEnum.Ollama : null;
-            RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, request.Model, request.Embeddings, provider, token).ConfigureAwait(false);
+            string? excludeClientId = request.ExcludeRequestingClient && !String.IsNullOrWhiteSpace(request.ClientId) ? request.ClientId : null;
+            RoutingDecision decision = await RequireRouting().RouteAsync(requestContext, request.Model, request.Embeddings, provider, token, excludeClientId).ConfigureAwait(false);
             if (!decision.Success)
             {
                 await RecordAndSaveHistoryAsync(requestContext, request.Method, request.RelativePath, decision, token).ConfigureAwait(false);
@@ -5604,7 +5659,7 @@ namespace Xeno.Server
             }
         }
 
-        private async Task UpdateClientHeartbeatAsync(string? clientId, WebSocketSession session, RequestContext requestContext, CancellationToken token)
+        private async Task UpdateClientHeartbeatAsync(string? clientId, WebSocketSession session, RequestContext requestContext, CancellationToken token, int? networkCapacity = null)
         {
             if (String.IsNullOrWhiteSpace(clientId)) return;
             ClientConnection? connection = GetClientConnection(clientId);
@@ -5617,6 +5672,7 @@ namespace Xeno.Server
             // Targeted scalar update only: rewriting the full aggregate here would replace the provider/model
             // child tables and could clobber a concurrent inventory update on reconnect.
             await _Database!.Clients!.UpdateHeartbeatAsync(requestContext.TenantId, clientId, true, DateTime.UtcNow, token).ConfigureAwait(false);
+            if (networkCapacity.HasValue) await _Database!.Clients!.UpdateCapacityAsync(requestContext.TenantId, clientId, networkCapacity.Value, token).ConfigureAwait(false);
         }
 
         private static void BindClientOwner(XenoClientRecord client, RequestContext requestContext)

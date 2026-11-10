@@ -11,6 +11,8 @@ namespace Xeno.Client
     /// </summary>
     public class ClientRunnerSettings
     {
+        private int? _MaxConcurrentRequests = null;
+
         /// <summary>
         /// Provider endpoint name.
         /// </summary>
@@ -56,6 +58,31 @@ namespace Xeno.Client
         /// Upstream request timeout in milliseconds.
         /// </summary>
         public int TimeoutMs { get; set; } = 300000;
+
+        /// <summary>
+        /// Whether this provider's models are offered to the Xeno network. Default is true. Set false for a local-only provider, such as a personal Ollama Cloud or ollama.com account.
+        /// </summary>
+        public bool ShareWithNetwork { get; set; } = true;
+
+        /// <summary>
+        /// Whether the local inference listener may route this machine's requests directly to this provider. Default is true.
+        /// </summary>
+        public bool RouteLocalRequests { get; set; } = true;
+
+        /// <summary>
+        /// Maximum concurrent requests across all models on this provider, shared by network and local requests. Null (the default) inherits ClientSettings.DefaultMaxConcurrentRequests. Minimum 1, maximum 256; out-of-range values are clamped.
+        /// </summary>
+        public int? MaxConcurrentRequests
+        {
+            get
+            {
+                return _MaxConcurrentRequests;
+            }
+            set
+            {
+                _MaxConcurrentRequests = value.HasValue ? Math.Min(256, Math.Max(1, value.Value)) : null;
+            }
+        }
 
         /// <summary>
         /// Models.

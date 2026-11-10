@@ -21,7 +21,7 @@ namespace Xeno.Client.Services
         public static ModelCatalog BuildLocal(ClientSettings settings)
         {
             ArgumentNullException.ThrowIfNull(settings);
-            return Merge(settings, null, "The network model list was not requested.");
+            return Merge(settings, null, "The network model list was not requested.", Routing.LocalInferenceRuntimeStatus.Load()?.Backends);
         }
 
         /// <summary>
@@ -37,7 +37,7 @@ namespace Xeno.Client.Services
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(server);
             NetworkModelListResult network = await server.ListNetworkModelsAsync(settings, token).ConfigureAwait(false);
-            return Merge(settings, network.Success ? network.Models : null, network.Success ? String.Empty : (network.Error ?? "The network model list is unavailable."));
+            return Merge(settings, network.Success ? network.Models : null, network.Success ? String.Empty : (network.Error ?? "The network model list is unavailable."), Routing.LocalInferenceRuntimeStatus.Load()?.Backends);
         }
 
         /// <summary>
@@ -50,18 +50,37 @@ namespace Xeno.Client.Services
         /// <exception cref="ArgumentNullException">Settings is null.</exception>
         public static ModelCatalog Merge(ClientSettings settings, IEnumerable<NetworkModelEntry>? networkModels, string networkMessage)
         {
+            return Merge(settings, networkModels, networkMessage, null);
+        }
+
+        /// <summary>
+        /// Merge configured models, models local providers reported, and the network model list into one catalog, and
+        /// record where the local inference listener would route each model.
+        /// </summary>
+        /// <param name="settings">Client settings.</param>
+        /// <param name="networkModels">Network models, or null when the list is unavailable.</param>
+        /// <param name="networkMessage">Why the network list is unavailable, shown when networkModels is null.</param>
+        /// <param name="backends">Local provider health snapshots with discovered models. Null when unknown.</param>
+        /// <returns>Catalog.</returns>
+        /// <exception cref="ArgumentNullException">settings is null.</exception>
+        public static ModelCatalog Merge(ClientSettings settings, IEnumerable<NetworkModelEntry>? networkModels, string networkMessage, IReadOnlyCollection<Routing.LocalBackendStatus>? backends)
+        {
             ArgumentNullException.ThrowIfNull(settings);
             Dictionary<string, ModelCatalogEntry> entries = new Dictionary<string, ModelCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, bool> shared = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             foreach (ClientRunnerSettings provider in settings.Runners)
             {
                 foreach (ClientModelSettings model in provider.Models)
                 {
                     if (String.IsNullOrWhiteSpace(model.Name)) continue;
-                    if (!entries.TryGetValue(model.Name, out ModelCatalogEntry? entry))
+                    string key = LocalModelNameNormalizer.Normalize(model.Name);
+                    if (!entries.TryGetValue(key, out ModelCatalogEntry? entry))
                     {
                         entry = new ModelCatalogEntry { Name = model.Name, LocalApiType = provider.ApiType };
-                        entries[model.Name] = entry;
+                        entries[key] = entry;
                     }
+
+                    shared[key] = (shared.TryGetValue(key, out bool already) && already) || provider.ShareWithNetwork;
 
                     entry.ServedLocally = true;
                     if (!entry.LocalProviders.Contains(provider.Name, StringComparer.OrdinalIgnoreCase)) entry.LocalProviders.Add(provider.Name);
@@ -71,15 +90,46 @@ namespace Xeno.Client.Services
                 }
             }
 
+            if ((settings.LocalInferenceServer?.DiscoverLocalModels ?? true) && backends != null)
+            {
+                foreach (Routing.LocalBackendStatus status in backends)
+                {
+                    ClientRunnerSettings? provider = settings.Runners.FirstOrDefault(item => String.Equals(item.Name, status.Provider, StringComparison.OrdinalIgnoreCase));
+                    if (provider == null || !provider.RouteLocalRequests) continue;
+                    foreach (string name in status.DiscoveredModels)
+                    {
+                        if (String.IsNullOrWhiteSpace(name)) continue;
+                        string key = LocalModelNameNormalizer.Normalize(name);
+                        if (entries.TryGetValue(key, out ModelCatalogEntry? existing))
+                        {
+                            if (existing.ServedLocally && !existing.LocalProviders.Contains(provider.Name, StringComparer.OrdinalIgnoreCase)) existing.LocalProviders.Add(provider.Name);
+                            continue;
+                        }
+
+                        entries[key] = new ModelCatalogEntry
+                        {
+                            Name = name,
+                            LocalApiType = provider.ApiType,
+                            ServedLocally = true,
+                            LocalProviders = new List<string> { provider.Name },
+                            SupportsCompletions = true,
+                            Discovered = true
+                        };
+                        shared[key] = false;
+                    }
+                }
+            }
+
             if (networkModels != null)
             {
                 foreach (NetworkModelEntry network in networkModels)
                 {
                     if (String.IsNullOrWhiteSpace(network.Id)) continue;
-                    if (!entries.TryGetValue(network.Id, out ModelCatalogEntry? entry))
+                    string key = LocalModelNameNormalizer.Normalize(network.Id);
+                    if (!entries.TryGetValue(key, out ModelCatalogEntry? entry))
                     {
                         entry = new ModelCatalogEntry { Name = network.Id };
-                        entries[network.Id] = entry;
+                        entries[key] = entry;
                     }
 
                     entry.OnNetwork = true;
@@ -87,11 +137,17 @@ namespace Xeno.Client.Services
                 }
             }
 
-            foreach (ModelCatalogEntry entry in entries.Values)
+            foreach (KeyValuePair<string, ModelCatalogEntry> pair in entries)
             {
+                ModelCatalogEntry entry = pair.Value;
                 entry.Availability = entry.ServedLocally && entry.OnNetwork
                     ? ModelAvailabilityEnum.Both
                     : entry.OnNetwork ? ModelAvailabilityEnum.XenoNetwork : ModelAvailabilityEnum.ThisMachine;
+                entry.LocalOnly = entry.ServedLocally && !(shared.TryGetValue(pair.Key, out bool isShared) && isShared);
+                bool embeddingsOnly = entry.SupportsEmbeddings && !entry.SupportsCompletions;
+                Routing.LocalInferenceRouteDecision decision = Routing.LocalInferenceRouter.Resolve(settings, backends, entry.Name, Routing.LocalInferenceApiShapeEnum.OpenAi, embeddingsOnly);
+                entry.RouteTarget = decision.RouteHeader;
+                entry.RouteReason = decision.Reason;
             }
 
             return new ModelCatalog

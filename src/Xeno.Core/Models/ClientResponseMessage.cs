@@ -64,6 +64,12 @@ namespace Xeno.Core.Models
         public string? Body { get; set; } = null;
 
         /// <summary>
+        /// True when the client turned the request away because the provider was at its concurrency limit, before doing any work.
+        /// The server may route the request to another client once. Default is false; clients before 0.2.0 never set it.
+        /// </summary>
+        public bool Busy { get; set; } = false;
+
+        /// <summary>
         /// Error message when the request failed.
         /// </summary>
         [JsonPropertyName("error")]

@@ -127,6 +127,7 @@ namespace Xeno.Desktop
             {
                 case XenoPageEnum.Models: created = new ModelsPage(_Session, this); break;
                 case XenoPageEnum.Providers: created = new ProvidersPage(_Session, this); break;
+                case XenoPageEnum.LocalEndpoint: created = new LocalEndpointPage(_Session, this); break;
                 case XenoPageEnum.Requests: created = new RequestsPage(_Session, this); break;
                 case XenoPageEnum.Logs: created = new LogsPage(_Session, this); break;
                 case XenoPageEnum.HostTelemetry: created = new HostTelemetryPage(_Session, this); break;

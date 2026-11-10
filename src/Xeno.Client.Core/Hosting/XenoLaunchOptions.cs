@@ -22,8 +22,8 @@ namespace Xeno.Client.Hosting
         /// </summary>
         public static readonly IReadOnlyList<string> Usage = new List<string>
         {
-            "  --page <page>     Open a page: overview, models, providers, requests, logs,",
-            "                    hosttelemetry, providertelemetry, server, settings.",
+            "  --page <page>     Open a page: overview, models, providers, localendpoint, requests,",
+            "                    logs, hosttelemetry, providertelemetry, server, settings.",
             "  --server <url>    Point this client at a Xeno server and save it to client.json:",
             "                    cloud (the default Xeno cloud server), a ws:// or wss:// URL,",
             "                    an http:// or https:// URL, or host[:port] (port 9000 if omitted).",

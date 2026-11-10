@@ -138,6 +138,7 @@ namespace Xeno.Client.Presentation
                 XenoMenuEntry.Item("Open Xeno", XenoCommandEnum.OpenDesktopApp),
                 XenoMenuEntry.Item("Open Xeno Terminal", XenoCommandEnum.OpenTerminalApp),
                 XenoMenuEntry.Item("Open Web Dashboard", XenoCommandEnum.OpenWebDashboard),
+                XenoMenuEntry.Item("Open Local Endpoint", XenoCommandEnum.GoLocalEndpoint),
                 XenoMenuEntry.Separator(),
                 XenoMenuEntry.Item("Start Client", XenoCommandEnum.StartClient),
                 XenoMenuEntry.Item("Stop Client", XenoCommandEnum.StopClient),

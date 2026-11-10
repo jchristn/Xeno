@@ -78,6 +78,12 @@ namespace Test.Shared
                     RoutingSuite(),
                     TenantIsolationSuite(),
                     ClientCliSuite(),
+                    HybridRoutingTestSuites.RoutingSettingsSuite(),
+                    HybridRoutingTestSuites.RoutingFrontEndSuite(),
+                    HybridRoutingTestSuites.RouterSuite(),
+                    HybridRoutingProxyTestSuites.ListenerRoutingSuite(),
+                    HybridConcurrencyTestSuites.ConcurrencySuite(),
+                    HybridConcurrencyTestSuites.VisibilitySuite(),
                     FrontEndTestSuites.SharedClientSuite(),
                     FrontEndTestSuites.TraySuite(),
                     FrontEndTestSuites.DesktopSuite(),
@@ -191,7 +197,7 @@ namespace Test.Shared
                                 if (settings.LocalInferenceServer == null) throw new InvalidOperationException("Local inference settings were not created.");
                                 if (settings.LocalInferenceServer.Enabled) throw new InvalidOperationException("Local inference should be disabled by default.");
                                 if (!String.Equals(settings.LocalInferenceServer.Host, "127.0.0.1", StringComparison.Ordinal)) throw new InvalidOperationException("Local inference default host is incorrect.");
-                                if (settings.LocalInferenceServer.Port != 11434) throw new InvalidOperationException("Local inference default port is incorrect.");
+                                if (settings.LocalInferenceServer.Port != 11435) throw new InvalidOperationException("Local inference default port is incorrect.");
                                 if (settings.LocalInferenceServer.RequestTimeoutMs != 300000) throw new InvalidOperationException("Local inference default request timeout is incorrect.");
                                 TestClientSettingsPresenceProbe? probe = JsonUtil.Deserialize<TestClientSettingsPresenceProbe>(File.ReadAllText(ClientSettings.SettingsFile));
                                 if (probe == null || probe.LocalInferenceServer == null) throw new InvalidOperationException("Local inference settings were not written back to client.json.");
@@ -638,7 +644,8 @@ namespace Test.Shared
                                     {
                                         Enabled = true,
                                         Host = "127.0.0.1",
-                                        Port = port
+                                        Port = port,
+                                        RoutingMode = LocalInferenceRoutingModeEnum.NetworkOnly
                                     }
                                 };
                                 LocalInferenceTunnelBridge.Register(settings, async delegate(object payload, CancellationToken sendToken)
@@ -1696,7 +1703,7 @@ namespace Test.Shared
                             {
                                 Directory.CreateDirectory(clientHome);
                                 string settingsFile = Path.Combine(clientHome, "client.json");
-                                File.WriteAllText(settingsFile, "{\"Name\":\"loop-test\",\"LocalInferenceServer\":{\"Enabled\":true,\"Host\":\"127.0.0.1\",\"Port\":11434},\"Providers\":[{\"Name\":\"self\",\"ApiType\":\"Ollama\",\"Endpoint\":\"http://localhost:11434/api\",\"Models\":[]}]}");
+                                File.WriteAllText(settingsFile, "{\"Name\":\"loop-test\",\"LocalInferenceServer\":{\"Enabled\":true,\"Host\":\"127.0.0.1\",\"Port\":11500},\"Providers\":[{\"Name\":\"self\",\"ApiType\":\"Ollama\",\"Endpoint\":\"http://localhost:11500/api\",\"Models\":[]}]}");
 
                                 ClientCommandResult result = await RunXenoClientAsync(new[] { "start", "--timeout", "1000" }, clientHome).ConfigureAwait(false);
                                 if (result.ExitCode != 1) throw new InvalidOperationException("Conflicting local inference provider loop start command should fail. Output: " + result.StandardOutput + result.StandardError);
@@ -1749,6 +1756,69 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "ClientCli",
+                        "ClientInferenceCommandsManageRouting",
+                        "xeno inference lists, sets, resolves, and removes route rules, and sets limits and provider flags",
+                        executeAsync: async delegate
+                        {
+                            string clientHome = Path.Combine(Path.GetTempPath(), "xeno-client-inference-" + Guid.NewGuid().ToString("N"));
+                            Directory.CreateDirectory(clientHome);
+                            try
+                            {
+                                ClientCommandResult empty = await RunXenoClientAsync(new[] { "inference", "routes" }, clientHome).ConfigureAwait(false);
+                                if (empty.ExitCode != 0 || !empty.StandardOutput.Contains("No route rules", StringComparison.Ordinal)) throw new InvalidOperationException("Empty routes listing failed: " + empty.StandardError + empty.StandardOutput);
+
+                                ClientCommandResult setLocal = await RunXenoClientAsync(new[] { "inference", "route", "set", "llama3.2", "--local", "local-ollama", "--fallback" }, clientHome).ConfigureAwait(false);
+                                if (setLocal.ExitCode != 0) throw new InvalidOperationException("Setting a local rule failed: " + setLocal.StandardError + setLocal.StandardOutput);
+                                ClientCommandResult setNetwork = await RunXenoClientAsync(new[] { "inference", "route", "set", "qwen3:235b", "--network" }, clientHome).ConfigureAwait(false);
+                                if (setNetwork.ExitCode != 0) throw new InvalidOperationException("Setting a network rule failed: " + setNetwork.StandardError + setNetwork.StandardOutput);
+                                ClientCommandResult badProvider = await RunXenoClientAsync(new[] { "inference", "route", "set", "x", "--local", "missing" }, clientHome).ConfigureAwait(false);
+                                if (badProvider.ExitCode == 0) throw new InvalidOperationException("A rule naming a missing provider was accepted.");
+                                ClientCommandResult both = await RunXenoClientAsync(new[] { "inference", "route", "set", "x", "--network", "--local", "local-ollama" }, clientHome).ConfigureAwait(false);
+                                if (both.ExitCode == 0) throw new InvalidOperationException("--network with --local was accepted.");
+
+                                ClientCommandResult routes = await RunXenoClientAsync(new[] { "--json", "inference", "routes" }, clientHome).ConfigureAwait(false);
+                                if (!routes.StandardOutput.Contains("\"llama3.2\"", StringComparison.Ordinal) || !routes.StandardOutput.Contains("\"qwen3:235b\"", StringComparison.Ordinal) || !routes.StandardOutput.Contains("local:local-ollama", StringComparison.Ordinal)) throw new InvalidOperationException("Routes JSON is wrong: " + routes.StandardOutput);
+
+                                ClientCommandResult resolve = await RunXenoClientAsync(new[] { "inference", "resolve", "qwen3:235b" }, clientHome).ConfigureAwait(false);
+                                if (resolve.ExitCode != 0 || !resolve.StandardOutput.Contains("goes to network", StringComparison.Ordinal) || !resolve.StandardOutput.Contains("route rule", StringComparison.Ordinal)) throw new InvalidOperationException("Resolve text is wrong: " + resolve.StandardOutput);
+                                ClientCommandResult resolveJson = await RunXenoClientAsync(new[] { "--json", "inference", "resolve", "llama3.2" }, clientHome).ConfigureAwait(false);
+                                if (!resolveJson.StandardOutput.Contains("local:local-ollama", StringComparison.Ordinal) || resolveJson.StandardOutput.Contains("Credential", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Resolve JSON is wrong: " + resolveJson.StandardOutput);
+
+                                ClientCommandResult remove = await RunXenoClientAsync(new[] { "inference", "route", "remove", "qwen3:235b" }, clientHome).ConfigureAwait(false);
+                                if (remove.ExitCode != 0) throw new InvalidOperationException("Removing a rule failed: " + remove.StandardError + remove.StandardOutput);
+                                ClientCommandResult removeAgain = await RunXenoClientAsync(new[] { "inference", "route", "remove", "qwen3:235b" }, clientHome).ConfigureAwait(false);
+                                if (removeAgain.ExitCode == 0) throw new InvalidOperationException("Removing a missing rule succeeded.");
+
+                                ClientCommandResult concurrency = await RunXenoClientAsync(new[] { "inference", "concurrency", "7" }, clientHome).ConfigureAwait(false);
+                                if (concurrency.ExitCode != 0) throw new InvalidOperationException("Setting the default limit failed: " + concurrency.StandardError + concurrency.StandardOutput);
+                                ClientCommandResult badConcurrency = await RunXenoClientAsync(new[] { "inference", "concurrency", "0" }, clientHome).ConfigureAwait(false);
+                                if (badConcurrency.ExitCode == 0) throw new InvalidOperationException("A limit of 0 was accepted.");
+
+                                ClientCommandResult localOnly = await RunXenoClientAsync(new[] { "provider", "update", "--name", "local-ollama", "--local-only", "--max-concurrent", "3" }, clientHome).ConfigureAwait(false);
+                                if (localOnly.ExitCode != 0) throw new InvalidOperationException("Provider flags failed: " + localOnly.StandardError + localOnly.StandardOutput);
+                                ClientCommandResult modelLimit = await RunXenoClientAsync(new[] { "model", "update", "--name", "llama3.2:latest", "--max-concurrent", "2" }, clientHome).ConfigureAwait(false);
+                                if (modelLimit.ExitCode != 0) throw new InvalidOperationException("Model limit failed: " + modelLimit.StandardError + modelLimit.StandardOutput);
+                                ClientCommandResult providers = await RunXenoClientAsync(new[] { "--json", "provider", "list" }, clientHome).ConfigureAwait(false);
+                                if (!providers.StandardOutput.Contains("\"shareWithNetwork\": false", StringComparison.Ordinal) || !providers.StandardOutput.Contains("\"maxConcurrentRequests\": 3", StringComparison.Ordinal) || !providers.StandardOutput.Contains("\"effectiveMaxConcurrentRequests\": 2", StringComparison.Ordinal)) throw new InvalidOperationException("Provider JSON is wrong: " + providers.StandardOutput);
+                                ClientCommandResult inventory = await RunXenoClientAsync(new[] { "--json", "inventory" }, clientHome).ConfigureAwait(false);
+                                if (inventory.StandardOutput.Contains("local-ollama", StringComparison.Ordinal)) throw new InvalidOperationException("A local-only provider appeared in the network inventory: " + inventory.StandardOutput);
+                                ClientCommandResult inherit = await RunXenoClientAsync(new[] { "provider", "update", "--name", "local-ollama", "--share-with-network", "true", "--max-concurrent", "inherit" }, clientHome).ConfigureAwait(false);
+                                if (inherit.ExitCode != 0) throw new InvalidOperationException("Inherit failed: " + inherit.StandardError + inherit.StandardOutput);
+
+                                ClientCommandResult status = await RunXenoClientAsync(new[] { "status" }, clientHome).ConfigureAwait(false);
+                                if (!status.StandardOutput.Contains("Routing:          PreferLocal", StringComparison.Ordinal) || !status.StandardOutput.Contains("Route rules:      1", StringComparison.Ordinal) || !status.StandardOutput.Contains("Max concurrent:   7 per provider", StringComparison.Ordinal)) throw new InvalidOperationException("Status routing block is wrong: " + status.StandardOutput);
+                                ClientCommandResult backends = await RunXenoClientAsync(new[] { "inference", "backends" }, clientHome).ConfigureAwait(false);
+                                if (backends.ExitCode != 0 || !backends.StandardOutput.Contains("local-ollama", StringComparison.Ordinal) || !backends.StandardOutput.Contains("health unknown", StringComparison.Ordinal)) throw new InvalidOperationException("Backends listing is wrong: " + backends.StandardOutput);
+                                ClientCommandResult requests = await RunXenoClientAsync(new[] { "inference", "requests" }, clientHome).ConfigureAwait(false);
+                                if (requests.ExitCode != 0 || !requests.StandardOutput.Contains("None yet", StringComparison.Ordinal)) throw new InvalidOperationException("Requests listing is wrong: " + requests.StandardOutput);
+                            }
+                            finally
+                            {
+                                if (Directory.Exists(clientHome)) Directory.Delete(clientHome, true);
+                            }
+                        }),
+                    new TestCaseDescriptor(
+                        "ClientCli",
                         "ClientModelDeleteRemovesConfiguredModels",
                         "Client model delete removes configured models",
                         executeAsync: async delegate
@@ -1787,7 +1857,7 @@ namespace Test.Shared
                                 if (!disabledStatus.StandardOutput.Contains("  Enabled:          false", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include disabled local inference state: " + disabledStatus.StandardOutput);
                                 if (!disabledStatus.StandardOutput.Contains("  Listening:        false", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference listening state: " + disabledStatus.StandardOutput);
                                 if (!disabledStatus.StandardOutput.Contains("  Host:             127.0.0.1", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference host: " + disabledStatus.StandardOutput);
-                                if (!disabledStatus.StandardOutput.Contains("  Port:             11434", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference port: " + disabledStatus.StandardOutput);
+                                if (!disabledStatus.StandardOutput.Contains("  Port:             11435", StringComparison.Ordinal)) throw new InvalidOperationException("Status did not include local inference port: " + disabledStatus.StandardOutput);
                                 disabledDashboardSettings.LocalDashboard.Enabled = true;
                                 File.WriteAllText(clientSettingsFile, JsonUtil.Serialize(disabledDashboardSettings, true));
                                 ClientCommandResult providerAdd = await RunXenoClientAsync(new[] { "provider", "add", "--name", "openai-compatible", "--type", "OpenAICompatible", "--endpoint", "http://127.0.0.1:11435" }, clientHome).ConfigureAwait(false);
@@ -4669,6 +4739,22 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         "Routing",
+                        "ExcludeRequestingClientSkipsOrigin",
+                        "A fallback request is never routed back to the client it came from",
+                        executeAsync: async delegate
+                        {
+                            using DatabaseDriverBase database = await CreateSeededDatabaseAsync().ConfigureAwait(false);
+                            await UpdateSeededClientAsync(database, Constants.DefaultTenantId, item => item.Connected = true).ConfigureAwait(false);
+                            RoutingService routing = new RoutingService(database);
+                            RequestContext context = new RequestContext { TenantId = Constants.DefaultTenantId, IsAuthenticated = true };
+                            RoutingDecision normal = await routing.RouteAsync(context, "llama3.2:latest", false).ConfigureAwait(false);
+                            if (!normal.Success || String.IsNullOrWhiteSpace(normal.SelectedClientId)) throw new InvalidOperationException("Baseline routing failed: " + normal.Message);
+                            RoutingDecision excluded = await routing.RouteAsync(context, "llama3.2:latest", false, null, CancellationToken.None, normal.SelectedClientId).ConfigureAwait(false);
+                            if (excluded.Success && String.Equals(excluded.SelectedClientId, normal.SelectedClientId, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("The excluded client was selected.");
+                            if (!excluded.ExcludedClientReasons.Any(item => item.Contains("RequestingClientExcluded", StringComparison.Ordinal))) throw new InvalidOperationException("The exclusion was not recorded in the routing decision.");
+                        }),
+                    new TestCaseDescriptor(
+                        "Routing",
                         "EmbeddingRoutes",
                         "Embedding requests route to an embedding-capable model",
                         executeAsync: async delegate
@@ -5080,6 +5166,11 @@ namespace Test.Shared
                         "OpenAiCompletionRelaysThroughClient",
                         "OpenAI-compatible completions relay through a connected Xeno client",
                         executeAsync: delegate { return RunRelaySmokeAsync(); }),
+                    new TestCaseDescriptor(
+                        "Relay",
+                        "BusyClientRetriesThenReturns503",
+                        "A client at its concurrency limit gets one retry on another client, then 503 with Retry-After; heartbeats report capacity",
+                        executeAsync: delegate { return RunBusyClientRetryAsync(); }),
                     new TestCaseDescriptor(
                         "Relay",
                         "OpenAiStreamingCompletionRelaysThroughClient",
@@ -7762,6 +7853,124 @@ namespace Test.Shared
                         {
                         }
                         catch (WebSocketException)
+                        {
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static async Task RunBusyClientRetryAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings { Hostname = "127.0.0.1", Port = port, Ssl = false },
+                Database = TestDatabase.Settings(dbFile)
+            };
+            settings.WebSocket.RequestTimeoutMs = 10000;
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            using (CancellationTokenSource clientTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    using (ClientWebSocket socket = new ClientWebSocket())
+                    {
+                        ApplySeedCredentialHeaders(socket);
+                        await socket.ConnectAsync(new Uri("ws://127.0.0.1:" + port + settings.WebSocket.Path), clientTokenSource.Token).ConfigureAwait(false);
+                        int busyAnswers = 0;
+                        Task clientTask = Task.Run(async () =>
+                        {
+                            while (!clientTokenSource.IsCancellationRequested && socket.State == WebSocketState.Open)
+                            {
+                                string? message;
+                                try
+                                {
+                                    message = await ReceiveWebSocketTextAsync(socket, clientTokenSource.Token).ConfigureAwait(false);
+                                }
+                                catch (Exception ex) when (ex is OperationCanceledException || ex is WebSocketException)
+                                {
+                                    return;
+                                }
+
+                                if (String.IsNullOrWhiteSpace(message) || !message.Contains("\"server.request\"", StringComparison.OrdinalIgnoreCase)) continue;
+                                ServerRequestMessage? serverRequest = JsonUtil.Deserialize<ServerRequestMessage>(message);
+                                if (serverRequest == null) continue;
+                                Interlocked.Increment(ref busyAnswers);
+                                await SendWebSocketJsonAsync(socket, new
+                                {
+                                    type = "client.response",
+                                    requestId = serverRequest.RequestId,
+                                    clientId = "xcl_busy",
+                                    tenantId = Constants.DefaultTenantId,
+                                    success = false,
+                                    busy = true,
+                                    statusCode = 503,
+                                    contentType = "application/json",
+                                    body = "{\"error\":\"ClientBusy\"}",
+                                    error = "Provider is at its concurrency limit."
+                                }, clientTokenSource.Token).ConfigureAwait(false);
+                            }
+                        });
+
+                        await SendWebSocketJsonAsync(socket, new
+                        {
+                            type = "client.register",
+                            clientId = "xcl_busy",
+                            tenantId = Constants.DefaultTenantId,
+                            name = "busy-client",
+                            inventory = new
+                            {
+                                runners = new[]
+                                {
+                                    new { name = "busy-runner", apiType = "OpenAICompatible", endpoint = "http://127.0.0.1:1", models = new[] { new { name = "llama3.2:latest", supportsCompletions = true, supportsEmbeddings = false } } }
+                                }
+                            }
+                        }, clientTokenSource.Token).ConfigureAwait(false);
+                        await WaitForRegisteredClientAsync(port, "xcl_busy").ConfigureAwait(false);
+
+                        await SendWebSocketJsonAsync(socket, new { type = "client.heartbeat", clientId = "xcl_busy", tenantId = Constants.DefaultTenantId, sentUtc = DateTime.UtcNow, networkCapacity = 3 }, clientTokenSource.Token).ConfigureAwait(false);
+                        using (HttpClient httpClient = new HttpClient())
+                        {
+                            await AuthenticateSeedAdminAsync(httpClient, "http://127.0.0.1:" + port).ConfigureAwait(false);
+                            bool capacityReported = false;
+                            for (int i = 0; i < 50 && !capacityReported; i++)
+                            {
+                                string clients = await httpClient.GetStringAsync("http://127.0.0.1:" + port + "/api/v1/clients").ConfigureAwait(false);
+                                capacityReported = clients.Contains("\"maxParallelRequests\": 3", StringComparison.Ordinal) || clients.Contains("\"MaxParallelRequests\": 3", StringComparison.Ordinal);
+                                if (!capacityReported) await Task.Delay(100).ConfigureAwait(false);
+                            }
+
+                            if (!capacityReported) throw new InvalidOperationException("The heartbeat's networkCapacity was not stored.");
+
+                            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:" + port + "/v1/chat/completions"))
+                            {
+                                request.Content = new StringContent("{\"model\":\"llama3.2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}", Encoding.UTF8, "application/json");
+                                using (HttpResponseMessage response = await httpClient.SendAsync(request).ConfigureAwait(false))
+                                {
+                                    string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    if ((int)response.StatusCode != 503 || !body.Contains("AllClientsBusy", StringComparison.Ordinal)) throw new InvalidOperationException("A busy client did not produce a 503 AllClientsBusy: " + (int)response.StatusCode + " " + body);
+                                    if (!response.Headers.Contains("Retry-After")) throw new InvalidOperationException("The busy response had no Retry-After header.");
+                                }
+                            }
+
+                            if (busyAnswers != 1) throw new InvalidOperationException("The busy client was asked " + busyAnswers + " times; the retry must exclude it.");
+                        }
+
+                        clientTokenSource.Cancel();
+                        try
+                        {
+                            await clientTask.ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (ex is OperationCanceledException || ex is WebSocketException)
                         {
                         }
                     }

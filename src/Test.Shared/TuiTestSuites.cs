@@ -7,6 +7,7 @@ namespace Test.Shared
     using Touchstone.Core;
     using Xeno.Client;
     using Xeno.Client.Presentation;
+    using Xeno.Client.Routing;
     using Xeno.Tui;
     using Xeno.Tui.Modals;
     using Xeno.Tui.Pages;
@@ -330,7 +331,106 @@ namespace Test.Shared
                         WaitFor(() => ClientSettings.Load().LocalDashboard.HistoryRetention.MaxEntries == 77, tui, "History setting was not saved.");
                         page.SetValue("inference.port", "notanumber");
                         tui.Press("ctrl+s");
-                        Check(ClientSettings.Load().LocalInferenceServer.Port == 11434, "An invalid port must not be saved.");
+                        Check(ClientSettings.Load().LocalInferenceServer.Port == 11435, "An invalid port must not be saved.");
+                    }
+                }),
+                Case(suite, "SettingsPageSavesRoutingMode", "The Settings page saves the routing mode and global limit from the keyboard and with the mouse", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(140, 120, XenoPageEnum.Settings))
+                    {
+                        SettingsPage page = (SettingsPage)tui.Tui.CurrentView;
+                        Check(page.Collect()["inference.routingMode"] == "PreferLocal", "Routing mode was not loaded.");
+                        page.SetValue("inference.routingMode", "NetworkOnly");
+                        page.SetValue("concurrency.defaultMax", "6");
+                        tui.Press("ctrl+s");
+                        WaitFor(() => ClientSettings.Load().LocalInferenceServer.RoutingMode == LocalInferenceRoutingModeEnum.NetworkOnly, tui, "Routing mode was not saved from the keyboard.");
+                        Check(ClientSettings.Load().DefaultMaxConcurrentRequests == 6, "Global limit was not saved.");
+
+                        TUIKit.Point label = tui.Find("Routing") ?? throw new InvalidOperationException("No Routing field:" + Environment.NewLine + tui.Screen());
+                        tui.Click(label.X + 2, label.Y + 1);
+                        TUIKit.Point localOnly = tui.Find("LocalOnly", label.Y + 2) ?? throw new InvalidOperationException("Clicking Routing should open its list:" + Environment.NewLine + tui.Screen());
+                        tui.Click(localOnly.X, localOnly.Y);
+                        Check(page.Collect()["inference.routingMode"] == "LocalOnly", "Clicking LocalOnly should choose it.");
+                        tui.Press("ctrl+s");
+                        WaitFor(() => ClientSettings.Load().LocalInferenceServer.RoutingMode == LocalInferenceRoutingModeEnum.LocalOnly, tui, "Routing mode was not saved after choosing with the mouse.");
+                    }
+                }),
+                Case(suite, "LocalEndpointPageRenders", "The Local endpoint page shows the URL, providers, rules, and requests within 120x36", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.LocalEndpoint))
+                    {
+                        string screen = tui.Screen();
+                        Contains(screen, "Local endpoint");
+                        Contains(screen, "http://127.0.0.1:11435");
+                        Contains(screen, "Providers on this machine");
+                        Contains(screen, "local-ollama");
+                        Contains(screen, "Route rules");
+                        Contains(screen, "Recent requests");
+                    }
+                }),
+                Case(suite, "LocalEndpointAddRouteWithKeyboard", "a opens the route rule form and ctrl+s saves the rule", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.LocalEndpoint))
+                    {
+                        tui.Press("a");
+                        Check(tui.App.Modals.IsActive, "a should open the route rule form.");
+                        Contains(tui.Screen(), "Add Route Rule");
+                        tui.Type("llama3.1:8b");
+                        tui.Press("ctrl+s");
+                        WaitFor(() => !tui.App.Modals.IsActive, tui, "The form should close after saving.");
+                        LocalInferenceRouteRule? rule = ClientSettings.Load().LocalInferenceServer.Routes.FirstOrDefault();
+                        Check(rule != null && rule.Model == "llama3.1:8b" && rule.Provider == "local-ollama", "The rule was not saved.");
+                        tui.Settle();
+                        Contains(tui.Screen(), "llama3.1:8b");
+                    }
+                }),
+                Case(suite, "LocalEndpointWorksWithTheMouse", "Clicking Add Rule opens the form and clicking a rule row opens it for editing", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.LocalEndpoint))
+                    {
+                        tui.ClickText("Add Rule ]");
+                        Check(tui.App.Modals.IsActive, "Clicking Add Rule should open the form.");
+                        tui.Press("escape");
+                        tui.Workspace.SaveRouteRuleAsync(new LocalInferenceRouteRule { Model = "qwen3:latest", Target = LocalInferenceRouteTargetEnum.Network }, null, System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+                        tui.Tui.Navigate(XenoPageEnum.Overview);
+                        tui.Settle();
+                        tui.Tui.Navigate(XenoPageEnum.LocalEndpoint);
+                        tui.Settle();
+                        TUIKit.Point row = tui.Find("qwen3:latest", 3) ?? throw new InvalidOperationException("No rule row:" + Environment.NewLine + tui.Screen());
+                        tui.DoubleClick(row.X, row.Y);
+                        Check(tui.App.Modals.IsActive, "Double-clicking a rule should open it.");
+                        Contains(tui.Screen(), "Edit Route Rule");
+                        tui.Press("escape");
+                    }
+                }),
+                Case(suite, "LocalEndpointDeleteConfirmsWithChoiceDialog", "d asks before deleting a rule, and confirming with the mouse deletes it", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
+                    {
+                        tui.Workspace.SaveRouteRuleAsync(new LocalInferenceRouteRule { Model = "qwen3:latest", Target = LocalInferenceRouteTargetEnum.Network }, null, System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+                        tui.Tui.Navigate(XenoPageEnum.LocalEndpoint);
+                        tui.Settle();
+                        TUIKit.Point row = tui.Find("qwen3:latest", 3) ?? throw new InvalidOperationException("No rule row.");
+                        tui.Click(row.X, row.Y);
+                        tui.Press("d");
+                        Check(tui.App.Modals.IsActive, "d should ask for confirmation.");
+                        Contains(tui.Screen(), "Delete Route Rule");
+                        TUIKit.Point confirm = tui.Find("[ Delete ]") ?? throw new InvalidOperationException("No Delete button:" + Environment.NewLine + tui.Screen());
+                        tui.Click(confirm.X + 2, confirm.Y);
+                        WaitFor(() => ClientSettings.Load().LocalInferenceServer.Routes.Count == 0, tui, "The rule was not deleted.");
+                    }
+                }),
+                Case(suite, "LocalEndpointExplainShowsMarkdown", "t asks for a model and explains its route in a Markdown viewer", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.LocalEndpoint))
+                    {
+                        tui.Press("t");
+                        Check(tui.App.Modals.IsActive, "t should ask for a model.");
+                        tui.Type("llama3.2");
+                        tui.Press("ctrl+s");
+                        WaitFor(() => tui.Screen().Contains("Where llama3.2 goes", StringComparison.Ordinal), tui, "The explanation did not open.");
+                        Contains(tui.Screen(), "local:local-ollama");
+                        tui.Press("escape");
                     }
                 }),
                 Case(suite, "TabLeavesTheSettingsForm", "Tab moves from the last setting to the Actions buttons and on to the sidebar instead of wrapping", () =>

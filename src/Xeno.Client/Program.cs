@@ -17,6 +17,7 @@ namespace Xeno.Client
     using Xeno.Client.LocalDashboard;
     using Xeno.Client.LocalInference;
     using Xeno.Client.Presentation;
+    using Xeno.Client.Routing;
     using Xeno.Client.Services;
     using Xeno.Client.Telemetry.Providers;
     using Xeno.Client.Telemetry.Services;
@@ -32,7 +33,7 @@ namespace Xeno.Client
     /// </summary>
     public static class Program
     {
-        private const string ClientVersion = "0.1.1";
+        private const string ClientVersion = "0.2.0";
         private const int DefaultConnectTimeoutMs = 30000;
         private const int DefaultStopTimeoutMs = 10000;
         private const int DefaultPingCount = 5;
@@ -180,6 +181,8 @@ namespace Xeno.Client
                             return await HandleRunnerAsync(args, settings).ConfigureAwait(false);
                         case "model":
                             return HandleModel(args, settings);
+                        case "inference":
+                            return await HandleInferenceAsync(args, settings).ConfigureAwait(false);
                         case "inventory":
                             if (_UseJson) WriteJson(settings.BuildInventory());
                             else PrintInventory(settings);
@@ -1102,12 +1105,29 @@ namespace Xeno.Client
                 bool clearCredential = false;
                 bool? allowModelManagement = null;
                 int? timeoutMs = null;
+                bool? shareWithNetwork = null;
+                bool? routeLocalRequests = null;
+                int? maxConcurrent = null;
+                bool inheritMaxConcurrent = false;
                 for (int i = 2; i < args.Length; i++)
                 {
                     string option = args[i];
                     if (String.Equals(option, "--clear-credential", StringComparison.OrdinalIgnoreCase))
                     {
                         clearCredential = true;
+                        continue;
+                    }
+
+                    if (TryParseProviderRoutingFlag(args, ref i, out bool? parsedShare, out bool? parsedLocal))
+                    {
+                        if (parsedShare.HasValue) shareWithNetwork = parsedShare;
+                        if (parsedLocal.HasValue) routeLocalRequests = parsedLocal;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--max-concurrent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!TryParseMaxConcurrentOption(args, ref i, out maxConcurrent, out inheritMaxConcurrent)) return 1;
                         continue;
                     }
 
@@ -1173,7 +1193,11 @@ namespace Xeno.Client
                         Credential = credential,
                         ClearCredential = clearCredential,
                         AllowModelManagement = allowModelManagement,
-                        TimeoutMs = timeoutMs
+                        TimeoutMs = timeoutMs,
+                        ShareWithNetwork = shareWithNetwork,
+                        RouteLocalRequests = routeLocalRequests,
+                        MaxConcurrentRequests = maxConcurrent,
+                        InheritMaxConcurrentRequests = inheritMaxConcurrent
                     });
                 }
                 catch (Exception ex) when (ex is KeyNotFoundException || ex is ArgumentException)
@@ -1197,6 +1221,19 @@ namespace Xeno.Client
                 for (int i = 2; i < args.Length; i++)
                 {
                     string option = args[i];
+                    if (TryParseProviderRoutingFlag(args, ref i, out bool? parsedShare, out bool? parsedLocal))
+                    {
+                        if (parsedShare.HasValue) runner.ShareWithNetwork = parsedShare.Value;
+                        if (parsedLocal.HasValue) runner.RouteLocalRequests = parsedLocal.Value;
+                        continue;
+                    }
+
+                    if (String.Equals(option, "--max-concurrent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!TryParseMaxConcurrentOption(args, ref i, out int? addLimit, out bool _)) return 1;
+                        runner.MaxConcurrentRequests = addLimit;
+                        continue;
+                    }
                     if (String.Equals(option, "--allow-model-management", StringComparison.OrdinalIgnoreCase) ||
                         String.Equals(option, "--model-management", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1289,6 +1326,235 @@ namespace Xeno.Client
             return 1;
         }
 
+        private static async Task<int> HandleInferenceAsync(string[] args, ClientSettings settings)
+        {
+            string sub = args.Length >= 2 ? args[1].ToLowerInvariant() : "routes";
+            LocalInferenceRuntimeStatus? runtime = LocalInferenceRuntimeStatus.Load();
+            if (sub == "routes" || sub == "rules")
+            {
+                LocalInferenceRoutingView view = LocalInferenceRoutingService.BuildView(settings, runtime);
+                List<object> rows = new List<object>();
+                foreach (LocalInferenceRouteRule rule in view.Rules)
+                {
+                    LocalInferenceRouteDecision now = LocalInferenceRoutingService.Resolve(settings, runtime, rule.Model);
+                    rows.Add(new { model = rule.Model, target = rule.Target.ToString(), provider = rule.Provider, fallbackToNetwork = rule.FallbackToNetwork, routesTo = now.RouteHeader });
+                }
+
+                if (_UseJson)
+                {
+                    WriteJson(new { routingMode = view.RoutingMode, rules = rows });
+                    return 0;
+                }
+
+                WriteInfoHeading("Local inference routing: " + view.RoutingMode);
+                if (view.Rules.Count == 0)
+                {
+                    Console.WriteLine("  No route rules. Models served on this machine are answered here; everything else goes to the Xeno network.");
+                    Console.WriteLine();
+                    return 0;
+                }
+
+                foreach (LocalInferenceRouteRule rule in view.Rules)
+                {
+                    LocalInferenceRouteDecision now = LocalInferenceRoutingService.Resolve(settings, runtime, rule.Model);
+                    string target = rule.Target == LocalInferenceRouteTargetEnum.Network ? "Xeno network" : (rule.Provider ?? String.Empty);
+                    Console.WriteLine("  - " + rule.Model + " -> " + target + (rule.FallbackToNetwork ? " (falls back to the network)" : String.Empty) + "; now goes to " + now.RouteHeader);
+                }
+
+                Console.WriteLine();
+                return 0;
+            }
+
+            if (sub == "resolve")
+            {
+                string model = args.Length >= 3 ? args[2] : String.Empty;
+                if (String.IsNullOrWhiteSpace(model))
+                {
+                    WriteError("Usage: xeno inference resolve <model> [--ollama]");
+                    return 1;
+                }
+
+                LocalInferenceApiShapeEnum shape = args.Any(item => String.Equals(item, "--ollama", StringComparison.OrdinalIgnoreCase)) ? LocalInferenceApiShapeEnum.Ollama : LocalInferenceApiShapeEnum.OpenAi;
+                LocalInferenceRouteDecision decision = LocalInferenceRoutingService.Resolve(settings, runtime, model, shape);
+                if (_UseJson)
+                {
+                    WriteJson(LocalInferenceRoutingService.ToResponse(decision));
+                    return 0;
+                }
+
+                WriteInfoHeading(model + " goes to " + decision.RouteHeader);
+                Console.WriteLine("  " + LocalInferenceRoutingService.DescribeReason(decision.Reason));
+                if (decision.FallbackToNetwork) Console.WriteLine("  If the provider fails before responding, the request falls back to the Xeno network.");
+                if (decision.Target == LocalInferenceRouteTargetKindEnum.Local && !decision.ShapeSupported) Console.WriteLine("  This provider accepts OpenAI-compatible requests only; call the /v1 routes.");
+                if (runtime == null) Console.WriteLine("  The client is not running, so provider health is unknown.");
+                Console.WriteLine();
+                return 0;
+            }
+
+            if (sub == "route")
+            {
+                string action = args.Length >= 3 ? args[2].ToLowerInvariant() : String.Empty;
+                string model = args.Length >= 4 ? args[3] : String.Empty;
+                if ((action != "set" && action != "remove" && action != "rm" && action != "delete") || String.IsNullOrWhiteSpace(model))
+                {
+                    PrintInferenceHelp();
+                    return 1;
+                }
+
+                if (action != "set")
+                {
+                    int removed = LocalInferenceRoutingService.DeleteRule(settings, model);
+                    if (removed == 0)
+                    {
+                        WriteError("No route rule for '" + model + "'.");
+                        return 1;
+                    }
+
+                    settings.Save();
+                    WriteSuccess("Removed the route rule for '" + model + "'.");
+                    return 0;
+                }
+
+                string? provider = null;
+                bool network = false;
+                bool fallback = false;
+                for (int i = 4; i < args.Length; i++)
+                {
+                    if (String.Equals(args[i], "--network", StringComparison.OrdinalIgnoreCase)) network = true;
+                    else if (String.Equals(args[i], "--fallback", StringComparison.OrdinalIgnoreCase)) fallback = true;
+                    else if (String.Equals(args[i], "--local", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) provider = args[++i];
+                    else
+                    {
+                        WriteError("Unknown route option: " + args[i]);
+                        PrintInferenceHelp();
+                        return 1;
+                    }
+                }
+
+                if (network == (provider != null))
+                {
+                    WriteError("Give exactly one of --local <provider> or --network.");
+                    return 1;
+                }
+
+                try
+                {
+                    LocalInferenceRoutingService.SaveRule(settings, new LocalInferenceRouteRule
+                    {
+                        Model = model,
+                        Target = network ? LocalInferenceRouteTargetEnum.Network : LocalInferenceRouteTargetEnum.Local,
+                        Provider = provider,
+                        FallbackToNetwork = fallback && !network
+                    });
+                }
+                catch (ArgumentException ex)
+                {
+                    WriteError(ex.Message);
+                    return 1;
+                }
+
+                settings.Save();
+                WriteSuccess("Saved the route rule for '" + model + "'. It applies to new requests right away.");
+                return 0;
+            }
+
+            if (sub == "backends" || sub == "providers")
+            {
+                bool check = args.Any(item => String.Equals(item, "--check", StringComparison.OrdinalIgnoreCase));
+                LocalInferenceRoutingView view = LocalInferenceRoutingService.BuildView(settings, runtime);
+                if (check)
+                {
+                    IReadOnlyCollection<LocalBackendStatus> statuses = await LocalInferenceRoutingService.CheckBackendsAsync(settings, CancellationToken.None).ConfigureAwait(false);
+                    view = LocalInferenceRoutingService.BuildView(settings, new LocalInferenceRuntimeStatus { Backends = statuses.ToList(), Concurrency = runtime?.Concurrency ?? new List<ProviderConcurrencySnapshot>() });
+                }
+
+                if (_UseJson)
+                {
+                    WriteJson(view.Backends);
+                    return 0;
+                }
+
+                WriteInfoHeading("Local providers" + (check ? " (checked now)" : runtime == null ? " (client not running; health unknown)" : String.Empty));
+                foreach (LocalBackendView backend in view.Backends)
+                {
+                    LocalBackendRow row = LocalBackendRow.From(backend);
+                    Console.WriteLine("  - " + row.Provider + " (" + row.ApiType + ")");
+                    Console.WriteLine("    Health:    " + row.Health + (backend.LatencyMs.HasValue ? ", " + row.Latency : String.Empty));
+                    Console.WriteLine("    In use:    " + row.Load);
+                    Console.WriteLine("    Shared:    " + row.Shared);
+                    if (!String.IsNullOrWhiteSpace(backend.LastError)) Console.WriteLine("    Error:     " + backend.LastError);
+                }
+
+                Console.WriteLine();
+                return 0;
+            }
+
+            if (sub == "concurrency")
+            {
+                if (args.Length < 3 || !Int32.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int limit) || limit < 1 || limit > 256)
+                {
+                    WriteError("Usage: xeno inference concurrency <1-256>");
+                    return 1;
+                }
+
+                settings.DefaultMaxConcurrentRequests = limit;
+                settings.Save();
+                WriteSuccess("Default max concurrent requests per provider is now " + limit.ToString(CultureInfo.InvariantCulture) + ".");
+                return 0;
+            }
+
+            if (sub == "requests")
+            {
+                int take = 20;
+                for (int i = 2; i < args.Length - 1; i++)
+                {
+                    if (String.Equals(args[i], "--limit", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(args[i + 1], out int parsed)) take = Math.Min(1000, Math.Max(1, parsed));
+                }
+
+                List<LocalInferenceRequestRecord> records = LocalInferenceRequestLog.Read(0, take);
+                if (_UseJson)
+                {
+                    WriteJson(records);
+                    return 0;
+                }
+
+                WriteInfoHeading("Recent local endpoint requests");
+                if (records.Count == 0) Console.WriteLine("  None yet.");
+                foreach (LocalInferenceRequestRecord record in records)
+                {
+                    LocalInferenceRequestRow row = LocalInferenceRequestRow.From(record);
+                    Console.WriteLine("  " + row.When + "  " + row.Status + "  " + row.Latency.PadLeft(8) + "  " + row.Route.PadRight(24) + "  " + row.Model);
+                }
+
+                Console.WriteLine();
+                return 0;
+            }
+
+            PrintInferenceHelp();
+            return 1;
+        }
+
+        private static void PrintInferenceHelp()
+        {
+            WriteInfoHeading("Local inference commands");
+            Console.WriteLine("  xeno inference routes");
+            Console.WriteLine("      List route rules and where each model goes now.");
+            Console.WriteLine("  xeno inference resolve <model> [--ollama]");
+            Console.WriteLine("      Show where the local endpoint would send a model, and why.");
+            Console.WriteLine("  xeno inference route set <model> --local <provider> [--fallback]");
+            Console.WriteLine("  xeno inference route set <model> --network");
+            Console.WriteLine("      Pin a model to a provider on this machine or to the Xeno network. --fallback lets a local request");
+            Console.WriteLine("      go to the network if the provider fails before responding.");
+            Console.WriteLine("  xeno inference route remove <model>");
+            Console.WriteLine("  xeno inference backends [--check]");
+            Console.WriteLine("      Provider health and load. --check probes every provider now.");
+            Console.WriteLine("  xeno inference concurrency <1-256>");
+            Console.WriteLine("      Set the default max concurrent requests per provider.");
+            Console.WriteLine("  xeno inference requests [--limit <n>]");
+            Console.WriteLine("      Recent requests apps on this machine sent to the local endpoint (metadata only).");
+            Console.WriteLine();
+        }
+
         private static int HandleModel(string[] args, ClientSettings settings)
         {
             if (args.Length >= 2 && IsHelp(args[1]))
@@ -1309,9 +1575,16 @@ namespace Xeno.Client
                 string modelName = String.Empty;
                 bool supportsCompletions = true;
                 bool supportsEmbeddings = false;
+                int? addModelLimit = null;
                 for (int i = 2; i < args.Length; i++)
                 {
                     string option = args[i];
+                    if (String.Equals(option, "--max-concurrent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!TryParseMaxConcurrentOption(args, ref i, out addModelLimit, out bool _)) return 1;
+                        continue;
+                    }
+
                     if (String.Equals(option, "--runner", StringComparison.OrdinalIgnoreCase) ||
                         String.Equals(option, "--provider", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1441,6 +1714,10 @@ namespace Xeno.Client
                 try
                 {
                     runner = ProviderConfiguration.AddModel(settings, runnerName, modelName, supportsCompletions, supportsEmbeddings);
+                    if (addModelLimit.HasValue)
+                    {
+                        ProviderConfiguration.UpdateModel(settings, new ModelUpdateRequest { Provider = runner.Name, Name = modelName, MaxConcurrentRequests = addModelLimit });
+                    }
                 }
                 catch (KeyNotFoundException ex)
                 {
@@ -1467,9 +1744,17 @@ namespace Xeno.Client
                 string? newModelName = null;
                 bool? supportsCompletions = null;
                 bool? supportsEmbeddings = null;
+                int? updateModelLimit = null;
+                bool inheritModelLimit = false;
                 for (int i = 2; i < args.Length; i++)
                 {
                     string option = args[i];
+                    if (String.Equals(option, "--max-concurrent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!TryParseMaxConcurrentOption(args, ref i, out updateModelLimit, out inheritModelLimit)) return 1;
+                        continue;
+                    }
+
                     if (String.Equals(option, "--completion", StringComparison.OrdinalIgnoreCase) ||
                         String.Equals(option, "--completions", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1587,7 +1872,9 @@ namespace Xeno.Client
                         NewProvider = newRunnerName,
                         NewName = newModelName,
                         SupportsCompletions = supportsCompletions,
-                        SupportsEmbeddings = supportsEmbeddings
+                        SupportsEmbeddings = supportsEmbeddings,
+                        MaxConcurrentRequests = updateModelLimit,
+                        InheritMaxConcurrentRequests = inheritModelLimit
                     });
                 }
                 catch (KeyNotFoundException ex)
@@ -1895,7 +2182,7 @@ namespace Xeno.Client
                     await Task.Delay(TimeSpan.FromMilliseconds(settings.Server.HeartbeatIntervalMs), token).ConfigureAwait(false);
                     if (token.IsCancellationRequested || socket.State != WebSocketState.Open) return;
 
-                    await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow }, token).ConfigureAwait(false);
+                    await SendMessageAsync(socket, new { type = "client.heartbeat", clientId = settings.ClientId, tenantId = settings.TenantId, sentUtc = DateTime.UtcNow, networkCapacity = Math.Max(0, ConcurrencyLimitResolver.NetworkCapacity(settings) - ProviderConcurrencyGate.Shared.LocalInFlightOnSharedProviders(settings)) }, token).ConfigureAwait(false);
                     ClientConnectionState.MarkHeartbeat(settings);
                     if (ClientConnectionState.IsInventoryUpdatePending())
                     {
@@ -3011,8 +3298,8 @@ namespace Xeno.Client
             bool stream = serverRequest.Stream;
             Stopwatch stopwatch = Stopwatch.StartNew();
             ClientRunnerSettings? runner = String.IsNullOrWhiteSpace(sourceName)
-                ? (settings.Runners.Count > 0 ? settings.Runners[0] : null)
-                : settings.Runners.Find(item => String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
+                ? settings.Runners.Find(item => item != null && item.ShareWithNetwork)
+                : settings.Runners.Find(item => item != null && item.ShareWithNetwork && String.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
 
             await LocalDashboardRuntime.RecordReceivedAsync(serverRequest, runner, requestId, method, relativePath, requestorLabel, token).ConfigureAwait(false);
 
@@ -3027,69 +3314,98 @@ namespace Xeno.Client
                     ClientId = settings.ClientId,
                     TenantId = settings.TenantId,
                     Success = false,
-                    Error = "No configured provider endpoint is available."
+                    Error = "No provider shared with the Xeno network is configured for this request."
                 };
                 await LocalDashboardRuntime.RecordCompletedAsync(requestId, response, false, token).ConfigureAwait(false);
                 return response;
             }
 
-            Dictionary<string, string> forwardedHeaders = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string body = PrepareUpstreamRequestBody(
-                runner.ApiType,
-                relativePath,
-                String.IsNullOrWhiteSpace(serverRequest.Body) ? "{}" : serverRequest.Body,
-                stream);
-            string endpoint = runner.Endpoint.TrimEnd('/') + "/" + relativePath.TrimStart('/');
-            using (HttpClient httpClient = new HttpClient())
-            using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
+            ConcurrencyLease? lease = ProviderConcurrencyGate.Shared.TryAcquireNetwork(settings, runner, serverRequest.Model);
+            if (lease == null)
             {
-                httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
-                if (!String.IsNullOrWhiteSpace(runner.Credential))
-                {
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
-                }
-
-                if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
-                {
-                    request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-                }
-
-                foreach (KeyValuePair<string, string> header in forwardedHeaders)
-                {
-                    if (IsBlockedForwardedRequestHeader(header.Key)) continue;
-                    if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content != null)
-                    {
-                        request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                    }
-                }
-
-                HttpCompletionOption completionOption = stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead;
-                HttpResponseMessage result = await httpClient.SendAsync(request, completionOption, token).ConfigureAwait(false);
-                if (stream)
-                {
-                    await StreamUpstreamResponseAsync(socket, settings, requestId, requestorLabel, method, relativePath, proxy, result, body, stopwatch, token).ConfigureAwait(false);
-                    return null;
-                }
-
-                string content = await result.Content.ReadAsStringAsync(token).ConfigureAwait(false);
                 stopwatch.Stop();
                 WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
-                Dictionary<string, string> responseHeaders = ExtractResponseHeaders(result);
-                ClientResponseMessage response = new ClientResponseMessage
+                ClientResponseMessage busy = new ClientResponseMessage
                 {
                     Type = "client.response",
                     RequestId = requestId,
                     ClientId = settings.ClientId,
                     TenantId = settings.TenantId,
-                    Success = result.IsSuccessStatusCode,
-                    StatusCode = (int)result.StatusCode,
-                    ContentType = result.Content.Headers.ContentType?.ToString(),
-                    Headers = responseHeaders,
-                    Telemetry = BuildTelemetry(body, content, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, null, null, 0, 0, false),
-                    Body = content
+                    Success = false,
+                    Busy = true,
+                    StatusCode = 503,
+                    ContentType = "application/json",
+                    Body = "{\"error\":\"ClientBusy\",\"message\":\"This client's provider is at its concurrency limit.\"}",
+                    Error = "Provider '" + runner.Name + "' is at its concurrency limit."
                 };
-                await LocalDashboardRuntime.RecordCompletedAsync(requestId, response, false, token).ConfigureAwait(false);
-                return response;
+                await LocalDashboardRuntime.RecordCompletedAsync(requestId, busy, false, token).ConfigureAwait(false);
+                return busy;
+            }
+
+            try
+            {
+                Dictionary<string, string> forwardedHeaders = serverRequest.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                string body = PrepareUpstreamRequestBody(
+                    runner.ApiType,
+                    relativePath,
+                    String.IsNullOrWhiteSpace(serverRequest.Body) ? "{}" : serverRequest.Body,
+                    stream);
+                string endpoint = runner.Endpoint.TrimEnd('/') + "/" + relativePath.TrimStart('/');
+                using (HttpClient httpClient = new HttpClient())
+                using (HttpRequestMessage request = new HttpRequestMessage(new HttpMethod(method), endpoint))
+                {
+                    httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, runner.TimeoutMs));
+                    if (!String.IsNullOrWhiteSpace(runner.Credential))
+                    {
+                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", runner.Credential);
+                    }
+
+                    if (!String.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+                    {
+                        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    }
+
+                    foreach (KeyValuePair<string, string> header in forwardedHeaders)
+                    {
+                        if (IsBlockedForwardedRequestHeader(header.Key)) continue;
+                        if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content != null)
+                        {
+                            request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                        }
+                    }
+
+                    HttpCompletionOption completionOption = stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead;
+                    HttpResponseMessage result = await httpClient.SendAsync(request, completionOption, token).ConfigureAwait(false);
+                    if (stream)
+                    {
+                        await StreamUpstreamResponseAsync(socket, settings, requestId, requestorLabel, method, relativePath, proxy, result, body, stopwatch, token).ConfigureAwait(false);
+                        return null;
+                    }
+
+                    string content = await result.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    stopwatch.Stop();
+                    WriteRequestCompleted(requestId, requestorLabel, method, relativePath, proxy, stopwatch.Elapsed.TotalMilliseconds);
+                    Dictionary<string, string> responseHeaders = ExtractResponseHeaders(result);
+                    ClientResponseMessage response = new ClientResponseMessage
+                    {
+                        Type = "client.response",
+                        RequestId = requestId,
+                        ClientId = settings.ClientId,
+                        TenantId = settings.TenantId,
+                        Success = result.IsSuccessStatusCode,
+                        StatusCode = (int)result.StatusCode,
+                        ContentType = result.Content.Headers.ContentType?.ToString(),
+                        Headers = responseHeaders,
+                        Telemetry = BuildTelemetry(body, content, responseHeaders, stopwatch.Elapsed.TotalMilliseconds, null, null, 0, 0, false),
+                        Body = content
+                    };
+                    await LocalDashboardRuntime.RecordCompletedAsync(requestId, response, false, token).ConfigureAwait(false);
+                    return response;
+                }
+            }
+            finally
+            {
+                lease.Dispose();
             }
         }
 
@@ -4182,7 +4498,13 @@ namespace Xeno.Client
                 stoppedUtc = FormatJsonUtc(state.LocalInferenceServerStoppedUtc),
                 lastRequestUtc = FormatJsonUtc(state.LocalInferenceServerLastRequestUtc),
                 error = state.LocalInferenceServerLastError ?? String.Empty,
-                websocketAvailable = state.IsConnected && state.IsRegistered
+                websocketAvailable = state.IsConnected && state.IsRegistered,
+                routingMode = settings.LocalInferenceServer.RoutingMode.ToString(),
+                routeRuleCount = settings.LocalInferenceServer.Routes.Count,
+                routing = state.LocalInferenceServerListening ? LocalInferenceRoutingService.BuildView(settings, LocalInferenceRuntimeStatus.Load()) : null,
+                defaultMaxConcurrentRequests = settings.DefaultMaxConcurrentRequests,
+                portMigratedFrom = state.LocalInferencePortMigratedFrom,
+                portMigratedTo = state.LocalInferencePortMigratedTo
             };
         }
 
@@ -4272,10 +4594,93 @@ namespace Xeno.Client
             Console.WriteLine("  Last request UTC: " + FormatUtc(connection.LocalInferenceServerLastRequestUtc));
             Console.WriteLine("  WebSocket ready:  " + FormatTrueFalse(connection.IsConnected && connection.IsRegistered));
             Console.WriteLine("  Last error:       " + DisplayValue(connection.LocalInferenceServerLastError, "(none)"));
+            Console.WriteLine("  Routing:          " + settings.LocalInferenceServer.RoutingMode.ToString());
+            Console.WriteLine("  Route rules:      " + settings.LocalInferenceServer.Routes.Count.ToString(CultureInfo.InvariantCulture));
+            Console.WriteLine("  Max concurrent:   " + settings.DefaultMaxConcurrentRequests.ToString(CultureInfo.InvariantCulture) + " per provider (default)");
+            LocalInferenceRuntimeStatus? routingRuntime = connection.LocalInferenceServerListening ? LocalInferenceRuntimeStatus.Load() : null;
+            LocalInferenceRoutingView routingView = LocalInferenceRoutingService.BuildView(settings, routingRuntime);
+            if (routingRuntime != null)
+            {
+                Console.WriteLine("  Providers:        " + routingView.HealthyBackends.ToString(CultureInfo.InvariantCulture) + " of " + routingView.RoutableBackends.ToString(CultureInfo.InvariantCulture) + " healthy");
+                foreach (LocalBackendView backend in routingView.Backends.Where(item => item.Routable))
+                {
+                    Console.WriteLine("    " + backend.Provider.PadRight(16) + " " + backend.Health.PadRight(10) + " " + LocalBackendRow.From(backend).Load);
+                }
+
+                Console.WriteLine("  Requests:         " + routingView.LocalRequests.ToString(CultureInfo.InvariantCulture) + " here, " + routingView.NetworkRequests.ToString(CultureInfo.InvariantCulture) + " network, " + routingView.Fallbacks.ToString(CultureInfo.InvariantCulture) + " fallbacks, " + routingView.Errors.ToString(CultureInfo.InvariantCulture) + " errors");
+            }
+            if (connection.LocalInferencePortMigratedFrom.HasValue)
+            {
+                Console.WriteLine("  Port changed:     " + connection.LocalInferencePortMigratedFrom.Value.ToString(CultureInfo.InvariantCulture) + " -> " + (connection.LocalInferencePortMigratedTo ?? settings.LocalInferenceServer.Port).ToString(CultureInfo.InvariantCulture) + " so Ollama can keep its default port. Point local apps at the new port.");
+                if (!_UseJson) ClientConnectionState.AcknowledgeLocalInferencePortMigration();
+            }
+
             if (enabled && (!connection.IsConnected || !connection.IsRegistered))
             {
-                Console.WriteLine("  Failure mode:     localhost inference endpoints return provider-shaped 502 responses until the websocket is registered.");
+                Console.WriteLine("  Failure mode:     models served on this machine keep working; requests that need the Xeno network return provider-shaped 502 responses until the websocket is registered.");
             }
+        }
+
+        private static bool TryParseProviderRoutingFlag(string[] args, ref int index, out bool? shareWithNetwork, out bool? routeLocalRequests)
+        {
+            shareWithNetwork = null;
+            routeLocalRequests = null;
+            string option = args[index];
+            if (String.Equals(option, "--local-only", StringComparison.OrdinalIgnoreCase))
+            {
+                shareWithNetwork = false;
+                return true;
+            }
+
+            if (String.Equals(option, "--share-with-network", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 < args.Length && IsBooleanLiteral(args[index + 1])) shareWithNetwork = ParseBooleanLiteral(args[++index]);
+                else shareWithNetwork = true;
+                return true;
+            }
+
+            if (String.Equals(option, "--local-requests", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 < args.Length && IsBooleanLiteral(args[index + 1])) routeLocalRequests = ParseBooleanLiteral(args[++index]);
+                else routeLocalRequests = true;
+                return true;
+            }
+
+            if (String.Equals(option, "--no-local-requests", StringComparison.OrdinalIgnoreCase))
+            {
+                routeLocalRequests = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryParseMaxConcurrentOption(string[] args, ref int index, out int? limit, out bool inherit)
+        {
+            limit = null;
+            inherit = false;
+            string option = args[index];
+            if (index + 1 >= args.Length)
+            {
+                WriteError(option + " requires a value from 1 to 256, or 'inherit'.");
+                return false;
+            }
+
+            string value = args[++index];
+            if (String.Equals(value, "inherit", StringComparison.OrdinalIgnoreCase))
+            {
+                inherit = true;
+                return true;
+            }
+
+            if (!Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) || parsed < 1 || parsed > 256)
+            {
+                WriteError(option + " requires a value from 1 to 256, or 'inherit'.");
+                return false;
+            }
+
+            limit = parsed;
+            return true;
         }
 
         private static void PrintProviders(ClientSettings settings)
@@ -4296,11 +4701,17 @@ namespace Xeno.Client
                     allowModelManagement = ProviderConfiguration.IsModelManagementAllowed(runner),
                     modelManagementAllowed = ProviderConfiguration.IsModelManagementAllowed(runner),
                     credentialConfigured = !String.IsNullOrWhiteSpace(runner.Credential),
+                    shareWithNetwork = runner.ShareWithNetwork,
+                    routeLocalRequests = runner.RouteLocalRequests,
+                    maxConcurrentRequests = runner.MaxConcurrentRequests,
+                    effectiveMaxConcurrentRequests = ConcurrencyLimitResolver.Resolve(settings, runner, null).ProviderLimit,
                     models = runner.Models.ConvertAll(model => new
                     {
                         name = model.Name,
                         supportsCompletions = model.SupportsCompletions,
-                        supportsEmbeddings = model.SupportsEmbeddings
+                        supportsEmbeddings = model.SupportsEmbeddings,
+                        maxConcurrentRequests = model.MaxConcurrentRequests,
+                        effectiveMaxConcurrentRequests = ConcurrencyLimitResolver.Resolve(settings, runner, model.Name).EffectiveModelLimit
                     })
                 }));
                 return;
@@ -4323,6 +4734,10 @@ namespace Xeno.Client
                 Console.WriteLine("    Timeout:    " + runner.TimeoutMs + " ms");
                 Console.WriteLine("    Credential: " + (String.IsNullOrWhiteSpace(runner.Credential) ? "not configured" : "configured"));
                 Console.WriteLine("    Model management allowed: " + FormatBool(ProviderConfiguration.IsModelManagementAllowed(runner)));
+                ConcurrencyLimits providerLimits = ConcurrencyLimitResolver.Resolve(settings, runner, null);
+                Console.WriteLine("    Shared with network: " + FormatBool(runner.ShareWithNetwork));
+                Console.WriteLine("    Local requests:      " + FormatBool(runner.RouteLocalRequests));
+                Console.WriteLine("    Max concurrent:      " + providerLimits.ProviderLimit.ToString(CultureInfo.InvariantCulture) + " (" + providerLimits.ProviderLimitSource + ")");
                 Console.WriteLine("    Models:     " + runner.Models.Count);
                 if (includeModelDetails && runner.Models.Count > 0)
                 {
@@ -4331,6 +4746,11 @@ namespace Xeno.Client
                         Console.WriteLine("      - " + model.Name);
                         Console.WriteLine("        Completions: " + FormatBool(model.SupportsCompletions));
                         Console.WriteLine("        Embeddings:  " + FormatBool(model.SupportsEmbeddings));
+                        if (model.MaxConcurrentRequests.HasValue)
+                        {
+                            ConcurrencyLimits modelLimits = ConcurrencyLimitResolver.Resolve(settings, runner, model.Name);
+                            Console.WriteLine("        Max concurrent: " + modelLimits.EffectiveModelLimit.ToString(CultureInfo.InvariantCulture) + (modelLimits.ModelLimitExceedsProvider ? " (model limit " + model.MaxConcurrentRequests.Value.ToString(CultureInfo.InvariantCulture) + " is above the provider limit)" : String.Empty));
+                        }
                     }
                 }
             }
@@ -4552,6 +4972,12 @@ namespace Xeno.Client
             Console.WriteLine("      --allow-model-management permits dashboard pull/delete commands for Ollama providers.");
             Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential] [--allow-model-management|--no-model-management]");
             Console.WriteLine("      Update a configured provider endpoint and request inventory re-advertisement when connected.");
+            Console.WriteLine("  Routing and concurrency options (add and update):");
+            Console.WriteLine("      --local-only                     Keep the provider off the Xeno network; this machine's apps can still use it.");
+            Console.WriteLine("      --share-with-network [true|false] Offer the provider's models to the Xeno network (default true).");
+            Console.WriteLine("      --local-requests [true|false]    Answer this machine's local endpoint requests with this provider (default true).");
+            Console.WriteLine("      --no-local-requests              Same as --local-requests false.");
+            Console.WriteLine("      --max-concurrent <1-256|inherit> Limit across the provider's models; inherit uses the global default.");
             Console.WriteLine();
         }
 
@@ -4566,6 +4992,7 @@ namespace Xeno.Client
             Console.WriteLine("      Add a model to a configured provider.");
             Console.WriteLine("  xeno model update --name <model-name> [--provider <provider-name>] [--new-name <model-name>] [--new-provider <provider-name>] [--type completion|embedding|both]");
             Console.WriteLine("      Update a model advertisement and request inventory re-advertisement when connected.");
+            Console.WriteLine("      --max-concurrent <1-256|inherit> (add and update) limits this model on its provider; inherit uses the provider limit.");
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]");
             Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete a model from one provider, or from all providers when omitted.");
@@ -4778,6 +5205,9 @@ namespace Xeno.Client
             Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--type completion|embedding|both]");
             Console.WriteLine("  xeno model update --name <model-name> [--provider <provider-name>] [--new-name <model-name>] [--new-provider <provider-name>] [--type completion|embedding|both]");
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]  (aliases: remove, remote, rm)");
+            Console.WriteLine();
+            Console.WriteLine("  xeno inference routes | resolve <model> | route set|remove <model> | backends [--check] | concurrency <n> | requests");
+            Console.WriteLine("      Local endpoint routing: where each model goes, provider health and load, and recent requests.");
             WritePlainHeading("Runtime:");
             Console.WriteLine("  xeno reload");
             Console.WriteLine("  xeno connect");
@@ -4791,7 +5221,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno disconnect");
             Console.WriteLine();
             Console.WriteLine("When LocalDashboard.Enabled is true, 'xeno connect', 'xeno status', and 'xeno dashboard' show the local dashboard URL.");
-            Console.WriteLine("When LocalInferenceServer.Enabled is true, 'xeno connect' and 'xeno status' show the local OpenAI/Ollama-compatible listener URL.");
+            Console.WriteLine("When LocalInferenceServer.Enabled is true, 'xeno connect' and 'xeno status' show the local OpenAI/Ollama-compatible listener URL, its routing, and provider health.");
             WritePlainHeading("Apps:");
             Console.WriteLine("  xeno tui [--page <page>] [--server <url>] [--home <dir>]");
             Console.WriteLine("      Terminal app with every client page and action.");

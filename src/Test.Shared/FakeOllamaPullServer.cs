@@ -81,6 +81,14 @@ namespace Test.Shared
                 return;
             }
 
+            if (String.Equals(context.Request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase) &&
+                String.Equals(path, "/api/version", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 200;
+                await SendAsync(context, "{\"version\":\"0.0.0-test\"}", "application/json").ConfigureAwait(false);
+                return;
+            }
+
             context.Response.StatusCode = 404;
             await SendAsync(context, "{\"error\":\"not found\"}", "application/json").ConfigureAwait(false);
         }

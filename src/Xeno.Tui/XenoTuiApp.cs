@@ -327,6 +327,7 @@ namespace Xeno.Tui
             {
                 case XenoPageEnum.Models: created = new ModelsPage(Context); break;
                 case XenoPageEnum.Providers: created = new ProvidersPage(Context); break;
+                case XenoPageEnum.LocalEndpoint: created = new LocalEndpointPage(Context); break;
                 case XenoPageEnum.Requests: created = new RequestsPage(Context); break;
                 case XenoPageEnum.Logs: created = new LogsPage(Context); break;
                 case XenoPageEnum.HostTelemetry: created = new HostTelemetryPage(Context); break;

@@ -36,5 +36,15 @@ namespace Xeno.Client.Services
         /// Whether the model serves embeddings, or null to keep the current value.
         /// </summary>
         public bool? SupportsEmbeddings { get; set; } = null;
+
+        /// <summary>
+        /// Maximum concurrent requests for this model on its provider. Null leaves it unchanged unless <see cref="InheritMaxConcurrentRequests"/> is true. Minimum 1, maximum 256.
+        /// </summary>
+        public int? MaxConcurrentRequests { get; set; } = null;
+
+        /// <summary>
+        /// Clear the model limit so it inherits the provider limit. Default is false.
+        /// </summary>
+        public bool InheritMaxConcurrentRequests { get; set; } = false;
     }
 }

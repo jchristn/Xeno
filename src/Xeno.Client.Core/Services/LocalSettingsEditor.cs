@@ -74,6 +74,7 @@ namespace Xeno.Client.Services
                 Database = settings.LocalDashboard.Database,
                 HistoryRetention = settings.LocalDashboard.HistoryRetention,
                 LocalInferenceServer = settings.LocalInferenceServer,
+                DefaultMaxConcurrentRequests = settings.DefaultMaxConcurrentRequests,
                 Telemetry = settings.Telemetry
             };
         }
@@ -85,7 +86,8 @@ namespace Xeno.Client.Services
         /// <param name="settings">Client settings to update.</param>
         /// <param name="request">Update.</param>
         /// <exception cref="ArgumentNullException">Settings or request is null.</exception>
-        /// <exception cref="ArgumentException">A host is not allowed, or a provider endpoint would loop back to the local inference server.</exception>
+        /// <exception cref="ArgumentException">A host is not allowed, a route rule is invalid, or the default concurrency limit is out of range.</exception>
+        /// <exception cref="InvalidOperationException">A provider endpoint would loop back to the local inference server.</exception>
         public static void Apply(ClientSettings settings, LocalClientSettingsUpdateRequest request)
         {
             ArgumentNullException.ThrowIfNull(settings);
@@ -94,6 +96,12 @@ namespace Xeno.Client.Services
             ClientLocalInferenceServerSettings localInferenceServer = request.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
             ValidateLocalInferenceHost(localInferenceServer.Host);
             settings.ValidateLocalInferenceProviderEndpoints(localInferenceServer);
+            LocalInferenceRouteValidator.Validate(localInferenceServer.Routes, settings.Providers);
+            if (request.DefaultMaxConcurrentRequests.HasValue && (request.DefaultMaxConcurrentRequests.Value < 1 || request.DefaultMaxConcurrentRequests.Value > 256))
+            {
+                throw new ArgumentException("Default max concurrent requests must be between 1 and 256.", "DefaultMaxConcurrentRequests");
+            }
+
             settings.LocalDashboard.Enabled = request.Enabled;
             settings.LocalDashboard.Host = request.Host;
             settings.LocalDashboard.Port = Math.Max(1, request.Port);
@@ -103,6 +111,7 @@ namespace Xeno.Client.Services
             settings.LocalDashboard.HistoryRetention = request.HistoryRetention ?? new ClientLocalHistorySettings();
             settings.LocalInferenceServer = localInferenceServer;
             settings.Telemetry = request.Telemetry ?? new ClientTelemetrySettings();
+            if (request.DefaultMaxConcurrentRequests.HasValue) settings.DefaultMaxConcurrentRequests = request.DefaultMaxConcurrentRequests.Value;
         }
 
         #endregion

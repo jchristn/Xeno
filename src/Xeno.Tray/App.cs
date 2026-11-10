@@ -27,7 +27,7 @@ namespace Xeno.Tray
         /// </summary>
         public string StatusLine
         {
-            get { return XenoCommandAvailability.StatusLine(_Status); }
+            get { return XenoCommandAvailability.TrayStatusLine(_Status); }
         }
 
         #endregion
@@ -118,6 +118,9 @@ namespace Xeno.Tray
                 case XenoCommandEnum.OpenWebDashboard:
                     _ = ReportAsync(XenoAppLauncher.OpenLocalDashboard());
                     break;
+                case XenoCommandEnum.GoLocalEndpoint:
+                    _ = ReportAsync(XenoAppLauncher.LaunchDesktop(XenoPageEnum.LocalEndpoint));
+                    break;
                 case XenoCommandEnum.StartClient:
                     _ = RunAsync(token => XenoClientActions.StartAsync(_Workspace, token));
                     break;
@@ -163,7 +166,7 @@ namespace Xeno.Tray
         private async Task RefreshAsync()
         {
             _Status = await Task.Run(() => _Workspace.GetStatus()).ConfigureAwait(true);
-            if (_Tray != null) _Tray.ToolTipText = XenoProduct.TrayName + " - " + _Status.StatusText;
+            if (_Tray != null) _Tray.ToolTipText = XenoProduct.TrayName + " - " + XenoCommandAvailability.TrayStatusLine(_Status).Substring("Xeno: ".Length);
             _Menus?.Refresh();
         }
 

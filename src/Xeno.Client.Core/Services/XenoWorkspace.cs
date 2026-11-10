@@ -139,6 +139,75 @@ namespace Xeno.Client.Services
         }
 
         /// <summary>
+        /// The Local endpoint page's data: listener, route rules, and provider health and concurrency.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Routing view.</returns>
+        public Task<Routing.LocalInferenceRoutingView> GetLocalInferenceRoutingAsync(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(Routing.LocalInferenceRoutingService.BuildView(LoadSettings(), Routing.LocalInferenceRuntimeStatus.Load()));
+        }
+
+        /// <summary>
+        /// Where a model would go, using live provider health when the client is running.
+        /// </summary>
+        /// <param name="model">Model.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Decision.</returns>
+        public Task<Routing.LocalInferenceRouteDecision> ResolveRouteAsync(string model, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(Routing.LocalInferenceRoutingService.Resolve(LoadSettings(), Routing.LocalInferenceRuntimeStatus.Load(), model));
+        }
+
+        /// <summary>
+        /// Add or replace a route rule and save. Routing changes apply to the running listener without a restart.
+        /// </summary>
+        /// <param name="rule">Rule.</param>
+        /// <param name="originalModel">Model of the rule being edited, or null for a new rule.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Stored rule.</returns>
+        /// <exception cref="ArgumentException">The rule is invalid.</exception>
+        public Task<LocalInferenceRouteRule> SaveRouteRuleAsync(LocalInferenceRouteRule rule, string? originalModel, CancellationToken token)
+        {
+            return MutateAsync(settings => new MutationResult<LocalInferenceRouteRule>(Routing.LocalInferenceRoutingService.SaveRule(settings, rule, originalModel), false), token);
+        }
+
+        /// <summary>
+        /// Delete the route rule for a model and save.
+        /// </summary>
+        /// <param name="model">Model.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Rules removed.</returns>
+        public Task<int> DeleteRouteRuleAsync(string model, CancellationToken token)
+        {
+            return MutateAsync(settings => new MutationResult<int>(Routing.LocalInferenceRoutingService.DeleteRule(settings, model), false), token);
+        }
+
+        /// <summary>
+        /// Check every routable provider now from this process.
+        /// </summary>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Statuses.</returns>
+        public Task<IReadOnlyCollection<Routing.LocalBackendStatus>> CheckBackendsAsync(CancellationToken token)
+        {
+            return Routing.LocalInferenceRoutingService.CheckBackendsAsync(LoadSettings(), token);
+        }
+
+        /// <summary>
+        /// Recent local inference listener requests, newest first. Metadata only.
+        /// </summary>
+        /// <param name="skip">Records to skip.</param>
+        /// <param name="take">Records to return, 1 through 1000.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Records.</returns>
+        public Task<List<Routing.LocalInferenceRequestRecord>> GetLocalInferenceRequestsAsync(int skip, int take, CancellationToken token)
+        {
+            return Routing.LocalInferenceRequestLog.ReadAsync(skip, take, token);
+        }
+
+        /// <summary>
         /// List configured providers.
         /// </summary>
         /// <returns>Rows.</returns>

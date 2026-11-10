@@ -487,8 +487,8 @@ namespace Xeno.Sdk.Tests
             RecordingHandler handler = new RecordingHandler(_ =>
             {
                 callCount++;
-                if (callCount == 1) return JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.1.0\"}");
-                return JsonResponse("{\"status\":\"healthy\",\"product\":\"Xeno\",\"version\":\"0.1.0\",\"sequence\":7,\"clientSentUtc\":\"2026-07-14T12:00:00Z\",\"serverUtc\":\"2026-07-14T12:00:01Z\"}");
+                if (callCount == 1) return JsonResponse("{\"status\":\"ok\",\"product\":\"Xeno\",\"version\":\"0.2.0\"}");
+                return JsonResponse("{\"status\":\"healthy\",\"product\":\"Xeno\",\"version\":\"0.2.0\",\"sequence\":7,\"clientSentUtc\":\"2026-07-14T12:00:00Z\",\"serverUtc\":\"2026-07-14T12:00:01Z\"}");
             });
             using (HttpClient httpClient = new HttpClient(handler))
             using (XenoClient client = new XenoClient("https://xeno.local", httpClient: httpClient))

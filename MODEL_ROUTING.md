@@ -6,7 +6,7 @@ Routing is the placement layer for Xeno's federated resource model. Connected cl
 
 For application developers, the result is a stable OpenAI-compatible endpoint. For operators, routing policies are where model names, tenant boundaries, preferred nodes, telemetry requirements, and fallback behavior become enforceable placement rules.
 
-Xeno v0.1.1 is alpha. Policy fields and routing behavior may change before a stable release.
+Xeno v0.2.0 is alpha. Policy fields and routing behavior may change before a stable release.
 
 ## Telemetry-Aware Policy Fields
 

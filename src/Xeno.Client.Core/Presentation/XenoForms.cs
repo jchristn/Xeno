@@ -30,7 +30,7 @@ namespace Xeno.Client.Presentation
                 Title = "Add Provider",
                 Intro = "A provider is an inference endpoint on this machine (Ollama, vLLM, or any OpenAI-compatible server) whose models this client serves to the Xeno network.",
                 SubmitText = "Add Provider",
-                Fields = ProviderFields(null),
+                Fields = ProviderFields(null, workspace.LoadSettings().DefaultMaxConcurrentRequests),
                 SubmitAsync = async (form, token) =>
                 {
                     try
@@ -43,6 +43,9 @@ namespace Xeno.Client.Presentation
                             Credential = String.IsNullOrWhiteSpace(form["credential"]) ? null : form["credential"],
                             TimeoutMs = ParseTimeoutSeconds(form["timeout"]),
                             AllowModelManagement = form["modelManagement"] == "true",
+                            ShareWithNetwork = form["shareWithNetwork"] != "false",
+                            RouteLocalRequests = form["routeLocalRequests"] != "false",
+                            MaxConcurrentRequests = ParseOptionalLimit(Value(form, "maxConcurrent")),
                             Models = new List<ClientModelSettings>()
                         };
                         ProviderAddResult result = await workspace.AddProviderAsync(provider, token).ConfigureAwait(false);
@@ -72,7 +75,7 @@ namespace Xeno.Client.Presentation
             ArgumentNullException.ThrowIfNull(workspace);
             ArgumentNullException.ThrowIfNull(provider);
             string originalName = provider.Name;
-            List<XenoFormFieldSpec> fields = ProviderFields(provider);
+            List<XenoFormFieldSpec> fields = ProviderFields(provider, workspace.LoadSettings().DefaultMaxConcurrentRequests);
             fields.Add(new XenoFormFieldSpec { Key = "clearCredential", Label = "Remove the stored credential", Kind = XenoSettingKindEnum.Toggle, Value = "false" });
             return new XenoFormSpec
             {
@@ -90,7 +93,11 @@ namespace Xeno.Client.Presentation
                             Credential = String.IsNullOrWhiteSpace(form["credential"]) ? null : form["credential"],
                             ClearCredential = form["clearCredential"] == "true",
                             TimeoutMs = ParseTimeoutSeconds(form["timeout"]),
-                            AllowModelManagement = form["modelManagement"] == "true"
+                            AllowModelManagement = form["modelManagement"] == "true",
+                            ShareWithNetwork = form["shareWithNetwork"] != "false",
+                            RouteLocalRequests = form["routeLocalRequests"] != "false",
+                            MaxConcurrentRequests = ParseOptionalLimit(Value(form, "maxConcurrent")),
+                            InheritMaxConcurrentRequests = String.IsNullOrWhiteSpace(Value(form, "maxConcurrent"))
                         }, token).ConfigureAwait(false);
                         return null;
                     }
@@ -125,13 +132,20 @@ namespace Xeno.Client.Presentation
                     new XenoFormFieldSpec { Key = "provider", Label = "Provider", Kind = XenoSettingKindEnum.Choice, Choices = providers, Value = providerName ?? providers[0] },
                     new XenoFormFieldSpec { Key = "name", Label = "Model name", Required = true, Placeholder = "llama3.2:latest", Help = "The exact model name the provider serves, for example from 'ollama list'." },
                     new XenoFormFieldSpec { Key = "completions", Label = "Serves completions (chat and generate)", Kind = XenoSettingKindEnum.Toggle, Value = "true" },
-                    new XenoFormFieldSpec { Key = "embeddings", Label = "Serves embeddings", Kind = XenoSettingKindEnum.Toggle, Value = "false" }
+                    new XenoFormFieldSpec { Key = "embeddings", Label = "Serves embeddings", Kind = XenoSettingKindEnum.Toggle, Value = "false" },
+                    new XenoFormFieldSpec { Key = "maxConcurrent", Label = "Max concurrent requests", Placeholder = "(provider limit)", Help = "For this model only. Leave blank to use the provider's limit." }
                 },
                 SubmitAsync = async (form, token) =>
                 {
                     try
                     {
+                        int? limit = ParseOptionalLimit(Value(form, "maxConcurrent"));
                         await workspace.AddModelAsync(form["provider"], form["name"], form["completions"] == "true", form["embeddings"] == "true", token).ConfigureAwait(false);
+                        if (limit.HasValue)
+                        {
+                            await workspace.UpdateModelAsync(new ModelUpdateRequest { Provider = form["provider"], Name = form["name"], MaxConcurrentRequests = limit }, token).ConfigureAwait(false);
+                        }
+
                         return null;
                     }
                     catch (Exception ex) when (ex is ArgumentException || ex is KeyNotFoundException)
@@ -166,7 +180,8 @@ namespace Xeno.Client.Presentation
                     new XenoFormFieldSpec { Key = "provider", Label = "Provider", Kind = XenoSettingKindEnum.Choice, Choices = settings.Runners.Select(item => item.Name).ToList(), Value = provider.Name, Help = "Choose another provider to move the model." },
                     new XenoFormFieldSpec { Key = "name", Label = "Model name", Required = true, Value = model.Name },
                     new XenoFormFieldSpec { Key = "completions", Label = "Serves completions (chat and generate)", Kind = XenoSettingKindEnum.Toggle, Value = model.SupportsCompletions ? "true" : "false" },
-                    new XenoFormFieldSpec { Key = "embeddings", Label = "Serves embeddings", Kind = XenoSettingKindEnum.Toggle, Value = model.SupportsEmbeddings ? "true" : "false" }
+                    new XenoFormFieldSpec { Key = "embeddings", Label = "Serves embeddings", Kind = XenoSettingKindEnum.Toggle, Value = model.SupportsEmbeddings ? "true" : "false" },
+                    new XenoFormFieldSpec { Key = "maxConcurrent", Label = "Max concurrent requests", Value = model.MaxConcurrentRequests?.ToString(CultureInfo.InvariantCulture) ?? String.Empty, Placeholder = "(provider limit)", Help = "For this model only. Leave blank to use the provider's limit." }
                 },
                 SubmitAsync = async (form, token) =>
                 {
@@ -179,7 +194,9 @@ namespace Xeno.Client.Presentation
                             NewProvider = form["provider"],
                             NewName = form["name"],
                             SupportsCompletions = form["completions"] == "true",
-                            SupportsEmbeddings = form["embeddings"] == "true"
+                            SupportsEmbeddings = form["embeddings"] == "true",
+                            MaxConcurrentRequests = ParseOptionalLimit(Value(form, "maxConcurrent")),
+                            InheritMaxConcurrentRequests = String.IsNullOrWhiteSpace(Value(form, "maxConcurrent"))
                         }, token).ConfigureAwait(false);
                         return null;
                     }
@@ -191,6 +208,64 @@ namespace Xeno.Client.Presentation
                 SuccessMessage = form => "Saved model '" + form["name"] + "'."
             };
         }
+
+        /// <summary>
+        /// Form to add a local inference route rule, or edit one when <paramref name="rule"/> is given.
+        /// </summary>
+        /// <param name="workspace">Workspace.</param>
+        /// <param name="rule">Rule to edit, or null for a new rule.</param>
+        /// <param name="model">Model to prefill for a new rule, or null.</param>
+        /// <returns>Form.</returns>
+        /// <exception cref="ArgumentNullException">Workspace is null.</exception>
+        public static XenoFormSpec RouteRule(XenoWorkspace workspace, LocalInferenceRouteRule? rule, string? model = null)
+        {
+            ArgumentNullException.ThrowIfNull(workspace);
+            ClientSettings settings = workspace.LoadSettings();
+            List<string> targets = new List<string> { NetworkTargetChoice };
+            targets.InsertRange(0, Routing.LocalInferenceRouter.RoutableProviders(settings).Select(item => item.Name));
+            string current = rule == null
+                ? (targets.Count > 1 ? targets[0] : NetworkTargetChoice)
+                : rule.Target == LocalInferenceRouteTargetEnum.Network ? NetworkTargetChoice : (rule.Provider ?? targets[0]);
+            string? originalModel = rule?.Model;
+            return new XenoFormSpec
+            {
+                Title = rule == null ? "Add Route Rule" : "Edit Route Rule",
+                Intro = "A route rule decides where one model goes when an app on this machine calls the local endpoint. Without a rule, models a provider here serves are answered here and everything else goes to the Xeno network.",
+                SubmitText = rule == null ? "Add Rule" : "Save Rule",
+                Fields = new List<XenoFormFieldSpec>
+                {
+                    new XenoFormFieldSpec { Key = "model", Label = "Model", Required = true, Value = rule?.Model ?? model ?? String.Empty, Placeholder = "llama3.1:8b", Help = "The model name apps send. \"llama3.1\" and \"llama3.1:latest\" are the same model." },
+                    new XenoFormFieldSpec { Key = "target", Label = "Send to", Kind = XenoSettingKindEnum.Choice, Choices = targets, Value = current, Help = "A provider on this machine, or the Xeno network." },
+                    new XenoFormFieldSpec { Key = "fallback", Label = "Fall back to the Xeno network if the provider fails", Kind = XenoSettingKindEnum.Toggle, Value = rule != null && rule.FallbackToNetwork ? "true" : "false", Help = "Only before the provider starts responding. A response that already started is never retried." }
+                },
+                SubmitAsync = async (form, token) =>
+                {
+                    try
+                    {
+                        string target = Value(form, "target");
+                        bool network = String.Equals(target, NetworkTargetChoice, StringComparison.Ordinal);
+                        await workspace.SaveRouteRuleAsync(new LocalInferenceRouteRule
+                        {
+                            Model = Value(form, "model"),
+                            Target = network ? LocalInferenceRouteTargetEnum.Network : LocalInferenceRouteTargetEnum.Local,
+                            Provider = network ? null : target,
+                            FallbackToNetwork = !network && Value(form, "fallback") == "true"
+                        }, originalModel, token).ConfigureAwait(false);
+                        return null;
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return ex.Message;
+                    }
+                },
+                SuccessMessage = form => "Saved the route rule for '" + Value(form, "model") + "'. It applies to new requests right away."
+            };
+        }
+
+        /// <summary>
+        /// Label used for the Xeno network in route rule forms.
+        /// </summary>
+        public const string NetworkTargetChoice = "Xeno network";
 
         /// <summary>
         /// Form to sign in to a Xeno server.
@@ -291,7 +366,7 @@ namespace Xeno.Client.Presentation
 
         #region Private-Methods
 
-        private static List<XenoFormFieldSpec> ProviderFields(ClientRunnerSettings? provider)
+        private static List<XenoFormFieldSpec> ProviderFields(ClientRunnerSettings? provider, int defaultMaxConcurrentRequests)
         {
             List<string> apiTypes = ProviderConfiguration.KnownApiTypes.ToList();
             if (provider != null && !apiTypes.Contains(provider.ApiType, StringComparer.OrdinalIgnoreCase)) apiTypes.Add(provider.ApiType);
@@ -302,8 +377,27 @@ namespace Xeno.Client.Presentation
                 new XenoFormFieldSpec { Key = "endpoint", Label = "Endpoint", Required = true, Value = provider?.Endpoint ?? "http://127.0.0.1:11434", Help = "Base URL of the provider. It must not point at this client's local inference server." },
                 new XenoFormFieldSpec { Key = "credential", Label = "Credential", Secret = true, Placeholder = provider == null ? "(optional)" : (String.IsNullOrWhiteSpace(provider.Credential) ? "(none)" : "(unchanged)"), Help = "Bearer token sent to the provider, if it requires one." },
                 new XenoFormFieldSpec { Key = "timeout", Label = "Timeout (seconds)", Kind = XenoSettingKindEnum.Number, Value = ((provider?.TimeoutMs ?? 300000) / 1000).ToString(CultureInfo.InvariantCulture) },
-                new XenoFormFieldSpec { Key = "modelManagement", Label = "Let the Xeno server pull and delete models (Ollama only)", Kind = XenoSettingKindEnum.Toggle, Value = provider != null && provider.AllowModelManagement ? "true" : "false" }
+                new XenoFormFieldSpec { Key = "modelManagement", Label = "Let the Xeno server pull and delete models (Ollama only)", Kind = XenoSettingKindEnum.Toggle, Value = provider != null && provider.AllowModelManagement ? "true" : "false" },
+                new XenoFormFieldSpec { Key = "shareWithNetwork", Label = "Share with the Xeno network", Kind = XenoSettingKindEnum.Toggle, Value = provider == null || provider.ShareWithNetwork ? "true" : "false", Help = "Turn off for a provider only you should use, such as your own Ollama Cloud or ollama.com account. Its models stay reachable through this machine's local endpoint." },
+                new XenoFormFieldSpec { Key = "routeLocalRequests", Label = "Use for this machine's local requests", Kind = XenoSettingKindEnum.Toggle, Value = provider == null || provider.RouteLocalRequests ? "true" : "false", Help = "Apps on this machine that call the local endpoint are answered by this provider directly." },
+                new XenoFormFieldSpec { Key = "maxConcurrent", Label = "Max concurrent requests", Value = provider?.MaxConcurrentRequests?.ToString(CultureInfo.InvariantCulture) ?? String.Empty, Placeholder = "(global default " + defaultMaxConcurrentRequests.ToString(CultureInfo.InvariantCulture) + ")", Help = "Across all of this provider's models, network and local requests combined. Leave blank to use the global default." }
             };
+        }
+
+        private static string Value(IReadOnlyDictionary<string, string> form, string key)
+        {
+            return form.TryGetValue(key, out string? value) && value != null ? value : String.Empty;
+        }
+
+        private static int? ParseOptionalLimit(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return null;
+            if (!Int32.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int limit) || limit < 1 || limit > 256)
+            {
+                throw new ArgumentException("Max concurrent requests must be a whole number from 1 to 256, or blank to inherit.");
+            }
+
+            return limit;
         }
 
         private static int ParseTimeoutSeconds(string value)

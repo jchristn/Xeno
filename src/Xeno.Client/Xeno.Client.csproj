@@ -20,7 +20,7 @@
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>xeno</ToolCommandName>
-    <Version>0.1.1</Version>
+    <Version>0.2.0</Version>
     <Authors>Joel Christner</Authors>
     <Company>Joel Christner</Company>
     <Product>Xeno</Product>

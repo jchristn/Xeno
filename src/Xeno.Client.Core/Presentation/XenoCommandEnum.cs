@@ -35,6 +35,11 @@ namespace Xeno.Client.Presentation
         GoModels,
         /// <summary>Go to the Providers page.</summary>
         GoProviders,
+
+        /// <summary>
+        /// Go to the Local endpoint page.
+        /// </summary>
+        GoLocalEndpoint,
         /// <summary>Go to the Requests page.</summary>
         GoRequests,
         /// <summary>Go to the Logs page.</summary>

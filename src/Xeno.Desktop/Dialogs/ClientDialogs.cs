@@ -21,6 +21,59 @@ namespace Xeno.Desktop.Dialogs
         #region Public-Methods
 
         /// <summary>
+        /// Add a route rule, or edit one when <paramref name="rule"/> is given.
+        /// </summary>
+        /// <param name="owner">Owner window.</param>
+        /// <param name="session">Session.</param>
+        /// <param name="rule">Rule to edit, or null.</param>
+        /// <param name="model">Model to prefill for a new rule, or null.</param>
+        /// <param name="completed">Called after a save.</param>
+        /// <returns>Task.</returns>
+        public static Task RouteRuleAsync(Window owner, DesktopSession session, Xeno.Client.LocalInferenceRouteRule? rule, string? model, Action completed)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            return RunSpecAsync(owner, session, XenoForms.RouteRule(session.Workspace, rule, model), completed);
+        }
+
+        /// <summary>
+        /// Delete the route rule for a model after confirming.
+        /// </summary>
+        /// <param name="owner">Owner window.</param>
+        /// <param name="session">Session.</param>
+        /// <param name="model">Model.</param>
+        /// <param name="completed">Called after a delete.</param>
+        /// <returns>Task.</returns>
+        public static async Task DeleteRouteRuleAsync(Window owner, DesktopSession session, string model, Action completed)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            bool confirmed = await XenoDialogs.ConfirmAsync(owner, "Delete Route Rule", "Delete the route rule for '" + model + "'? The model goes back to the default: this machine when a provider here serves it, otherwise the Xeno network.", "Delete").ConfigureAwait(true);
+            if (!confirmed) return;
+            int removed = await session.Workspace.DeleteRouteRuleAsync(model, CancellationToken.None).ConfigureAwait(true);
+            session.Report(removed > 0 ? "Deleted the route rule for '" + model + "'." : "No route rule for '" + model + "'.");
+            completed();
+        }
+
+        /// <summary>
+        /// Ask for a model and show where the local endpoint would send it.
+        /// </summary>
+        /// <param name="owner">Owner window.</param>
+        /// <param name="session">Session.</param>
+        /// <param name="initial">Model to prefill.</param>
+        /// <returns>Task.</returns>
+        public static async Task TestRouteAsync(Window owner, DesktopSession session, string initial)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            string? model = await XenoDialogs.PromptAsync(owner, "Test a Route", "Model", initial ?? String.Empty, false).ConfigureAwait(true);
+            if (String.IsNullOrWhiteSpace(model)) return;
+            Xeno.Client.Routing.LocalInferenceRouteDecision decision = await session.Workspace.ResolveRouteAsync(model, CancellationToken.None).ConfigureAwait(true);
+            string message = model + " goes to " + decision.RouteHeader + "." + Environment.NewLine + Environment.NewLine
+                + Xeno.Client.Routing.LocalInferenceRoutingService.DescribeReason(decision.Reason)
+                + (decision.FallbackToNetwork ? Environment.NewLine + "If the provider fails before responding, the request falls back to the Xeno network." : String.Empty)
+                + (decision.Target == Xeno.Client.Routing.LocalInferenceRouteTargetKindEnum.Local && !decision.ShapeSupported ? Environment.NewLine + "This provider accepts OpenAI-compatible requests only; call the /v1 routes." : String.Empty);
+            await XenoDialogs.MessageAsync(owner, "Where " + model + " goes", message, XenoToneEnum.Neutral).ConfigureAwait(true);
+        }
+
+        /// <summary>
         /// Add a provider endpoint.
         /// </summary>
         /// <param name="owner">Owner window.</param>

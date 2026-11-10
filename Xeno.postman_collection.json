@@ -175,7 +175,7 @@
     },
     {
       "key": "localInferenceBaseUrl",
-      "value": "http://127.0.0.1:11434",
+      "value": "http://127.0.0.1:11435",
       "type": "string"
     }
   ],
@@ -793,13 +793,14 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"allowModelManagement\": true\n}",
+                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"allowModelManagement\": true,\n  \"shareWithNetwork\": true,\n  \"routeLocalRequests\": true,\n  \"maxConcurrentRequests\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Create or update a provider. shareWithNetwork false keeps the provider off the Xeno network (for example your own Ollama Cloud or ollama.com account) while this machine's local endpoint can still use it. routeLocalRequests lets the local endpoint answer requests with this provider directly. maxConcurrentRequests (1 to 256) limits network and local requests together across the provider's models; null inherits defaultMaxConcurrentRequests."
               }
             },
             {
@@ -826,13 +827,14 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"clearCredential\": false,\n  \"allowModelManagement\": true\n}",
+                  "raw": "{\n  \"name\": \"{{localProviderName}}\",\n  \"apiType\": \"Ollama\",\n  \"endpoint\": \"{{localProviderEndpoint}}\",\n  \"timeoutMs\": 300000,\n  \"credential\": null,\n  \"clearCredential\": false,\n  \"allowModelManagement\": true,\n  \"shareWithNetwork\": true,\n  \"routeLocalRequests\": true,\n  \"maxConcurrentRequests\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Create or update a provider. shareWithNetwork false keeps the provider off the Xeno network (for example your own Ollama Cloud or ollama.com account) while this machine's local endpoint can still use it. routeLocalRequests lets the local endpoint answer requests with this provider directly. maxConcurrentRequests (1 to 256) limits network and local requests together across the provider's models; null inherits defaultMaxConcurrentRequests."
               }
             },
             {
@@ -934,13 +936,14 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"provider\": \"{{localProviderName}}\",\n  \"name\": \"{{modelName}}\",\n  \"supportsCompletions\": true,\n  \"supportsEmbeddings\": false\n}",
+                  "raw": "{\n  \"provider\": \"{{localProviderName}}\",\n  \"name\": \"{{modelName}}\",\n  \"supportsCompletions\": true,\n  \"supportsEmbeddings\": false,\n  \"maxConcurrentRequests\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Create or update an advertised model. maxConcurrentRequests (1 to 256) limits this model on its provider; null inherits the provider limit."
               }
             },
             {
@@ -968,13 +971,14 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"provider\": \"{{localProviderName}}\",\n  \"name\": \"{{modelName}}\",\n  \"supportsCompletions\": true,\n  \"supportsEmbeddings\": false\n}",
+                  "raw": "{\n  \"provider\": \"{{localProviderName}}\",\n  \"name\": \"{{modelName}}\",\n  \"supportsCompletions\": true,\n  \"supportsEmbeddings\": false,\n  \"maxConcurrentRequests\": null\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Create or update an advertised model. maxConcurrentRequests (1 to 256) limits this model on its provider; null inherits the provider limit."
               }
             },
             {
@@ -1675,13 +1679,14 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"enabled\": true,\n  \"host\": \"127.0.0.1\",\n  \"port\": 9343,\n  \"openBrowserOnStart\": false,\n  \"requireLocalToken\": true,\n  \"database\": {\n    \"filename\": \"\"\n  },\n  \"historyRetention\": {\n    \"maxEntries\": 1000,\n    \"maxBodyBytes\": 65536,\n    \"persistBodies\": true\n  },\n  \"telemetry\": {\n    \"enabled\": true,\n    \"collectionIntervalMs\": 15000,\n    \"retentionDays\": 30,\n    \"pruneIntervalMinutes\": 60,\n    \"persistRawSnapshot\": true,\n    \"gpu\": {\n      \"enabled\": true,\n      \"nvidiaDcgmExporterUrl\": null,\n      \"commandTimeoutMs\": 5000\n    }\n  }\n}",
+                  "raw": "{\n  \"enabled\": true,\n  \"host\": \"127.0.0.1\",\n  \"port\": 9343,\n  \"openBrowserOnStart\": false,\n  \"requireLocalToken\": true,\n  \"database\": {\n    \"filename\": \"\"\n  },\n  \"historyRetention\": {\n    \"maxEntries\": 1000,\n    \"maxBodyBytes\": 65536,\n    \"persistBodies\": true\n  },\n  \"telemetry\": {\n    \"enabled\": true,\n    \"collectionIntervalMs\": 15000,\n    \"retentionDays\": 30,\n    \"pruneIntervalMinutes\": 60,\n    \"persistRawSnapshot\": true,\n    \"gpu\": {\n      \"enabled\": true,\n      \"nvidiaDcgmExporterUrl\": null,\n      \"commandTimeoutMs\": 5000\n    }\n  },\n  \"localInferenceServer\": {\n    \"port\": 11435,\n    \"routingMode\": \"PreferLocal\",\n    \"routes\": [],\n    \"discoverLocalModels\": true,\n    \"healthCheckIntervalMs\": 15000,\n    \"localQueueTimeoutMs\": 30000\n  },\n  \"defaultMaxConcurrentRequests\": 4\n}",
                   "options": {
                     "raw": {
                       "language": "json"
                     }
                   }
-                }
+                },
+                "description": "Replace the local dashboard, local inference listener, and telemetry settings. Send the full localInferenceServer object, including routes, because omitted fields reset to their defaults. routingMode is PreferLocal, NetworkOnly, or LocalOnly. defaultMaxConcurrentRequests (1 to 256, default 4) applies to providers that set no limit. Listener host and port changes need a client restart."
               }
             },
             {
@@ -1716,12 +1721,223 @@
                   }
                 }
               }
+            },
+            {
+              "name": "Acknowledge Local Inference Port Migration",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/port-migration/acknowledge",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "port-migration",
+                    "acknowledge"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Dismiss the one-time notice shown after the client moved the local inference listener from the pre-0.2.0 default port 11434 to 11435. Returns {\"acknowledged\": true}. The notice appears in GET /api/v1/state as connection.localInferencePortMigratedFrom and localInferencePortMigratedTo."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Local Routing",
+          "description": "Where the Xeno Client local inference listener sends each model. Reads the listener's live provider health and counters when the client is running, edits per-model route rules in client.json, and pages the metadata-only local endpoint request log. Rule changes apply to the running listener without a restart.",
+          "item": [
+            {
+              "name": "Get Routing",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/routing",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "routing"
+                  ]
+                },
+                "description": "Listener URL, routing mode, route rules, each local provider's health, load, and limit, and request counters since the listener started. runtimeAvailable is false when the client is not running, in which case health is unknown."
+              }
+            },
+            {
+              "name": "Resolve Model Route",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/resolve?model={{modelName}}&shape=openai",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "resolve"
+                  ],
+                  "query": [
+                    {
+                      "key": "model",
+                      "value": "{{modelName}}"
+                    },
+                    {
+                      "key": "shape",
+                      "value": "openai"
+                    }
+                  ]
+                },
+                "description": "Where the listener would send {{modelName}}, and why. shape is openai (the /v1 routes) or ollama (the /api routes). Returns target, route (the X-Xeno-Route value), provider, a stable reason code, fallbackToNetwork, and shapeSupported."
+              }
+            },
+            {
+              "name": "Save Route Rule",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/routes",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "routes"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"target\": \"Local\",\n  \"provider\": \"{{localProviderName}}\",\n  \"fallbackToNetwork\": false,\n  \"originalModel\": null\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Create or replace the rule for one model. target is Local (provider required) or Network. fallbackToNetwork lets a local request go to the network if the provider fails before responding; it never retries a response that already started. Set originalModel to rename an existing rule. Invalid rules return 400."
+              }
+            },
+            {
+              "name": "Delete Route Rule",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/routes/{{modelName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "routes",
+                    "{{modelName}}"
+                  ]
+                },
+                "description": "Remove the rule for a model; the model goes back to the default route. Returns 404 when there is no rule."
+              }
+            },
+            {
+              "name": "Check Providers",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/backends/check",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "backends",
+                    "check"
+                  ]
+                },
+                "description": "Probe every provider used for local requests now (Ollama /api/tags, others /v1/models) and return each one's health, latency, error, and discovered models.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "List Local Endpoint Requests",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/requests?page=1&pageSize=25",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "requests"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "25"
+                    }
+                  ]
+                },
+                "description": "Page the local endpoint request log, newest first. Metadata only: route, provider, status, timing, and token counts. Bodies are never stored."
+              }
             }
           ]
         },
         {
           "name": "Local OpenAI APIs",
-          "description": "Executable requests against the optional Xeno Client localhost OpenAI-compatible inference listener.",
+          "description": "Executable requests against the optional Xeno Client localhost OpenAI-compatible inference listener. The listener defaults to http://127.0.0.1:11435 ({{localInferenceBaseUrl}}) so a local Ollama can keep port 11434.",
           "item": [
             {
               "name": "Root Probe (HEAD)",
@@ -2004,7 +2220,7 @@
         },
         {
           "name": "Local Ollama APIs",
-          "description": "Executable requests against the optional Xeno Client localhost Ollama-compatible inference listener.",
+          "description": "Executable requests against the optional Xeno Client localhost Ollama-compatible inference listener. The listener defaults to http://127.0.0.1:11435 ({{localInferenceBaseUrl}}) so a local Ollama can keep port 11434.",
           "item": [
             {
               "name": "Ollama Endpoint Probe (HEAD)",
