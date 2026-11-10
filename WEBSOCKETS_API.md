@@ -46,7 +46,7 @@ Telemetry payloads must not contain prompts, responses, provider credentials, au
 The current protocol version is the Xeno application version:
 
 ```text
-0.1.1
+0.2.0
 ```
 
 ## Authentication
@@ -454,6 +454,39 @@ Example:
   }
 }
 ```
+
+### `server.localInference.response`, `.response.start`, `.response.chunk`, `.response.complete`
+
+Answers a `client.localInference.request`. The server sends either one `server.localInference.response` (a
+complete, non-streaming answer or an error) or, for streaming requests, a `server.localInference.response.start`,
+any number of `server.localInference.response.chunk` frames, and a final `server.localInference.response.complete`.
+The client writes them to the local app that called its local inference listener.
+
+Response and start schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | `server.localInference.response`, `server.localInference.response.start`, or `server.localInference.response.complete`. |
+| `requestId` | string | yes | The `requestId` of the client request. |
+| `success` | boolean | yes | Whether the upstream request succeeded. |
+| `statusCode` | number | no | HTTP status code to return to the local app. |
+| `contentType` | string | no | Response content type, for example `application/json` or `text/event-stream`. |
+| `headers` | object | no | Safe response headers. The client drops hop-by-hop headers, `Content-Length`, and any `X-Xeno-Route` or `X-Xeno-Fallback` value. |
+| `body` | string | no | Response body for non-streaming responses. |
+| `error` | string | no | Error message when `success` is false. |
+
+Chunk schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `server.localInference.response.chunk`. |
+| `requestId` | string | yes | The `requestId` of the client request. |
+| `sequence` | number | yes | Zero-based chunk order. |
+| `encoding` | string | no | `base64` (default) or `utf8`. |
+| `byteCount` | number | yes | Decoded byte count. |
+| `contentBase64` | string | no | Chunk bytes when `encoding` is `base64`. |
+| `content` | string | no | Chunk text when `encoding` is `utf8`. |
+| `sentUtc` | string | no | When the server sent the chunk. |
 
 ## Client-to-Server Messages
 
@@ -1146,6 +1179,49 @@ Example:
   "body": "{\"model\":\"gemma3:4b\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply in one short sentence: latency matters. Sample 1.\"}]}"
 }
 ```
+
+### `client.localInference.request`
+
+Sent by a client's local inference listener when a local app asks for a model the client does not answer from a
+provider on the same machine. The server authenticates the frame against the client's WebSocket session, routes it
+like an OpenAI-compatible or Ollama-compatible request from that client's user, and answers with
+`server.localInference.response` frames.
+
+Since 0.2.0 the client answers models served by its own providers directly and sends only the rest. A request whose
+local provider failed before responding, and whose route rule allows falling back to the network, sets
+`excludeRequestingClient` so the server does not send it back to the client it came from.
+
+Schema:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.localInference.request`. |
+| `requestId` | string | yes | Client-generated request ID used to correlate responses and cancellation. |
+| `tenantId` | string | yes | Must match the authenticated WebSocket tenant. |
+| `clientId` | string | yes | Must be the client registered on this WebSocket session. |
+| `method` | string | yes | HTTP method the local app used. |
+| `relativePath` | string | yes | Route the local app called, for example `/v1/chat/completions` or `/api/chat`. |
+| `model` | string | no | Requested model. Empty for model lists. |
+| `embeddings` | boolean | yes | Whether the request is an embeddings request. |
+| `stream` | boolean | yes | Whether the local app asked for a streaming response. |
+| `providerFamily` | string | yes | `openai` or `ollama`, from the route the local app called. |
+| `requestorIp` | string | no | Loopback address of the local app. |
+| `headers` | object | no | Forwarded request headers, without hop-by-hop headers. |
+| `body` | string | yes | Request body as the local app sent it. |
+| `excludeRequestingClient` | boolean | no | Default `false`. When `true`, the server must not select the sending client. Servers before 0.2.0 ignore it, so a fallback can be routed back to the same client and fail there. |
+
+### `client.localInference.cancel`
+
+Tells the server to stop a `client.localInference.request` because the local app disconnected or the listener's
+request timeout elapsed.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | yes | Always `client.localInference.cancel`. |
+| `requestId` | string | yes | The request to cancel. |
+| `tenantId` | string | yes | Tenant ID. |
+| `clientId` | string | yes | Sending client. |
+| `reason` | string | yes | `CallerDisconnected` or `RequestTimeout`. |
 
 ## Telemetry Object
 

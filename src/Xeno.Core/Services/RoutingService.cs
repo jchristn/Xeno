@@ -66,8 +66,9 @@ namespace Xeno.Core.Services
         /// <param name="isEmbedding">Whether request is an embedding request.</param>
         /// <param name="provider">Optional upstream provider filter.</param>
         /// <param name="token">Cancellation token.</param>
+        /// <param name="excludeClientId">Client that must not be selected, for example the client a fallback request came from. Null excludes nothing.</param>
         /// <returns>Routing decision.</returns>
-        public async Task<RoutingDecision> RouteAsync(RequestContext context, string? model, bool isEmbedding, ApiProviderTypeEnum? provider, CancellationToken token = default)
+        public async Task<RoutingDecision> RouteAsync(RequestContext context, string? model, bool isEmbedding, ApiProviderTypeEnum? provider, CancellationToken token = default, string? excludeClientId = null)
         {
             if (context == null) throw new ArgumentNullException(nameof(context));
             token.ThrowIfCancellationRequested();
@@ -100,6 +101,7 @@ namespace Xeno.Core.Services
             DateTime utcNow = DateTime.UtcNow;
             DateTime freshnessCutoffUtc = utcNow.AddMilliseconds(-_Settings.ClientFreshnessTimeoutMs);
             List<XenoClientRecord> candidates = visibleClients
+                .Where(item => String.IsNullOrWhiteSpace(excludeClientId) || !String.Equals(item.Id, excludeClientId, StringComparison.OrdinalIgnoreCase))
                 .Where(item => IsEligibleClient(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
                 .OrderBy(item => item.Name)
                 .ThenByDescending(item => item.Weight)
@@ -109,6 +111,12 @@ namespace Xeno.Core.Services
                 .Select(item => BuildClientExclusionReason(item, effectiveModel, isEmbedding, provider, freshnessCutoffUtc))
                 .Where(item => !String.IsNullOrWhiteSpace(item))
                 .ToList();
+            if (!String.IsNullOrWhiteSpace(excludeClientId))
+            {
+                XenoClientRecord? excluded = visibleClients.FirstOrDefault(item => String.Equals(item.Id, excludeClientId, StringComparison.OrdinalIgnoreCase));
+                if (excluded != null) decision.ExcludedClientReasons.Add(ClientLabel(excluded) + ":RequestingClientExcluded");
+            }
+
             decision.Timeline.Add("ClientInventory");
 
             RoutingPolicy policy = await ResolveRoutingPolicyAsync(context.TenantId, effectiveModel, candidates, token).ConfigureAwait(false);

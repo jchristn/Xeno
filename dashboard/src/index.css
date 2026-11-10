@@ -2824,7 +2824,7 @@ html[data-theme='dark'] .primitive-list-item {
 }
 
 .explorer-item span {
-  color: var(--color-text-muted);
+  color: var(--color-muted);
   font-size: 12px;
 }
 
@@ -4404,4 +4404,56 @@ html[data-theme='dark'] .primitive-list-item {
 .captcha-widget {
   margin: 4px 0 8px;
   min-height: 65px;
+}
+
+.route-mix-chart {
+  display: grid;
+  gap: 8px;
+}
+
+.route-mix-chart svg {
+  display: block;
+  max-height: 180px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.route-resolver {
+  display: grid;
+  gap: 12px;
+}
+
+.route-resolver-result {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--color-panel-soft, var(--color-panel));
+}
+
+.route-resolver-result p {
+  margin: 6px 0 0;
+  color: var(--color-muted);
+}
+
+.metric-copy strong * {
+  text-transform: none;
 }

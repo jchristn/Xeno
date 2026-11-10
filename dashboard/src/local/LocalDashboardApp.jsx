@@ -16,9 +16,11 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Route as RouteIcon,
   Search,
   Server,
   Settings as SettingsIcon,
+  Square,
   Sun,
   Terminal,
   Trash2,
@@ -38,6 +40,7 @@ import { jsonBody, localApi } from './localApi.js';
 const pages = [
   { id: 'home', descriptionKey: 'localHomeDescription', icon: Activity, labelKey: 'home', tooltipKey: 'tooltipLocalNavHome' },
   { id: 'providers', descriptionKey: 'localProvidersDescription', icon: Server, labelKey: 'localProviders', tooltipKey: 'tooltipLocalNavProviders' },
+  { id: 'localEndpoint', descriptionKey: 'localEndpointDescription', icon: RouteIcon, labelKey: 'localEndpoint', tooltipKey: 'tooltipLocalNavLocalEndpoint' },
   { id: 'models', descriptionKey: 'localModelsDescription', icon: BrainCircuit, labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
   { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
   { id: 'apiExplorer', descriptionKey: 'localApiExplorerDescription', icon: FileJson, labelKey: 'apiExplorer', tooltipKey: 'tooltipLocalNavApiExplorer' },
@@ -48,7 +51,7 @@ const pages = [
 ];
 
 const localNavGroups = [
-  { key: 'observe', pageIds: ['home', 'providers', 'models', 'requests', 'apiExplorer'] },
+  { key: 'observe', pageIds: ['home', 'providers', 'localEndpoint', 'models', 'requests', 'apiExplorer'] },
   { key: 'telemetry', pageIds: ['telemetry', 'providerTelemetry'] },
   { key: 'administration', pageIds: ['logs', 'settings'] }
 ];
@@ -127,6 +130,8 @@ export default function LocalDashboardApp() {
   const [logTail, setLogTail] = useState(200);
   const [followLogs, setFollowLogs] = useState(false);
   const [modal, setModal] = useState(null);
+  const [localRouting, setLocalRouting] = useState(null);
+  const [localEndpointRequests, setLocalEndpointRequests] = useState([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -161,6 +166,7 @@ export default function LocalDashboardApp() {
     try {
       setError('');
       if (page === 'home') {
+        localApi('/api/v1/local-inference/routing').then((value) => setLocalRouting(value)).catch(() => setLocalRouting(null));
         const [stateResponse, statisticsResponse, summaryResponse] = await Promise.all([
           localApi('/api/v1/state'),
           localApi('/api/v1/statistics'),
@@ -169,6 +175,13 @@ export default function LocalDashboardApp() {
         setState(stateResponse);
         setStatistics(statisticsResponse);
         setSummary(summaryResponse.buckets || []);
+      } else if (page === 'localEndpoint') {
+        const [routingResponse, requestsResponse] = await Promise.all([
+          localApi('/api/v1/local-inference/routing'),
+          localApi('/api/v1/local-inference/requests?page=1&pageSize=200')
+        ]);
+        setLocalRouting(routingResponse);
+        setLocalEndpointRequests(Array.isArray(requestsResponse.items) ? requestsResponse.items : []);
       } else if (page === 'providers') {
         const response = await localApi('/api/v1/providers');
         setProviders(response.providers || []);
@@ -258,7 +271,7 @@ export default function LocalDashboardApp() {
         </nav>
         <div className="sidebar-footer">
           <span>{t('version')}</span>
-          <strong>v0.1.0</strong>
+          <strong>v0.2.0</strong>
         </div>
       </aside>
       <div className="content-shell">
@@ -292,8 +305,9 @@ export default function LocalDashboardApp() {
         </header>
         <main className="workspace">
           {error ? <div className="settings-restart-banner error-state"><CircleAlert size={18} /><span>{error}</span></div> : null}
-          {page === 'home' ? <Home range={range} refresh={refresh} setRange={setRange} state={state} statistics={statistics} summary={summary} /> : null}
+          {page === 'home' ? <Home range={range} refresh={refresh} routing={localRouting} setRange={setRange} state={state} statistics={statistics} summary={summary} /> : null}
           {page === 'providers' ? <Providers providers={providers} refresh={refresh} setModal={setModal} /> : null}
+          {page === 'localEndpoint' ? <LocalEndpoint modalOpen={!!modal} refresh={refresh} requests={localEndpointRequests} routing={localRouting} setModal={setModal} /> : null}
           {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
           {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
           {page === 'apiExplorer' ? <LocalApiExplorer state={state} /> : null}
@@ -357,17 +371,32 @@ function DiscordMark({ size = 17 }) {
   );
 }
 
-function Home({ range, refresh, setRange, state, statistics, summary }) {
+function Home({ range, refresh, routing, setRange, state, statistics, summary }) {
   const { t } = useTranslation();
   return (
     <>
       {state?.settings?.localDashboard?.host === '0.0.0.0' ? <div className="settings-restart-banner"><CircleAlert size={18} /><span>{t('localBindWarning')}</span></div> : null}
+      {state?.connection?.localInferencePortMigratedFrom ? (
+        <div className="settings-restart-banner" role="status">
+          <CircleAlert size={18} />
+          <span>{t('localInferencePortMigrated', { from: state.connection.localInferencePortMigratedFrom, to: state.connection.localInferencePortMigratedTo || state?.settings?.localInferenceServer?.port || 11435 })}</span>
+          <button className="action-button" onClick={async () => { await localApi('/api/v1/local-inference/port-migration/acknowledge', { method: 'POST', body: '{}' }); refresh(); }} title={t('tooltipDismissNotice')} type="button">{t('dismiss')}</button>
+        </div>
+      ) : null}
       <div className="metric-grid">
         <Metric icon={<Zap size={18} />} label={t('connected')} subtext={state?.connection?.webSocketUrl} tone={state?.connection?.isConnected ? 'success' : 'danger'} value={state?.connection?.isConnected ? t('yes') : t('no')} />
         <Metric icon={<Server size={18} />} label={t('registered')} tone={state?.connection?.isRegistered ? 'success' : 'warning'} value={state?.connection?.isRegistered ? t('yes') : t('no')} />
         <Metric icon={<History size={18} />} label={t('requests')} value={statistics?.requests || 0} />
         <Metric icon={<Gauge size={18} />} label={t('failures')} tone={statistics?.failures ? 'danger' : 'neutral'} value={statistics?.failures || 0} />
       </div>
+      {routing ? (
+        <div className="metric-grid">
+          <Metric icon={<RouteIcon size={18} />} label={t('localEndpoint')} subtext={routing.url} value={t(`routingMode${routing.routingMode}`, routing.routingMode)} />
+          <Metric icon={<Zap size={18} />} label={t('answeredHere')} subtext={t('sinceStart')} tone="success" value={display(routing.localRequests, t)} />
+          <Metric icon={<Activity size={18} />} label={t('sentToNetwork')} subtext={t('fallbacksCount', { count: routing.fallbacks || 0 })} value={display(routing.networkRequests, t)} />
+          <Metric icon={<Server size={18} />} label={t('providersHealthy')} subtext={routing.runtimeAvailable ? '' : t('healthUnknownNotRunning')} tone={routing.runtimeAvailable && routing.healthyBackends < routing.routableBackends ? 'warning' : 'neutral'} value={routing.runtimeAvailable ? `${routing.healthyBackends} / ${routing.routableBackends}` : '-'} />
+        </div>
+      ) : null}
       <Panel className="chart-panel-card" title={t('requestsOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
         <ActivityChart onRangeChange={setRange} onRefresh={refresh} range={range} summary={{ buckets: summary }} />
       </Panel>
@@ -406,7 +435,7 @@ function Providers({ providers, refresh, setModal }) {
         { divider: true, key: 'divider-delete' },
         { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalProvider') }
       ]}
-      columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential', 'allowModelManagement']}
+      columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential', 'allowModelManagement', 'shareWithNetwork', 'routeLocalRequests', 'maxConcurrentRequests']}
       headerActions={<button className="primary-button" onClick={() => setModal(providerModal(t, null, refresh))} title={t('tooltipCreateLocalProvider')} type="button"><Plus size={16} />{t('createProvider')}</button>}
       onRefresh={refresh}
       onRowClick={(row) => setModal(providerModal(t, row, refresh))}
@@ -440,7 +469,7 @@ function Models({ models, providerFilter, providers, refresh, setModal, setProvi
       actions={(row) => [
         { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalModel') }
       ]}
-      columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings', 'modelManagementAllowed']}
+      columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings', 'modelManagementAllowed', 'maxConcurrentRequests', 'effectiveMaxConcurrentRequests']}
       headerActions={(
         <>
           <label className="form-field inline compact-field" title={t('tooltipLocalModelProviderFilter')}>
@@ -857,6 +886,255 @@ function Logs({ followLogs, logSeverity, logTail, logs, setFollowLogs, setLogSev
   );
 }
 
+function LocalEndpoint({ modalOpen, refresh, requests, routing, setModal }) {
+  const { t } = useTranslation();
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  useEffect(() => {
+    if (!autoRefresh || modalOpen) return undefined;
+    const interval = window.setInterval(() => refresh(), 5000);
+    return () => window.clearInterval(interval);
+  }, [autoRefresh, modalOpen]);
+
+  if (!routing) return <Panel title={t('localEndpoint')}><EmptyState message={t('loading')} /></Panel>;
+  const backends = Array.isArray(routing.backends) ? routing.backends : [];
+  const rules = Array.isArray(routing.rules) ? routing.rules : [];
+  const records = Array.isArray(requests) ? requests : [];
+  const status = !routing.enabled ? t('localEndpointDisabled') : routing.runtimeAvailable ? t('listening') : t('localEndpointNotRunning');
+  const providerNames = backends.filter((item) => item.routable).map((item) => item.provider);
+
+  async function check() {
+    const response = await localApi('/api/v1/local-inference/backends/check', { method: 'POST', body: '{}' });
+    const list = Array.isArray(response.backends) ? response.backends : [];
+    const healthy = list.filter((item) => item.healthy === true).length;
+    setModal(messageModal(t, t('checkProviders'), t('providersChecked', { healthy, total: list.length }), response));
+    refresh();
+  }
+
+  function removeRule(rule) {
+    setModal(confirmModal(t, t('deleteRouteRule'), t('deleteRouteRuleMessage', { model: rule.model }), async () => {
+      await localApi(`/api/v1/local-inference/routes/${encodeURIComponent(rule.model)}`, { method: 'DELETE' });
+      setModal(null);
+      refresh();
+    }));
+  }
+
+  return (
+    <>
+      {!routing.runtimeAvailable && routing.enabled ? <div className="settings-restart-banner" role="status"><CircleAlert size={18} /><span>{t('localEndpointNotRunningBanner')}</span></div> : null}
+      <div className="metric-grid">
+        <Metric icon={<RouteIcon size={18} />} label={t('localEndpoint')} subtext={status} value={<CopyableValue label={t('copyValue')} value={routing.url} />} />
+        <Metric icon={<Activity size={18} />} label={t('localRoutingMode')} subtext={t('defaultLimitEach', { limit: routing.defaultMaxConcurrentRequests })} value={t(`routingMode${routing.routingMode}`, routing.routingMode)} />
+        <Metric icon={<Server size={18} />} label={t('providersHealthy')} subtext={routing.runtimeAvailable ? '' : t('healthUnknownNotRunning')} tone={routing.runtimeAvailable && routing.healthyBackends < routing.routableBackends ? 'warning' : 'neutral'} value={routing.runtimeAvailable ? `${routing.healthyBackends} / ${routing.routableBackends}` : '-'} />
+        <Metric icon={<Zap size={18} />} label={t('answeredHere')} subtext={t('sinceStart')} tone="success" value={display(routing.localRequests, t)} />
+        <Metric icon={<Activity size={18} />} label={t('sentToNetwork')} subtext={t('fallbacksCount', { count: routing.fallbacks || 0 })} value={display(routing.networkRequests, t)} />
+        <Metric icon={<CircleAlert size={18} />} label={t('errors')} subtext={t('sinceStart')} tone={routing.errors > 0 ? 'danger' : 'neutral'} value={display(routing.errors, t)} />
+      </div>
+      <Panel
+        actions={(
+          <div className="button-row">
+            <label className="toggle-field" title={t('tooltipAutoRefreshLocalEndpoint')}><input checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} title={t('tooltipAutoRefreshLocalEndpoint')} type="checkbox" />{t('autoRefresh')}</label>
+            <button className="action-button" onClick={refresh} title={t('tooltipRefresh')} type="button"><RefreshCw size={16} />{t('refresh')}</button>
+          </div>
+        )}
+        title={t('localEndpointTraffic')}
+      >
+        <RouteMixChart records={records} />
+      </Panel>
+      <DataTable
+        actions={(row) => [
+          { icon: <Play size={14} />, key: 'resolve', label: t('testRoute'), onSelect: () => setModal(resolveModal(t, '')), tooltip: t('tooltipTestRoute') }
+        ]}
+        columns={['provider', 'apiType', 'health', 'latencyMs', 'inFlight', 'inFlightLocal', 'inFlightNetwork', 'queued', 'limit', 'shared', 'routable', 'lastError']}
+        headerActions={<button className="action-button" onClick={check} title={t('tooltipCheckProviders')} type="button"><RefreshCw size={16} />{t('checkProviders')}</button>}
+        onRefresh={refresh}
+        rows={backends.map((item) => ({ ...item, latencyMs: item.latencyMs == null ? '' : Math.round(item.latencyMs), health: t(`health_${item.health}`, item.health) }))}
+        title={t('providersOnThisMachine')}
+      />
+      <DataTable
+        actions={(row) => [
+          { icon: <Pencil size={14} />, key: 'edit', label: t('edit'), onSelect: () => setModal(ruleModal(t, row, providerNames, refresh, setModal)), tooltip: t('tooltipEditRouteRule') },
+          { icon: <Play size={14} />, key: 'resolve', label: t('testRoute'), onSelect: () => setModal(resolveModal(t, row.model)), tooltip: t('tooltipTestRoute') },
+          { divider: true, key: 'divider-delete' },
+          { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => removeRule(row), tooltip: t('tooltipDeleteRouteRule') }
+        ]}
+        columns={['model', 'sendTo', 'fallbackToNetwork']}
+        headerActions={(
+          <div className="button-row">
+            <button className="action-button" onClick={() => setModal(resolveModal(t, ''))} title={t('tooltipTestRoute')} type="button"><Play size={16} />{t('testRoute')}</button>
+            <button className="primary-button" onClick={() => setModal(ruleModal(t, null, providerNames, refresh, setModal))} title={t('tooltipAddRouteRule')} type="button"><Plus size={16} />{t('addRouteRule')}</button>
+          </div>
+        )}
+        onRefresh={refresh}
+        onRowClick={(row) => setModal(ruleModal(t, row, providerNames, refresh, setModal))}
+        rowActionLabel={t('edit')}
+        rows={rules.map((item) => ({ ...item, sendTo: item.target === 'Network' ? t('xenoNetwork') : (item.provider || '-') }))}
+        title={t('routeRules')}
+      />
+      <DataTable
+        actions={(row) => [
+          { icon: <Play size={14} />, key: 'resolve', label: t('testRoute'), onSelect: () => setModal(resolveModal(t, row.model)), tooltip: t('tooltipTestRoute') },
+          { icon: <Plus size={14} />, key: 'rule', label: t('addRouteRule'), onSelect: () => setModal(ruleModal(t, { model: row.model, target: 'Local', provider: providerNames[0] || null, fallbackToNetwork: false, isNew: true }, providerNames, refresh, setModal)), tooltip: t('tooltipAddRouteRule') }
+        ]}
+        columns={['received', 'model', 'route', 'statusCode', 'latencyMs', 'queuedMs', 'promptTokens', 'completionTokens', 'fallback']}
+        onRefresh={refresh}
+        rows={records.map((item) => ({ ...item, received: formatLocalTime(item.receivedUtc), latencyMs: Math.round(item.latencyMs || 0), queuedMs: Math.round(item.queuedMs || 0), model: item.model || `${item.method} ${item.path}` }))}
+        title={t('recentLocalEndpointRequests')}
+      />
+    </>
+  );
+}
+
+function formatLocalTime(value) {
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return value || '';
+  return new Date(time).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function RouteMixChart({ records }) {
+  const { t } = useTranslation();
+  const bucketCount = 12;
+  const bucketMs = 5 * 60 * 1000;
+  const end = Math.ceil(Date.now() / bucketMs) * bucketMs;
+  const start = end - bucketCount * bucketMs;
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({ startMs: start + index * bucketMs, local: 0, network: 0, fallback: 0 }));
+  (records || []).forEach((record) => {
+    const time = Date.parse(record.receivedUtc);
+    if (Number.isNaN(time) || time < start || time >= end) return;
+    const bucket = buckets[Math.floor((time - start) / bucketMs)];
+    if (!bucket) return;
+    if (record.fallback) bucket.fallback += 1;
+    else if (String(record.route || '').startsWith('local')) bucket.local += 1;
+    else bucket.network += 1;
+  });
+  const max = Math.max(1, ...buckets.map((item) => item.local + item.network + item.fallback));
+  const total = buckets.reduce((sum, item) => sum + item.local + item.network + item.fallback, 0);
+  if (total === 0) return <EmptyState message={t('noLocalEndpointTraffic')} />;
+  const width = 600;
+  const height = 140;
+  const barWidth = width / bucketCount;
+  return (
+    <div className="route-mix-chart">
+      <svg aria-label={t('localEndpointTrafficSummary', { total })} role="img" viewBox={`0 0 ${width} ${height + 18}`} width="100%">
+        {buckets.map((bucket, index) => {
+          let y = height;
+          const parts = [['local', 'var(--color-success)'], ['network', 'var(--color-info)'], ['fallback', 'var(--color-warning)']];
+          const label = new Date(bucket.startMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          return (
+            <g key={bucket.startMs}>
+              <title>{`${label}: ${t('answeredHere')} ${bucket.local}, ${t('sentToNetwork')} ${bucket.network}, ${t('fallback')} ${bucket.fallback}`}</title>
+              {parts.map(([key, color]) => {
+                const value = bucket[key];
+                if (!value) return null;
+                const barHeight = (value / max) * (height - 8);
+                y -= barHeight;
+                return <rect fill={color} height={barHeight} key={key} rx="2" width={barWidth - 6} x={index * barWidth + 3} y={y} />;
+              })}
+              {index % 3 === 0 ? <text fill="var(--color-muted)" fontSize="10" x={index * barWidth + 3} y={height + 14}>{label}</text> : null}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="chart-legend">
+        <span><i style={{ background: 'var(--color-success)' }} />{t('answeredHere')}</span>
+        <span><i style={{ background: 'var(--color-info)' }} />{t('sentToNetwork')}</span>
+        <span><i style={{ background: 'var(--color-warning)' }} />{t('fallback')}</span>
+      </div>
+    </div>
+  );
+}
+
+function ruleModal(t, rule, providerNames, refresh, setModal) {
+  const editing = !!rule && !rule.isNew;
+  const networkValue = '__network__';
+  const current = rule ? (rule.target === 'Network' ? networkValue : (rule.provider || providerNames[0] || networkValue)) : (providerNames[0] || networkValue);
+
+  async function save(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const target = form.get('target');
+    const network = target === networkValue;
+    await localApi('/api/v1/local-inference/routes', {
+      method: 'PUT',
+      body: jsonBody({
+        model: form.get('model'),
+        target: network ? 'Network' : 'Local',
+        provider: network ? null : target,
+        fallbackToNetwork: !network && form.get('fallbackToNetwork') === 'on',
+        originalModel: editing ? rule.model : null
+      })
+    });
+    setModal(null);
+    refresh();
+  }
+
+  return {
+    title: editing ? t('editRouteRule') : t('addRouteRule'),
+    json: rule || {},
+    body: (
+      <form className="form-grid" id="route-rule-form" onSubmit={save}>
+        <div className="empty-state span-full">{t('routeRuleIntro')}</div>
+        <Field defaultValue={rule?.model || ''} label={t('model')} name="model" tooltip={t('tooltipRouteRuleModel')} />
+        <SelectField defaultValue={current} label={t('sendTo')} name="target" options={[...providerNames.map((name) => ({ value: name, label: name })), { value: networkValue, label: t('xenoNetwork') }]} tooltip={t('tooltipRouteRuleTarget')} />
+        <Toggle checked={rule?.fallbackToNetwork} label={t('fallbackToNetworkLabel')} name="fallbackToNetwork" tooltip={t('tooltipRouteRuleFallback')} />
+      </form>
+    ),
+    actions: <button className="primary-button" form="route-rule-form" title={t('tooltipSaveRouteRule')} type="submit">{t('save')}</button>
+  };
+}
+
+function resolveModal(t, initialModel) {
+  return {
+    title: t('testRoute'),
+    body: <RouteResolver initialModel={initialModel} />
+  };
+}
+
+function RouteResolver({ compact = false, initialModel = '' }) {
+  const { t } = useTranslation();
+  const [model, setModel] = useState(initialModel || '');
+  const [shape, setShape] = useState('openai');
+  const [result, setResult] = useState(null);
+  const [failure, setFailure] = useState('');
+
+  async function resolve(event) {
+    event?.preventDefault();
+    setFailure('');
+    setResult(null);
+    if (!model.trim()) return;
+    try {
+      setResult(await localApi(`/api/v1/local-inference/resolve?model=${encodeURIComponent(model.trim())}&shape=${shape}`));
+    } catch (err) {
+      setFailure(err.message);
+    }
+  }
+
+  return (
+    <form className={compact ? 'route-resolver compact' : 'route-resolver'} onSubmit={resolve}>
+      <div className="form-grid">
+        <label className="form-field" title={t('tooltipRouteRuleModel')}><span>{t('model')}</span><input onChange={(event) => setModel(event.target.value)} title={t('tooltipRouteRuleModel')} value={model} /></label>
+        <label className="form-field" title={t('tooltipResolveShape')}>
+          <span>{t('apiShape')}</span>
+          <select onChange={(event) => setShape(event.target.value)} title={t('tooltipResolveShape')} value={shape}>
+            <option value="openai">OpenAI (/v1)</option>
+            <option value="ollama">Ollama (/api)</option>
+          </select>
+        </label>
+        <div className="button-row"><button className="primary-button" title={t('tooltipTestRoute')} type="submit"><Play size={16} />{t('testRoute')}</button></div>
+      </div>
+      {failure ? <div className="settings-restart-banner error-state" role="alert"><CircleAlert size={18} /><span>{failure}</span></div> : null}
+      {result ? (
+        <div className="route-resolver-result" role="status">
+          <strong>{t('modelGoesTo', { model: result.model, route: result.route })}</strong>
+          <p>{t(`routeReason_${result.reason}`, result.reasonText)}</p>
+          {result.fallbackToNetwork ? <p>{t('routeFallsBack')}</p> : null}
+          {result.target === 'local' && !result.shapeSupported ? <p>{t('routeShapeUnsupported')}</p> : null}
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
 function LocalApiExplorer({ state }) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState('openai-models');
@@ -864,10 +1142,12 @@ function LocalApiExplorer({ state }) {
   const [response, setResponse] = useState('');
   const [status, setStatus] = useState('');
   const [running, setRunning] = useState(false);
+  const [routeHeaders, setRouteHeaders] = useState(null);
+  const abortRef = useRef(null);
   const localInference = state?.connection || {};
   const settings = state?.settings?.localInferenceServer || {};
   const baseUrl = localInference.localInferenceServerUrl
-    || (settings.host && settings.port ? `http://${settings.host}:${settings.port}` : 'http://127.0.0.1:11434');
+    || (settings.host && settings.port ? `http://${settings.host}:${settings.port}` : 'http://127.0.0.1:11435');
   const enabled = !!(localInference.localInferenceServerEnabled || settings.enabled);
   const listening = !!localInference.localInferenceServerListening;
   const samples = localInferenceSamples(t);
@@ -883,10 +1163,14 @@ function LocalApiExplorer({ state }) {
     setRunning(true);
     setResponse('');
     setStatus('');
+    setRouteHeaders(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const request = {
         method: selected.method,
-        headers: { Accept: 'application/json' }
+        headers: { Accept: 'application/json' },
+        signal: controller.signal
       };
       if (selected.method !== 'GET') {
         request.headers['Content-Type'] = 'application/json';
@@ -894,19 +1178,44 @@ function LocalApiExplorer({ state }) {
       }
 
       const result = await fetch(baseUrl + selected.path, request);
-      const text = await result.text();
       setStatus(`${result.status} ${result.statusText}`);
+      setRouteHeaders({ route: result.headers.get('x-xeno-route') || '', fallback: result.headers.get('x-xeno-fallback') === 'true' });
+      const contentType = result.headers.get('content-type') || '';
+      if (result.body && (contentType.includes('event-stream') || contentType.includes('ndjson'))) {
+        const reader = result.body.getReader();
+        const decoder = new TextDecoder();
+        let streamed = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          streamed += decoder.decode(value, { stream: true });
+          setResponse(streamed);
+        }
+        return;
+      }
+
+      const text = await result.text();
       try {
         setResponse(JSON.stringify(JSON.parse(text), null, 2));
       } catch {
         setResponse(text);
       }
     } catch (err) {
+      if (err.name === 'AbortError') {
+        setStatus((current) => `${current || ''} ${t('stopped')}`.trim());
+        return;
+      }
+
       setStatus(t('requestFailed'));
       setResponse(err.message);
     } finally {
+      abortRef.current = null;
       setRunning(false);
     }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
   }
 
   const curl = buildLocalInferenceCurl(baseUrl, selected, body);
@@ -920,6 +1229,9 @@ function LocalApiExplorer({ state }) {
           websocketReady: !!(state?.connection?.isConnected && state?.connection?.isRegistered),
           lastError: localInference.localInferenceServerLastError || ''
         }} />
+      </Panel>
+      <Panel title={t('whereDoesAModelGo')}>
+        <RouteResolver compact />
       </Panel>
       <Panel title={t('apiExplorer')}>
         <div className="explorer-layout">
@@ -945,6 +1257,7 @@ function LocalApiExplorer({ state }) {
             ) : null}
             <div className="button-row">
               <button className="primary-button" disabled={!enabled || !listening || running} onClick={execute} type="button"><Play size={16} />{running ? t('running') : t('sendRequest')}</button>
+              {running ? <button className="action-button danger" onClick={stop} title={t('tooltipStopRequest')} type="button"><Square size={16} />{t('stop')}</button> : null}
               <CopyButton label={t('copyJson')} value={curl} />
             </div>
             <details open>
@@ -952,7 +1265,7 @@ function LocalApiExplorer({ state }) {
               <pre className="json-preview"><code>{curl}</code></pre>
             </details>
             <details open>
-              <summary>{t('response')} {status ? <span className="status-inline">{status}</span> : null}</summary>
+              <summary>{t('response')} {status ? <span className="status-inline">{status}</span> : null} {routeHeaders?.route ? <span className="status-inline" title={t('tooltipRouteHeader')}>X-Xeno-Route: {routeHeaders.route}{routeHeaders.fallback ? ` (${t('fallback')})` : ''}</span> : null}</summary>
               <pre className="json-preview"><code>{response || t('noData')}</code></pre>
             </details>
           </div>
@@ -1018,14 +1331,21 @@ function Settings({ database, refresh, state }) {
           persistBodies: form.has('persistBodies') ? form.get('persistBodies') === 'on' : !!settings.historyRetention?.persistBodies
         },
         localInferenceServer: {
+          ...camelCaseOnly(localInference),
           enabled: form.has('localInferenceEnabled') ? form.get('localInferenceEnabled') === 'on' : !!localInference.enabled,
           host: form.get('localInferenceHost') || localInference.host || '127.0.0.1',
-          port: Number(form.get('localInferencePort') || localInference.port || 11434),
+          port: Number(form.get('localInferencePort') || localInference.port || 11435),
           enableCors: form.has('localInferenceEnableCors') ? form.get('localInferenceEnableCors') === 'on' : localInference.enableCors !== false,
-          requestTimeoutMs: Number(form.get('localInferenceRequestTimeoutMs') || localInference.requestTimeoutMs || 120000),
+          requestTimeoutMs: Number(form.get('localInferenceRequestTimeoutMs') || localInference.requestTimeoutMs || 300000),
           maxRequestBodyBytes: Number(form.get('localInferenceMaxRequestBodyBytes') || localInference.maxRequestBodyBytes || 10485760),
-          corsAllowedOrigins: localInference.corsAllowedOrigins || ['http://localhost', 'http://127.0.0.1', 'http://[::1]']
+          corsAllowedOrigins: localInference.corsAllowedOrigins || ['http://localhost', 'http://127.0.0.1', 'http://[::1]'],
+          routingMode: form.get('localInferenceRoutingMode') || localInference.routingMode || 'PreferLocal',
+          routes: localInference.routes || [],
+          discoverLocalModels: form.has('localInferenceRoutingMode') ? form.get('localInferenceDiscoverLocalModels') === 'on' : localInference.discoverLocalModels !== false,
+          healthCheckIntervalMs: Number(form.get('localInferenceHealthCheckIntervalMs') || localInference.healthCheckIntervalMs || 15000),
+          localQueueTimeoutMs: form.has('localInferenceLocalQueueTimeoutMs') && form.get('localInferenceLocalQueueTimeoutMs') !== '' ? Number(form.get('localInferenceLocalQueueTimeoutMs')) : (localInference.localQueueTimeoutMs ?? 30000)
         },
+        defaultMaxConcurrentRequests: Number(form.get('defaultMaxConcurrentRequests') || state?.settings?.defaultMaxConcurrentRequests || 4),
         telemetry: {
           enabled: form.has('telemetryEnabled') ? form.get('telemetryEnabled') === 'on' : !!telemetry.enabled,
           collectionIntervalMs: Number(form.get('telemetryCollectionIntervalMs') || telemetry.collectionIntervalMs || 15000),
@@ -1102,10 +1422,15 @@ function Settings({ database, refresh, state }) {
         <form className="form-grid" onSubmit={save}>
           <Toggle checked={localInference.enabled} label={t('enabled')} name="localInferenceEnabled" tooltip={t('localInferenceSettings')} />
           <Field defaultValue={localInference.host || '127.0.0.1'} label={t('host')} name="localInferenceHost" tooltip={t('localInferenceSettings')} />
-          <Field defaultValue={localInference.port || 11434} label={t('port')} name="localInferencePort" tooltip={t('localInferenceSettings')} type="number" />
+          <Field defaultValue={localInference.port || 11435} label={t('port')} name="localInferencePort" tooltip={t('tooltipLocalInferencePort')} type="number" />
           <Toggle checked={localInference.enableCors !== false} label={t('cors')} name="localInferenceEnableCors" tooltip={t('localInferenceSettings')} />
-          <Field defaultValue={localInference.requestTimeoutMs || 120000} label={t('timeoutMs')} name="localInferenceRequestTimeoutMs" tooltip={t('localInferenceSettings')} type="number" />
+          <Field defaultValue={localInference.requestTimeoutMs || 300000} label={t('timeoutMs')} name="localInferenceRequestTimeoutMs" tooltip={t('localInferenceSettings')} type="number" />
           <Field defaultValue={localInference.maxRequestBodyBytes || 10485760} label={t('maxBodyBytes')} name="localInferenceMaxRequestBodyBytes" tooltip={t('localInferenceSettings')} type="number" />
+          <SelectField defaultValue={localInference.routingMode || 'PreferLocal'} label={t('localRoutingMode')} name="localInferenceRoutingMode" options={[{ value: 'PreferLocal', label: t('routingModePreferLocal') }, { value: 'NetworkOnly', label: t('routingModeNetworkOnly') }, { value: 'LocalOnly', label: t('routingModeLocalOnly') }]} tooltip={t('tooltipRoutingMode')} />
+          <Toggle checked={localInference.discoverLocalModels !== false} label={t('discoverLocalModels')} name="localInferenceDiscoverLocalModels" tooltip={t('tooltipDiscoverLocalModels')} />
+          <Field defaultValue={localInference.healthCheckIntervalMs || 15000} label={t('healthCheckIntervalMs')} name="localInferenceHealthCheckIntervalMs" tooltip={t('tooltipHealthCheckIntervalMs')} type="number" />
+          <Field defaultValue={localInference.localQueueTimeoutMs ?? 30000} label={t('localQueueTimeoutMs')} name="localInferenceLocalQueueTimeoutMs" tooltip={t('tooltipLocalQueueTimeoutMs')} type="number" />
+          <Field defaultValue={state?.settings?.defaultMaxConcurrentRequests || 4} label={t('defaultMaxConcurrentRequests')} name="defaultMaxConcurrentRequests" tooltip={t('tooltipDefaultMaxConcurrentRequests')} type="number" />
           <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
         </form>
       </Panel>
@@ -1156,7 +1481,10 @@ function providerModal(t, provider, refresh) {
         timeoutMs: Number(form.get('timeoutMs')),
         credential: form.get('credential') || null,
         clearCredential: form.get('clearCredential') === 'on',
-        allowModelManagement: form.get('allowModelManagement') === 'on'
+        allowModelManagement: form.get('allowModelManagement') === 'on',
+        shareWithNetwork: form.get('shareWithNetwork') === 'on',
+        routeLocalRequests: form.get('routeLocalRequests') === 'on',
+        maxConcurrentRequests: form.get('maxConcurrentRequests') ? Number(form.get('maxConcurrentRequests')) : null
       })
     });
     refresh();
@@ -1174,6 +1502,9 @@ function providerModal(t, provider, refresh) {
         <Field defaultValue="" label={t('credential')} name="credential" tooltip={t('tooltipLocalProviderCredential')} />
         <Toggle checked={false} label={t('clearCredential')} name="clearCredential" tooltip={t('tooltipLocalProviderClearCredential')} />
         <Toggle checked={provider?.allowModelManagement} label={t('modelManagement')} name="allowModelManagement" tooltip={t('tooltipLocalProviderModelManagement')} />
+        <Toggle checked={provider ? provider.shareWithNetwork !== false : true} label={t('shareWithNetwork')} name="shareWithNetwork" tooltip={t('tooltipShareWithNetwork')} />
+        <Toggle checked={provider ? provider.routeLocalRequests !== false : true} label={t('routeLocalRequests')} name="routeLocalRequests" tooltip={t('tooltipRouteLocalRequests')} />
+        <Field defaultValue={provider?.maxConcurrentRequests ?? ''} label={t('maxConcurrentRequests')} name="maxConcurrentRequests" tooltip={t('tooltipProviderMaxConcurrentRequests')} type="number" />
       </form>
     ),
     actions: <button className="primary-button" form="provider-form" title={t('tooltipSaveLocalProvider')} type="submit">{t('save')}</button>
@@ -1190,7 +1521,8 @@ function modelModal(t, model, providers, refresh) {
         provider: form.get('provider'),
         name: form.get('name'),
         supportsCompletions: form.get('supportsCompletions') === 'on',
-        supportsEmbeddings: form.get('supportsEmbeddings') === 'on'
+        supportsEmbeddings: form.get('supportsEmbeddings') === 'on',
+        maxConcurrentRequests: form.get('maxConcurrentRequests') ? Number(form.get('maxConcurrentRequests')) : null
       })
     });
     refresh();
@@ -1210,6 +1542,7 @@ function modelModal(t, model, providers, refresh) {
         <Field defaultValue={model?.name || ''} label={t('model')} name="name" tooltip={t('tooltipLocalModelName')} />
         <Toggle checked={model ? model.supportsCompletions : true} label={t('supportsCompletions')} name="supportsCompletions" tooltip={t('tooltipLocalModelCompletions')} />
         <Toggle checked={model ? model.supportsEmbeddings : false} label={t('supportsEmbeddings')} name="supportsEmbeddings" tooltip={t('tooltipLocalModelEmbeddings')} />
+        <Field defaultValue={model?.maxConcurrentRequests ?? ''} label={t('maxConcurrentRequests')} name="maxConcurrentRequests" tooltip={t('tooltipModelMaxConcurrentRequests')} type="number" />
       </form>
     ),
     actions: <button className="primary-button" form="model-form" title={t('tooltipSaveLocalModel')} type="submit">{t('save')}</button>
@@ -1951,6 +2284,10 @@ function Metric({ icon, label, subtext, tone = 'neutral', value }) {
       </div>
     </div>
   );
+}
+
+function camelCaseOnly(value) {
+  return Object.fromEntries(Object.entries(value || {}).filter(([key]) => key && key[0] === key[0].toLowerCase()));
 }
 
 function Field({ defaultValue, label, name, tooltip, type = 'text' }) {

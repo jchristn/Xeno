@@ -52,7 +52,7 @@ To run the server image on its own against your own `xeno.json`:
 docker run -d --name xeno-server -p 9000:9000 \
   -v "$(pwd)/xeno.json:/app/xeno.json" \
   -v "$(pwd)/logs:/app/logs" \
-  jchristn77/xeno-server:v0.1.0
+  jchristn77/xeno-server:v0.2.0
 ```
 
 ## Architecture

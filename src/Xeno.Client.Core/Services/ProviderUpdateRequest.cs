@@ -40,5 +40,25 @@ namespace Xeno.Client.Services
         /// Upstream request timeout in milliseconds (minimum 1000), or null to keep the current timeout.
         /// </summary>
         public int? TimeoutMs { get; set; } = null;
+
+        /// <summary>
+        /// Whether the provider's models are offered to the Xeno network. Null leaves it unchanged.
+        /// </summary>
+        public bool? ShareWithNetwork { get; set; } = null;
+
+        /// <summary>
+        /// Whether the local inference listener may route requests to the provider. Null leaves it unchanged.
+        /// </summary>
+        public bool? RouteLocalRequests { get; set; } = null;
+
+        /// <summary>
+        /// Maximum concurrent requests across the provider's models. Null leaves it unchanged unless <see cref="InheritMaxConcurrentRequests"/> is true. Minimum 1, maximum 256.
+        /// </summary>
+        public int? MaxConcurrentRequests { get; set; } = null;
+
+        /// <summary>
+        /// Clear the provider limit so it inherits the global default. Default is false.
+        /// </summary>
+        public bool InheritMaxConcurrentRequests { get; set; } = false;
     }
 }

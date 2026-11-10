@@ -250,7 +250,7 @@ services:
     restart: unless-stopped
 
   xeno-server:
-    image: ${XENO_SERVER_IMAGE:-jchristn77/xeno-server:v0.1.0}
+    image: ${XENO_SERVER_IMAGE:-jchristn77/xeno-server:v0.2.0}
     container_name: xeno-server
     ports:
       - "9000:9000"
@@ -276,7 +276,7 @@ services:
       retries: 10
 
   xeno-dashboard:
-    image: ${XENO_DASHBOARD_IMAGE:-jchristn77/xeno-dashboard:v0.1.0}
+    image: ${XENO_DASHBOARD_IMAGE:-jchristn77/xeno-dashboard:v0.2.0}
     container_name: xeno-dashboard
     ports:
       - "9100:9100"

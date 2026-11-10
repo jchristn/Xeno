@@ -424,24 +424,26 @@ namespace Test.Shared
                 Case(suite, "ExecutableLocatorFollowsSearchOrder", "Executable locator follows override, sibling, path, and checkout order", () =>
                 {
                     string root = Path.Combine(Path.GetTempPath(), "xeno-locate-" + Guid.NewGuid().ToString("N"));
+                    bool windows = OperatingSystem.IsWindows();
+                    string cliFile = windows ? "xeno.exe" : "xeno";
                     try
                     {
                         string sibling = Directory.CreateDirectory(Path.Combine(root, "app")).FullName;
                         string pathDir = Directory.CreateDirectory(Path.Combine(root, "bin")).FullName;
                         string checkoutBin = Directory.CreateDirectory(Path.Combine(root, "repo", "src", "Xeno.Desktop", "bin", "Debug", "net10.0")).FullName;
                         string nested = Directory.CreateDirectory(Path.Combine(root, "repo", "work", "deep")).FullName;
-                        File.WriteAllText(Path.Combine(pathDir, "xeno"), String.Empty);
+                        File.WriteAllText(Path.Combine(pathDir, cliFile), String.Empty);
                         File.WriteAllText(Path.Combine(checkoutBin, "xeno-desktop.dll"), String.Empty);
 
-                        XenoLocatorContext context = new XenoLocatorContext { IsWindows = false, PathVariable = pathDir, SiblingDirectories = new List<string> { sibling }, CheckoutSearchRoots = new List<string> { nested } };
+                        XenoLocatorContext context = new XenoLocatorContext { IsWindows = windows, PathVariable = pathDir, SiblingDirectories = new List<string> { sibling }, CheckoutSearchRoots = new List<string> { nested } };
                         XenoExecutableLocation? cli = XenoExecutableLocator.Locate(XenoApplicationEnum.Cli, context);
                         Check(cli != null && cli.Source == "path", "CLI should come from PATH.");
                         XenoExecutableLocation? desktop = XenoExecutableLocator.Locate(XenoApplicationEnum.Desktop, context);
                         Check(desktop != null && desktop.Source == "checkout" && desktop.LeadingArguments.Count == 1 && desktop.LeadingArguments[0].EndsWith("xeno-desktop.dll", StringComparison.Ordinal), "Desktop should come from the checkout through dotnet.");
 
-                        File.WriteAllText(Path.Combine(sibling, "xeno"), String.Empty);
+                        File.WriteAllText(Path.Combine(sibling, cliFile), String.Empty);
                         Check(XenoExecutableLocator.Locate(XenoApplicationEnum.Cli, context)!.Source == "sibling", "Sibling should win over PATH.");
-                        context.EnvironmentOverrides[XenoExecutableLocator.CliEnvironmentVariable] = Path.Combine(pathDir, "xeno");
+                        context.EnvironmentOverrides[XenoExecutableLocator.CliEnvironmentVariable] = Path.Combine(pathDir, cliFile);
                         Check(XenoExecutableLocator.Locate(XenoApplicationEnum.Cli, context)!.Source == "environment", "Environment override should win.");
                         Check(XenoExecutableLocator.Locate(XenoApplicationEnum.Tray, context) == null, "Missing tray should return null.");
                     }

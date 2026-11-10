@@ -7,7 +7,7 @@ This guide installs and runs the Xeno client on Linux.
 - Client settings: `~/.xeno/client.json`
 - Client state: `~/.xeno/state.json`
 - Local dashboard: `http://127.0.0.1:9343`
-- Optional local inference listener: `http://127.0.0.1:11434` when `LocalInferenceServer.Enabled` is true
+- Optional local inference listener: `http://127.0.0.1:11435` when `LocalInferenceServer.Enabled` is true (Ollama keeps its own port, 11434)
 - Default cloud server: `https://app.xenocloud.ai:9000` (HTTPS only; plain `http://` on port 9000 is rejected)
 - Default cloud WebSocket URL: `wss://app.xenocloud.ai:9000/ws/v1/clients`
 - Local Docker server WebSocket URL: `ws://localhost:9000/ws/v1/clients`
@@ -101,11 +101,14 @@ Edit `~/.xeno/client.json` and add:
 "LocalInferenceServer": {
   "Enabled": true,
   "Host": "127.0.0.1",
-  "Port": 11434,
+  "Port": 11435,
   "EnableCors": true,
-  "RequestTimeoutMs": 300000
+  "RequestTimeoutMs": 300000,
+  "RoutingMode": "PreferLocal"
 }
 ```
+
+The listener defaults to port 11435 so a local Ollama can keep 11434. A client upgraded from 0.1.x with `"Port": 11434` is moved to 11435 once, and `xeno status` reports the change. To keep a provider off the Xeno network but still use it from this machine (for example your own Ollama Cloud account), add it with `--local-only`.
 
 The listener is loopback-only and uses the client identity from `client.json`. If the WebSocket tunnel is unavailable, local API calls return provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 

@@ -307,7 +307,7 @@ The clients list also includes foreign clients that are shared into the caller's
 
 `POST /api/v1/clients/{id}/sharing`
 
-Sets whether a client is shared as a cross-tenant routing target. Only the owner tenant may call this route; requests from a non-owner tenant are rejected. Sharing is server-authoritative and set only through this route — a connecting node never declares its own sharing, and the per-client value is preserved across reconnects. Toggling the value writes an audit record. The request body is:
+Sets whether a client is shared as a cross-tenant routing target. Only the owner tenant may call this route; requests from a non-owner tenant are rejected. Sharing is server-authoritative and set only through this route; a connecting node never declares its own sharing, and the per-client value is preserved across reconnects. Toggling the value writes an audit record. The request body is:
 
 ```json
 {
@@ -853,7 +853,56 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `PUT /api/v1/settings`
 
-Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, `clearCredential`, and `allowModelManagement`. `allowModelManagement` is valid only for Ollama providers and permits the Xeno server to issue pull/delete model commands through the client WebSocket. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, and `supportsEmbeddings`. Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry `latest` returns `{ snapshot, detail, status }`. Local telemetry search bodies use `metric`, `fromUtc`, `toUtc`, `limit`, `offset`, and optional GPU filters and return `{ total, samples }`. Local telemetry rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, and optional GPU filters and return an array of `{ startUtc, endUtc, label, count, average, minimum, maximum }` buckets. Local host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`; search returns `{ total, samples }` and rollups return the same bucket array shape. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
+`POST /api/v1/local-inference/port-migration/acknowledge`
+
+`GET /api/v1/local-inference/routing`
+
+`GET /api/v1/local-inference/resolve?model={model}&shape=openai|ollama`
+
+`PUT /api/v1/local-inference/routes`
+
+`DELETE /api/v1/local-inference/routes/{model}`
+
+`POST /api/v1/local-inference/backends/check`
+
+`GET /api/v1/local-inference/requests?page={page}&pageSize={pageSize}`
+
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, `clearCredential`, `allowModelManagement`, `shareWithNetwork` (false keeps the provider off the Xeno network), `routeLocalRequests`, and `maxConcurrentRequests` (1 to 256; null inherits `defaultMaxConcurrentRequests`). `allowModelManagement` is valid only for Ollama providers and permits the Xeno server to issue pull/delete model commands through the client WebSocket. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, `supportsEmbeddings`, and `maxConcurrentRequests` (1 to 256; null inherits the provider limit). Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry `latest` returns `{ snapshot, detail, status }`. Local telemetry search bodies use `metric`, `fromUtc`, `toUtc`, `limit`, `offset`, and optional GPU filters and return `{ total, samples }`. Local telemetry rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, and optional GPU filters and return an array of `{ startUtc, endUtc, label, count, average, minimum, maximum }` buckets. Local host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`; search returns `{ total, samples }` and rollups return the same bucket array shape. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
+
+`PUT /api/v1/settings` also accepts `defaultMaxConcurrentRequests` (1 to 256) and the full `localInferenceServer` object, including `routingMode`, `routes`, `discoverLocalModels`, `healthCheckIntervalMs`, and `localQueueTimeoutMs`. Send the whole object back, including `routes`; omitted fields reset to their defaults. Routing and concurrency changes apply to the running listener without a restart.
+
+### Local inference routing
+
+`GET /api/v1/local-inference/routing` returns what the Local endpoint page shows: `enabled`, `url`, `routingMode`, `runtimeAvailable` (false when the client is not running), `updatedUtc`, `rules`, `backends` (each with `provider`, `apiType`, `endpoint`, `health` of `unknown`, `healthy`, `unhealthy`, or `notRoutable`, `lastCheckedUtc`, `latencyMs`, `lastError`, `inFlight`, `inFlightLocal`, `inFlightNetwork`, `queued`, `limit`, `limitSource`, `shared`, `routable`, `discoveredModels`), and counters since the listener started (`localRequests`, `networkRequests`, `fallbacks`, `errors`) plus `healthyBackends` and `routableBackends`.
+
+`GET /api/v1/local-inference/resolve` answers where the listener would send a model: `{ model, normalizedModel, target: "local"|"network"|"unavailable", route, provider, reason, reasonText, fallbackToNetwork, shapeSupported }`. `reason` is a stable code: `rule`, `preferLocal`, `notLocal`, `localUnhealthy`, `networkOnlyMode`, `localOnlyMode`, `ruleProviderUnavailable`, or `noModel`. A missing `model` returns `400`.
+
+`PUT /api/v1/local-inference/routes` creates or replaces the rule for one model. Body: `{ "model": "llama3.1:8b", "target": "Local", "provider": "local-ollama", "fallbackToNetwork": true, "originalModel": null }`. `target` is `Local` or `Network`; `provider` is required for `Local`; set `originalModel` to rename an existing rule. `llama3.1` and `llama3.1:latest` name the same model. Invalid rules return `400` with the field in the message. `DELETE /api/v1/local-inference/routes/{model}` removes a rule and returns `404` when there is none.
+
+`POST /api/v1/local-inference/backends/check` probes every provider used for local requests now and returns `{ backends: [{ provider, apiType, endpoint, healthy, lastCheckedUtc, lastLatencyMs, lastError, discoveredModels }] }`.
+
+`GET /api/v1/local-inference/requests` pages the local endpoint request log, newest first: `{ items, total, page, pageSize }`. Each item has `id`, `receivedUtc`, `method`, `path`, `model`, `route`, `provider`, `reason`, `statusCode`, `stream`, `fallback`, `latencyMs`, `firstByteMs`, `queuedMs`, `responseBytes`, `promptTokens`, `completionTokens`, and `error`. The log never stores request or response bodies.
+
+`POST /api/v1/local-inference/port-migration/acknowledge` clears the one-time notice shown after an upgrade moved the listener from port 11434 to 11435 and returns `{ "acknowledged": true }`.
+
+## Xeno Client Local Inference Listener
+
+The local inference listener is a separate loopback service in the Xeno client, enabled by `LocalInferenceServer.Enabled`, with a default base URL of `http://127.0.0.1:11435`. It accepts no credentials of its own; local apps may send any `Authorization` header, which the listener drops.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/models` | Models served on this machine first, then network models this machine does not serve. |
+| `GET` | `/v1/models/{model}` | Local models are answered here; others come from the network. |
+| `POST` | `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings` | Routed per model. Streaming passes through as server-sent events. |
+| `GET` | `/api/tags` | Live tags from local Ollama providers, then the network's Ollama models. |
+| `GET` | `/api/ps` | Models loaded on this machine's Ollama providers only. |
+| `POST` | `/api/show`, `/api/generate`, `/api/chat`, `/api/embeddings`, `/api/embed` | Routed per model. Streaming passes through as NDJSON. |
+| `GET`, `HEAD` | `/`, `/health` | Liveness. |
+| `GET` | `/openapi.json`, `/swagger` | OpenAPI document. |
+
+Routing follows `LocalInferenceServer.RoutingMode`: `PreferLocal` (default) sends a model served by a provider on this machine straight to that provider and everything else to the Xeno network; `NetworkOnly` sends everything to the network; `LocalOnly` never uses the network and answers unknown models with `404`. Rules in `LocalInferenceServer.Routes` override the default for one model. Every response carries `X-Xeno-Route` (`local:<provider>`, `network`, `local`, `local+network`, or `unavailable`); `X-Xeno-Fallback: true` marks a request that fell back to the network after its local provider failed before responding.
+
+Status codes: provider status codes and content types pass through unchanged. The listener adds `400` for invalid bodies and for an Ollama-shaped request to a model served only by an OpenAI-compatible provider, `404` for unknown routes and for unknown models in `LocalOnly` mode, `429` with `Retry-After` when a local provider stays at its concurrency limit longer than `LocalQueueTimeoutMs`, `502` when the chosen backend (a local provider or the Xeno tunnel) is unavailable, and `504` when `RequestTimeoutMs` elapses on a network request. Errors use the caller's API shape: `{ "error": { "message", "type", "code" } }` on `/v1` routes and `{ "error": "..." }` on `/api` routes.
 
 ## WebSocket
 

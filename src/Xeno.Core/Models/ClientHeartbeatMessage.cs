@@ -25,5 +25,11 @@ namespace Xeno.Core.Models
         /// </summary>
         [JsonPropertyName("sentUtc")]
         public DateTime? SentUtc { get; set; } = null;
+
+        /// <summary>
+        /// Concurrent network requests this client can take right now: the limits of its shared providers minus the slots
+        /// its own local requests hold. Null from clients before 0.2.0, which leaves the server's stored capacity unchanged.
+        /// </summary>
+        public int? NetworkCapacity { get; set; } = null;
     }
 }

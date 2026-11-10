@@ -4,6 +4,7 @@ namespace Xeno.Client
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
+    using Xeno.Client.Services;
     using Xeno.Core.Serialization;
 
     /// <summary>
@@ -256,6 +257,16 @@ namespace Xeno.Client
         public string? LocalInferenceServerLastError { get; set; } = null;
 
         /// <summary>
+        /// Listener port the client migrated away from (the pre-0.2.0 default). Null when no migration notice is pending.
+        /// </summary>
+        public int? LocalInferencePortMigratedFrom { get; set; } = null;
+
+        /// <summary>
+        /// Listener port the client migrated to. Null when no migration notice is pending.
+        /// </summary>
+        public int? LocalInferencePortMigratedTo { get; set; } = null;
+
+        /// <summary>
         /// Last inventory update request timestamp.
         /// </summary>
         public DateTime? InventoryUpdateRequestedUtc { get; set; } = null;
@@ -275,7 +286,7 @@ namespace Xeno.Client
 
             try
             {
-                ClientConnectionState state = JsonUtil.Deserialize<ClientConnectionState>(File.ReadAllText(StateFile)) ?? new ClientConnectionState();
+                ClientConnectionState state = JsonUtil.Deserialize<ClientConnectionState>(ClientFileIo.ReadAllText(StateFile)) ?? new ClientConnectionState();
                 if ((state.IsConnected || state.IsRegistered) && !state.IsProcessRunning())
                 {
                     state.IsConnected = false;
@@ -299,10 +310,7 @@ namespace Xeno.Client
         /// </summary>
         public void Save()
         {
-            Directory.CreateDirectory(ClientSettings.SettingsDirectory);
-            string tempFile = StateFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(tempFile, JsonUtil.Serialize(this, true));
-            File.Move(tempFile, StateFile, true);
+            ClientFileIo.WriteAllTextAtomic(StateFile, JsonUtil.Serialize(this, true));
         }
 
         /// <summary>
@@ -647,6 +655,33 @@ namespace Xeno.Client
             ApplyLocalInferenceSettings(state, settings);
             state.LocalInferenceServerLastRequestUtc = now;
             state.LastUpdatedUtc = state.LocalInferenceServerLastRequestUtc;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Record that the local inference listener port was migrated, so front ends can show a one-time notice.
+        /// </summary>
+        /// <param name="fromPort">Port migrated away from.</param>
+        /// <param name="toPort">Port migrated to.</param>
+        public static void RecordLocalInferencePortMigration(int fromPort, int toPort)
+        {
+            ClientConnectionState state = Load();
+            state.LocalInferencePortMigratedFrom = fromPort;
+            state.LocalInferencePortMigratedTo = toPort;
+            state.LastUpdatedUtc = DateTime.UtcNow;
+            state.Save();
+        }
+
+        /// <summary>
+        /// Clear the local inference port migration notice after a front end has shown it.
+        /// </summary>
+        public static void AcknowledgeLocalInferencePortMigration()
+        {
+            ClientConnectionState state = Load();
+            if (!state.LocalInferencePortMigratedFrom.HasValue && !state.LocalInferencePortMigratedTo.HasValue) return;
+            state.LocalInferencePortMigratedFrom = null;
+            state.LocalInferencePortMigratedTo = null;
+            state.LastUpdatedUtc = DateTime.UtcNow;
             state.Save();
         }
 

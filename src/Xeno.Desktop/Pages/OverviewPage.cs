@@ -5,6 +5,7 @@ namespace Xeno.Desktop.Pages
     using System.Linq;
     using System.Threading.Tasks;
     using Avalonia.Controls;
+    using Xeno.Client;
     using Xeno.Client.LocalDashboard.Models;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
@@ -38,6 +39,7 @@ namespace Xeno.Desktop.Pages
         private ComboBox _Range = new ComboBox();
         private XenoTable<RequestRow>? _Recent;
         private LocalDashboardStatisticsResponse? _Statistics;
+        private string _PortNotice = String.Empty;
         private ModelCatalog? _Catalog;
 
         #endregion
@@ -193,10 +195,18 @@ namespace Xeno.Desktop.Pages
             {
                 new KeyValuePair<string, string>("Web dashboard", !status.LocalDashboardEnabled ? "disabled" : status.LocalDashboardListening ? status.LocalDashboardUrl : "not running"),
                 new KeyValuePair<string, string>("Local inference", !status.LocalInferenceEnabled ? "disabled" : status.LocalInferenceListening ? status.LocalInferenceUrl : "enabled, not running"),
+                new KeyValuePair<string, string>("Routing", DisplayFormat.OrDash(status.LocalInferenceRoutingMode)),
                 new KeyValuePair<string, string>("Inventory update", status.InventoryUpdatePending ? "pending" : "up to date"),
                 new KeyValuePair<string, string>("Worker process", status.ProcessId == null ? DisplayFormat.Dash : status.ProcessId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 new KeyValuePair<string, string>("Settings file", status.SettingsFile)
             }, 130));
+            if (!String.IsNullOrWhiteSpace(status.LocalInferencePortNotice) && String.IsNullOrEmpty(_PortNotice))
+            {
+                _PortNotice = status.LocalInferencePortNotice;
+                ClientConnectionState.AcknowledgeLocalInferencePortMigration();
+            }
+
+            if (!String.IsNullOrEmpty(_PortNotice)) _Services.Children.Add(Ui.Notice(_PortNotice, XenoToneEnum.Neutral));
             if (!String.IsNullOrWhiteSpace(status.LocalInferenceLastError)) _Services.Children.Add(Ui.Notice("Local inference: " + status.LocalInferenceLastError, XenoToneEnum.Warning));
             if (!String.IsNullOrWhiteSpace(status.LocalDashboardLastError)) _Services.Children.Add(Ui.Notice("Web dashboard: " + status.LocalDashboardLastError, XenoToneEnum.Warning));
         }

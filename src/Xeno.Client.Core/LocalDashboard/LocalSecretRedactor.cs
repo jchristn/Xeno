@@ -42,6 +42,9 @@ namespace Xeno.Client.LocalDashboard
                 Credential = String.IsNullOrWhiteSpace(provider.Credential) ? null : "configured",
                 TimeoutMs = provider.TimeoutMs,
                 AllowModelManagement = String.Equals(provider.ApiType, "Ollama", StringComparison.OrdinalIgnoreCase) && provider.AllowModelManagement,
+                ShareWithNetwork = provider.ShareWithNetwork,
+                RouteLocalRequests = provider.RouteLocalRequests,
+                MaxConcurrentRequests = provider.MaxConcurrentRequests,
                 Models = provider.Models
             };
             return copy;

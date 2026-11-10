@@ -1,5 +1,6 @@
 namespace Xeno.Client.Presentation
 {
+    using System;
     using Xeno.Client.Services;
 
     /// <summary>
@@ -55,6 +56,28 @@ namespace Xeno.Client.Presentation
         public static string StatusLine(ClientStatusSnapshot? snapshot)
         {
             return snapshot == null ? "Xeno: checking..." : "Xeno: " + snapshot.StatusText;
+        }
+
+        /// <summary>
+        /// Status line for the tray agent: the status line plus the local endpoint address when the listener is enabled,
+        /// for example "Xeno: Connected - local endpoint 127.0.0.1:11435".
+        /// </summary>
+        /// <param name="snapshot">Current status, or null when unknown.</param>
+        /// <returns>Status line.</returns>
+        public static string TrayStatusLine(ClientStatusSnapshot? snapshot)
+        {
+            string line = StatusLine(snapshot);
+            if (snapshot == null || !snapshot.LocalInferenceEnabled) return line;
+            string endpoint = snapshot.LocalInferenceUrl ?? String.Empty;
+            int scheme = endpoint.IndexOf("://", StringComparison.Ordinal);
+            if (scheme >= 0) endpoint = endpoint.Substring(scheme + 3);
+            endpoint = endpoint.TrimEnd('/');
+            if (endpoint.Length == 0) return line;
+            if (!snapshot.LocalInferenceListening) return line + " - local endpoint " + endpoint + " (not running)";
+            string health = snapshot.LocalInferenceRoutableBackends > 0
+                ? ", " + snapshot.LocalInferenceHealthyBackends.ToString(System.Globalization.CultureInfo.InvariantCulture) + " of " + snapshot.LocalInferenceRoutableBackends.ToString(System.Globalization.CultureInfo.InvariantCulture) + " providers healthy"
+                : String.Empty;
+            return line + " - local endpoint " + endpoint + health;
         }
 
         /// <summary>

@@ -24,5 +24,10 @@ namespace Xeno.Client.LocalDashboard.Models
         /// Supports embeddings.
         /// </summary>
         public bool SupportsEmbeddings { get; set; } = false;
+
+        /// <summary>
+        /// Maximum concurrent requests for this model on its provider. Null inherits the provider limit. Minimum 1, maximum 256.
+        /// </summary>
+        public int? MaxConcurrentRequests { get; set; } = null;
     }
 }

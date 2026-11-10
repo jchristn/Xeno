@@ -677,7 +677,8 @@ test('ledger page renders system admin controls and summaries', async ({ page })
     }
   });
 
-  await expect(page.getByRole('link', { name: 'NetLedger UI' })).toBeVisible();
+  // The NetLedger console link lives under Settings > Related Consoles, not on the ledger page.
+  await expect(page.getByRole('link', { name: 'NetLedger UI' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Drain' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reconcile' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tenant Ledger Summary' })).toBeVisible();
@@ -895,7 +896,8 @@ test('regular tenant members see member dashboard surfaces without admin routes'
 
     if (url.pathname === '/api/v1/credentials' && method === 'POST') {
       const body = route.request().postDataJSON();
-      expect(body.userId || '').toBe('');
+      // Members can only pick themselves in the credential form; the server also fences the user to the caller.
+      expect(['', 'usr_regular']).toContain(body.userId || '');
       await route.fulfill({ json: { id: 'cred_new', tenantId: 'ten_default', userId: 'usr_regular', accessKey: 'xeno_new', active: true } });
       return;
     }

@@ -142,6 +142,8 @@ namespace Xeno.Client.Services
                 throw new ArgumentException("Provider timeout must be at least " + MinimumTimeoutMs + " milliseconds.");
             }
 
+            ValidateConcurrencyLimit(update.MaxConcurrentRequests, "Provider");
+
             string apiType = String.IsNullOrWhiteSpace(update.ApiType) ? runner.ApiType : update.ApiType;
             bool allowModelManagement = update.AllowModelManagement ?? runner.AllowModelManagement;
             if (allowModelManagement && !IsOllamaApiType(apiType))
@@ -156,6 +158,10 @@ namespace Xeno.Client.Services
             if (update.ClearCredential) runner.Credential = null;
             else if (update.Credential != null) runner.Credential = update.Credential;
             runner.AllowModelManagement = IsOllamaApiType(runner.ApiType) && allowModelManagement;
+            if (update.ShareWithNetwork.HasValue) runner.ShareWithNetwork = update.ShareWithNetwork.Value;
+            if (update.RouteLocalRequests.HasValue) runner.RouteLocalRequests = update.RouteLocalRequests.Value;
+            if (update.InheritMaxConcurrentRequests) runner.MaxConcurrentRequests = null;
+            else if (update.MaxConcurrentRequests.HasValue) runner.MaxConcurrentRequests = update.MaxConcurrentRequests.Value;
             return runner;
         }
 
@@ -195,6 +201,10 @@ namespace Xeno.Client.Services
             }
 
             provider.AllowModelManagement = IsOllamaApiType(provider.ApiType) && requestedModelManagement;
+            ValidateConcurrencyLimit(request.MaxConcurrentRequests, "Provider");
+            if (request.ShareWithNetwork.HasValue) provider.ShareWithNetwork = request.ShareWithNetwork.Value;
+            if (request.RouteLocalRequests.HasValue) provider.RouteLocalRequests = request.RouteLocalRequests.Value;
+            provider.MaxConcurrentRequests = request.MaxConcurrentRequests;
             return provider;
         }
 
@@ -287,6 +297,7 @@ namespace Xeno.Client.Services
                 throw new ArgumentException("Model already exists in provider endpoint '" + targetRunner.Name + "': " + targetModelName);
             }
 
+            ValidateConcurrencyLimit(update.MaxConcurrentRequests, "Model");
             bool finalSupportsCompletions = update.SupportsCompletions ?? model.SupportsCompletions;
             bool finalSupportsEmbeddings = update.SupportsEmbeddings ?? model.SupportsEmbeddings;
             if (!finalSupportsCompletions && !finalSupportsEmbeddings) throw new ArgumentException("Model must support completions, embeddings, or both.");
@@ -300,6 +311,8 @@ namespace Xeno.Client.Services
             model.Name = targetModelName;
             model.SupportsCompletions = finalSupportsCompletions;
             model.SupportsEmbeddings = finalSupportsEmbeddings;
+            if (update.InheritMaxConcurrentRequests) model.MaxConcurrentRequests = null;
+            else if (update.MaxConcurrentRequests.HasValue) model.MaxConcurrentRequests = update.MaxConcurrentRequests.Value;
             return new ModelUpdateResult { Provider = targetRunner, Model = model };
         }
 
@@ -330,9 +343,11 @@ namespace Xeno.Client.Services
                 provider.Models.Add(model);
             }
 
+            ValidateConcurrencyLimit(request.MaxConcurrentRequests, "Model");
             model.SupportsCompletions = request.SupportsCompletions;
             model.SupportsEmbeddings = request.SupportsEmbeddings;
-            return ToModelEntry(provider, model);
+            model.MaxConcurrentRequests = request.MaxConcurrentRequests;
+            return ToModelEntry(provider, model, settings.DefaultMaxConcurrentRequests);
         }
 
         /// <summary>
@@ -378,7 +393,7 @@ namespace Xeno.Client.Services
             {
                 foreach (ClientModelSettings model in provider.Models)
                 {
-                    response.Models.Add(ToModelEntry(provider, model));
+                    response.Models.Add(ToModelEntry(provider, model, settings.DefaultMaxConcurrentRequests));
                 }
             }
 
@@ -390,9 +405,10 @@ namespace Xeno.Client.Services
         /// </summary>
         /// <param name="provider">Provider.</param>
         /// <param name="model">Model.</param>
+        /// <param name="defaultMaxConcurrentRequests">Global default limit used when the provider sets none. Default is 4.</param>
         /// <returns>Model entry.</returns>
         /// <exception cref="ArgumentNullException">Provider or model is null.</exception>
-        public static LocalModelEntry ToModelEntry(ClientRunnerSettings provider, ClientModelSettings model)
+        public static LocalModelEntry ToModelEntry(ClientRunnerSettings provider, ClientModelSettings model, int defaultMaxConcurrentRequests = 4)
         {
             ArgumentNullException.ThrowIfNull(provider);
             ArgumentNullException.ThrowIfNull(model);
@@ -404,7 +420,10 @@ namespace Xeno.Client.Services
                 Name = model.Name,
                 SupportsCompletions = model.SupportsCompletions,
                 SupportsEmbeddings = model.SupportsEmbeddings,
-                ModelManagementAllowed = IsModelManagementAllowed(provider)
+                ModelManagementAllowed = IsModelManagementAllowed(provider),
+                MaxConcurrentRequests = model.MaxConcurrentRequests,
+                EffectiveMaxConcurrentRequests = Math.Min(model.MaxConcurrentRequests ?? Int32.MaxValue, provider.MaxConcurrentRequests ?? defaultMaxConcurrentRequests),
+                ShareWithNetwork = provider.ShareWithNetwork
             };
         }
 
@@ -433,6 +452,7 @@ namespace Xeno.Client.Services
                 },
                 LocalDashboard = settings.LocalDashboard,
                 LocalInferenceServer = settings.LocalInferenceServer,
+                DefaultMaxConcurrentRequests = settings.DefaultMaxConcurrentRequests,
                 Telemetry = settings.Telemetry,
                 Providers = settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList()
             };
@@ -507,8 +527,16 @@ namespace Xeno.Client.Services
             return response;
         }
 
+        private static void ValidateConcurrencyLimit(int? value, string scope)
+        {
+            if (value.HasValue && (value.Value < 1 || value.Value > 256))
+            {
+                throw new ArgumentException(scope + " max concurrent requests must be between 1 and 256.");
+            }
+        }
+
         /// <summary>
-        /// Determine whether an API type is Ollama.
+        /// Whether the API type is Ollama.
         /// </summary>
         /// <param name="apiType">API type.</param>
         /// <returns>True for Ollama.</returns>

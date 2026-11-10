@@ -8,7 +8,9 @@ namespace Xeno.Tui.Pages
     using TUIKit;
     using TUIKit.Input;
     using TUIKit.Layout;
+    using TUIKit.Modals;
     using TUIKit.Widgets;
+    using Xeno.Client;
     using Xeno.Client.LocalDashboard.Models;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
@@ -166,7 +168,13 @@ namespace Xeno.Tui.Pages
             _Status.Set("On the network", _Catalog == null ? "checking..." : _Catalog.NetworkAvailable ? _Catalog.NetworkCount + " models available to you" : "unavailable (" + _Catalog.NetworkMessage + ")");
             _Status.Set("Requests", _Statistics == null ? DisplayFormat.Dash : DisplayFormat.Number(_Statistics.Requests) + " served, " + DisplayFormat.Number(_Statistics.Failures) + " failed, average " + DisplayFormat.Milliseconds(_Statistics.AverageLatencyMs));
             _Status.Set("Web dashboard", !status.LocalDashboardEnabled ? "disabled" : status.LocalDashboardListening ? status.LocalDashboardUrl : "not running");
-            _Status.Set("Local inference", !status.LocalInferenceEnabled ? "disabled" : status.LocalInferenceListening ? status.LocalInferenceUrl : "enabled, not running");
+            _Status.Set("Local inference", !status.LocalInferenceEnabled ? "disabled" : status.LocalInferenceListening ? status.LocalInferenceUrl + "  (" + status.LocalInferenceRoutingMode + ")" : "enabled, not running");
+            if (!String.IsNullOrWhiteSpace(status.LocalInferencePortNotice))
+            {
+                ClientConnectionState.AcknowledgeLocalInferencePortMigration();
+                Context.Notify(status.LocalInferencePortNotice, NotificationSeverity.Info);
+            }
+
             _Status.Set("Last heartbeat", DisplayFormat.Ago(status.LastHeartbeatUtc, DateTime.UtcNow));
 
             string actionKey = status.Status + "|" + status.Running + "|" + status.CanOpenLocalDashboard;

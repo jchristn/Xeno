@@ -111,6 +111,7 @@ test.beforeEach(async ({ page }) => {
   logRequests = 0;
   await page.route('**/api/v1/state', async (route) => route.fulfill({ json: stateResponse }));
   await page.route('**/api/v1/settings', async (route) => route.fulfill({ json: stateResponse }));
+  await page.route('**/api/v1/local-inference/routing', async (route) => route.fulfill({ json: routingResponse }));
   await page.route('**/api/v1/statistics', async (route) => route.fulfill({ json: { requests: 12, failures: 1, streamingRequests: 3, averageLatencyMs: 42 } }));
   await page.route('**/api/v1/requests/summary**', async (route) => route.fulfill({ json: { buckets: [{ startUtc: '2026-06-26T08:00:00Z', total: 4, success: 4, failure: 0 }, { startUtc: '2026-06-26T09:00:00Z', total: 8, success: 7, failure: 1 }] } }));
   await page.route('**/api/v1/providers*/test', async (route) => route.fulfill({ json: { name: 'local-ollama', endpoint: 'http://127.0.0.1:11434', success: true, statusCode: 200 } }));
@@ -220,4 +221,151 @@ test('local dashboard renders and follows interaction expectations', async ({ pa
     .filter((node) => !node.getAttribute('title') && !node.getAttribute('aria-label'))
     .map((node) => node.outerHTML));
   expect(missingTooltips).toEqual([]);
+});
+
+test('local dashboard shows the port notice and saves routing settings without dropping route rules', async ({ page }) => {
+  const migratedState = {
+    ...stateResponse,
+    connection: { ...stateResponse.connection, localInferencePortMigratedFrom: 11434, localInferencePortMigratedTo: 11435 },
+    settings: {
+      ...stateResponse.settings,
+      defaultMaxConcurrentRequests: 4,
+      localInferenceServer: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 11435,
+        enableCors: true,
+        requestTimeoutMs: 300000,
+        maxRequestBodyBytes: 10485760,
+        routingMode: 'PreferLocal',
+        routes: [{ model: 'gpt-oss:120b', target: 'Network', provider: null, fallbackToNetwork: false }],
+        discoverLocalModels: true,
+        healthCheckIntervalMs: 15000,
+        localQueueTimeoutMs: 30000
+      }
+    }
+  };
+  let acknowledged = 0;
+  let savedSettings = null;
+  await page.route('**/api/v1/state', async (route) => route.fulfill({ json: migratedState }));
+  await page.route('**/api/v1/settings', async (route) => {
+    if (route.request().method() === 'PUT') savedSettings = route.request().postDataJSON();
+    await route.fulfill({ json: migratedState });
+  });
+  await page.route('**/api/v1/local-inference/port-migration/acknowledge', async (route) => {
+    acknowledged += 1;
+    await route.fulfill({ json: { acknowledged: true } });
+  });
+
+  await page.goto('/index-local.html');
+  await expect(page.getByText('The local inference port moved from 11434 to 11435')).toBeVisible();
+  await page.getByRole('button', { name: 'Dismiss' }).click();
+  await expect.poll(() => acknowledged).toBe(1);
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const routing = page.locator('select[name="localInferenceRoutingMode"]');
+  await expect(routing).toHaveValue('PreferLocal');
+  await expect(page.locator('input[name="localInferencePort"]')).toHaveValue('11435');
+  await expect(page.locator('input[name="defaultMaxConcurrentRequests"]')).toHaveValue('4');
+  await routing.selectOption('LocalOnly');
+  await page.locator('input[name="defaultMaxConcurrentRequests"]').fill('6');
+  await routing.locator('xpath=ancestor::form').getByRole('button', { name: 'Save Settings' }).click();
+  await expect.poll(() => savedSettings).not.toBeNull();
+  expect(savedSettings.localInferenceServer.routingMode).toBe('LocalOnly');
+  expect(savedSettings.defaultMaxConcurrentRequests).toBe(6);
+  expect(savedSettings.localInferenceServer.routes).toHaveLength(1);
+  expect(savedSettings.localInferenceServer.routes[0].model).toBe('gpt-oss:120b');
+  expect(Object.keys(savedSettings.localInferenceServer).some((key) => key[0] === key[0].toUpperCase())).toBe(false);
+});
+
+const routingResponse = {
+  enabled: true,
+  url: 'http://127.0.0.1:11435',
+  routingMode: 'PreferLocal',
+  runtimeAvailable: true,
+  updatedUtc: new Date().toISOString(),
+  rules: [{ model: 'gpt-oss:120b', target: 'Network', provider: null, fallbackToNetwork: false }],
+  backends: [
+    { provider: 'local-ollama', apiType: 'Ollama', endpoint: 'http://127.0.0.1:11434', health: 'healthy', latencyMs: 12.4, lastError: '', inFlight: 1, inFlightLocal: 1, inFlightNetwork: 0, queued: 0, limit: 4, limitSource: 'global', shared: true, routable: true, discoveredModels: 3 },
+    { provider: 'vllm', apiType: 'vLLM', endpoint: 'http://127.0.0.1:8000', health: 'unhealthy', latencyMs: null, lastError: 'Connection refused', inFlight: 0, inFlightLocal: 0, inFlightNetwork: 0, queued: 0, limit: 4, limitSource: 'global', shared: false, routable: true, discoveredModels: 0 }
+  ],
+  localRequests: 7,
+  networkRequests: 3,
+  fallbacks: 1,
+  errors: 1,
+  defaultMaxConcurrentRequests: 4,
+  healthyBackends: 1,
+  routableBackends: 2
+};
+
+test('local endpoint page shows routing, edits rules, and tests routes', async ({ page }) => {
+  let savedRule = null;
+  let deletedModel = null;
+  const now = Date.now();
+  await page.route('**/api/v1/local-inference/routing', async (route) => route.fulfill({ json: routingResponse }));
+  await page.route('**/api/v1/local-inference/requests**', async (route) => route.fulfill({ json: { items: [
+    { id: 'r1', receivedUtc: new Date(now - 60000).toISOString(), method: 'POST', path: '/v1/chat/completions', model: 'llama3.1:8b', route: 'local:local-ollama', provider: 'local-ollama', reason: 'preferLocal', statusCode: 200, latencyMs: 812.2, queuedMs: 0, promptTokens: 12, completionTokens: 40, fallback: false },
+    { id: 'r2', receivedUtc: new Date(now - 120000).toISOString(), method: 'POST', path: '/api/chat', model: 'deepseek-r1:671b', route: 'network', provider: '', reason: 'notLocal', statusCode: 200, latencyMs: 2412, queuedMs: 0, fallback: false }
+  ], total: 2, page: 1, pageSize: 200 } }));
+  await page.route('**/api/v1/local-inference/routes', async (route) => {
+    savedRule = route.request().postDataJSON();
+    await route.fulfill({ json: savedRule });
+  });
+  await page.route('**/api/v1/local-inference/routes/**', async (route) => {
+    deletedModel = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop());
+    await route.fulfill({ json: { removed: 1, removedOne: true } });
+  });
+  await page.route('**/api/v1/local-inference/resolve**', async (route) => route.fulfill({ json: { model: 'llama3.1:8b', normalizedModel: 'llama3.1:8b', target: 'local', route: 'local:local-ollama', provider: 'local-ollama', reason: 'preferLocal', reasonText: 'x', fallbackToNetwork: false, shapeSupported: true } }));
+
+  await page.goto('/index-local.html');
+  await page.getByRole('button', { name: 'Local endpoint', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Providers on this machine' })).toBeVisible();
+  await expect(page.getByText('1 / 2')).toBeVisible();
+  await expect(page.getByText('Connection refused')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Route rules' })).toBeVisible();
+  await expect(page.getByText('gpt-oss:120b')).toBeVisible();
+  await expect(page.getByText('deepseek-r1:671b')).toBeVisible();
+  await expect(page.locator('.route-mix-chart svg')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add route rule' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[name="model"]').fill('llama3.1:8b');
+  await dialog.locator('select[name="target"]').selectOption('local-ollama');
+  await dialog.locator('input[name="fallbackToNetwork"]').check();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => savedRule).not.toBeNull();
+  expect(savedRule.model).toBe('llama3.1:8b');
+  expect(savedRule.target).toBe('Local');
+  expect(savedRule.provider).toBe('local-ollama');
+  expect(savedRule.fallbackToNetwork).toBe(true);
+
+  await page.getByRole('button', { name: 'Test a route' }).first().click();
+  const resolver = page.getByRole('dialog');
+  await resolver.locator('input').first().fill('llama3.1:8b');
+  await resolver.getByRole('button', { name: 'Test a route' }).click();
+  await expect(resolver.getByText('llama3.1:8b goes to local:local-ollama')).toBeVisible();
+  await page.getByTitle('Close this modal without applying unsaved changes.').click();
+
+  await page.getByText('gpt-oss:120b').click();
+  await expect(page.getByRole('dialog').getByText('Edit route rule')).toBeVisible();
+  await page.getByTitle('Close this modal without applying unsaved changes.').click();
+
+  const missingTooltips = await page.locator('button, a, input, select').evaluateAll((nodes) => nodes
+    .filter((node) => !node.getAttribute('title') && !node.getAttribute('aria-label'))
+    .map((node) => node.outerHTML));
+  expect(missingTooltips).toEqual([]);
+});
+
+test('API explorer resolves routes and shows the route header', async ({ page }) => {
+  await page.route('**/api/v1/local-inference/resolve**', async (route) => route.fulfill({ json: { model: 'qwen3', normalizedModel: 'qwen3:latest', target: 'network', route: 'network', provider: '', reason: 'notLocal', reasonText: 'x', fallbackToNetwork: false, shapeSupported: true } }));
+  await page.route('http://127.0.0.1:11435/**', async (route) => route.fulfill({ json: { object: 'list', data: [] }, headers: { 'x-xeno-route': 'local+network', 'access-control-expose-headers': 'x-xeno-route' } }));
+  await page.route('**/api/v1/state', async (route) => route.fulfill({ json: { ...stateResponse, connection: { ...stateResponse.connection, localInferenceServerEnabled: true, localInferenceServerListening: true, localInferenceServerUrl: 'http://127.0.0.1:11435' } } }));
+  await page.goto('/index-local.html');
+  await page.getByRole('button', { name: 'API Explorer', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Where does a model go?' })).toBeVisible();
+  await page.locator('.route-resolver input').fill('qwen3');
+  await page.locator('.route-resolver').getByRole('button', { name: 'Test a route' }).click();
+  await expect(page.getByText('qwen3 goes to network')).toBeVisible();
+  await page.getByRole('button', { name: 'Send Request' }).click();
+  await expect(page.getByText('X-Xeno-Route: local+network')).toBeVisible();
 });

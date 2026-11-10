@@ -13,7 +13,7 @@ namespace Xeno.Core
         /// <summary>
         /// Product version.
         /// </summary>
-        public const string Version = "0.1.1";
+        public const string Version = "0.2.0";
 
         /// <summary>
         /// Default tenant identifier.

@@ -24,6 +24,11 @@ namespace Xeno.Client.Presentation
         Providers,
 
         /// <summary>
+        /// Local endpoint: the URL local apps call, where each model goes, and provider health and load.
+        /// </summary>
+        LocalEndpoint,
+
+        /// <summary>
         /// Requests this machine served for the Xeno network.
         /// </summary>
         Requests,

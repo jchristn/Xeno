@@ -93,6 +93,13 @@ namespace Xeno.Core.Models
         [JsonPropertyName("body")]
         public string Body { get; set; } = "{}";
 
+        /// <summary>
+        /// When true, the server must not route this request back to the client that sent it. The client sets it when a
+        /// local provider failed and the model's route rule allows falling back to the network. Default is false.
+        /// Servers older than 0.2.0 ignore the field.
+        /// </summary>
+        public bool ExcludeRequestingClient { get; set; } = false;
+
         private static Dictionary<string, string> NormalizeHeaders(Dictionary<string, string>? headers)
         {
             Dictionary<string, string> normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

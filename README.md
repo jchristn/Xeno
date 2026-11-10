@@ -2,11 +2,11 @@
 
 <img src="assets/logo.png" alt="Xeno logo" width="192" height="192">
 
-**Version:** v0.1.1
+**Version:** v0.2.0
 
 **Status:** ALPHA
 
-Xeno v0.1.1 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, SDKs, and client commands may change before a stable release.
+Xeno v0.2.0 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, SDKs, and client commands may change before a stable release.
 
 Xeno is an AI control plane for turning distributed computers into a shared model-serving network. A lightweight client runs on laptops, desktops, workstations, and servers, advertises the machine's available providers and models, and maintains a persistent WebSocket connection to the Xeno server. The server exposes OpenAI-compatible APIs and routes requests to connected clients that can service the selected model.
 
@@ -23,7 +23,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Supports opt-in cross-tenant shared clients so a node owned by one tenant can be an eligible routing target for others, with owner-set sharing, provenance labels, redacted foreign views, and a per-tenant consume switch.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, client-side request history, and machine telemetry.
-- Can expose an optional localhost-only OpenAI-compatible and Ollama-compatible inference listener from the client for local apps. It is disabled by default, uses the client's configured Xeno identity, and proxies requests through the authenticated WebSocket tunnel.
+- Gives apps on a machine one localhost-only OpenAI-compatible and Ollama-compatible endpoint (`http://127.0.0.1:11435`) for both the models that machine runs and the models the Xeno network offers. Local models go straight to the local provider; everything else goes through the authenticated WebSocket tunnel. Per-model rules can pin a model to local or network, with optional fallback. Disabled by default. See [HYBRID_MODELS.md](HYBRID_MODELS.md).
 - Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
 - Collects local CPU, memory, disk, and GPU telemetry on the client at a configurable interval, persists it in SQLite, and exposes live and historical telemetry dashboard pages.
 - Can collect fleet-level client telemetry from the server. When `TelemetryCollection.Enabled` is true, the server requests host and provider telemetry over the authenticated client WebSocket, persists server-collected samples, and shows them under `CONTROL > Client Telemetry`.
@@ -41,6 +41,7 @@ Use Xeno when you want a single OpenAI-compatible endpoint backed by many machin
 - Mix providers without forcing application code to know where a model actually runs.
 - Add authentication, multitenancy, request history, dashboard visibility, and routing policy around model execution.
 - Move between local Ollama, hosted APIs, and OpenAI-compatible model servers while keeping the same application integration point.
+- Use your own local models and the Xeno network's models from one local endpoint, without changing app configuration per model.
 - Debug agentic applications with request history that shows which node handled a request and why it was selected.
 
 ## Hardware Fit
@@ -82,12 +83,12 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 7. The selected client forwards the request to its configured provider, streams or returns the response, and reports telemetry back to the server.
 8. The server returns the model response to the caller and persists request history for dashboard inspection.
 9. When enabled, the client also writes local request history to SQLite and exposes a local dashboard for inspecting what that specific machine processed.
-10. When enabled, the client can expose `http://127.0.0.1:11434` as a local OpenAI/Ollama-compatible API surface. Requests still go through the Xeno server over the WebSocket tunnel, so server-side tenancy, routing, request history, and ledgering remain in effect.
+10. When enabled, the client can expose `http://127.0.0.1:11435` as a local OpenAI/Ollama-compatible API surface. Requests for models this machine's providers serve go straight to those providers. Requests for models the Xeno network serves go through the Xeno server over the WebSocket tunnel, so server-side tenancy, routing, request history, and ledgering remain in effect.
 11. When server telemetry collection is enabled, the server controls collection cadence and clients answer explicit telemetry request frames. Disabling server collection does not disable the client's local telemetry dashboard.
 
 ## Local Client Inference Listener
 
-The Xeno client can expose a convenience API for local applications that expect either OpenAI-compatible or Ollama-compatible endpoints. The listener is disabled by default and is loopback-only; it accepts `localhost`, `127.0.0.1`, `::1`, or `[::1]` and rejects public or wildcard hosts.
+The Xeno client can expose one API for local applications that expect either OpenAI-compatible or Ollama-compatible endpoints, covering both the models this machine runs and the models the Xeno network offers. For a short setup guide, see [HYBRID_MODELS.md](HYBRID_MODELS.md). The listener is disabled by default and is loopback-only; it accepts `localhost`, `127.0.0.1`, `::1`, or `[::1]` and rejects public or wildcard hosts.
 
 Add or edit this section in `~/.xeno/client.json`:
 
@@ -96,19 +97,60 @@ Add or edit this section in `~/.xeno/client.json`:
   "LocalInferenceServer": {
     "Enabled": true,
     "Host": "127.0.0.1",
-    "Port": 11434,
+    "Port": 11435,
     "EnableCors": true,
-    "RequestTimeoutMs": 300000
+    "RequestTimeoutMs": 300000,
+    "RoutingMode": "PreferLocal"
   }
 }
 ```
 
+The listener uses port 11435 by default so a local Ollama can keep its own port, 11434. Clients upgraded from 0.1.x that still have `"Port": 11434` are moved to 11435 once, and `xeno status`, the dashboards, and the desktop and terminal apps say so the next time you open them. Point local apps at the new port.
+
+`RoutingMode` is `PreferLocal` (the default), `NetworkOnly`, or `LocalOnly`. Each provider can also set `ShareWithNetwork` (set it to `false` for a provider only you should use, such as your own Ollama Cloud or ollama.com account), `RouteLocalRequests`, and `MaxConcurrentRequests`. Each model can set its own `MaxConcurrentRequests`. `DefaultMaxConcurrentRequests` (default 4) at the top level of `client.json` applies to providers that set no limit. Network requests and local requests share these limits.
+
 After `xeno start`, local apps can use:
 
-- OpenAI base URL: `http://127.0.0.1:11434/v1`
-- Ollama base URL: `http://127.0.0.1:11434/api`
+- OpenAI base URL: `http://127.0.0.1:11435/v1`
+- Ollama base URL: `http://127.0.0.1:11435/api` (for the Ollama CLI, `OLLAMA_HOST=127.0.0.1:11435`)
 
-Supported routes are `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/models/{model}`, `/api/generate`, `/api/chat`, `/api/embeddings`, `/api/embed`, `/api/tags`, `/api/show`, and `/api/ps`. `HEAD /` and `GET /` return `200 OK` with no payload for compatibility probes. `HEAD` against any supported OpenAI- or Ollama-compatible route also returns `200 OK` with no payload and does not require the WebSocket tunnel. Streaming is supported for OpenAI chat completions, OpenAI completions, and Ollama generate/chat. If the Xeno WebSocket is disconnected, severed, or unauthorized, the listener stays up but returns provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
+### One endpoint for local and network models
+
+The listener is a router. Say you run Ollama on this machine with `llama3.1:8b` pulled, and you are signed in to Ollama so it also lists its cloud models such as `gpt-oss:120b-cloud`. Point your app at `http://127.0.0.1:11435` and:
+
+- requests for `llama3.1:8b` and `gpt-oss:120b-cloud` go straight to your Ollama, without a round trip through the Xeno cloud;
+- requests for models only the Xeno network serves go through the Xeno server;
+- `GET /v1/models` and `GET /api/tags` list both sets, local models first.
+
+Every response says where it went in the `X-Xeno-Route` header (`local:<provider>` or `network`). To change a single model's route, add a rule to `LocalInferenceServer.Routes`:
+
+```json
+"Routes": [
+  { "Model": "llama3.1:8b", "Target": "Local", "Provider": "local-ollama", "FallbackToNetwork": true },
+  { "Model": "qwen3:235b", "Target": "Network" }
+]
+```
+
+`FallbackToNetwork` lets a request go to the Xeno network if the local provider fails before it starts responding. It never retries a response that has already started, and it is off unless a rule turns it on. To keep a provider (for example your own Ollama Cloud or ollama.com account) off the Xeno network entirely, add it with `--local-only`; this machine's apps can still reach it through the local endpoint.
+
+Requests to a provider on this machine share its concurrency limit with the network requests the machine serves: `DefaultMaxConcurrentRequests` (default 4) per provider, overridable per provider and per model. A local request waits up to `LocalQueueTimeoutMs` for a slot and then gets a `429`. The client also tells the Xeno server how many slots it has left after its own local requests, so the server sends work elsewhere instead of overloading a machine its owner is using. When a client turns a request away as busy, the server tries one other client before answering `503`.
+
+See where requests go and how each provider is doing on the **Local endpoint** page of the local web dashboard, the desktop app, and the terminal app, or from the command line:
+
+```bash
+xeno inference routes                                    # rules and where each model goes now
+xeno inference resolve llama3.1:8b                       # where one model goes, and why
+xeno inference route set llama3.1:8b --local local-ollama --fallback
+xeno inference route set qwen3:235b --network
+xeno inference route remove qwen3:235b
+xeno inference backends --check                          # provider health and load
+xeno inference concurrency 6                             # default limit per provider
+xeno inference requests --limit 20                       # recent local endpoint requests (metadata only)
+```
+
+Ollama accepts both the OpenAI and Ollama API shapes. vLLM and other OpenAI-compatible providers accept only the OpenAI shape, so call their models through the `/v1` routes.
+
+Supported routes are `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/models/{model}`, `/api/generate`, `/api/chat`, `/api/embeddings`, `/api/embed`, `/api/tags`, `/api/show`, and `/api/ps`. `HEAD /` and `GET /` return `200 OK` with no payload for compatibility probes. `HEAD` against any supported OpenAI- or Ollama-compatible route also returns `200 OK` with no payload and does not require the WebSocket tunnel. Streaming is supported for OpenAI chat completions, OpenAI completions, and Ollama generate/chat. If the Xeno WebSocket is disconnected, severed, or unauthorized, the listener stays up: models served on this machine keep working, and requests that need the network return provider-shaped `502` responses. If a local inference request exceeds `LocalInferenceServer.RequestTimeoutMs`, the listener cancels the tunneled request and returns a provider-shaped `504` response.
 
 ## Server Client Telemetry
 
@@ -154,8 +196,8 @@ Seeded alpha credentials:
 
 The Docker images are:
 
-- `jchristn77/xeno-server:v0.1.0`
-- `jchristn77/xeno-dashboard:v0.1.0`
+- `jchristn77/xeno-server:v0.2.0`
+- `jchristn77/xeno-dashboard:v0.2.0`
 - `jchristn77/netledger:v4.0.0`
 - `jchristn77/netledger-archive:v4.0.0`
 - `jchristn77/netledger-ui:v4.0.0`
@@ -172,18 +214,18 @@ To rebuild and push images on Windows:
 
 ```powershell
 docker login
-build-server.bat v0.1.0
-build-dashboard.bat v0.1.0
-build-all.bat v0.1.0
+build-server.bat v0.2.0
+build-dashboard.bat v0.2.0
+build-all.bat v0.2.0
 ```
 
 On macOS or Linux:
 
 ```bash
 docker login
-./build-server.sh v0.1.0
-./build-dashboard.sh v0.1.0
-./build-all.sh v0.1.0
+./build-server.sh v0.2.0
+./build-dashboard.sh v0.2.0
+./build-all.sh v0.2.0
 ```
 
 `build-all.bat` and `build-all.sh` delegate to the server and dashboard build scripts and pass the requested image tag through to both. Every build script tags the image with both the requested tag and `latest`. The `.sh` scripts use `docker buildx` to build and push multi-architecture (`linux/amd64`, `linux/arm64`) images. `build-local-dashboard.bat` / `build-local-dashboard.sh` build the local client dashboard bundle embedded in the `xeno` tool.
@@ -609,7 +651,7 @@ The full stack ships in `docker/compose.yaml` and comes up with `docker compose 
 | OTLP Collector | localhost:4317 (gRPC), 4318 (HTTP) | Telemetry ingest from xeno-server |
 | Collector metrics | http://localhost:8889/metrics | Prometheus exposition surface |
 
-Grafana is provisioned with the Prometheus, Tempo, and Loki datasources and eight pre-built dashboards, all in the top-level Dashboards list: **Overview** (request rate, latency, relay throughput, tokens), **Relay & LLM** (per-model/provider throughput, time-to-first-token, streaming and upstream latency, payload sizes), **Tokens** (prompt/completion/total rates, tokens per request), **Connections & Fleet Health** (connect/disconnect/eviction, collection cycles, ledger queue), **Fleet** (per-client host CPU/memory/disk/GPU and per-provider model counts and reachability), **Auth, RBAC & Email** (auth outcomes, denials, mutations, email), **Runtime (.NET)** (process CPU/memory/threads, GC, thread pool, exceptions), and **Logs** (a Loki view over the server logs). Open Grafana at http://localhost:9400 — no login is required in the local stack. There is also a **Grafana** card at the bottom of the dashboard Settings page that links to it.
+Grafana is provisioned with the Prometheus, Tempo, and Loki datasources and eight pre-built dashboards, all in the top-level Dashboards list: **Overview** (request rate, latency, relay throughput, tokens), **Relay & LLM** (per-model/provider throughput, time-to-first-token, streaming and upstream latency, payload sizes), **Tokens** (prompt/completion/total rates, tokens per request), **Connections & Fleet Health** (connect/disconnect/eviction, collection cycles, ledger queue), **Fleet** (per-client host CPU/memory/disk/GPU and per-provider model counts and reachability), **Auth, RBAC & Email** (auth outcomes, denials, mutations, email), **Runtime (.NET)** (process CPU/memory/threads, GC, thread pool, exceptions), and **Logs** (a Loki view over the server logs). Open Grafana at http://localhost:9400; no login is required in the local stack. There is also a **Grafana** card at the bottom of the dashboard Settings page that links to it.
 
 Telemetry is configured under the `Telemetry` block in `xeno.json`:
 
@@ -652,6 +694,7 @@ Developer documentation:
 - [REST_API.md](REST_API.md)
 - [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
 - [MODEL_ROUTING.md](MODEL_ROUTING.md)
+- [HYBRID_MODELS.md](HYBRID_MODELS.md) (local and Xeno network models through one local endpoint)
 - [getting-started/](getting-started/)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
 - [DESKTOP_AND_TERMINAL.md](DESKTOP_AND_TERMINAL.md)
@@ -719,6 +762,23 @@ npm run build
 ```
 
 The test projects follow the Touchstone package pattern used by the reference applications: `Test.Shared`, `Test.Automated`, `Test.Xunit`, and `Test.Nunit`.
+
+Run the dashboard browser tests (Playwright, Chromium):
+
+```bash
+cd dashboard
+npx playwright install chromium
+npx playwright test --config playwright.local.config.mjs
+npx playwright test --config playwright.config.mjs
+```
+
+Run the shared suites against a server database instead of SQLite by setting `XENO_TEST_DB_PROVIDER` (`mysql`, `postgresql`, or `sqlserver`) with `XENO_TEST_DB_HOST`, `XENO_TEST_DB_PORT`, `XENO_TEST_DB_NAME`, `XENO_TEST_DB_USER`, and `XENO_TEST_DB_PASSWORD`.
+
+GitHub Actions (`.github/workflows/tests.yml`) runs all of this on every push and pull request: the full suite, the C#, JavaScript, and Python SDK tests, and the dashboard checks on Linux, Windows, and macOS, plus the shared suites against MySQL, PostgreSQL, and SQL Server on Linux.
+
+### AOT support
+
+Not supported. The server and client serialize anonymous types and use `System.Text.Json` reflection without source generation, and the desktop and tray apps are Avalonia applications, so none of them publish as native AOT. There is no `Test.Aot` project.
 
 ## Security Notes
 

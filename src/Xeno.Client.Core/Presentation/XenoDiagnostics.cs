@@ -74,6 +74,7 @@ namespace Xeno.Client.Presentation
                 Pair("Providers", snapshot.ProviderCount + ", models: " + snapshot.ModelCount),
                 Pair("Local dashboard", snapshot.LocalDashboardListening ? snapshot.LocalDashboardUrl : "not listening"),
                 Pair("Local inference", snapshot.LocalInferenceEnabled ? (snapshot.LocalInferenceListening ? snapshot.LocalInferenceUrl : "enabled, not listening") : "disabled"),
+                Pair("Local routing", DisplayFormat.OrDash(snapshot.LocalInferenceRoutingMode) + ", " + snapshot.LocalInferenceRuleCount.ToString(CultureInfo.InvariantCulture) + " rules, " + (snapshot.LocalInferenceListening ? snapshot.LocalInferenceHealthyBackends.ToString(CultureInfo.InvariantCulture) + " of " + snapshot.LocalInferenceRoutableBackends.ToString(CultureInfo.InvariantCulture) + " providers healthy" : snapshot.LocalInferenceRoutableBackends.ToString(CultureInfo.InvariantCulture) + " providers for local requests")),
                 Pair("Settings", snapshot.SettingsFile),
                 Pair("Log", snapshot.LogFile),
                 Pair(".NET", RuntimeInformation.FrameworkDescription),

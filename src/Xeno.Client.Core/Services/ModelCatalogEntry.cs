@@ -60,6 +60,26 @@ namespace Xeno.Client.Services
         public string NetworkOwner { get; set; } = String.Empty;
 
         /// <summary>
+        /// Where the local inference listener would send a request for this model: "local:&lt;provider&gt;", "network", or "unavailable". Never null.
+        /// </summary>
+        public string RouteTarget { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Stable reason code for <see cref="RouteTarget"/>, as returned by the router (for example "preferLocal" or "rule"). Never null.
+        /// </summary>
+        public string RouteReason { get; set; } = String.Empty;
+
+        /// <summary>
+        /// True when every provider on this machine that serves the model keeps it off the Xeno network.
+        /// </summary>
+        public bool LocalOnly { get; set; } = false;
+
+        /// <summary>
+        /// True when the model is known only because a local provider reported it, not because it is configured in Xeno.
+        /// </summary>
+        public bool Discovered { get; set; } = false;
+
+        /// <summary>
         /// Display label for <see cref="Availability"/>.
         /// </summary>
         public string AvailabilityText

@@ -15,6 +15,7 @@ namespace Xeno.Client.LocalDashboard
     using Xeno.Client.LocalDashboard.Database;
     using Xeno.Client.LocalDashboard.Models;
     using Xeno.Client.LocalInference;
+    using Xeno.Client.Routing;
     using Xeno.Client.Services;
     using Xeno.Client.Telemetry.Models;
     using Xeno.Client.Telemetry.Services;
@@ -524,6 +525,70 @@ namespace Xeno.Client.LocalDashboard
                 await LocalDashboardRuntime.SnapshotConfigurationAsync(_History, _Settings, token).ConfigureAwait(false);
                 ClientConnectionState.MarkInventoryUpdateRequested();
                 await SendJsonAsync(context, new LocalDashboardMutationResponse { InventoryUpdateRequested = true, SettingsFile = ClientSettings.SettingsFile }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && String.Equals(path, "/api/v1/local-inference/routing", StringComparison.OrdinalIgnoreCase))
+            {
+                await SendJsonAsync(context, LocalInferenceRoutingService.BuildView(_Settings, LocalInferenceRuntimeStatus.Load())).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && String.Equals(path, "/api/v1/local-inference/resolve", StringComparison.OrdinalIgnoreCase))
+            {
+                string model = context.Request.Query.Elements.Get("model") ?? String.Empty;
+                if (String.IsNullOrWhiteSpace(model)) throw new ArgumentException("Query parameter 'model' is required.", "model");
+                LocalInferenceApiShapeEnum shape = String.Equals(context.Request.Query.Elements.Get("shape"), "ollama", StringComparison.OrdinalIgnoreCase) ? LocalInferenceApiShapeEnum.Ollama : LocalInferenceApiShapeEnum.OpenAi;
+                LocalInferenceRouteDecision decision = LocalInferenceRoutingService.Resolve(_Settings, LocalInferenceRuntimeStatus.Load(), model, shape);
+                await SendJsonAsync(context, LocalInferenceRoutingService.ToResponse(decision)).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "PUT" && String.Equals(path, "/api/v1/local-inference/routes", StringComparison.OrdinalIgnoreCase))
+            {
+                LocalRouteRuleSaveRequest request = ReadJson<LocalRouteRuleSaveRequest>(context);
+                LocalInferenceRouteRule rule = LocalInferenceRoutingService.SaveRule(_Settings, new LocalInferenceRouteRule { Model = request.Model, Target = request.Target, Provider = request.Provider, FallbackToNetwork = request.FallbackToNetwork }, request.OriginalModel);
+                _Settings.Save();
+                await SendJsonAsync(context, rule).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "DELETE" && path.StartsWith("/api/v1/local-inference/routes/", StringComparison.OrdinalIgnoreCase))
+            {
+                string model = DecodePathSegment(path.Substring("/api/v1/local-inference/routes/".Length));
+                int removed = LocalInferenceRoutingService.DeleteRule(_Settings, model);
+                if (removed == 0)
+                {
+                    context.Response.StatusCode = 404;
+                    await SendJsonAsync(context, new LocalDashboardErrorResponse { Error = "NotFound", Message = "No route rule for model '" + model + "'." }).ConfigureAwait(false);
+                    return;
+                }
+
+                _Settings.Save();
+                await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed, RemovedOne = removed == 1, SettingsFile = ClientSettings.SettingsFile }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/local-inference/backends/check", StringComparison.OrdinalIgnoreCase))
+            {
+                IReadOnlyCollection<LocalBackendStatus> backends = await LocalInferenceRoutingService.CheckBackendsAsync(_Settings, token).ConfigureAwait(false);
+                await SendJsonAsync(context, new LocalBackendCheckResponse { Backends = backends.ToList() }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "GET" && String.Equals(path, "/api/v1/local-inference/requests", StringComparison.OrdinalIgnoreCase))
+            {
+                int page = Math.Max(1, ParseInt(context.Request.Query.Elements.Get("page"), 1));
+                int pageSize = Math.Min(1000, Math.Max(1, ParseInt(context.Request.Query.Elements.Get("pageSize"), 25)));
+                List<LocalInferenceRequestRecord> items = LocalInferenceRequestLog.Read((page - 1) * pageSize, pageSize);
+                await SendJsonAsync(context, new LocalInferenceRequestPage { Items = items, Total = LocalInferenceRequestLog.Count(), Page = page, PageSize = pageSize }).ConfigureAwait(false);
+                return;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/local-inference/port-migration/acknowledge", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientConnectionState.AcknowledgeLocalInferencePortMigration();
+                await SendJsonAsync(context, new LocalAcknowledgeResponse()).ConfigureAwait(false);
                 return;
             }
 

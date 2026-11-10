@@ -117,6 +117,16 @@ namespace Xeno.Client.Hosting
         }
 
         /// <summary>
+        /// Launch the desktop app on a page.
+        /// </summary>
+        /// <param name="page">Page to open.</param>
+        /// <returns>Launch result.</returns>
+        public static LaunchResult LaunchDesktop(Presentation.XenoPageEnum page)
+        {
+            return LaunchApplication(XenoApplicationEnum.Desktop, XenoProduct.DesktopName, new List<string> { "--page", page.ToString().ToLowerInvariant() });
+        }
+
+        /// <summary>
         /// Launch the tray agent.
         /// </summary>
         /// <returns>Launch result.</returns>
@@ -198,7 +208,7 @@ namespace Xeno.Client.Hosting
 
         #region Private-Methods
 
-        private static LaunchResult LaunchApplication(XenoApplicationEnum application, string displayName)
+        private static LaunchResult LaunchApplication(XenoApplicationEnum application, string displayName, IReadOnlyList<string>? extraArguments = null)
         {
             XenoExecutableLocation? location = XenoExecutableLocator.Locate(application);
             if (location == null)
@@ -206,7 +216,9 @@ namespace Xeno.Client.Hosting
                 return LaunchResult.Fail("Could not find " + displayName + " (" + XenoExecutableLocator.BaseName(application) + "). Set " + XenoExecutableLocator.EnvironmentVariable(application) + " to its location.");
             }
 
-            ProcessStartInfo startInfo = location.CreateStartInfo(XenoLaunchOptions.ForwardHomeArguments());
+            List<string> arguments = new List<string>(XenoLaunchOptions.ForwardHomeArguments());
+            if (extraArguments != null) arguments.AddRange(extraArguments);
+            ProcessStartInfo startInfo = location.CreateStartInfo(arguments);
             startInfo.UseShellExecute = false;
             startInfo.CreateNoWindow = true;
             string? directory = Path.GetDirectoryName(location.LeadingArguments.Count > 0 ? location.LeadingArguments[0] : location.Executable);

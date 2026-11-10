@@ -39,5 +39,20 @@ namespace Xeno.Client.LocalDashboard.Models
         /// Whether the backing Ollama provider allows server-initiated model management.
         /// </summary>
         public bool ModelManagementAllowed { get; set; } = false;
+
+        /// <summary>
+        /// Model concurrency limit. Null when the model inherits the provider limit.
+        /// </summary>
+        public int? MaxConcurrentRequests { get; set; } = null;
+
+        /// <summary>
+        /// Concurrency limit the model can actually reach: the smaller of the model and provider limits.
+        /// </summary>
+        public int EffectiveMaxConcurrentRequests { get; set; } = 4;
+
+        /// <summary>
+        /// Whether the provider's models are offered to the Xeno network.
+        /// </summary>
+        public bool ShareWithNetwork { get; set; } = true;
     }
 }

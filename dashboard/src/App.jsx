@@ -450,7 +450,7 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
         </nav>
         <div className="sidebar-footer">
           <span>{t('version')}</span>
-          <strong>v0.1.0</strong>
+          <strong>v0.2.0</strong>
         </div>
       </aside>
 

@@ -105,15 +105,16 @@ Things to know:
 
 | Page | What it shows and does |
 |---|---|
-| Overview | Client status with Start, Stop, Restart, and Sign In; requests served, failures, and latency; a requests-over-time chart with a range (last hour, day, week, or month); how many models are served here and offered by the network; local services; recent requests. |
+| Overview | Client status with Start, Stop, Restart, and Sign In; the local inference URL and routing mode (and, once, a notice when an upgrade moved the listener from port 11434 to 11435); requests served, failures, and latency; a requests-over-time chart with a range (last hour, day, week, or month); how many models are served here and offered by the network; local services; recent requests. |
 | Models | One catalog of the models this machine serves and the models the Xeno network offers it, with where each is available (this machine, the network, or both). Add, edit, rename, move, and delete local models. |
-| Providers | Local inference endpoints (Ollama, vLLM, OpenAI-compatible), their models, and a connection test. Add, edit, and delete providers. |
+| Providers | Local inference endpoints (Ollama, vLLM, OpenAI-compatible), their models, and a connection test. Add, edit, and delete providers. Each provider can be shared with the Xeno network or kept local-only (for example your own Ollama Cloud account), used for this machine's local endpoint requests, and given a concurrency limit; each model can have its own limit. |
+| Local endpoint | The URL apps on this machine call, its routing mode, a traffic chart (answered here, sent to the network, fallbacks), each provider's health, latency, and load against its concurrency limit, the route rules, and recent local endpoint requests. Add, edit, and delete rules, test where a model would go, and check every provider now. In the terminal app: a add, e edit, d delete, t test a route, c check providers. |
 | Requests | Requests this machine served for the network, with a requests-over-time chart, range, outcome, and text filters, and full request details (timeline, headers, and stored bodies). Delete one request or clear the history. |
 | Logs | The worker log or error log, with tail length, severity filter, and live follow. Routine server messages are rolled up (see below). |
 | Host (Telemetry) | CPU, memory, disk, and GPU readings; CPU, memory, and GPU charts over a range; stored samples; and Collect Now. |
 | Provider (Telemetry) | Health, loaded and available models, queue depth, and throughput per provider; a chart of the chosen metric over a range; and stored samples. |
 | General (Configuration) | The server connection, sign-in (username and password, or an access key), sign-out, connectivity checks, and what the network offers this tenant. |
-| Settings | Appearance and every local setting: the web dashboard, the local inference server, request history retention, and telemetry. Saved to `client.json`; listener changes apply after a restart. |
+| Settings | Appearance and every local setting: the web dashboard, the local inference server (port, routing mode, model discovery, provider health checks, and how long a local request waits for a free slot), the default concurrency limit per provider, request history retention, and telemetry. Saved to `client.json`; listener host and port changes apply after a restart, routing and concurrency changes apply right away. |
 
 The sidebar groups pages under section headings (Client, Models, Activity, Telemetry, Configuration), so the
 telemetry pages are just **Host** and **Provider** there. Menus, the command palette, and page headers use the full
@@ -222,11 +223,13 @@ when the editor exits.
 ## Tray agent
 
 The tray agent (`xeno-tray`, shown as **Xeno Agent**) lives in the macOS menu bar or the Windows and Linux
-notification area. Its menu shows the client status and offers:
+notification area. Its menu offers:
 
+- The status line, which also shows the local endpoint address when the local inference server is enabled, for example `Xeno: Connected - local endpoint 127.0.0.1:11435, 2 of 2 providers healthy`
 - Open Xeno (the desktop app)
 - Open Xeno Terminal (the terminal app, in a new terminal window)
 - Open Web Dashboard
+- Open Local Endpoint (the desktop app's Local endpoint page)
 - Start Client, Stop Client, and Restart Client
 - About Xeno Agent and Quit Xeno Agent
 

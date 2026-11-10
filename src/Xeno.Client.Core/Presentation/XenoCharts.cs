@@ -61,6 +61,44 @@ namespace Xeno.Client.Presentation
         }
 
         /// <summary>
+        /// Local endpoint traffic over the last hour: requests answered on this machine, sent to the network, and fallbacks, per 5-minute bucket.
+        /// Phase 5 moves this chart onto the shared usage model.
+        /// </summary>
+        /// <param name="records">Local endpoint request records, any order.</param>
+        /// <param name="nowUtc">End of the window (UTC).</param>
+        /// <returns>Chart.</returns>
+        /// <exception cref="ArgumentNullException">records is null.</exception>
+        public static XenoChart LocalEndpointTraffic(IEnumerable<Routing.LocalInferenceRequestRecord> records, DateTime nowUtc)
+        {
+            ArgumentNullException.ThrowIfNull(records);
+            const int buckets = 12;
+            DateTime end = new DateTime(nowUtc.Ticks - (nowUtc.Ticks % TimeSpan.FromMinutes(5).Ticks), DateTimeKind.Utc).AddMinutes(5);
+            DateTime start = end.AddMinutes(-5 * buckets);
+            double[] local = new double[buckets];
+            double[] network = new double[buckets];
+            double[] fallback = new double[buckets];
+            foreach (Routing.LocalInferenceRequestRecord record in records)
+            {
+                if (record == null || record.ReceivedUtc < start || record.ReceivedUtc >= end) continue;
+                int index = (int)((record.ReceivedUtc - start).TotalMinutes / 5);
+                if (index < 0 || index >= buckets) continue;
+                if (record.Fallback) fallback[index]++;
+                else if (record.Route.StartsWith("local", StringComparison.OrdinalIgnoreCase)) local[index]++;
+                else network[index]++;
+            }
+
+            List<string> labels = Enumerable.Range(0, buckets).Select(i => Label(start.AddMinutes(5 * i), HistoryRangeEnum.Hour)).ToList();
+            List<XenoChartSeries> series = new List<XenoChartSeries>
+            {
+                new XenoChartSeries("This machine", XenoChartToneEnum.Success, local.ToList()),
+                new XenoChartSeries("Xeno network", XenoChartToneEnum.Accent, network.ToList()),
+                new XenoChartSeries("Fallback", XenoChartToneEnum.Warning, fallback.ToList())
+            };
+            bool hasData = local.Sum() + network.Sum() + fallback.Sum() > 0;
+            return new XenoChart("Local endpoint traffic", "last hour", " req", labels, series, "No local endpoint requests in the last hour. Point an app at the local endpoint to see where its requests go.", true, hasData);
+        }
+
+        /// <summary>
         /// A host metric over time (average per bucket).
         /// </summary>
         /// <param name="metric">Metric.</param>

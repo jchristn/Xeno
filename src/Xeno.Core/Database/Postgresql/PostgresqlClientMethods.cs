@@ -336,6 +336,25 @@ namespace Xeno.Core.Database.Postgresql
         #endregion
 
         /// <inheritdoc />
+        public async Task UpdateCapacityAsync(string tenantId, string id, int maxParallelRequests, CancellationToken token = default)
+        {
+            if (String.IsNullOrWhiteSpace(id)) return;
+            token.ThrowIfCancellationRequested();
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "UPDATE clients SET max_parallel_requests = @capacity WHERE tenant_id = @tenant AND id = @id;";
+                    command.Parameters.AddWithValue("@capacity", Math.Max(1, maxParallelRequests));
+                    command.Parameters.AddWithValue("@tenant", tenantId ?? String.Empty);
+                    command.Parameters.AddWithValue("@id", id);
+                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public async Task AdjustInFlightAsync(string tenantId, string id, int delta, CancellationToken token = default)
         {
             if (String.IsNullOrWhiteSpace(id)) return;

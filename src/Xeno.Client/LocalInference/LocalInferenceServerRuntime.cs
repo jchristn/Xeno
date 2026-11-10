@@ -4,6 +4,7 @@ namespace Xeno.Client.LocalInference
     using System.Net.Sockets;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Client.Services;
 
     /// <summary>
     /// Runtime manager for the local inference server.
@@ -41,7 +42,7 @@ namespace Xeno.Client.LocalInference
             }
             catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is SocketException)
             {
-                string message = BuildStartupFailureMessage(settings, ex);
+                string message = await BuildStartupFailureMessageAsync(settings, ex, token).ConfigureAwait(false);
                 ClientConnectionState.MarkLocalInferenceError(settings, message);
                 Console.Error.WriteLine(message);
             }
@@ -64,13 +65,21 @@ namespace Xeno.Client.LocalInference
             ClientConnectionState.MarkLocalInferenceStopped(settings);
         }
 
-        private static string BuildStartupFailureMessage(ClientSettings settings, Exception ex)
+        private static async Task<string> BuildStartupFailureMessageAsync(ClientSettings settings, Exception ex, CancellationToken token)
         {
             string endpoint = settings.LocalInferenceServer.Host + ":" + settings.LocalInferenceServer.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string message = "Local inference server failed to start on " + endpoint + " (" + ex.GetType().Name + "): " + ex.Message;
             if (IsPortConflict(ex))
             {
-                message += " The port appears to be in use. Change LocalInferenceServer.Port in " + ClientSettings.SettingsFile + ".";
+                string? ollamaVersion = await OllamaPortProbe.DetectOllamaAsync(settings.LocalInferenceServer.Port, 1000, token).ConfigureAwait(false);
+                if (!String.IsNullOrWhiteSpace(ollamaVersion))
+                {
+                    message += " Ollama " + ollamaVersion + " is already listening on this port. Leave Ollama where it is and change LocalInferenceServer.Port in " + ClientSettings.SettingsFile + " (the default is " + ClientLocalInferenceServerSettings.DefaultPort.ToString(System.Globalization.CultureInfo.InvariantCulture) + ").";
+                }
+                else
+                {
+                    message += " The port appears to be in use. Change LocalInferenceServer.Port in " + ClientSettings.SettingsFile + ".";
+                }
             }
 
             return message;

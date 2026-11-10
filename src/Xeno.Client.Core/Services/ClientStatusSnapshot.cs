@@ -157,6 +157,46 @@ namespace Xeno.Client.Services
         public DateTime? LocalInferenceLastRequestUtc { get; set; } = null;
 
         /// <summary>
+        /// Local inference routing mode, for example "PreferLocal". Never null.
+        /// </summary>
+        public string LocalInferenceRoutingMode { get; set; } = String.Empty;
+
+        /// <summary>
+        /// Number of local inference route rules.
+        /// </summary>
+        public int LocalInferenceRuleCount { get; set; } = 0;
+
+        /// <summary>
+        /// Routable local providers that are not unhealthy, from the running listener. Zero when it is not running.
+        /// </summary>
+        public int LocalInferenceHealthyBackends { get; set; } = 0;
+
+        /// <summary>
+        /// Routable local providers.
+        /// </summary>
+        public int LocalInferenceRoutableBackends { get; set; } = 0;
+
+        /// <summary>
+        /// Requests answered on this machine since the listener started.
+        /// </summary>
+        public long LocalInferenceLocalRequests { get; set; } = 0;
+
+        /// <summary>
+        /// Requests sent to the network since the listener started.
+        /// </summary>
+        public long LocalInferenceNetworkRequests { get; set; } = 0;
+
+        /// <summary>
+        /// Requests that fell back to the network since the listener started.
+        /// </summary>
+        public long LocalInferenceFallbacks { get; set; } = 0;
+
+        /// <summary>
+        /// One-time notice that the local inference port moved, or empty when there is none. Front ends show it once and then call <see cref="ClientConnectionState.AcknowledgeLocalInferencePortMigration"/>.
+        /// </summary>
+        public string LocalInferencePortNotice { get; set; } = String.Empty;
+
+        /// <summary>
         /// Number of configured provider endpoints.
         /// </summary>
         public int ProviderCount { get; set; } = 0;
@@ -271,6 +311,13 @@ namespace Xeno.Client.Services
                     : "http://" + settings.LocalInferenceServer.Host + ":" + settings.LocalInferenceServer.Port,
                 LocalInferenceLastError = state.LocalInferenceServerLastError ?? String.Empty,
                 LocalInferenceLastRequestUtc = state.LocalInferenceServerLastRequestUtc,
+                LocalInferenceRoutingMode = settings.LocalInferenceServer.RoutingMode.ToString(),
+                LocalInferenceRuleCount = settings.LocalInferenceServer.Routes.Count,
+                LocalInferencePortNotice = state.LocalInferencePortMigratedFrom.HasValue
+                    ? "The local inference port moved from " + state.LocalInferencePortMigratedFrom.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " to " + (state.LocalInferencePortMigratedTo ?? settings.LocalInferenceServer.Port).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " so Ollama can keep its default port. Point local apps at the new port."
+                    : String.Empty,
                 ProviderCount = settings.Runners.Count,
                 ModelCount = settings.Runners.Sum(item => item.Models.Count),
                 InventoryUpdatePending = ClientConnectionState.IsInventoryUpdatePending(),
@@ -279,6 +326,13 @@ namespace Xeno.Client.Services
                 ErrorLogFile = state.ErrorLogFilePath ?? ClientConnectionState.ErrorLogFile,
                 CapturedUtc = DateTime.UtcNow
             };
+            Routing.LocalInferenceRuntimeStatus? runtime = running ? Routing.LocalInferenceRuntimeStatus.Load() : null;
+            Routing.LocalInferenceRoutingView routing = Routing.LocalInferenceRoutingService.BuildView(settings, runtime);
+            snapshot.LocalInferenceRoutableBackends = routing.RoutableBackends;
+            snapshot.LocalInferenceHealthyBackends = runtime == null ? 0 : routing.HealthyBackends;
+            snapshot.LocalInferenceLocalRequests = routing.LocalRequests;
+            snapshot.LocalInferenceNetworkRequests = routing.NetworkRequests;
+            snapshot.LocalInferenceFallbacks = routing.Fallbacks;
 
             if (!running && !hasCredential)
             {
