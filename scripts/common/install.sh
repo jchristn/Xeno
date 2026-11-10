@@ -27,6 +27,13 @@ for arg in "$@"; do
     esac
 done
 
+# Install the system packages Xeno needs on Linux when they are missing (INSTALL_SYSTEM_PACKAGES=0 to only report them):
+# ICU for .NET, the Avalonia libraries for the desktop app, and a clipboard tool for xeno tui.
+if [ "${INSTALL_APPS}" -eq 1 ]; then
+    native_install_deps "Xeno" icu gui clipboard
+else
+    native_install_deps "Xeno" icu clipboard
+fi
 xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
 
 # A running worker or app keeps using the old files; stop them before replacing the tool and the apps.

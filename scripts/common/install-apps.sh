@@ -55,4 +55,5 @@ Categories=Network;Utility;
 DESKTOP
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "${APPLICATIONS}" >/dev/null 2>&1 || true
 
+native_check_libs warning "The Xeno desktop app" "$NATIVE_AVALONIA_LIBS"
 echo "[install-apps] Installed. Start the desktop app from your app launcher (Xeno) or run ${TARGET}/xeno-desktop."

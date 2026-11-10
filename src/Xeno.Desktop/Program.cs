@@ -6,6 +6,7 @@ namespace Xeno.Desktop
     using Xeno.Client.Hosting;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
+    using Xeno.Desktop.Common;
 
     /// <summary>
     /// Entry point for xeno-desktop.
@@ -60,7 +61,7 @@ namespace Xeno.Desktop
                     return 0;
                 }
 
-                return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+                return XenoNativeLibraries.Run("Xeno", () => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args));
             }
         }
 

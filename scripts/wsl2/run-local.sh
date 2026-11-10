@@ -48,11 +48,17 @@ case "$APP" in
         if [ -z "${DISPLAY:-}" ]; then
             die "DISPLAY is not set. The tray agent uses X11 and needs WSLg, which sets DISPLAY (Windows 11, or Windows 10 with the Microsoft Store WSL). From Windows run wsl --update, then wsl --shutdown, and reopen this shell. Or run scripts\\windows\\run-local.bat from Windows, or scripts/wsl2/run-tui.sh for the terminal app."
         fi
+        wsl_check_libs error "The Xeno Agent tray app" "$WSL_AVALONIA_LIBS"
         ;;
     desktop)
         if [ -z "${DISPLAY:-}" ]; then
             die "DISPLAY is not set. The desktop app uses X11 and needs WSLg, which sets DISPLAY (Windows 11, or Windows 10 with the Microsoft Store WSL). From Windows run wsl --update, then wsl --shutdown, and reopen this shell. Or run scripts\\windows\\run-local.bat from Windows, or scripts/wsl2/run-tui.sh for the terminal app."
         fi
+        wsl_check_libs error "The Xeno desktop app" "$WSL_AVALONIA_LIBS"
+        ;;
+    tui)
+        wsl_check_libs warning "The Xeno desktop app (which the terminal app opens)" "$WSL_AVALONIA_LIBS"
+        wsl_check_clipboard "the Xeno terminal app"
         ;;
 esac
 # WSLg has no notification area, so the desktop app does not start the tray agent unless XENO_AGENT_AUTOSTART is set.
@@ -114,6 +120,8 @@ XENO="$(xeno_exe xeno)"
 echo "[run-local] Client home: $XENO_CLIENT_HOME (server $XENO_LOCAL_SERVER)"
 echo "[run-local] Sign in from the General page with admin@xeno / password."
 
+# Give the app the Windows PATH entries back (clip.exe, explorer.exe, wslview) and BROWSER=wslview.
+wsl_prepare_app_env
 case "$APP" in
     desktop) "$(xeno_exe xeno-desktop)" "$@" ;;
     tui) "$XENO" tui "$@" ;;

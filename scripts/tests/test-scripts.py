@@ -46,13 +46,19 @@ if name == 'wslpath':
     print(env['MOCK_APPDATA'] if args[0] == '-u' else 'C:\\fake\\' + pathlib.Path(args[1]).name); sys.exit(0)
 if name == 'ip':
     print('default via 172.29.0.1 dev eth0 proto kernel'); sys.exit(0)
+if name == 'apt-cache':
+    print('libicu-dev\nlibicu74\nlibicu72'); sys.exit(0)
+if name == 'apt-get':
+    log([name, *args])
+    if args[:1] == ['install']: pathlib.Path(env['APT_STATE']).write_text('1')
+    sys.exit(0)
 if name == 'curl':
     ok = [u for u in env.get('MOCK_CURL_OK', '').split(',') if u]
     sys.exit(0 if any(a.startswith(u) for a in args for u in ok) else 7)
 if name in ('xeno', 'xeno-desktop', 'xeno-tray'):
     where = 'tool' if '.dotnet' in sys.argv[0] else 'built'
     log([f'{where}:{name}', *args, {'XENO_AGENT_AUTOSTART': env.get('XENO_AGENT_AUTOSTART'),
-                                   'XENO_CLIENT_HOME': env.get('XENO_CLIENT_HOME')}])
+                                   'XENO_CLIENT_HOME': env.get('XENO_CLIENT_HOME'), 'PATH': env.get('PATH')}])
     if args[:2] == ['status', '--json']:
         print(json.dumps({'processId': int(env.get('MOCK_WORKER_PID', '0'))}, indent=2))
     sys.exit(0)
@@ -173,19 +179,52 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
     repo = make_repo(temp)
     bin_dir = temp / 'bin'
     bin_dir.mkdir()
-    for name in ['dotnet', 'uname', 'pgrep', 'pkill', 'npm', 'curl', 'ip', 'cmd.exe', 'wslpath', 'wscript.exe']:
+    for name in ['dotnet', 'uname', 'pgrep', 'pkill', 'npm', 'curl', 'ip', 'cmd.exe', 'wslpath', 'wscript.exe',
+                 'apt-get', 'apt-cache']:
         (bin_dir / name).write_text(FAKE)
         (bin_dir / name).chmod(0o755)
+    (bin_dir / 'sudo').write_text('#!/bin/sh\nexec "$@"\n')
+    (bin_dir / 'sudo').chmod(0o755)
+    apt_state = temp / 'apt-installed'
+    tools = temp / 'bin-tools'   # clipboard and browser tools; left out of PATH where a test needs them missing
+    tools.mkdir()
+    for name in ['xclip', 'wslview', 'xdg-open']:
+        (tools / name).write_text('#!/bin/sh\nexit 0\n')
+        (tools / name).chmod(0o755)
+    no_tools_path = f'{bin_dir}:/usr/bin:/bin'
     log = temp / 'calls.jsonl'
     home = temp / 'home'
+
+    # Fake ldconfig -p output (XENO_LDCONFIG on Linux, WSL_LDCONFIG on WSL), so the native-library checks do not
+    # depend on the machine running the tests.
+    ICU = '\tlibicuuc.so.74 (libc6,x86-64) => /lib/x86_64-linux-gnu/libicuuc.so.74'
+    AVALONIA = ['libX11.so.6', 'libICE.so.6', 'libSM.so.6', 'libXext.so.6', 'libXrandr.so.2', 'libXi.so.6',
+                'libXcursor.so.1', 'libXfixes.so.3', 'libfontconfig.so.1']
+
+    gui_lines = ['\t%s (libc6,x86-64) => /lib/x86_64-linux-gnu/%s' % (n, n) for n in AVALONIA]
+
+    def ldconfig(tag, lines):
+        # After the fake apt-get has "installed" packages, everything is present.
+        f = temp / ('fake-ldconfig-' + tag)
+        everything = '\n'.join([ICU] + gui_lines)
+        f.write_text(f'#!/bin/sh\nif [ -f "$APT_STATE" ]; then\ncat <<"EOF"\n{everything}\nEOF\nelse\ncat <<"EOF"\n'
+                     + '\n'.join(lines) + '\nEOF\nfi\n')
+        f.chmod(0o755)
+        return str(f)
+    full = ldconfig('full', [ICU] + gui_lines)
+    no_gui = ldconfig('nogui', [ICU, '\tlibICE.so.6 (libc6) => /lib/i386-linux-gnu/libICE.so.6'])  # wrong arch only
+    no_icu = ldconfig('noicu', gui_lines)
+    no_ldconfig = str(temp / 'no-such-ldconfig')
     base_env = {k: v for k, v in os.environ.items()
                 if not k.startswith(('XENO_', 'WSL_', 'DOTNET_')) and k not in ('DISPLAY', 'WAYLAND_DISPLAY')}
-    base_env.update(PATH=f'{bin_dir}:/usr/bin:/bin', CALL_LOG=str(log), HOME=str(home), WSL_SKIP_CHECK='1',
-                    DISPLAY=':0', WSL_DISTRO_NAME='Test', MOCK_APPDATA=str(temp / 'appdata'))
+    base_env.update(PATH=f'{bin_dir}:{tools}:/usr/bin:/bin', CALL_LOG=str(log), HOME=str(home), WSL_SKIP_CHECK='1',
+                    DISPLAY=':0', WSL_DISTRO_NAME='Test', MOCK_APPDATA=str(temp / 'appdata'),
+                    XENO_LDCONFIG=full, WSL_LDCONFIG=full, APT_STATE=str(apt_state))
 
     def fresh_home():
         shutil.rmtree(home, ignore_errors=True)
         home.mkdir()
+        apt_state.unlink(missing_ok=True)
 
     def run(plat, script, *args, unset=(), stdin='', **env):
         log.unlink(missing_ok=True)
@@ -419,6 +458,101 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
         p, calls = run(plat, 'remove', PATH=f'{nodotnet}:/usr/bin:/bin')
         check(p.returncode == 0 and 'uninstall was skipped' in p.stderr and not any(x.exists() for x in leftovers)
               and not dotnet(calls), plat, p.stdout, p.stderr)
+
+    # Native libraries (WSLg and minimal distros): the GUI launchers stop before building when the Avalonia libraries
+    # are missing, the terminal app and install only warn, a missing ICU stops every dotnet script, and without
+    # ldconfig nothing is guessed. macOS has none of these checks.
+    def lib_env(fake):
+        return dict(XENO_LDCONFIG=fake, WSL_LDCONFIG=fake, XENO_WSL_FORCE_TRAY='1', MOCK_CURL_OK='http://localhost:9000',
+                    XENO_SKIP_DASHBOARD='1')
+    for plat in UNIX:
+        native = plat != 'macos'
+        cases = [(full, 'run-desktop', [], True, None), (no_ldconfig, 'run-desktop', [], True, None),
+                 (no_gui, 'run-desktop', [], not native, 'cannot start without these shared libraries: libX11.so.6 libICE.so.6'),
+                 (no_gui, 'run-tray', [], not native, 'libice6'),
+                 (no_gui, 'run-local', ['desktop'], not native, 'Unable to load shared library'),
+                 (no_gui, 'run-local', ['tray'], not native, 'libfontconfig1'),
+                 (no_gui, 'run-local', ['tui'], True, 'cannot start until these shared libraries are installed'),
+                 (no_gui, 'run-tui', [], True, 'cannot start until these shared libraries are installed'),
+                 (no_icu, 'run-tui', [], not native, 'needs ICU'), (no_icu, 'build', [], not native, 'needs ICU'),
+                 (no_icu, 'run-server', [], not native, "Couldn't find a valid ICU package")]
+        for fake, script, args, ok, text in cases:
+            fresh_home()
+            p, calls = run(plat, script, *args, **lib_env(fake))
+            check((p.returncode == 0) == ok, plat, script, args, fake, p.stderr)
+            if text and native:
+                check(text in p.stderr, plat, script, text, p.stderr)
+            if not native:
+                check('shared libraries' not in p.stderr and 'ICU' not in p.stderr, plat, script, p.stderr)
+            if not ok:
+                check(not dotnet(calls, 'build') and not dotnet(calls, 'run') and not dotnet(calls, 'pack')
+                      and not [c for c in calls if c[0].startswith('built:')], plat, script, calls)
+        fresh_home()
+        p, _ = run(plat, 'build', **dict(lib_env(no_icu), DOTNET_SYSTEM_GLOBALIZATION_INVARIANT='1'))
+        check(p.returncode == 0, plat, 'invariant globalization needs no ICU', p.stderr)
+        # Launchers only check; they never install packages.
+        for fake, script, args in [(no_gui, 'run-desktop', []), (no_gui, 'run-tui', []), (no_icu, 'run-tui', []),
+                                   (no_gui, 'run-local', ['tui']), (no_icu, 'build', [])]:
+            fresh_home()
+            p, calls = run(plat, script, *args, **lib_env(fake))
+            check(not [c for c in calls if c[0] == 'apt-get'], plat, script, calls)
+
+    # Install-type scripts install the missing system packages themselves (apt-get through sudo), before the dotnet
+    # check and before removing anything. Linux: ICU, the Avalonia libraries, a clipboard tool; WSL adds wslu and
+    # xdg-utils. INSTALL_SYSTEM_PACKAGES=0 only reports. --help never installs.
+    GUI_DEBS = ['libx11-6', 'libice6', 'libsm6', 'libxext6', 'libxrandr2', 'libxi6', 'libxcursor1', 'libxfixes3', 'libfontconfig1']
+    have_clip = any(shutil.which(t, path='/usr/bin:/bin') for t in ['wl-copy', 'xclip', 'xsel'])
+    for plat in UNIX:
+        native = plat != 'macos'
+        for script in ['install', 'reinstall', 'update']:
+            for fake, args, want in [(no_gui, ['--no-dashboard'], GUI_DEBS), (no_icu, ['--no-dashboard', '--no-apps'], ['libicu74'])]:
+                fresh_home()
+                extra = ['--no-apps'] if plat == 'macos' else []
+                p, calls = run(plat, script, *args, *extra, **dict(lib_env(fake), PATH=no_tools_path))
+                installs = [c for c in calls if c[:2] == ['apt-get', 'install']]
+                check(p.returncode == 0, plat, script, fake, p.stderr)
+                if not native:
+                    check(not installs, plat, script, calls)
+                    continue
+                pkgs = [x for c in installs for x in c[2:] if not x.startswith('-')]
+                check(set(want) <= set(pkgs) and ['apt-get', 'update', '-qq'] in calls, plat, script, pkgs)
+                check(('xclip' in pkgs) == (not have_clip), plat, script, pkgs)
+                check(('wslu' in pkgs and 'xdg-utils' in pkgs) == plat.startswith('wsl'), plat, script, pkgs)
+                # Packages come first: before the tool is packed or the old install removed.
+                first_dotnet = next(i for i, c in enumerate(calls) if c[0] == 'dotnet' or c[0].startswith('tool:'))
+                check(calls.index(installs[0]) < first_dotnet, plat, script, calls)
+                check('--no-apps' not in args or not set(GUI_DEBS) & set(pkgs), plat, script, pkgs)
+            # Nothing missing: nothing is installed.
+            fresh_home()
+            p, calls = run(plat, script, '--no-dashboard', '--no-apps', **lib_env(full))
+            check(p.returncode == 0 and not [c for c in calls if c[0] == 'apt-get'], plat, script, calls)
+            # INSTALL_SYSTEM_PACKAGES=0 reports the packages and stops when required ones are missing.
+            fresh_home()
+            p, calls = run(plat, script, '--no-dashboard', **dict(lib_env(no_gui), INSTALL_SYSTEM_PACKAGES='0'))
+            if native:
+                check(p.returncode == 1 and 'were not installed automatically' in p.stderr and 'libice6' in p.stderr
+                      and not [c for c in calls if c[0] in ('apt-get', 'dotnet')], plat, script, p.stderr, calls)
+            # --help installs nothing.
+            for flag in ['-h', '--help']:
+                fresh_home()
+                p, calls = run(plat, script, '--no-apps', flag, **lib_env(no_gui))
+                check(p.returncode == 0 and 'Usage:' in p.stdout and not calls, plat, script, flag, calls)
+
+    # The terminal app notes a missing clipboard tool (wl-copy, xclip, xsel).
+    if not have_clip:
+        for plat in ['linux', 'wsl', 'wsl2']:
+            for script, args in [('run-tui', [])]:
+                fresh_home()
+                p, _ = run(plat, script, *args, PATH=no_tools_path)
+                check(p.returncode == 0 and 'copy to clipboard will not work' in p.stderr and 'xclip' in p.stderr,
+                      plat, script, p.stderr)
+    # WSL apps get the Windows PATH entries back (clip.exe, explorer.exe, wslview); the build does not use them.
+    for plat in ['wsl', 'wsl2']:
+        for script, args in [('run-tui', []), ('run-desktop', []), ('run-tray', []), ('run-local', ['tui'])]:
+            p, calls = run(plat, script, *args, **dict(lib_env(full), PATH=no_tools_path + ':/mnt/c/Windows/System32'))
+            app = [c for c in calls if c[0].startswith('built:') and c[1:2] != ['server']]
+            check(p.returncode == 0 and '/mnt/c/Windows/System32' in app[-1][-1]['PATH'], plat, script, calls, p.stderr)
+            check('links may not open from the app until wslview' in p.stderr, plat, script, p.stderr)
 
     # factory-reset keeps client.json unless --all; asks first; nothing to do without a client home.
     for plat in UNIX:

@@ -9,13 +9,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common/lib.sh
 . "${SCRIPT_DIR}/lib.sh"
 
+INSTALL_APPS=1
 for arg in "$@"; do
     case "${arg}" in
-        --no-apps|--no-dashboard) ;;
+        --no-apps) INSTALL_APPS=0 ;;
+        --no-dashboard) ;;
         -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "[update] Unknown argument: ${arg}" >&2; exit 2 ;;
     esac
 done
+
+# Before removing anything, so a package that cannot be installed leaves the current install in place.
+if [ "${INSTALL_APPS}" -eq 1 ]; then
+    native_install_deps "Xeno" icu gui clipboard
+else
+    native_install_deps "Xeno" icu clipboard
+fi
 
 WAS_RUNNING=0
 if [ -n "$(xeno_worker_pid)" ]; then

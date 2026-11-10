@@ -29,11 +29,28 @@ xeno_usage() {
     awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$1"
 }
 
+# Native-library checks (ICU, the Avalonia X11 libraries, a clipboard tool) apply on Linux only; elsewhere they do
+# nothing. The WSL scripts get the same checks from _wsl-common.sh.
+if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
+    # shellcheck source=scripts/common/native-libs.sh
+    . "${XENO_REPO_ROOT}/scripts/common/native-libs.sh"
+else
+    # shellcheck disable=SC2034 # used by the scripts that source this file
+    NATIVE_AVALONIA_LIBS=""
+    native_check_icu() { :; }
+    native_check_libs() { :; }
+    native_check_clipboard() { :; }
+    native_install_deps() { :; }
+fi
+
 # Fail with an install hint when a required command is missing. Usage: xeno_require_cmd <name> <hint>
+# For dotnet it also checks for ICU on Linux, which the SDK and the apps need.
 xeno_require_cmd() {
-    command -v "$1" >/dev/null 2>&1 && return 0
-    echo "ERROR: '$1' was not found on PATH. $2" >&2
-    exit 1
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "ERROR: '$1' was not found on PATH. $2" >&2
+        exit 1
+    fi
+    if [ "$1" = dotnet ]; then native_check_icu; fi
 }
 
 # True when the xeno global tool is installed (package id xeno, or Xeno.Client from older checkouts).

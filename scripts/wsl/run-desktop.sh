@@ -31,9 +31,12 @@ wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.micros
 if [ -z "${DISPLAY:-}" ]; then
     die "WSL 1 has no WSLg and DISPLAY is not set, so the desktop app cannot be shown. Run scripts\\windows\\run-desktop.bat from Windows, use scripts/wsl/run-tui.sh for the terminal app, move this distro to WSL 2 (wsl --set-version ${WSL_DISTRO_NAME:-<distro>} 2) and use scripts/wsl2, or start an X server on Windows and set DISPLAY (for example export DISPLAY=localhost:0)."
 fi
+wsl_check_libs error "The Xeno desktop app" "$WSL_AVALONIA_LIBS"
 # WSLg has no notification area, so the desktop app does not start the tray agent unless XENO_AGENT_AUTOSTART is set.
 export XENO_AGENT_AUTOSTART="${XENO_AGENT_AUTOSTART:-0}"
 
 xeno_build_apps run-desktop
 echo "[run-desktop] Starting xeno-desktop..."
+# Give the app the Windows PATH entries back (clip.exe, explorer.exe, wslview) and BROWSER=wslview.
+wsl_prepare_app_env
 exec "$(xeno_exe xeno-desktop)" "$@"

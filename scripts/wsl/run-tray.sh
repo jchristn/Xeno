@@ -31,7 +31,10 @@ fi
 if [ -z "${DISPLAY:-}" ]; then
     die "WSL 1 has no WSLg and DISPLAY is not set, so the tray agent cannot be shown. Run scripts\\windows\\run-tray.bat from Windows, use scripts/wsl/run-tui.sh for the terminal app, move this distro to WSL 2 (wsl --set-version ${WSL_DISTRO_NAME:-<distro>} 2) and use scripts/wsl2, or start an X server on Windows and set DISPLAY (for example export DISPLAY=localhost:0)."
 fi
+wsl_check_libs error "The Xeno Agent tray app" "$WSL_AVALONIA_LIBS"
 
 xeno_build_apps run-tray
 echo "[run-tray] Starting xeno-tray..."
+# Give the app the Windows PATH entries back (clip.exe, explorer.exe, wslview) and BROWSER=wslview.
+wsl_prepare_app_env
 exec "$(xeno_exe xeno-tray)" "$@"

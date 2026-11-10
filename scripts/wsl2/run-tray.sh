@@ -31,7 +31,10 @@ fi
 if [ -z "${DISPLAY:-}" ]; then
     die "DISPLAY is not set. The tray agent uses X11 and needs WSLg, which sets DISPLAY (Windows 11, or Windows 10 with the Microsoft Store WSL). From Windows run wsl --update, then wsl --shutdown, and reopen this shell. Or run scripts\\windows\\run-tray.bat from Windows, or scripts/wsl2/run-tui.sh for the terminal app."
 fi
+wsl_check_libs error "The Xeno Agent tray app" "$WSL_AVALONIA_LIBS"
 
 xeno_build_apps run-tray
 echo "[run-tray] Starting xeno-tray..."
+# Give the app the Windows PATH entries back (clip.exe, explorer.exe, wslview) and BROWSER=wslview.
+wsl_prepare_app_env
 exec "$(xeno_exe xeno-tray)" "$@"

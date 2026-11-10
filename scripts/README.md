@@ -23,6 +23,7 @@ code 2. `build`, `test`, and `run-cli` pass every argument, `-h` included, on to
 Platform-only helpers, which the scripts above use:
 
 - `scripts/common/lib.sh`: settings and functions for the bash scripts (sourced, never run).
+- `scripts/common/native-libs.sh`: the Linux system-package checks and installs (sourced by `lib.sh` on Linux).
 - `scripts/macos/build-app.sh [--install]`: builds the `Xeno.app` bundle; `install.sh` uses it on macOS.
 - `scripts/windows/env.bat`: settings for the `.bat` files, like `lib.sh`.
 - `scripts/windows/build-apps.bat`: builds xeno, xeno-desktop, and xeno-tray for the `run-*.bat` files.
@@ -156,6 +157,38 @@ What the WSL scripts do differently:
   `run-desktop.sh`, or `run-client.sh` get `--server http://localhost:...` and nothing answers inside the distro but
   a server on Windows does, they use the Windows host address and say so. That address can change when Windows
   restarts; `networkingMode=mirrored` in `.wslconfig` avoids the problem. `WSL_NO_HOST_REWRITE=1` turns this off.
+
+## System packages on Linux and WSL
+
+The desktop app and the tray agent (Avalonia) load X11 client libraries at startup, and every .NET program needs
+ICU. Desktop distros ship them, but minimal and server images and the stock WSL images often don't (WSLg provides
+only the display). Building never loads them, so without them the build succeeds and the app then fails with:
+
+```
+System.DllNotFoundException: Unable to load shared library 'libICE.so.6'
+Couldn't find a valid ICU package installed on the system
+```
+
+- `install.sh`, `reinstall.sh`, and `update.sh` (Linux, WSL 1, WSL 2) install the missing packages themselves, with
+  `sudo apt-get install` or `sudo dnf install`, before they change anything: ICU, the Avalonia libraries (unless
+  `--no-apps`), and `xclip` when no clipboard tool (`wl-copy`, `xclip`, `xsel`) exists, for copying in `xeno tui`.
+  On WSL they also install `wslu` and `xdg-utils`, so links open in the Windows browser. `sudo` may ask for your
+  password. Set `INSTALL_SYSTEM_PACKAGES=0` to get the list instead; the script then stops when a required package
+  is missing.
+- The `run-*` scripts only check: `run-desktop`, `run-tray`, and `run-local desktop|tray` stop before building when a
+  library is missing, `run-tui` warns, and every script that builds stops when ICU is missing. They print the
+  command to run. The checks use `ldconfig` and do nothing without it.
+- The desktop app and the tray agent also print the command and exit with code 1, instead of a stack trace, when a
+  library is missing at startup on Linux.
+
+To install them yourself on Debian or Ubuntu (use the `libicu` package your release has, for example `libicu74`):
+
+```bash
+sudo apt install libx11-6 libice6 libsm6 libxext6 libxrandr2 libxi6 libxcursor1 libxfixes3 libfontconfig1 libicu74 xclip
+sudo apt install wslu xdg-utils    # WSL only
+```
+
+On Fedora: `sudo dnf install libX11 libICE libSM libXext libXrandr libXi libXcursor libXfixes fontconfig libicu xclip`.
 
 ## Tests
 

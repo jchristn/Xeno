@@ -36,7 +36,7 @@ namespace Xeno.Tray
                 }
 
                 XenoDialogs.HideDockWhenIdle = true;
-                return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
+                return XenoNativeLibraries.Run("Xeno Agent", () => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown));
             }
         }
 

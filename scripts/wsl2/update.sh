@@ -34,14 +34,23 @@ for arg in "$@"; do
         *) echo "[update] Unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
-wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.microsoft.com/dotnet/core/install/linux"
-wsl_require_cmd pkill "Install procps inside WSL (for example: sudo apt install procps)."
 
 # The desktop app needs a display: WSLg on WSL 2, an X server on Windows on WSL 1.
 if [ "$INSTALL_APPS" -eq 1 ] && [ -z "${DISPLAY:-}" ]; then
     echo "[install] DISPLAY is not set, so WSLg is not available and only the xeno tool is installed. For the desktop app, run wsl --update and then wsl --shutdown from Windows, reopen this shell, and install again. Pass --no-apps to skip this note." >&2
     INSTALL_APPS=0
 fi
+
+# Install the system packages Xeno needs in this distro when they are missing (INSTALL_SYSTEM_PACKAGES=0 to only
+# report them): ICU for .NET, the Avalonia libraries for the desktop app, a clipboard tool for xeno tui, and wslu and
+# xdg-utils so links open in the Windows browser. Before the dotnet check, which needs ICU, and before removing anything.
+if [ "$INSTALL_APPS" -eq 1 ]; then
+    wsl_install_deps "Xeno" icu gui clipboard browser
+else
+    wsl_install_deps "Xeno" icu clipboard browser
+fi
+wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.microsoft.com/dotnet/core/install/linux"
+wsl_require_cmd pkill "Install procps inside WSL (for example: sudo apt install procps)."
 
 # Stops the worker and the apps, then uninstalls the xeno tool and the apps in this distro.
 do_remove() {
@@ -153,6 +162,7 @@ do_install() {
         if command -v update-desktop-database >/dev/null 2>&1; then
             update-desktop-database "$applications" >/dev/null 2>&1 || true
         fi
+        wsl_check_libs warning "The Xeno desktop app" "$WSL_AVALONIA_LIBS"
         echo "[install-apps] Installed. Start the desktop app from your app launcher (Xeno) or run: $exec_line \"$target/xeno-desktop\""
     fi
 

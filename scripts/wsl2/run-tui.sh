@@ -29,6 +29,8 @@ case "${1:-}" in
     -h|--help) xeno_usage "${BASH_SOURCE[0]}"; exit 0 ;;
 esac
 wsl_require_cmd dotnet "Install the .NET 10 SDK inside WSL: https://learn.microsoft.com/dotnet/core/install/linux"
+wsl_check_libs warning "The Xeno desktop app (which the terminal app opens)" "$WSL_AVALONIA_LIBS"
+wsl_check_clipboard "the Xeno terminal app"
 
 # WSL 2 NAT networking: localhost inside the distro is not Windows. When a --server URL on localhost gets no answer
 # here but a server on Windows answers, use the Windows host address instead (WSL_NO_HOST_REWRITE=1 turns this off).
@@ -61,4 +63,6 @@ set -- ${ARGS[@]+"${ARGS[@]}"}
 
 xeno_build_apps run-tui
 echo "[run-tui] Starting xeno tui..."
+# Give the app the Windows PATH entries back (clip.exe, explorer.exe, wslview) and BROWSER=wslview.
+wsl_prepare_app_env
 exec "$(xeno_exe xeno)" tui "$@"

@@ -27,6 +27,13 @@ case "${1:-}" in
 esac
 xeno_require_cmd dotnet "Install the .NET 10 SDK: https://dotnet.microsoft.com/download"
 xeno_require_cmd curl "Install curl (it checks that the local server is healthy)."
+case "${APP}" in
+    desktop) native_check_libs error "The Xeno desktop app" "$NATIVE_AVALONIA_LIBS" ;;
+    tray) native_check_libs error "The Xeno Agent tray app" "$NATIVE_AVALONIA_LIBS" ;;
+    tui)
+        native_check_libs warning "The Xeno desktop app (which the terminal app opens)" "$NATIVE_AVALONIA_LIBS"
+        native_check_clipboard "the Xeno terminal app" ;;
+esac
 
 HEALTH_URL="${XENO_LOCAL_SERVER%/}/"
 export XENO_CLIENT_HOME="${XENO_LOCAL_HOME}"
