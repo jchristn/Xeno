@@ -2765,7 +2765,10 @@ namespace Xeno.Server
                 _PendingCallerDisconnects.TryRemove(requestEventKey, out CancellationTokenSource? _);
                 requestWaitSource?.Dispose();
                 callerDisconnectedSource?.Dispose();
-                await _Database!.Clients!.UpdateAsync(client, CancellationToken.None).ConfigureAwait(false);
+
+                // The in-flight counter is already persisted atomically above. A full UpdateAsync here would write back the
+                // count this request read before others started or finished, drifting it until routing sees every client as
+                // full, and would overwrite the capacity the client reports in its heartbeats.
             }
 
             return busyRetry;
