@@ -179,9 +179,9 @@ jobs:
           docker restart ${{ job.services.postgresql.id }}
           for i in $(seq 1 30); do docker exec ${{ job.services.postgresql.id }} pg_isready -h 127.0.0.1 -U postgres && break; sleep 2; done
 
-      - name: Raise MySQL connection limit
+      - name: Raise MySQL connection limit and network timeouts
         if: matrix.provider == 'mysql'
-        run: docker exec ${{ job.services.mysql.id }} mysql -h 127.0.0.1 -uroot -pTest_Passw0rd -e "SET GLOBAL max_connections = 1000;"
+        run: docker exec ${{ job.services.mysql.id }} mysql -h 127.0.0.1 -uroot -pTest_Passw0rd -e "SET GLOBAL max_connections = 1000; SET GLOBAL net_read_timeout = 120; SET GLOBAL net_write_timeout = 120;"
 
       - name: Run shared suites against ${{ matrix.provider }}
         run: dotnet run --project src/Test.Automated -- --results results-provider-${{ matrix.provider }}.json

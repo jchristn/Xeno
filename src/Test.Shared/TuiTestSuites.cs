@@ -607,6 +607,7 @@ namespace Test.Shared
                 {
                     using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Overview))
                     {
+                        WaitFor(() => tui.Tui.Context.Status != null, tui, "Client status never loaded.");
                         Check(!tui.Tui.CanExecute(XenoCommandEnum.StartClient), "Start should be disabled before sign-in.");
                         tui.Tui.Execute(XenoCommandEnum.StartClient);
                         WaitFor(() => tui.Tui.Context.Message.Contains("Sign in", StringComparison.Ordinal), tui, "The status bar should explain sign-in. It said: " + tui.Tui.Context.Message);
