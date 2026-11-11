@@ -97,6 +97,22 @@ namespace Xeno.Client.Presentation
         }
 
         /// <summary>
+        /// Seconds between chart refreshes for an auto-refresh command (0 for off), or null for other commands.
+        /// </summary>
+        /// <param name="command">Command.</param>
+        /// <returns>Seconds, or null.</returns>
+        public static int? AutoRefreshFor(XenoCommandEnum command)
+        {
+            switch (command)
+            {
+                case XenoCommandEnum.AutoRefreshOff: return 0;
+                case XenoCommandEnum.AutoRefresh15: return 15;
+                case XenoCommandEnum.AutoRefresh60: return 60;
+                default: return null;
+            }
+        }
+
+        /// <summary>
         /// External link opened by a help command, or null for other commands.
         /// </summary>
         /// <param name="command">Command.</param>
@@ -139,6 +155,9 @@ namespace Xeno.Client.Presentation
                 case XenoCommandEnum.AppearanceSystem: return "Appearance: System";
                 case XenoCommandEnum.AppearanceLight: return "Appearance: Light";
                 case XenoCommandEnum.AppearanceDark: return "Appearance: Dark";
+                case XenoCommandEnum.AutoRefreshOff: return "Auto Refresh: Off";
+                case XenoCommandEnum.AutoRefresh15: return "Auto Refresh: 15 Seconds";
+                case XenoCommandEnum.AutoRefresh60: return "Auto Refresh: 1 Minute";
                 case XenoCommandEnum.KeyboardShortcuts: return "Keyboard Shortcuts";
                 case XenoCommandEnum.Documentation: return "Xeno Documentation";
                 case XenoCommandEnum.ReportIssue: return "Report an Issue";

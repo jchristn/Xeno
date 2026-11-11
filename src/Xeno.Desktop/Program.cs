@@ -24,6 +24,11 @@ namespace Xeno.Desktop
         public static string? StartupMessage { get; private set; } = null;
 
         /// <summary>
+        /// True when the app was started with --settings, to open the Settings window at startup.
+        /// </summary>
+        public static bool OpenSettingsAtStart { get; private set; } = false;
+
+        /// <summary>
         /// Run the desktop app.
         /// </summary>
         /// <param name="args">Arguments: see <see cref="XenoLaunchOptions.Usage"/> (--page, --server, --home).</param>
@@ -35,13 +40,14 @@ namespace Xeno.Desktop
             if (options.ShowHelp || options.Error != null)
             {
                 if (options.Error != null) Console.Error.WriteLine(options.Error);
-                Console.WriteLine("Usage: xeno-desktop [--page <page>] [--server <url>] [--home <dir>]");
+                Console.WriteLine("Usage: xeno-desktop [--page <page>] [--settings] [--server <url>] [--home <dir>]");
                 Console.WriteLine();
                 foreach (string line in XenoLaunchOptions.Usage) Console.WriteLine(line);
                 return options.Error != null ? 1 : 0;
             }
 
             StartPage = options.StartPage;
+            OpenSettingsAtStart = options.OpenSettings;
             options.ApplyHome();
             if (options.Server != null)
             {
@@ -57,7 +63,17 @@ namespace Xeno.Desktop
             {
                 if (instance == null)
                 {
-                    Console.Error.WriteLine("Xeno is already running.");
+                    // Hand the request to the running app so it comes to the front (and opens the page or Settings).
+                    try
+                    {
+                        DesktopActivation.Post(new DesktopActivationRequest { Page = options.StartPage, OpenSettings = options.OpenSettings });
+                        Console.WriteLine("Xeno is already running; asked it to come to the front.");
+                    }
+                    catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+                    {
+                        Console.Error.WriteLine("Xeno is already running, and could not be asked to come to the front: " + ex.Message);
+                    }
+
                     return 0;
                 }
 

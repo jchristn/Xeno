@@ -122,7 +122,7 @@ whose raw JSON is the server settings object itself.
 dotnet run --project .\src\sdk\csharp\Xeno.Sdk.Console
 ```
 
-Type `?` for commands. The console can inspect health, clients, tenants, users, credentials, roles, permissions, settings, metrics, request history, and send a chat request.
+Type `?` for commands. The console can inspect health, clients, tenants, users, credentials, roles, permissions, settings, metrics, request history, usage analytics, and send a chat request.
 
 ## Coverage
 
@@ -137,7 +137,7 @@ The SDK includes methods for:
 - server-collected client telemetry status, latest samples, manual collection,
   history search, rollups, detail reads, deletes, provider telemetry, and the
   telemetry metric catalog;
-- request history, public model token leaderboard, analytics, settings including
+- request history, usage analytics (`GetUsageAnalyticsAsync`, `GetChatUsageAnalyticsAsync`), provider health (`GetProviderHealthAsync`), public model token leaderboard, analytics, settings including
   email provider configuration and administrative test email sends, backup,
   restore, health, ping, metrics, and OpenAPI.
 

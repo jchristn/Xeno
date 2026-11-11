@@ -5,6 +5,7 @@ namespace Xeno.Client.LocalDashboard.Database
     using System.Data;
     using System.Globalization;
     using System.IO;
+    using System.Runtime.CompilerServices;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -12,6 +13,8 @@ namespace Xeno.Client.LocalDashboard.Database
     using SQLitePCL;
     using Xeno.Client.LocalDashboard.Database.Sqlite;
     using Xeno.Client.LocalDashboard.Models;
+    using Xeno.Client.Routing;
+    using Xeno.Core.Analytics;
     using Xeno.Core.Models;
 
     /// <summary>
@@ -230,6 +233,140 @@ namespace Xeno.Client.LocalDashboard.Database
             }
 
             return buckets;
+        }
+
+        /// <inheritdoc />
+        public async IAsyncEnumerable<UsageRecord> EnumerateServedUsageAsync(DateTime fromUtc, DateTime toUtc, [EnumeratorCancellation] CancellationToken token)
+        {
+            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT h.received_utc, h.model_name, h.provider_name, h.status_code, h.outcome, h.duration_ms, t.duration_ms AS t_duration, t.time_to_headers_ms, t.time_to_first_byte_ms, t.prompt_tokens, t.completion_tokens, t.total_tokens "
+                        + "FROM local_request_history h LEFT JOIN local_request_telemetry t ON t.request_id = h.id WHERE h.received_utc >= $fromUtc AND h.received_utc < $toUtc;";
+                    command.Parameters.AddWithValue("$fromUtc", fromUtc.ToString("O", CultureInfo.InvariantCulture));
+                    command.Parameters.AddWithValue("$toUtc", toUtc.ToString("O", CultureInfo.InvariantCulture));
+                    using (SqliteDataReader reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(token).ConfigureAwait(false))
+                        {
+                            DateTime received = ParseDateTime(GetString(reader, "received_utc")) ?? fromUtc;
+                            bool failed = String.Equals(GetString(reader, "outcome"), LocalRequestOutcomeEnum.Failure.ToString(), StringComparison.OrdinalIgnoreCase);
+                            double? duration = UsageDouble(reader, "t_duration") ?? UsageDouble(reader, "duration_ms");
+                            long? prompt = UsageLong(reader, "prompt_tokens");
+                            long? completion = UsageLong(reader, "completion_tokens");
+                            if (!prompt.HasValue && !completion.HasValue) prompt = UsageLong(reader, "total_tokens");
+                            long? status = UsageLong(reader, "status_code");
+                            yield return UsageRecordMapper.FromServedRequest(received, NullIfEmpty(GetString(reader, "model_name")), NullIfEmpty(GetString(reader, "provider_name")), status.HasValue ? (int)status.Value : null, !failed, duration, UsageDouble(reader, "time_to_headers_ms"), UsageDouble(reader, "time_to_first_byte_ms"), prompt, completion);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> IngestLocalInferenceAsync(IEnumerable<LocalInferenceRequestRecord> records, CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(records);
+            int added = 0;
+            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (SqliteTransaction transaction = connection.BeginTransaction())
+                {
+                    foreach (LocalInferenceRequestRecord record in records)
+                    {
+                        if (record == null || String.IsNullOrWhiteSpace(record.Id)) continue;
+                        using (SqliteCommand command = connection.CreateCommand())
+                        {
+                            command.Transaction = transaction;
+                            command.CommandText = "INSERT OR IGNORE INTO local_inference_requests (id, received_utc, method, path, model, route, provider, reason, status_code, stream, fallback, latency_ms, first_byte_ms, queued_ms, response_bytes, prompt_tokens, completion_tokens, error) "
+                                + "VALUES ($id, $received, $method, $path, $model, $route, $provider, $reason, $status, $stream, $fallback, $latency, $firstByte, $queued, $bytes, $prompt, $completion, $error);";
+                            command.Parameters.AddWithValue("$id", record.Id);
+                            command.Parameters.AddWithValue("$received", record.ReceivedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                            command.Parameters.AddWithValue("$method", record.Method ?? String.Empty);
+                            command.Parameters.AddWithValue("$path", record.Path ?? String.Empty);
+                            command.Parameters.AddWithValue("$model", record.Model ?? String.Empty);
+                            command.Parameters.AddWithValue("$route", record.Route ?? String.Empty);
+                            command.Parameters.AddWithValue("$provider", record.Provider ?? String.Empty);
+                            command.Parameters.AddWithValue("$reason", (object?)record.Reason ?? DBNull.Value);
+                            command.Parameters.AddWithValue("$status", record.StatusCode);
+                            command.Parameters.AddWithValue("$stream", record.Stream ? 1 : 0);
+                            command.Parameters.AddWithValue("$fallback", record.Fallback ? 1 : 0);
+                            command.Parameters.AddWithValue("$latency", record.LatencyMs);
+                            command.Parameters.AddWithValue("$firstByte", (object?)record.FirstByteMs ?? DBNull.Value);
+                            command.Parameters.AddWithValue("$queued", record.QueuedMs);
+                            command.Parameters.AddWithValue("$bytes", (object?)record.ResponseBytes ?? DBNull.Value);
+                            command.Parameters.AddWithValue("$prompt", (object?)record.PromptTokens ?? DBNull.Value);
+                            command.Parameters.AddWithValue("$completion", (object?)record.CompletionTokens ?? DBNull.Value);
+                            command.Parameters.AddWithValue("$error", String.IsNullOrEmpty(record.Error) ? DBNull.Value : record.Error);
+                            added += await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                        }
+                    }
+
+                    transaction.Commit();
+                }
+            }
+
+            return added;
+        }
+
+        /// <inheritdoc />
+        public async IAsyncEnumerable<UsageRecord> EnumerateLocalInferenceUsageAsync(DateTime fromUtc, DateTime toUtc, [EnumeratorCancellation] CancellationToken token)
+        {
+            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT received_utc, model, route, provider, status_code, fallback, latency_ms, first_byte_ms, queued_ms, prompt_tokens, completion_tokens FROM local_inference_requests WHERE received_utc >= $fromUtc AND received_utc < $toUtc;";
+                    command.Parameters.AddWithValue("$fromUtc", fromUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                    command.Parameters.AddWithValue("$toUtc", toUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                    using (SqliteDataReader reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false))
+                    {
+                        while (await reader.ReadAsync(token).ConfigureAwait(false))
+                        {
+                            DateTime received = ParseDateTime(GetString(reader, "received_utc")) ?? fromUtc;
+                            yield return UsageRecordMapper.FromLocalEndpointRequest(received, GetString(reader, "model"), GetString(reader, "route"), GetString(reader, "provider"), (int)(UsageLong(reader, "status_code") ?? 0), UsageLong(reader, "fallback") == 1, UsageDouble(reader, "latency_ms") ?? 0, UsageDouble(reader, "first_byte_ms"), UsageDouble(reader, "queued_ms") ?? 0, UsageLong(reader, "prompt_tokens"), null, UsageLong(reader, "completion_tokens"));
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> PruneLocalInferenceAsync(DateTime cutoffUtc, CancellationToken token)
+        {
+            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                using (SqliteCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM local_inference_requests WHERE received_utc < $cutoff;";
+                    command.Parameters.AddWithValue("$cutoff", cutoffUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                    return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static double? UsageDouble(SqliteDataReader reader, string name)
+        {
+            int ordinal = reader.GetOrdinal(name);
+            if (reader.IsDBNull(ordinal)) return null;
+            return Convert.ToDouble(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+        }
+
+        private static long? UsageLong(SqliteDataReader reader, string name)
+        {
+            int ordinal = reader.GetOrdinal(name);
+            if (reader.IsDBNull(ordinal)) return null;
+            return Convert.ToInt64(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+        }
+
+        private static string? NullIfEmpty(string? value)
+        {
+            return String.IsNullOrWhiteSpace(value) ? null : value;
         }
 
         /// <inheritdoc />
@@ -952,6 +1089,29 @@ CREATE TABLE IF NOT EXISTS local_dashboard_metadata
     updated_utc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS local_inference_requests
+(
+    id TEXT PRIMARY KEY,
+    received_utc TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    model TEXT NOT NULL,
+    route TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    reason TEXT NULL,
+    status_code INTEGER NOT NULL,
+    stream INTEGER NOT NULL DEFAULT 0,
+    fallback INTEGER NOT NULL DEFAULT 0,
+    latency_ms REAL NOT NULL,
+    first_byte_ms REAL NULL,
+    queued_ms REAL NOT NULL DEFAULT 0,
+    response_bytes INTEGER NULL,
+    prompt_tokens INTEGER NULL,
+    completion_tokens INTEGER NULL,
+    error TEXT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_inference_requests_received ON local_inference_requests(received_utc);
 CREATE INDEX IF NOT EXISTS idx_local_request_history_received ON local_request_history(received_utc);
 CREATE INDEX IF NOT EXISTS idx_local_request_history_completed ON local_request_history(completed_utc);
 CREATE INDEX IF NOT EXISTS idx_local_request_history_model ON local_request_history(model_name);

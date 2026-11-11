@@ -65,7 +65,7 @@ namespace Xeno.Client.Services
         }
 
         /// <summary>
-        /// Default chart bucket size for a range, in minutes: 1 (hour), 15 (day), 120 (week), 480 (month).
+        /// Default chart bucket size for a range, in minutes: 1 (hour), 15 (day), 120 (week), 360 (month), so the last hour, day, week, and month have 60, 96, 84, and 120 buckets.
         /// </summary>
         /// <param name="range">Range.</param>
         /// <returns>Bucket size in minutes.</returns>
@@ -75,9 +75,20 @@ namespace Xeno.Client.Services
             {
                 case HistoryRangeEnum.Day: return 15;
                 case HistoryRangeEnum.Week: return 120;
-                case HistoryRangeEnum.Month: return 480;
+                case HistoryRangeEnum.Month: return 360;
                 default: return 1;
             }
+        }
+
+        /// <summary>
+        /// Bucket size for chat activity charts, the same presets as every other chart: 1 minute for the last hour (60
+        /// buckets), 15 minutes for the last day (96), 2 hours for the last week (84), and 6 hours for the last month (120).
+        /// </summary>
+        /// <param name="range">Range.</param>
+        /// <returns>Bucket size in seconds.</returns>
+        public static int ChatBucketSeconds(HistoryRangeEnum range)
+        {
+            return DefaultBucketMinutes(range) * 60;
         }
     }
 }

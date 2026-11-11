@@ -103,6 +103,41 @@ namespace Xeno.Client.Presentation
         /// <summary>Show keyboard shortcuts.</summary>
         KeyboardShortcuts,
         /// <summary>Open the command palette.</summary>
-        CommandPalette
+        CommandPalette,
+
+        /// <summary>
+        /// Go to the Chat page.
+        /// </summary>
+        GoChat,
+
+        /// <summary>
+        /// Go to the Chat history page.
+        /// </summary>
+        GoChatHistory,
+
+        /// <summary>
+        /// Go to the Chat feedback page.
+        /// </summary>
+        GoChatFeedback,
+
+        /// <summary>
+        /// Go to the Usage page.
+        /// </summary>
+        GoUsage,
+
+        /// <summary>
+        /// Turn chart auto-refresh off.
+        /// </summary>
+        AutoRefreshOff,
+
+        /// <summary>
+        /// Refresh charts every 15 seconds.
+        /// </summary>
+        AutoRefresh15,
+
+        /// <summary>
+        /// Refresh charts every minute.
+        /// </summary>
+        AutoRefresh60
     }
 }

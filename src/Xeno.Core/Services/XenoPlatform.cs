@@ -644,6 +644,10 @@ namespace Xeno.Core.Services
             Permission ledgerReadPermission = EnsurePermission(tenantId, "Ledger", OperationTypeEnum.Read);
             Permission ledgerAdminPermission = EnsurePermission(tenantId, "Ledger", OperationTypeEnum.Admin);
             Permission adminPermission = EnsurePermission(tenantId, "Admin", OperationTypeEnum.Admin);
+            Permission chatReadPermission = EnsurePermission(tenantId, "Chat", OperationTypeEnum.Read);
+            Permission chatWritePermission = EnsurePermission(tenantId, "Chat", OperationTypeEnum.Write);
+            Permission chatDeletePermission = EnsurePermission(tenantId, "Chat", OperationTypeEnum.Delete);
+            Permission chatExecutePermission = EnsurePermission(tenantId, "Chat", OperationTypeEnum.Execute);
             Role tenantAdmin = EnsureRole(tenantId, "TenantAdmin", new List<string> { readPermission.Id, writePermission.Id, deletePermission.Id, executePermission.Id, inferenceReadPermission.Id, inferenceExecutePermission.Id, ledgerReadPermission.Id, ledgerAdminPermission.Id, adminPermission.Id });
             EnsureRole(tenantId, "Viewer", new List<string> { readPermission.Id });
             Role tenantMember = EnsureRole(tenantId, "TenantMember", new List<string>
@@ -658,7 +662,11 @@ namespace Xeno.Core.Services
                 clientsReadPermission.Id,
                 clientTelemetryReadPermission.Id,
                 inferenceReadPermission.Id,
-                ledgerReadPermission.Id
+                ledgerReadPermission.Id,
+                chatReadPermission.Id,
+                chatWritePermission.Id,
+                chatDeletePermission.Id,
+                chatExecutePermission.Id
             });
             EnsureTenantMemberBackfill(tenantId, tenantMember);
 

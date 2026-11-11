@@ -9,6 +9,45 @@ export class XenoApiError extends Error {
 }
 
 /**
+ * @typedef {Object} UsageAnalyticsQuery
+ * @property {string} [fromUtc] Range start, ISO 8601. Default 24 hours before toUtc.
+ * @property {string} [toUtc] Range end, ISO 8601. Default now.
+ * @property {number} [bucketMinutes] Bucket minutes; at most 2000 buckets.
+ * @property {string} [model] Only this model.
+ * @property {string} [provider] Only this provider.
+ * @property {string} [clientId] Only this client.
+ * @property {string} [userId] Only this user (tenant administrators).
+ * @property {string} [credentialId] Only this credential (tenant administrators).
+ * @property {string} [tenantId] Another tenant (global administrators).
+ * @property {string} [groupBy] Model, Provider, Route, Client, Tenant, User, or Credential.
+ * @property {string} [groupMetric] Requests or Tokens.
+ * @property {number} [topN] Groups shown by name, 1 to 20.
+ * @property {number} [utcOffsetMinutes] Viewer's offset from UTC, for heatmap hours.
+ * @property {string} [sections] Comma-separated sections to compute.
+ * @property {string} [scope] Chat only: tenant for every user.
+ */
+
+/**
+ * @typedef {Object} UsageAnalytics
+ * @property {string} Dataset NetworkRequests or Chat.
+ * @property {number} BucketMinutes Bucket size in minutes.
+ * @property {Object} Totals Range totals with Latency, TimeToFirstToken, Streaming, and Throughput distributions.
+ * @property {Object[]} Buckets Every bucket in the range, empty ones included.
+ * @property {string[]} GroupKeys Top group keys, then Other when anything was folded.
+ * @property {Object[]} GroupTotals Totals per group key.
+ * @property {Object} [Heatmap] Token heatmap: Layout, Rows, Columns, Cells, MaximumTokens.
+ * @property {Object[]} StageAverages Average and 95th percentile per stage.
+ * @property {boolean} Truncated True when the range was not read in full.
+ * @property {string} [TruncatedReason] Why the range was not read in full.
+ */
+
+/**
+ * @typedef {Object} ProviderHealthStrip
+ * @property {number} BucketMinutes Bucket size in minutes.
+ * @property {Object[]} Providers Rows with ProviderName, UptimePercent, ConsecutiveFailures, and Cells.
+ */
+
+/**
  * @typedef {Object} LedgerQueueStatus
  * @property {boolean} enabled
  * @property {number} queueDepth
@@ -391,6 +430,33 @@ export class XenoClient {
 
   async deleteRequestHistory(id) {
     return this.#request('DELETE', `/v1.0/api/request-history/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Usage analytics for the requests the server relayed.
+   * @param {UsageAnalyticsQuery} [query]
+   * @returns {Promise<UsageAnalytics>}
+   */
+  async getUsageAnalytics(query = {}) {
+    return this.#request('GET', `/v1.0/api/request-history/analytics/usage${this.#queryString(query)}`);
+  }
+
+  /**
+   * Usage analytics for chat turns, including feedback and tool calls.
+   * @param {UsageAnalyticsQuery} [query]
+   * @returns {Promise<UsageAnalytics>}
+   */
+  async getChatUsageAnalytics(query = {}) {
+    return this.#request('GET', `/v1.0/api/chat/analytics/usage${this.#queryString(query)}`);
+  }
+
+  /**
+   * Provider health strip: one row per provider, one status cell per bucket.
+   * @param {{fromUtc?: string, toUtc?: string, bucketMinutes?: number, clientId?: string, providerName?: string}} [query]
+   * @returns {Promise<ProviderHealthStrip>}
+   */
+  async getProviderHealth(query = {}) {
+    return this.#request('GET', `/v1.0/api/client-telemetry/providers/health${this.#queryString(query)}`);
   }
 
   async getRequestHistorySummary(filters = {}) {

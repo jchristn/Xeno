@@ -41,6 +41,8 @@ namespace Xeno.Client.Services
         private readonly XenoServerClient _Server;
         private readonly Func<XenoExecutableLocation?> _CliLocator;
         private LocalDataSession? _Data = null;
+        private Chat.XenoChatClient? _Chat = null;
+        private Analytics.XenoUsageClient? _Usage = null;
         private int _RequestPageSize = 200;
         private bool _Disposed = false;
 
@@ -62,6 +64,31 @@ namespace Xeno.Client.Services
         #endregion
 
         #region Public-Methods
+
+        /// <summary>
+        /// The running client's chat API: conversations, streaming turns, feedback, and history.
+        /// </summary>
+        public Chat.XenoChatClient Chat
+        {
+            get
+            {
+                if (_Chat == null) _Chat = new Chat.XenoChatClient();
+                return _Chat;
+            }
+        }
+
+        /// <summary>
+        /// Usage analytics and provider health from the running client's local API, shared by the Usage and provider
+        /// telemetry pages.
+        /// </summary>
+        public Analytics.XenoUsageClient Usage
+        {
+            get
+            {
+                if (_Usage == null) _Usage = new Analytics.XenoUsageClient();
+                return _Usage;
+            }
+        }
 
         /// <summary>
         /// Capture the current client status.
@@ -544,8 +571,9 @@ namespace Xeno.Client.Services
         /// <param name="providerName">Provider name, or null for all providers.</param>
         /// <param name="range">Range.</param>
         /// <param name="token">Cancellation token.</param>
+        /// <param name="modelName">Only this model, or null for every model.</param>
         /// <returns>Buckets.</returns>
-        public Task<List<ClientProviderTelemetryRollupBucket>> RollupProviderTelemetryAsync(ClientProviderTelemetryMetricEnum metric, string? providerName, HistoryRangeEnum range, CancellationToken token)
+        public Task<List<ClientProviderTelemetryRollupBucket>> RollupProviderTelemetryAsync(ClientProviderTelemetryMetricEnum metric, string? providerName, HistoryRangeEnum range, CancellationToken token, string? modelName = null)
         {
             DateTime toUtc = DateTime.UtcNow;
             ClientProviderTelemetryRollupRequest request = new ClientProviderTelemetryRollupRequest
@@ -554,6 +582,7 @@ namespace Xeno.Client.Services
                 ToUtc = toUtc,
                 BucketMinutes = HistoryRanges.DefaultBucketMinutes(range),
                 ProviderName = String.IsNullOrWhiteSpace(providerName) ? null : providerName,
+                ModelName = String.IsNullOrWhiteSpace(modelName) ? null : modelName,
                 Metric = metric
             };
             return WithDataAsync(async data => (await data.ProviderTelemetryHistory.RollupAsync(request, token).ConfigureAwait(false)).ToList(), token);
@@ -773,6 +802,8 @@ namespace Xeno.Client.Services
             _Disposed = true;
             ResetData();
             _Server.Dispose();
+            _Chat?.Dispose();
+            _Usage?.Dispose();
             _ConfigLock.Dispose();
             _DataLock.Dispose();
         }

@@ -454,7 +454,10 @@ namespace Xeno.Client.Services
                 LocalInferenceServer = settings.LocalInferenceServer,
                 DefaultMaxConcurrentRequests = settings.DefaultMaxConcurrentRequests,
                 Telemetry = settings.Telemetry,
-                Providers = settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList()
+                Providers = settings.Runners.Select(LocalSecretRedactor.RedactProvider).ToList(),
+                Chat = ChatSettingsSecrets.Redact(settings.Chat),
+                Analytics = settings.Analytics,
+                Mcp = settings.Mcp
             };
             copy.Server.Token = String.IsNullOrWhiteSpace(copy.Server.Token) ? null : "configured";
             return copy;

@@ -24,6 +24,7 @@ namespace Xeno.Client.Hosting
         {
             "  --page <page>     Open a page: overview, models, providers, localendpoint, requests,",
             "                    logs, hosttelemetry, providertelemetry, server, settings.",
+            "  --settings        Open the Xeno Settings window (desktop app only).",
             "  --server <url>    Point this client at a Xeno server and save it to client.json:",
             "                    cloud (the default Xeno cloud server), a ws:// or wss:// URL,",
             "                    an http:// or https:// URL, or host[:port] (port 9000 if omitted).",
@@ -35,6 +36,11 @@ namespace Xeno.Client.Hosting
         /// Page to open, or null for the last page used.
         /// </summary>
         public XenoPageEnum? StartPage { get; set; } = null;
+
+        /// <summary>
+        /// True to open the Settings window (desktop app) from --settings.
+        /// </summary>
+        public bool OpenSettings { get; set; } = false;
 
         /// <summary>
         /// Server value from --server, or null to keep the configured server.
@@ -81,6 +87,12 @@ namespace Xeno.Client.Hosting
                 if (arg == "-h" || arg == "--help" || arg == "-?" || String.Equals(arg, "help", StringComparison.OrdinalIgnoreCase))
                 {
                     options.ShowHelp = true;
+                    continue;
+                }
+
+                if (String.Equals(arg, "--settings", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.OpenSettings = true;
                     continue;
                 }
 

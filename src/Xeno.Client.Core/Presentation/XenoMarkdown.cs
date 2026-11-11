@@ -45,6 +45,24 @@ namespace Xeno.Client.Presentation
         }
 
         /// <summary>
+        /// Escape text so it renders literally, keeping its paragraphs and line breaks.
+        /// </summary>
+        /// <param name="text">Text.</param>
+        /// <returns>Escaped Markdown, paragraphs separated by blank lines and lines by hard breaks.</returns>
+        public static string EscapeParagraphs(string? text)
+        {
+            if (String.IsNullOrEmpty(text)) return String.Empty;
+            List<string> paragraphs = new List<string>();
+            foreach (string block in text.Replace("\r\n", "\n", StringComparison.Ordinal).Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+            {
+                List<string> lines = block.Split('\n').Select(line => Escape(line).TrimEnd()).Where(line => line.Length > 0).ToList();
+                if (lines.Count > 0) paragraphs.Add(String.Join("  \n", lines));
+            }
+
+            return String.Join("\n\n", paragraphs);
+        }
+
+        /// <summary>
         /// A level-two heading.
         /// </summary>
         /// <param name="text">Heading text.</param>

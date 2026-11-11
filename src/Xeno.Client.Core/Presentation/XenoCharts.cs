@@ -19,13 +19,17 @@ namespace Xeno.Client.Presentation
         #region Public-Members
 
         /// <summary>
-        /// Host metrics charted on the Host Telemetry page, in display order (the same as the web dashboard).
+        /// Host metrics the Host Telemetry page's metric picker offers, in display order (the same as the web dashboards).
         /// </summary>
         public static readonly IReadOnlyList<ClientTelemetryMetricEnum> HostMetrics = new List<ClientTelemetryMetricEnum>
         {
             ClientTelemetryMetricEnum.CpuUtilizationPercent,
             ClientTelemetryMetricEnum.MemoryUtilizationPercent,
-            ClientTelemetryMetricEnum.GpuUtilizationPercent
+            ClientTelemetryMetricEnum.DiskUtilizationPercent,
+            ClientTelemetryMetricEnum.GpuUtilizationPercent,
+            ClientTelemetryMetricEnum.GpuMemoryUtilizationPercent,
+            ClientTelemetryMetricEnum.GpuTemperatureCelsius,
+            ClientTelemetryMetricEnum.GpuPowerWatts
         };
 
         #endregion
@@ -99,6 +103,26 @@ namespace Xeno.Client.Presentation
         }
 
         /// <summary>
+        /// Chat turns over time, split by where they ran, with failures on top. Matches the web Chat history chart.
+        /// </summary>
+        /// <param name="analytics">Chat analytics.</param>
+        /// <param name="range">Range the analytics cover.</param>
+        /// <returns>Chart.</returns>
+        /// <exception cref="ArgumentNullException">analytics is null.</exception>
+        public static XenoChart ChatActivity(Xeno.Core.Chat.ChatAnalytics analytics, HistoryRangeEnum range)
+        {
+            ArgumentNullException.ThrowIfNull(analytics);
+            List<string> labels = analytics.Buckets.Select(bucket => Label(bucket.StartUtc, range)).ToList();
+            List<XenoChartSeries> series = new List<XenoChartSeries>
+            {
+                new XenoChartSeries("This machine", XenoChartToneEnum.Success, analytics.Buckets.Select(bucket => (double)bucket.Local).ToList()),
+                new XenoChartSeries("Xeno network", XenoChartToneEnum.Accent, analytics.Buckets.Select(bucket => (double)bucket.Network).ToList()),
+                new XenoChartSeries("Errors", XenoChartToneEnum.Danger, analytics.Buckets.Select(bucket => (double)bucket.Errors).ToList())
+            };
+            return new XenoChart("Chat activity", HistoryRanges.Describe(range).ToLowerInvariant(), " turns", labels, series, "No chat turns in this range.", true, analytics.Turns > 0);
+        }
+
+        /// <summary>
         /// A host metric over time (average per bucket).
         /// </summary>
         /// <param name="metric">Metric.</param>
@@ -116,15 +140,7 @@ namespace Xeno.Client.Presentation
                 || metric == ClientTelemetryMetricEnum.GpuTemperatureCelsius || metric == ClientTelemetryMetricEnum.GpuPowerWatts
                 ? "No " + title + " readings in the " + rangeText + ". GPU telemetry needs an NVIDIA GPU (nvidia-smi or DCGM)."
                 : "No " + title + " readings in the " + rangeText + ". Host telemetry is collected while the client runs.";
-            return new XenoChart(
-                title,
-                rangeText,
-                HostMetricUnit(metric),
-                buckets.Select(item => Label(item.StartUtc, range)).ToList(),
-                new List<XenoChartSeries> { new XenoChartSeries(title, HostMetricTone(metric), buckets.Select(item => item.Average ?? 0).ToList()) },
-                empty,
-                false,
-                hasData);
+            return RollupChart("telemetry.host", title, rangeText, HostMetricUnit(metric), buckets.Select(item => Label(item.StartUtc, range)).ToList(), buckets.Select(item => item.Average).ToList(), buckets.Select(item => item.Minimum).ToList(), buckets.Select(item => item.Maximum).ToList(), buckets.Select(item => new XenoChartBucket(item.StartUtc, item.EndUtc)).ToList(), empty, hasData);
         }
 
         /// <summary>
@@ -142,15 +158,7 @@ namespace Xeno.Client.Presentation
             string rangeText = HistoryRanges.Describe(range);
             string title = MetricName(metric.ToString());
             string scope = String.IsNullOrWhiteSpace(providerName) ? "any provider" : providerName;
-            return new XenoChart(
-                title + (String.IsNullOrWhiteSpace(providerName) ? String.Empty : " (" + providerName + ")"),
-                rangeText,
-                ProviderMetricUnit(metric),
-                buckets.Select(item => Label(item.StartUtc, range)).ToList(),
-                new List<XenoChartSeries> { new XenoChartSeries(title, XenoChartToneEnum.Info, buckets.Select(item => item.Average ?? 0).ToList()) },
-                "No " + title.ToLowerInvariant() + " readings from " + scope + " in the " + rangeText + ". Provider telemetry is collected while the client runs.",
-                false,
-                buckets.Any(item => item.Count > 0 && item.Average != null));
+            return RollupChart("telemetry.provider", title + (String.IsNullOrWhiteSpace(providerName) ? String.Empty : " (" + providerName + ")"), rangeText, ProviderMetricUnit(metric), buckets.Select(item => Label(item.StartUtc, range)).ToList(), buckets.Select(item => item.Average).ToList(), buckets.Select(item => item.Minimum).ToList(), buckets.Select(item => item.Maximum).ToList(), buckets.Select(item => new XenoChartBucket(item.StartUtc, item.EndUtc)).ToList(), "No " + title.ToLowerInvariant() + " readings from " + scope + " in the " + rangeText + ". Provider telemetry is collected while the client runs.", buckets.Any(item => item.Count > 0 && item.Average != null));
         }
 
         /// <summary>
@@ -196,6 +204,17 @@ namespace Xeno.Client.Presentation
 
         #region Private-Methods
 
+        private static XenoChart RollupChart(string id, string title, string rangeText, string unit, List<string> labels, List<double?> average, List<double?> minimum, List<double?> maximum, List<XenoChartBucket> windows, string empty, bool hasData)
+        {
+            List<XenoChartSeries> series = new List<XenoChartSeries>
+            {
+                new XenoChartSeries("Average", XenoChartToneEnum.Info, average.Select(item => item ?? Double.NaN).ToList()),
+                new XenoChartSeries("Minimum", XenoChartToneEnum.Neutral, minimum.Select(item => item ?? Double.NaN).ToList()),
+                new XenoChartSeries("Maximum", XenoChartToneEnum.Warning, maximum.Select(item => item ?? Double.NaN).ToList())
+            };
+            return new XenoChart(id, XenoChartKindEnum.Lines, title, rangeText, unit, labels, series, empty, false, hasData, false, null, null, windows, null);
+        }
+
         private static string Label(DateTime startUtc, HistoryRangeEnum range)
         {
             DateTime local = DateTime.SpecifyKind(startUtc, DateTimeKind.Utc).ToLocalTime();
@@ -208,17 +227,6 @@ namespace Xeno.Client.Presentation
             if (metric == ClientTelemetryMetricEnum.GpuTemperatureCelsius) return " C";
             if (metric == ClientTelemetryMetricEnum.GpuPowerWatts) return " W";
             return "%";
-        }
-
-        private static XenoChartToneEnum HostMetricTone(ClientTelemetryMetricEnum metric)
-        {
-            switch (metric)
-            {
-                case ClientTelemetryMetricEnum.CpuUtilizationPercent: return XenoChartToneEnum.Info;
-                case ClientTelemetryMetricEnum.MemoryUtilizationPercent: return XenoChartToneEnum.Success;
-                case ClientTelemetryMetricEnum.GpuUtilizationPercent: return XenoChartToneEnum.Warning;
-                default: return XenoChartToneEnum.Accent;
-            }
         }
 
         private static string ProviderMetricUnit(ClientProviderTelemetryMetricEnum metric)

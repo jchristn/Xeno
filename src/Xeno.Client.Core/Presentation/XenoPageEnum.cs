@@ -56,6 +56,27 @@ namespace Xeno.Client.Presentation
         /// <summary>
         /// Local dashboard, local inference server, history, and telemetry settings.
         /// </summary>
-        Settings
+        Settings,
+
+        /// <summary>
+        /// Chat with a local or Xeno network model.
+        /// </summary>
+        Chat,
+
+        /// <summary>
+        /// Chat request history.
+        /// </summary>
+        ChatHistory,
+
+        /// <summary>
+        /// Ratings and comments on chat answers.
+        /// </summary>
+        ChatFeedback,
+
+        /// <summary>
+        /// Usage analytics: latency, tokens, groups, heatmap, and timing by stage for served requests, the local
+        /// endpoint, and chat.
+        /// </summary>
+        Usage
     }
 }

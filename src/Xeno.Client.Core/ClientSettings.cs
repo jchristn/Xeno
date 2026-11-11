@@ -105,6 +105,21 @@ namespace Xeno.Client
         }
 
         /// <summary>
+        /// Chat settings.
+        /// </summary>
+        public ClientChatSettings Chat { get; set; } = new ClientChatSettings();
+
+        /// <summary>
+        /// Usage analytics settings.
+        /// </summary>
+        public ClientAnalyticsSettings Analytics { get; set; } = new ClientAnalyticsSettings();
+
+        /// <summary>
+        /// MCP server settings.
+        /// </summary>
+        public ClientMcpSettings Mcp { get; set; } = new ClientMcpSettings();
+
+        /// <summary>
         /// Provider endpoint settings.
         /// </summary>
         public List<ClientRunnerSettings> Providers { get; set; } = new List<ClientRunnerSettings>();
@@ -330,6 +345,24 @@ namespace Xeno.Client
                 rewritten = true;
             }
 
+            if (Chat == null)
+            {
+                Chat = new ClientChatSettings();
+                rewritten = true;
+            }
+
+            if (Mcp == null)
+            {
+                Mcp = new ClientMcpSettings();
+                rewritten = true;
+            }
+
+            if (Analytics == null)
+            {
+                Analytics = new ClientAnalyticsSettings();
+                rewritten = true;
+            }
+
             if (Providers == null)
             {
                 Providers = new List<ClientRunnerSettings>();
@@ -338,6 +371,9 @@ namespace Xeno.Client
 
             if (probe.Server == null) rewritten = true;
             if (probe.LocalDashboard == null) rewritten = true;
+            if (probe.Chat == null) rewritten = true;
+            if (probe.Mcp == null) rewritten = true;
+            if (probe.Analytics == null) rewritten = true;
             if (probe.LocalInferenceServer == null) rewritten = true;
             else
             {
@@ -362,6 +398,7 @@ namespace Xeno.Client
                 if (!inference.DiscoverLocalModels.HasValue) rewritten = true;
                 if (!inference.HealthCheckIntervalMs.HasValue) rewritten = true;
                 if (!inference.LocalQueueTimeoutMs.HasValue) rewritten = true;
+                if (!inference.RequestRetentionDays.HasValue) rewritten = true;
             }
 
             if (!probe.DefaultMaxConcurrentRequests.HasValue) rewritten = true;

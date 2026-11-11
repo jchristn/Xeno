@@ -71,6 +71,8 @@ Server-collected telemetry is stored in the database engine selected by the serv
 - `POST /v1.0/api/client-telemetry/providers/history/delete`
 - `GET /v1.0/api/client-telemetry/collection-attempts`
 - `GET /v1.0/api/client-telemetry/metrics`
+- `GET /v1.0/api/client-telemetry/providers/health`
+- `GET /v1.0/api/client-telemetry/connected-history`
 
 `status` returns telemetry settings state, service running state, last/next collection timestamps, connected client count, eligible client count, `sharedEligibleClientCount` (the number of foreign shared clients eligible for the tenant), and recent failure count. `latest` returns `{ hostTelemetry, providerTelemetry }`, where each property is an array of the most recent persisted samples. `collect` triggers immediate server-requested collection for all connected clients or for a supplied `clientId`. Search endpoints accept `clientId`, `metric`, `fromUtc`, `toUtc`, `limit`, and `offset`; they return `{ total, items }`. Rollup endpoints accept `clientId`, `metric`, `fromUtc`, `toUtc`, and `bucketMinutes`; they return an array of buckets shaped as `{ startUtc, endUtc, label, count, average, minimum, maximum }`. Host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Detail routes return normalized rows and bounded raw snapshot JSON when persisted. Delete routes are tenant-scoped.
 
@@ -769,6 +771,87 @@ Analytics overview accepts optional `fromUtc` and `toUtc` parameters and returns
 
 The request history detail response includes routing metadata, selected client metadata, resolved requestor tenant/principal fields, request and response headers, bounded request and response bodies, telemetry fields, and timeline events. Streaming responses include stream chunk and stream event counters when the client reports them.
 
+## Usage Analytics
+
+Finished charts data for every Xeno surface. [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md) explains the datasets, stages, percentiles, and truncation.
+
+| Method | Path | Authorization |
+|---|---|---|
+| GET | `/v1.0/api/request-history/analytics/usage` | `RequestHistory` read |
+| GET | `/v1.0/api/chat/analytics/usage` | Any tenant member with chat permissions; `scope=tenant` needs a tenant administrator |
+| GET | `/v1.0/api/client-telemetry/providers/health` | `ClientTelemetry` read |
+| GET | `/v1.0/api/client-telemetry/connected-history` | `ClientTelemetry` read |
+| GET | `/api/v1/requests/analytics/usage` | `X-Xeno-Local-Token` |
+| GET | `/api/v1/local-inference/analytics/usage` | `X-Xeno-Local-Token` |
+| GET | `/api/v1/chat/analytics/usage` | `X-Xeno-Local-Token` |
+| GET | `/api/v1/telemetry/providers/health` | `X-Xeno-Local-Token` |
+
+Query parameters for the usage routes:
+
+| Parameter | Meaning |
+|---|---|
+| `fromUtc`, `toUtc` | Window. Defaults to the last day |
+| `bucketMinutes` | Bucket width. Defaults from the window |
+| `groupBy` | `Model`, `Provider`, or `Route`. The server also accepts `Client`, `User` and `Credential` (tenant administrators), and `Tenant` (global administrators) |
+| `groupMetric` | `Requests` or `Tokens` |
+| `topN` | Groups shown by name, 1 to 20 |
+| `model`, `provider`, `clientId`, `userId`, `credentialId` | Filters |
+| `tenantId` | Another tenant (global administrators) |
+| `scope` | `tenant` on server chat usage |
+| `utcOffsetMinutes` | Viewer's offset from UTC, for heatmap hours and weekdays |
+| `sections` | Comma-separated sections to compute (`Totals`, `Outcome`, `Latency`, `TimeToFirstToken`, `Streaming`, and so on) |
+
+The health routes take `fromUtc`, `toUtc`, `bucketMinutes`, `providerName`, and on the server `clientId`. `connected-history` takes `fromUtc`, `toUtc`, and `bucketMinutes`.
+
+Status codes: `200`; `400` for an invalid window, grouping, or section; `401` without valid credentials or for a tenant the caller does not belong to; `403` for a grouping or scope the caller may not use.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "$XENO/v1.0/api/request-history/analytics/usage?bucketMinutes=15&groupBy=Model&groupMetric=Tokens"
+```
+
+Abridged response:
+
+```json
+{
+  "Dataset": "NetworkRequests",
+  "BucketMinutes": 15,
+  "Truncated": false,
+  "Totals": { "Requests": 12, "Failed": 1, "PromptTokens": 840, "CompletionTokens": 2210 },
+  "Buckets": [],
+  "GroupKeys": ["llama3.2:latest"],
+  "GroupTotals": [],
+  "StageOrder": [],
+  "StageAverages": []
+}
+```
+
+`connected-history` returns `FromUtc`, `ToUtc`, `BucketMinutes`, and `Buckets`, each with `StartUtc`, `EndUtc`, `Connected`, and `Total`. A bucket with no sample leaves out the counts.
+
+## Chat
+
+Signed-in users of the server web dashboard can chat with any model the Xeno network serves their tenant. Turns go
+through the same relay as `/v1/chat/completions`, so they are recorded in request history and charge credits like any
+network request. Conversations, ratings, and chat history are stored per tenant and user. Routes need the `Chat`
+permission (Read, Write, Delete, Execute; the built-in TenantMember role has all four, TenantAdmin holds the
+wildcard). `scope=tenant` on the feedback, history, and analytics routes shows every user in the tenant and needs
+`ChatAdmin` Read. Answers stream as server-sent events with the same events as the local chat API (see
+[CHAT.md](CHAT.md)).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1.0/api/chat/models` | Models connected clients serve this tenant (no embedding models) |
+| POST | `/v1.0/api/chat/models/prepare` | `{ "model" }`: readiness of a network model |
+| GET, POST | `/v1.0/api/chat/conversations` | List or start your conversations |
+| GET, PUT, DELETE | `/v1.0/api/chat/conversations/{id}` | Read, change, or delete a conversation |
+| POST | `/v1.0/api/chat/conversations/{id}/messages` | Send `{ "content", "model" }`; the answer streams |
+| POST | `/v1.0/api/chat/turns/{id}/cancel` | Stop your running turn |
+| PUT, DELETE | `/v1.0/api/chat/messages/{id}/feedback` | Rate an answer `{ "rating": 1 or -1, "comment" }` or remove the rating |
+| GET | `/v1.0/api/chat/feedback` | Ratings (`rating`, `model`, `route`, `hasComment`, `search`, `fromUtc`, `toUtc`, `page`, `pageSize`, `scope`) |
+| GET | `/v1.0/api/chat/history` | Chat turns (`model`, `route`, `provider`, `status`, `surface`, `rating`, `conversationId`, `search`, `fromUtc`, `toUtc`, `page`, `pageSize`, `scope`) |
+| GET | `/v1.0/api/chat/history/{id}` | One turn |
+| GET | `/v1.0/api/chat/analytics` | Totals, percentiles, ratings, and buckets (`fromUtc`, `toUtc`, `bucketSeconds` or `bucketMinutes`, `scope`) |
+
 ## Xeno Client Local Dashboard API
 
 The Xeno Client local dashboard API is served by the background `xeno` process, not by the Xeno server. The default local dashboard base URL is `http://127.0.0.1:9343`. When `LocalDashboard.RequireLocalToken` is true, the embedded dashboard page receives a per-process token and sends it to the local API.
@@ -884,6 +967,29 @@ Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `
 `GET /api/v1/local-inference/requests` pages the local endpoint request log, newest first: `{ items, total, page, pageSize }`. Each item has `id`, `receivedUtc`, `method`, `path`, `model`, `route`, `provider`, `reason`, `statusCode`, `stream`, `fallback`, `latencyMs`, `firstByteMs`, `queuedMs`, `responseBytes`, `promptTokens`, `completionTokens`, and `error`. The log never stores request or response bodies.
 
 `POST /api/v1/local-inference/port-migration/acknowledge` clears the one-time notice shown after an upgrade moved the listener from port 11434 to 11435 and returns `{ "acknowledged": true }`.
+
+### Local chat
+
+Chat with local and Xeno network models through the running client. Routes are under `/api/v1/chat/`, need the same
+`X-Xeno-Local-Token` header, and stream answers as server-sent events. [CHAT.md](CHAT.md) lists every route, its
+filters, and the stream events. The client also serves Xeno's tools over MCP; see [MCP.md](MCP.md).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/chat/models` | Models to chat with (no embedding models) |
+| POST | `/api/v1/chat/models/prepare` | Load a model and report whether it supports tools |
+| GET | `/api/v1/chat/tools` | Tools the chat model can use, with group and approval |
+| GET, POST | `/api/v1/chat/mcp-servers` | External MCP server connection state; POST reconnects and refreshes tools |
+| GET, POST | `/api/v1/chat/conversations` | List or start conversations |
+| GET, PUT, DELETE | `/api/v1/chat/conversations/{id}` | Read, change, or delete a conversation |
+| POST | `/api/v1/chat/conversations/{id}/messages` | Send a message; the answer streams |
+| POST | `/api/v1/chat/turns/{id}/cancel` | Stop a turn |
+| POST | `/api/v1/chat/turns/{id}/tool-calls/{toolCallId}/approval` | Allow or deny a tool call |
+| PUT, DELETE | `/api/v1/chat/messages/{id}/feedback` | Rate an answer or remove its rating |
+| GET | `/api/v1/chat/feedback` | Query ratings |
+| GET, DELETE | `/api/v1/chat/history` | Query or delete chat turns |
+| GET | `/api/v1/chat/history/{id}` | One turn with its tool calls |
+| GET | `/api/v1/chat/analytics` | Totals, percentiles, ratings, and buckets (`fromUtc`, `toUtc`, `bucketSeconds` or `bucketMinutes`) |
 
 ## Xeno Client Local Inference Listener
 

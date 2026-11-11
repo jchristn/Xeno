@@ -20,6 +20,12 @@ namespace Xeno.Desktop.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return true; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.ProviderTelemetry; }
@@ -30,12 +36,15 @@ namespace Xeno.Desktop.Pages
         #region Private-Members
 
         private const string AllProviders = "All providers";
+        private const string AllModels = "All models";
+        private ComboBox _Model = new ComboBox();
         private XenoTable<ProviderSampleRow>? _Latest;
         private XenoTable<ProviderSampleRow>? _Samples;
         private ComboBox _Provider = new ComboBox();
         private ComboBox _Metric = new ComboBox();
         private ComboBox _Range = new ComboBox();
         private ColumnChart _Chart = new ColumnChart();
+        private ColumnChart _Health = new ColumnChart();
         private StackPanel _Models = new StackPanel();
 
         #endregion
@@ -90,15 +99,20 @@ namespace Xeno.Desktop.Pages
             _Provider.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
             _Metric = new ComboBox { ItemsSource = Enum.GetNames(typeof(ClientProviderTelemetryMetricEnum)), SelectedIndex = 0, MinWidth = 220 };
             _Metric.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
-            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 0, MinWidth = 140 };
+            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 1, MinWidth = 140 };
+            _Model = new ComboBox { MinWidth = 180 };
+            _Model.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
             _Range.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
             _Chart = new ColumnChart { Height = 190 };
+            _Health = new ColumnChart { Height = 150 };
+            _Health.SetLoadingText("Provider health needs the Xeno client running.");
             _Samples = new XenoTable<ProviderSampleRow>(columns, null, "No samples in this range.");
             _Samples.Height = 300;
 
             return Ui.Stack(16,
                 Ui.Card("Latest by provider", Ui.Stack(10, _Latest, _Models)),
-                Ui.Card("Provider metric over time", Ui.Stack(10, Ui.Row(_Provider, _Metric, _Range), _Chart)),
+                Ui.Card("Provider health", _Health),
+                Ui.Card("Provider metric over time", Ui.Stack(10, Ui.Row(_Provider, _Model, _Metric, _Range), _Chart)),
                 Ui.Card("Samples", _Samples));
         }
 
@@ -113,6 +127,15 @@ namespace Xeno.Desktop.Pages
                 providers.AddRange(Workspace.LoadSettings().Runners.Select(item => item.Name));
                 string? selected = _Provider.SelectedItem as string;
                 _Provider.ItemsSource = providers;
+                List<string> models = new List<string> { AllModels };
+                models.AddRange(Workspace.LoadSettings().Runners.SelectMany(item => item.Models.Select(entry => entry.Name)).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal));
+                if (_Model.ItemsSource is not List<string> currentModels || !currentModels.SequenceEqual(models))
+                {
+                    object? selectedModel = _Model.SelectedItem;
+                    _Model.ItemsSource = models;
+                    _Model.SelectedItem = selectedModel != null && models.Contains((string)selectedModel) ? selectedModel : AllModels;
+                }
+
                 _Provider.SelectedItem = providers.Contains(selected ?? String.Empty) ? selected : AllProviders;
                 await RefreshHistoryAsync().ConfigureAwait(true);
             }).ConfigureAwait(true);
@@ -131,9 +154,17 @@ namespace Xeno.Desktop.Pages
                 if (provider == AllProviders) provider = null;
                 HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
                 ClientProviderTelemetryMetricEnum metric = Enum.TryParse(_Metric.SelectedItem as string, out ClientProviderTelemetryMetricEnum parsed) ? parsed : ClientProviderTelemetryMetricEnum.ActiveRequests;
-                List<ClientProviderTelemetryRollupBucket> buckets = await Workspace.RollupProviderTelemetryAsync(metric, provider, range, None).ConfigureAwait(true);
+                string? model = _Model.SelectedItem as string;
+                if (model == AllModels) model = null;
+                List<ClientProviderTelemetryRollupBucket> buckets = await Workspace.RollupProviderTelemetryAsync(metric, provider, range, None, model).ConfigureAwait(true);
                 _Chart.SetChart(XenoCharts.ProviderMetric(metric, provider, buckets, range));
                 _Samples.SetRows(await Workspace.SearchProviderTelemetryAsync(provider, range, 500, None).ConfigureAwait(true));
+                if (Workspace.Usage.IsAvailable)
+                {
+                    DateTime to = DateTime.UtcNow;
+                    Xeno.Core.Analytics.ProviderHealthQuery query = new Xeno.Core.Analytics.ProviderHealthQuery { FromUtc = HistoryRanges.StartUtc(range, to), ToUtc = to, BucketMinutes = HistoryRanges.DefaultBucketMinutes(range), ProviderName = provider };
+                    _Health.SetChart(XenoUsageCharts.Health(await Workspace.Usage.GetProviderHealthAsync(query, None).ConfigureAwait(true), HistoryRanges.Describe(range)));
+                }
             }).ConfigureAwait(true);
         }
 

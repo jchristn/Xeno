@@ -1,10 +1,11 @@
 namespace Xeno.Desktop.Common
 {
+    using System.Linq;
     using Avalonia.Media;
     using Xeno.Client.Presentation;
 
     /// <summary>
-    /// Colors for the Xeno desktop app and tray agent in light and dark, built from the logo colors in <see cref="XenoBrand"/>.
+    /// Brushes for the Xeno desktop app and tray agent, built from a color scheme in <see cref="XenoColorSchemes"/>.
     /// </summary>
     public sealed class XenoPalette
     {
@@ -54,6 +55,21 @@ namespace Xeno.Desktop.Common
         /// Brand accent color.
         /// </summary>
         public Color AccentColor { get; private set; } = Colors.Teal;
+
+        /// <summary>
+        /// Fill of accent buttons and the user's chat bubbles.
+        /// </summary>
+        public IBrush AccentFill { get; private set; } = Brushes.Teal;
+
+        /// <summary>
+        /// Text on <see cref="AccentFill"/>.
+        /// </summary>
+        public IBrush AccentText { get; private set; } = Brushes.White;
+
+        /// <summary>
+        /// Text on accent buttons, or null when the toolkit theme chooses it.
+        /// </summary>
+        public Color? AccentTextColor { get; private set; } = null;
 
         /// <summary>
         /// Success.
@@ -130,70 +146,60 @@ namespace Xeno.Desktop.Common
         #region Public-Methods
 
         /// <summary>
-        /// Light palette.
+        /// Light palette of the default Xeno scheme.
         /// </summary>
         /// <returns>Palette.</returns>
         public static XenoPalette Light()
         {
-            return new XenoPalette
-            {
-                IsDark = false,
-                Background = Brush("#f7f5f9"),
-                Panel = Brush("#ffffff"),
-                PanelSoft = Brush("#f4f0f6"),
-                Text = Brush("#2a1530"),
-                Muted = Brush("#6e5f75"),
-                Border = Brush("#e3dbe8"),
-                Accent = Brush(XenoBrand.GreenDeep),
-                AccentColor = Color.Parse(XenoBrand.GreenDeep),
-                Success = Brush(XenoBrand.GreenDeep),
-                SuccessSoft = Brush("#e3f8eb"),
-                Warning = Brush("#a15d00"),
-                WarningSoft = Brush("#fff4df"),
-                Danger = Brush("#c73737"),
-                DangerSoft = Brush("#fdecec"),
-                Info = Brush(XenoBrand.Purple),
-                InfoSoft = Brush("#f1e8f4"),
-                Sidebar = Brush(XenoBrand.Purple),
-                SidebarText = Brush("#efe6f2"),
-                SidebarMuted = Brush("#b9a6c1"),
-                SidebarActive = Brush(XenoBrand.Green),
-                SidebarActiveText = Brush(XenoBrand.PurpleInk),
-                Series = new IBrush[] { Brush(XenoBrand.GreenShade), Brush(XenoBrand.Purple), Brush("#a15d00"), Brush("#0f6e8f"), Brush("#c73737"), Brush(XenoBrand.Green) }
-            };
+            return From(XenoColorSchemes.Resolve(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), false));
         }
 
         /// <summary>
-        /// Dark palette.
+        /// Dark palette of the default Xeno scheme.
         /// </summary>
         /// <returns>Palette.</returns>
         public static XenoPalette Dark()
         {
+            return From(XenoColorSchemes.Resolve(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), true));
+        }
+
+        /// <summary>
+        /// Palette for resolved scheme colors.
+        /// </summary>
+        /// <param name="colors">Colors from <see cref="XenoColorSchemes.Resolve"/>.</param>
+        /// <returns>Palette.</returns>
+        /// <exception cref="System.ArgumentNullException">colors is null.</exception>
+        public static XenoPalette From(XenoResolvedColors colors)
+        {
+            System.ArgumentNullException.ThrowIfNull(colors);
             return new XenoPalette
             {
-                IsDark = true,
-                Background = Brush("#150b18"),
-                Panel = Brush("#211327"),
-                PanelSoft = Brush("#2b1933"),
-                Text = Brush("#f3ecf5"),
-                Muted = Brush("#b4a3bb"),
-                Border = Brush("#3d2846"),
-                Accent = Brush(XenoBrand.Green),
-                AccentColor = Color.Parse(XenoBrand.GreenDeep),
-                Success = Brush(XenoBrand.Green),
-                SuccessSoft = Brush("#123a22"),
-                Warning = Brush("#fbbf24"),
-                WarningSoft = Brush("#412f15"),
-                Danger = Brush("#f87171"),
-                DangerSoft = Brush("#442121"),
-                Info = Brush(XenoBrand.Lavender),
-                InfoSoft = Brush("#352040"),
-                Sidebar = Brush(XenoBrand.PurpleDeep),
-                SidebarText = Brush("#e6dbea"),
-                SidebarMuted = Brush("#a48fad"),
-                SidebarActive = Brush(XenoBrand.Green),
-                SidebarActiveText = Brush(XenoBrand.PurpleInk),
-                Series = new IBrush[] { Brush(XenoBrand.Green), Brush(XenoBrand.Lavender), Brush("#fbbf24"), Brush("#38bdf8"), Brush("#f87171"), Brush(XenoBrand.GreenShade) }
+                IsDark = colors.IsDark,
+                Background = Brush(colors.Background),
+                Panel = Brush(colors.Panel),
+                PanelSoft = Brush(colors.PanelSoft),
+                Text = Brush(colors.Text),
+                Muted = Brush(colors.Muted),
+                Border = Brush(colors.Border),
+                Accent = Brush(colors.Accent),
+                AccentColor = Color.Parse(colors.AccentFill),
+                AccentFill = Brush(colors.AccentFill),
+                AccentText = colors.AccentText != null ? Brush(colors.AccentText) : Brushes.White,
+                AccentTextColor = colors.AccentText != null ? Color.Parse(colors.AccentText) : null,
+                Success = Brush(colors.Success),
+                SuccessSoft = Brush(colors.SuccessSoft),
+                Warning = Brush(colors.Warning),
+                WarningSoft = Brush(colors.WarningSoft),
+                Danger = Brush(colors.Danger),
+                DangerSoft = Brush(colors.DangerSoft),
+                Info = Brush(colors.Info),
+                InfoSoft = Brush(colors.InfoSoft),
+                Sidebar = Brush(colors.Sidebar),
+                SidebarText = Brush(colors.SidebarText),
+                SidebarMuted = Brush(colors.SidebarMuted),
+                SidebarActive = Brush(colors.SidebarActive),
+                SidebarActiveText = Brush(colors.SidebarActiveText),
+                Series = colors.Series.Select(Brush).ToArray()
             };
         }
 

@@ -6,6 +6,7 @@ namespace Xeno.Desktop
     using Avalonia.Controls;
     using Avalonia.Controls.ApplicationLifetimes;
     using Avalonia.Input;
+    using Avalonia.Threading;
     using Avalonia.Themes.Fluent;
     using Xeno.Client;
     using Xeno.Client.Hosting;
@@ -37,6 +38,8 @@ namespace Xeno.Desktop
         private DesktopSession? _Session;
         private MainWindow? _Main;
         private XenoNativeMenuBuilder? _Menus;
+        private SettingsWindow? _Settings;
+        private DispatcherTimer? _ActivationTimer;
 
         #endregion
 
@@ -68,7 +71,7 @@ namespace Xeno.Desktop
             // from the menu bar after this window closes. Opt out with XENO_AGENT_AUTOSTART=0.
             XenoAppLauncher.EnsureTrayRunning();
             _Session = new DesktopSession();
-            XenoTheme.Apply(this, _Session.Preferences.DesktopAppearance);
+            XenoTheme.Apply(this, _Session.Preferences.DesktopAppearance, XenoColorSchemes.Selected(_Session.Preferences));
             if (OperatingSystem.IsMacOS() && !MacPlatform.IsRunningFromBundle())
             {
                 using (System.IO.Stream? logo = XenoAssets.OpenLogoPng())
@@ -87,9 +90,33 @@ namespace Xeno.Desktop
                 Window.WindowOpenedEvent.AddClassHandler<Window>((window, args) => AttachWindowMenu(window));
                 _Session.Changed += (sender, args) => _Menus?.Refresh();
                 if (!String.IsNullOrWhiteSpace(Program.StartupMessage)) _Session.Report(Program.StartupMessage);
+                AutoConnect(_Session);
+
+                // Another process (the tray agent, or a second launch) asks this instance to come forward by posting a
+                // request under the client home. A request left over from before this launch is dropped.
+                DesktopActivation.Clear();
+                _ActivationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                _ActivationTimer.Tick += (sender, args) => TakeActivationRequest();
+                _ActivationTimer.Start();
+                desktop.ShutdownRequested += (sender, args) => _ActivationTimer?.Stop();
+                if (Program.OpenSettingsAtStart) _Main.Opened += (sender, args) => ShowSettings();
             }
 
             base.OnFrameworkInitializationCompleted();
+        }
+
+        private static void AutoConnect(DesktopSession session)
+        {
+            // Opening the app connects this computer, as the terminal app and the tray agent do. XENO_AUTOCONNECT=0 opts out.
+            XenoAutoConnectDecisionEnum decision = XenoAutoConnect.Decide(session.Workspace);
+            if (decision == XenoAutoConnectDecisionEnum.Connect)
+            {
+                _ = session.RunBusyAsync(XenoAutoConnect.ProgressMessage, () => XenoAutoConnect.ConnectAsync(session.Workspace, CancellationToken.None));
+            }
+            else if (decision == XenoAutoConnectDecisionEnum.NotSignedIn)
+            {
+                session.Report(XenoAutoConnect.NotSignedInMessage);
+            }
         }
 
         /// <summary>
@@ -114,6 +141,8 @@ namespace Xeno.Desktop
         /// <returns>True when selected.</returns>
         public bool IsChecked(XenoCommandEnum command)
         {
+            int? autoRefresh = XenoCommandAvailability.AutoRefreshFor(command);
+            if (autoRefresh != null) return _Session != null && autoRefresh == _Session.Preferences.AutoRefreshSeconds;
             XenoAppearanceEnum? appearance = XenoCommandAvailability.AppearanceFor(command);
             return appearance != null && appearance == XenoTheme.Appearance;
         }
@@ -145,6 +174,15 @@ namespace Xeno.Desktop
                 return;
             }
 
+            int? autoRefresh = XenoCommandAvailability.AutoRefreshFor(command);
+            if (autoRefresh != null)
+            {
+                session.Preferences.AutoRefreshSeconds = autoRefresh.Value;
+                session.SavePreferences();
+                _Menus?.Refresh();
+                return;
+            }
+
             string? link = XenoCommandAvailability.LinkFor(command);
             if (link != null)
             {
@@ -158,7 +196,7 @@ namespace Xeno.Desktop
                     _ = XenoDialogs.ShowModalAsync<object>(new AboutWindow(XenoProduct.DesktopName), main);
                     break;
                 case XenoCommandEnum.Settings:
-                    main.Navigate(XenoPageEnum.Settings);
+                    ShowSettings();
                     break;
                 case XenoCommandEnum.Quit:
                     if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime) lifetime.Shutdown();
@@ -243,6 +281,36 @@ namespace Xeno.Desktop
         #endregion
 
         #region Private-Methods
+
+        /// <summary>
+        /// Open the Settings window, or bring it to the front when it is already open.
+        /// </summary>
+        private void ShowSettings()
+        {
+            if (_Session == null) return;
+            if (_Settings != null)
+            {
+                if (_Settings.WindowState == WindowState.Minimized) _Settings.WindowState = WindowState.Normal;
+                _Settings.Activate();
+                return;
+            }
+
+            _Settings = new SettingsWindow(_Session);
+            _Settings.Closed += (sender, args) => _Settings = null;
+            _Settings.Show();
+            _Settings.Activate();
+        }
+
+        private void TakeActivationRequest()
+        {
+            DesktopActivationRequest? request = DesktopActivation.Take();
+            if (request == null || _Main == null) return;
+            if (!_Main.IsVisible) _Main.Show();
+            if (_Main.WindowState == WindowState.Minimized) _Main.WindowState = WindowState.Normal;
+            if (request.Page.HasValue) _Main.Navigate(request.Page.Value);
+            _Main.Activate();
+            if (request.OpenSettings) ShowSettings();
+        }
 
         private void AttachWindowMenu(Window window)
         {

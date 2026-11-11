@@ -4,8 +4,9 @@ namespace Test.Xunit
     using System.Threading.Tasks;
     using global::Test.Shared;
     using global::Touchstone.Core;
-    using global::Touchstone.XunitAdapter;
+    using global::Touchstone.Xunit2Adapter;
     using global::Xunit;
+    using global::Xunit.Abstractions;
 
     /// <summary>
     /// Shared fixture that drops any per-test server catalogs after the suite completes. The backing
@@ -31,13 +32,24 @@ namespace Test.Xunit
     /// </summary>
     public sealed class TouchstoneTheoryTests : IClassFixture<DatabaseCleanupFixture>
     {
+        private readonly ITestOutputHelper _Output;
+
+        /// <summary>
+        /// Create the runner.
+        /// </summary>
+        /// <param name="output">Test output.</param>
+        public TouchstoneTheoryTests(ITestOutputHelper output)
+        {
+            _Output = output;
+        }
+
         /// <summary>
         /// Return test cases.
         /// </summary>
         /// <returns>Theory data.</returns>
-        public static TheoryData<TestCaseDescriptor> TestCases()
+        public static TheoryData<TouchstoneXunit2Case> TestCases()
         {
-            return new TouchstoneTheoryData(SharedTestSuites.All);
+            return TouchstoneXunit2Cases.From<XenoTestSuiteProvider>();
         }
 
         /// <summary>
@@ -47,9 +59,9 @@ namespace Test.Xunit
         /// <returns>Task.</returns>
         [Theory]
         [MemberData(nameof(TestCases))]
-        public async Task RunTest(TestCaseDescriptor testCase)
+        public Task RunTest(TouchstoneXunit2Case testCase)
         {
-            await testCase.ExecuteAsync(CancellationToken.None);
+            return TouchstoneXunit2.ExecuteAsync(testCase, _Output, CancellationToken.None);
         }
     }
 }

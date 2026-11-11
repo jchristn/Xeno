@@ -104,11 +104,11 @@ authenticate the request.
 python -m xeno_client.console
 ```
 
-Type `?` for commands. The console can inspect health, clients, tenants, users, credentials, roles, permissions, settings, metrics, request history, and send a chat request.
+Type `?` for commands. The console can inspect health, clients, tenants, users, credentials, roles, permissions, settings, metrics, request history, usage analytics, and send a chat request.
 
 ## Coverage
 
-The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, per-client cross-tenant sharing (`set_client_sharing`), routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, ping, metrics, and OpenAPI.
+The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, per-client cross-tenant sharing (`set_client_sharing`), routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, usage analytics (`get_usage_analytics`, `get_chat_usage_analytics`), provider health (`get_provider_health`), public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, ping, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

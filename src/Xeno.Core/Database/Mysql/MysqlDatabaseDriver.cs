@@ -88,6 +88,13 @@ VALUES ('0001', 'initial_platform_state', UTC_TIMESTAMP(6));
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new MysqlRequestHistoryMethods(_ConnectionString);
             Audit = new MysqlAuditMethods(_ConnectionString);
+            string chatConnectionString = _ConnectionString;
+            DbChatMethods chat = new DbChatMethods(ChatSqlDialectEnum.Mysql, () => new MySqlConnection(chatConnectionString));
+            await chat.InitializeAsync(token).ConfigureAwait(false);
+            Chat = chat;
+            DbConnectedClientSampleMethods connectedClientSamples = new DbConnectedClientSampleMethods(ChatSqlDialectEnum.Mysql, () => new MySqlConnection(chatConnectionString));
+            await connectedClientSamples.InitializeAsync(token).ConfigureAwait(false);
+            ConnectedClientSamples = connectedClientSamples;
             Onboarding = new MysqlOnboardingMethods(_ConnectionString);
 
             Tenants = new MysqlTenantMethods(_ConnectionString);

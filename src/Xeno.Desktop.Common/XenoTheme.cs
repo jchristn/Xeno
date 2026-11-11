@@ -2,12 +2,15 @@ namespace Xeno.Desktop.Common
 {
     using System;
     using Avalonia;
+    using Avalonia.Controls;
+    using Avalonia.Controls.Presenters;
     using Avalonia.Media;
     using Avalonia.Styling;
     using Xeno.Client.Presentation;
 
     /// <summary>
-    /// Applies the Xeno appearance (system, light, dark) to an Avalonia application and exposes the active palette.
+    /// Applies the Xeno appearance (system, light, dark) and color scheme to an Avalonia application and exposes the
+    /// active palette.
     /// Call from the UI thread.
     /// </summary>
     public static class XenoTheme
@@ -25,6 +28,11 @@ namespace Xeno.Desktop.Common
         public static XenoAppearanceEnum Appearance { get; private set; } = XenoAppearanceEnum.System;
 
         /// <summary>
+        /// Selected color scheme.
+        /// </summary>
+        public static XenoColorScheme Scheme { get; private set; } = XenoColorSchemes.Find(XenoColorSchemes.DefaultId);
+
+        /// <summary>
         /// Raised after the palette changes.
         /// </summary>
         public static event EventHandler? Changed;
@@ -34,6 +42,8 @@ namespace Xeno.Desktop.Common
         #region Private-Members
 
         private static Application? _Application = null;
+        private static readonly Styles _AccentStyles = new Styles();
+        private static bool _ForceChanged = false;
 
         #endregion
 
@@ -51,6 +61,7 @@ namespace Xeno.Desktop.Common
             if (!Object.ReferenceEquals(_Application, application))
             {
                 _Application = application;
+                application.Styles.Add(_AccentStyles);
                 application.ActualThemeVariantChanged += (sender, args) => Refresh();
             }
 
@@ -71,6 +82,34 @@ namespace Xeno.Desktop.Common
             Refresh();
         }
 
+        /// <summary>
+        /// Apply an appearance and a color scheme.
+        /// </summary>
+        /// <param name="application">Application.</param>
+        /// <param name="appearance">Appearance.</param>
+        /// <param name="scheme">Color scheme.</param>
+        /// <exception cref="ArgumentNullException">Application or scheme is null.</exception>
+        public static void Apply(Application application, XenoAppearanceEnum appearance, XenoColorScheme scheme)
+        {
+            ArgumentNullException.ThrowIfNull(scheme);
+            Scheme = scheme;
+            _ForceChanged = true;
+            Apply(application, appearance);
+        }
+
+        /// <summary>
+        /// Switch to another color scheme, or apply edits to the current one, and raise <see cref="Changed"/>.
+        /// </summary>
+        /// <param name="scheme">Color scheme.</param>
+        /// <exception cref="ArgumentNullException">scheme is null.</exception>
+        public static void SetScheme(XenoColorScheme scheme)
+        {
+            ArgumentNullException.ThrowIfNull(scheme);
+            Scheme = scheme;
+            _ForceChanged = true;
+            Refresh();
+        }
+
         #endregion
 
         #region Private-Methods
@@ -80,7 +119,7 @@ namespace Xeno.Desktop.Common
             Application? application = _Application;
             if (application == null) return;
             bool dark = application.ActualThemeVariant == ThemeVariant.Dark;
-            XenoPalette palette = dark ? XenoPalette.Dark() : XenoPalette.Light();
+            XenoPalette palette = XenoPalette.From(XenoColorSchemes.Resolve(Scheme, dark));
             Color accent = palette.AccentColor;
             application.Resources["SystemAccentColor"] = accent;
             application.Resources["SystemAccentColorDark1"] = Shade(accent, 0.88);
@@ -91,9 +130,31 @@ namespace Xeno.Desktop.Common
             application.Resources["SystemAccentColorLight3"] = Shade(accent, 1.36);
             application.Resources["ControlCornerRadius"] = new CornerRadius(6);
             application.Resources["OverlayCornerRadius"] = new CornerRadius(8);
-            bool changed = Current.IsDark != palette.IsDark || Current.Series.Length == 0;
+            ApplyAccentText(palette.AccentTextColor);
+            bool changed = _ForceChanged || Current.IsDark != palette.IsDark || Current.Series.Length == 0;
+            _ForceChanged = false;
             Current = palette;
             if (changed) Changed?.Invoke(null, EventArgs.Empty);
+        }
+
+        private static void ApplyAccentText(Color? color)
+        {
+            // Accent buttons take their text color from the scheme, except in the original scheme, which leaves it
+            // to the Fluent theme. Styles added after the theme win.
+            _AccentStyles.Clear();
+            if (color == null) return;
+            SolidColorBrush brush = new SolidColorBrush(color.Value);
+            foreach (string state in new[] { String.Empty, ":pointerover", ":pressed" })
+            {
+                Style style = new Style(selector =>
+                {
+                    Selector button = selector.OfType<Button>().Class("accent");
+                    if (state.Length > 0) button = button.Class(state);
+                    return button.Template().OfType<ContentPresenter>().Name("PART_ContentPresenter");
+                });
+                style.Setters.Add(new Setter(ContentPresenter.ForegroundProperty, brush));
+                _AccentStyles.Add(style);
+            }
         }
 
         private static Color Shade(Color color, double factor)

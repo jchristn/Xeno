@@ -107,11 +107,11 @@ authenticate the request.
 npm --prefix src/sdk/javascript run console
 ```
 
-Type `?` for commands. The console can inspect health, clients, tenants, users, credentials, roles, permissions, settings, metrics, request history, and send a chat request.
+Type `?` for commands. The console can inspect health, clients, tenants, users, credentials, roles, permissions, settings, metrics, request history, usage analytics, and send a chat request.
 
 ## Coverage
 
-The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, per-client cross-tenant sharing (`setClientSharing`), routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, ping, metrics, and OpenAPI.
+The SDK covers authentication, onboarding, administrative nuke APIs, tenants, users, credentials, roles, permissions, grantable permissions, role assignments, clients, advertised models, per-client cross-tenant sharing (`setClientSharing`), routing policies, OpenAI-compatible inference, Ollama-compatible inference, server-collected client telemetry, request history, usage analytics (`getUsageAnalytics`, `getChatUsageAnalytics`), provider health (`getProviderHealth`), public model token leaderboard, analytics, settings including email provider configuration and administrative test email sends, backup, health, ping, metrics, and OpenAPI.
 
 The SDK targets the Xeno server API. The `xeno` client local dashboard API,
 including local request history, machine telemetry, and provider runtime

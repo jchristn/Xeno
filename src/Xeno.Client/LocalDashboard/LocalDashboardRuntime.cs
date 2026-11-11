@@ -26,6 +26,27 @@ namespace Xeno.Client.LocalDashboard
         private static ClientTelemetryPersistenceService? _TelemetryService;
         private static ClientProviderTelemetryPersistenceService? _ProviderTelemetryService;
         private static LocalDashboardService? _Service;
+        private static Xeno.Client.LocalInference.RoutedChatTransport? _ChatTransport;
+        private static Xeno.Client.Services.XenoWorkspace? _ToolWorkspace;
+        private static Xeno.Client.Tools.Workspace.Processes.BackgroundProcessRegistry? _Processes;
+        private static Xeno.Client.Tools.Mcp.McpClientManager? _Mcp;
+        private static Xeno.Client.Tools.Workspace.Planning.TaskPlanStore? _Plans;
+        private static CancellationTokenSource? _IngestCancel;
+
+        /// <summary>
+        /// Xeno tools for the in-app chat and the MCP server, or null when the local dashboard is not running.
+        /// </summary>
+        public static Xeno.Client.Tools.XenoToolCatalog? Tools { get; private set; } = null;
+
+        /// <summary>
+        /// Every tool chat offers (Xeno, workspace, and external MCP tools), or null when chat is not running.
+        /// </summary>
+        public static Xeno.Client.Tools.XenoChatToolHost? ChatTools { get; private set; } = null;
+
+        /// <summary>
+        /// Tools from external MCP servers, or null when chat is not running.
+        /// </summary>
+        public static Xeno.Client.Tools.Mcp.IMcpToolSource? McpTools { get; private set; } = null;
 
         /// <summary>
         /// Local dashboard history database.
@@ -121,9 +142,35 @@ namespace Xeno.Client.LocalDashboard
                 _ProviderTelemetryService = providerTelemetryService;
                 if (settings.LocalDashboard.Enabled)
                 {
-                    LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, telemetryService, providerTelemetryHistory, providerTelemetryService);
+                    Xeno.Client.Chat.SqliteChatStore chatStore = new Xeno.Client.Chat.SqliteChatStore(settings.LocalDashboard.Database);
+                    await chatStore.InitializeAsync(token).ConfigureAwait(false);
+                    Xeno.Client.LocalInference.RoutedChatTransport chatTransport = new Xeno.Client.LocalInference.RoutedChatTransport(() => settings);
+                    _ChatTransport = chatTransport;
+                    Xeno.Core.Chat.ChatEngine? chatEngine = null;
+                    Xeno.Client.Services.XenoWorkspace toolWorkspace = new Xeno.Client.Services.XenoWorkspace();
+                    _ToolWorkspace = toolWorkspace;
+                    Xeno.Client.Tools.XenoToolCatalog tools = new Xeno.Client.Tools.XenoToolCatalog(toolWorkspace, cancel => Task.FromResult<Xeno.Core.Chat.IChatStore>(chatStore), new Xeno.Client.Mcp.EngineChatGateway(chatStore, () => chatEngine!, () => settings));
+                    Tools = tools;
+                    Xeno.Client.Tools.Workspace.Processes.BackgroundProcessRegistry processes = new Xeno.Client.Tools.Workspace.Processes.BackgroundProcessRegistry();
+                    _Processes = processes;
+                    Xeno.Client.Tools.Mcp.McpClientManager mcp = new Xeno.Client.Tools.Mcp.McpClientManager(() => settings);
+                    _Mcp = mcp;
+                    McpTools = mcp;
+                    Xeno.Client.Tools.Workspace.Planning.TaskPlanStore plans = new Xeno.Client.Tools.Workspace.Planning.TaskPlanStore();
+                    _Plans = plans;
+                    IReadOnlyList<Xeno.Client.Tools.Workspace.IWorkspaceTool> workspaceTools = Xeno.Client.Tools.Workspace.WorkspaceTools.Create(processes, plans, System.IO.Path.Combine(ClientSettings.SettingsDirectory, "memory"));
+                    Xeno.Client.Tools.XenoChatToolHost chatTools = new Xeno.Client.Tools.XenoChatToolHost(tools, () => settings, workspaceTools, mcp);
+                    // Connect configured MCP servers in the background; their tools appear once connected.
+                    _ = Task.Run(() => mcp.RefreshAsync(CancellationToken.None));
+                    ChatTools = chatTools;
+                    chatEngine = new Xeno.Core.Chat.ChatEngine(chatStore, chatTransport, () => settings.Chat, chatTools);
+                    LocalDashboardService service = new LocalDashboardService(settings, history, telemetryHistory, telemetryService, providerTelemetryHistory, providerTelemetryService, chatStore, chatEngine);
                     await service.StartAsync(token).ConfigureAwait(false);
                     _Service = service;
+                    _IngestCancel = new CancellationTokenSource();
+                    CancellationToken ingestToken = _IngestCancel.Token;
+                    _ = Task.Run(() => IngestLocalInferenceLoopAsync(service, ingestToken));
+                    PublishLocalApi(service);
                     ClientConnectionState.MarkLocalDashboardListening(settings, service.DashboardUrl);
                     Console.WriteLine("Local dashboard listening at " + service.DashboardUrl + ".");
                     if (String.Equals(settings.LocalDashboard.Host, "0.0.0.0", StringComparison.OrdinalIgnoreCase))
@@ -141,6 +188,35 @@ namespace Xeno.Client.LocalDashboard
                 ClientConnectionState.MarkLocalDashboardError(settings, ex.Message);
                 Console.Error.WriteLine("Local dashboard failed to start: " + ex.Message);
             }
+        }
+
+        private static void PublishLocalApi(LocalDashboardService service)
+        {
+            try
+            {
+                Xeno.Client.Services.LocalApiEndpoint.Publish(new Xeno.Client.Services.LocalApiEndpoint
+                {
+                    Url = service.DashboardUrl,
+                    Token = service.ApiToken,
+                    ProcessId = Environment.ProcessId,
+                    StartedUtc = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("Could not publish the local API endpoint for the CLI, desktop, and terminal apps: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Drop what chat tools keep for a deleted conversation: its task plan, and its background processes (stopped).
+        /// </summary>
+        /// <param name="conversationId">Conversation id.</param>
+        public static void ForgetConversation(string conversationId)
+        {
+            if (String.IsNullOrWhiteSpace(conversationId)) return;
+            _Plans?.Remove(conversationId);
+            _Processes?.RemoveConversation(conversationId);
         }
 
         /// <summary>
@@ -167,8 +243,24 @@ namespace Xeno.Client.LocalDashboard
             LocalDashboardService? service = _Service;
             if (service != null)
             {
+                _IngestCancel?.Cancel();
+                _IngestCancel?.Dispose();
+                _IngestCancel = null;
+                Xeno.Client.Services.LocalApiEndpoint.Withdraw(Environment.ProcessId);
                 service.Dispose();
                 _Service = null;
+                _ChatTransport?.Dispose();
+                _ChatTransport = null;
+                Tools = null;
+                ChatTools = null;
+                McpTools = null;
+                _Mcp?.Dispose();
+                _Mcp = null;
+                _Processes?.Dispose();
+                _Processes = null;
+                _Plans = null;
+                _ToolWorkspace?.Dispose();
+                _ToolWorkspace = null;
                 Console.WriteLine("Local dashboard stopped.");
             }
 
@@ -422,6 +514,39 @@ namespace Xeno.Client.LocalDashboard
             entry.Telemetry.CompletionTokens = telemetry.CompletionTokens;
             entry.Telemetry.StreamChunkCount = telemetry.StreamChunkCount ?? 0;
             entry.Telemetry.StreamEventCount = telemetry.StreamEventCount ?? 0;
+        }
+
+        private static async Task IngestLocalInferenceLoopAsync(LocalDashboardService service, CancellationToken token)
+        {
+            // Copies local endpoint requests from the listener's JSON log into the database every 15 seconds, so the
+            // Usage page keeps more history than the log's last 1000 requests.
+            using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromSeconds(15)))
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await service.IngestLocalInferenceRequestsAsync(token).ConfigureAwait(false);
+                        await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                    catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException || ex is System.IO.IOException || ex is InvalidOperationException || ex is ObjectDisposedException)
+                    {
+                        Console.WriteLine("Local endpoint usage ingest failed: " + ex.Message);
+                        try
+                        {
+                            await timer.WaitForNextTickAsync(token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
         }
     }
 }

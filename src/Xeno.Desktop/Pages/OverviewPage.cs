@@ -21,6 +21,12 @@ namespace Xeno.Desktop.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return true; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.Overview; }
@@ -75,7 +81,7 @@ namespace Xeno.Desktop.Pages
             _Connection = new StackPanel();
             _Services = new StackPanel();
             _Chart = new ColumnChart();
-            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 0, MinWidth = 140 };
+            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 1, MinWidth = 140 };
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Recent = new XenoTable<RequestRow>(new List<XenoTableColumn<RequestRow>>
             {

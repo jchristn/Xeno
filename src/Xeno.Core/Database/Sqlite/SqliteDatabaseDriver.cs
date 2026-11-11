@@ -95,6 +95,13 @@ VALUES ('0001', 'initial_platform_state', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new SqliteRequestHistoryMethods(_ConnectionString);
             Audit = new SqliteAuditMethods(_ConnectionString);
+            string chatConnectionString = _ConnectionString;
+            DbChatMethods chat = new DbChatMethods(ChatSqlDialectEnum.Sqlite, () => new SqliteConnection(chatConnectionString));
+            await chat.InitializeAsync(token).ConfigureAwait(false);
+            Chat = chat;
+            DbConnectedClientSampleMethods connectedClientSamples = new DbConnectedClientSampleMethods(ChatSqlDialectEnum.Sqlite, () => new SqliteConnection(chatConnectionString));
+            await connectedClientSamples.InitializeAsync(token).ConfigureAwait(false);
+            ConnectedClientSamples = connectedClientSamples;
             Onboarding = new SqliteOnboardingMethods(_ConnectionString);
 
             Tenants = new SqliteTenantMethods(_ConnectionString);

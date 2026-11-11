@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  BarChart3,
   BrainCircuit,
   ChevronDown,
   ChevronRight,
@@ -11,6 +12,8 @@ import {
   HardDrive,
   History,
   MemoryStick,
+  MessagesSquare,
+  MessageSquareText,
   Moon,
   Pencil,
   Play,
@@ -36,22 +39,43 @@ import LanguageSelector from '../components/LanguageSelector.jsx';
 import Modal from '../components/Modal.jsx';
 import Pagination from '../components/Pagination.jsx';
 import { jsonBody, localApi } from './localApi.js';
+import ChatPage from '../chat/ChatPage.jsx';
+import { ChatApiContext } from '../chat/ChatApiContext.js';
+import * as localChatApi from './chat/chatApi.js';
+import ChatHistoryPage from './chat/ChatHistoryPage.jsx';
+import ChatFeedbackPage from './chat/ChatFeedbackPage.jsx';
+import UsagePage from '../usage/UsagePage.jsx';
+import ProviderHealthPanel from '../usage/ProviderHealthPanel.jsx';
+import DrillBanner, { matchesDrill } from '../usage/DrillBanner.jsx';
+import { UsageApiContext } from '../usage/UsageApiContext.js';
+import { localUsageApi } from '../usage/localUsageApi.js';
+import TimingBars, { servedRequestStages } from '../charts/TimingBars.jsx';
+import { AutoRefreshSelect, useAutoRefresh } from '../charts/autoRefresh.jsx';
+import RollupChart from '../charts/RollupChart.jsx';
+import { hostMetrics, hostMetricUnit, providerMetrics, providerMetricUnit } from '../charts/telemetryMetrics.js';
 
 const pages = [
   { id: 'home', descriptionKey: 'localHomeDescription', icon: Activity, labelKey: 'home', tooltipKey: 'tooltipLocalNavHome' },
   { id: 'providers', descriptionKey: 'localProvidersDescription', icon: Server, labelKey: 'localProviders', tooltipKey: 'tooltipLocalNavProviders' },
   { id: 'localEndpoint', descriptionKey: 'localEndpointDescription', icon: RouteIcon, labelKey: 'localEndpoint', tooltipKey: 'tooltipLocalNavLocalEndpoint' },
   { id: 'models', descriptionKey: 'localModelsDescription', icon: BrainCircuit, labelKey: 'advertisedModels', tooltipKey: 'tooltipLocalNavModels' },
+  { id: 'usage', descriptionKey: 'usageDescription', icon: BarChart3, labelKey: 'usage', tooltipKey: 'tooltipLocalNavUsage' },
   { id: 'requests', descriptionKey: 'localRequestsDescription', icon: History, labelKey: 'requests', tooltipKey: 'tooltipLocalNavRequests' },
   { id: 'apiExplorer', descriptionKey: 'localApiExplorerDescription', icon: FileJson, labelKey: 'apiExplorer', tooltipKey: 'tooltipLocalNavApiExplorer' },
+  { id: 'chat', descriptionKey: 'chatDescription', icon: MessagesSquare, labelKey: 'chat', tooltipKey: 'tooltipLocalNavChat' },
+  { id: 'chatHistory', descriptionKey: 'chatHistoryDescription', icon: History, labelKey: 'chatHistory', tooltipKey: 'tooltipLocalNavChatHistory' },
+  { id: 'chatFeedback', descriptionKey: 'chatFeedbackDescription', icon: MessageSquareText, labelKey: 'chatFeedback', tooltipKey: 'tooltipLocalNavChatFeedback' },
   { id: 'logs', descriptionKey: 'localLogsDescription', icon: Terminal, labelKey: 'localLogs', tooltipKey: 'tooltipLocalNavLogs' },
   { id: 'telemetry', descriptionKey: 'localTelemetryDescription', icon: Gauge, labelKey: 'host', tooltipKey: 'tooltipLocalNavTelemetry' },
   { id: 'providerTelemetry', descriptionKey: 'localProviderTelemetryDescription', icon: Server, labelKey: 'provider', tooltipKey: 'tooltipLocalNavProviderTelemetry' },
   { id: 'settings', descriptionKey: 'localSettingsDescription', icon: SettingsIcon, labelKey: 'settings', tooltipKey: 'tooltipLocalNavSettings' }
 ];
 
+const localChatProvider = { ...localChatApi, supportsTools: true, surface: 'Web' };
+
 const localNavGroups = [
-  { key: 'observe', pageIds: ['home', 'providers', 'localEndpoint', 'models', 'requests', 'apiExplorer'] },
+  { key: 'observe', pageIds: ['home', 'providers', 'localEndpoint', 'models', 'usage', 'requests', 'apiExplorer'] },
+  { key: 'chatGroup', pageIds: ['chat', 'chatHistory', 'chatFeedback'] },
   { key: 'telemetry', pageIds: ['telemetry', 'providerTelemetry'] },
   { key: 'administration', pageIds: ['logs', 'settings'] }
 ];
@@ -79,8 +103,6 @@ const tooltipBackfillSelector = [
   '[role="button"]:not([title])'
 ].join(', ');
 
-const chartRefreshIntervals = [0, 15, 30, 60, 180, 300];
-
 const localProviderApiTypeOptions = [
   { label: 'Ollama', value: 'Ollama' },
   { label: 'OpenAI', value: 'OpenAI' },
@@ -89,21 +111,12 @@ const localProviderApiTypeOptions = [
   { label: 'OpenAI Compatible', value: 'OpenAICompatible' }
 ];
 
-const localHostTelemetryChartConfigs = [
-  { color: 'var(--color-info)', key: 'cpu', labelFallback: 'CPU', labelKey: 'cpu', metric: 'CpuUtilizationPercent', titleFallback: 'CPU Telemetry', titleKey: 'cpuTelemetry' },
-  { color: 'var(--color-success)', key: 'memory', labelFallback: 'Memory', labelKey: 'memory', metric: 'MemoryUtilizationPercent', titleFallback: 'Memory Telemetry', titleKey: 'memoryTelemetry' },
-  { color: 'var(--color-warning)', key: 'gpu', labelFallback: 'GPU', labelKey: 'gpu', metric: 'GpuUtilizationPercent', titleFallback: 'GPU Telemetry', titleKey: 'gpuTelemetry' }
-];
-
-const localHostTelemetryChartOpenDefaults = {
-  cpu: true,
-  memory: false,
-  gpu: false
-};
-
 export default function LocalDashboardApp() {
   const { t } = useTranslation();
   const [page, setPage] = useState('home');
+  const [drill, setDrill] = useState(null);
+  const [usageRefresh, setUsageRefresh] = useState(0);
+  const [chatConversationId, setChatConversationId] = useState(null);
   const [theme, setTheme] = useState(document.documentElement.getAttribute('data-theme') || 'light');
   const [state, setState] = useState(null);
   const [statistics, setStatistics] = useState(null);
@@ -114,17 +127,16 @@ export default function LocalDashboardApp() {
   const [logs, setLogs] = useState([]);
   const [database, setDatabase] = useState(null);
   const [telemetryLatest, setTelemetryLatest] = useState(null);
-  const [hostTelemetryRollups, setHostTelemetryRollups] = useState({});
+  const [hostTelemetryRollups, setHostTelemetryRollups] = useState([]);
   const [telemetrySamples, setTelemetrySamples] = useState([]);
   const [telemetryMetric, setTelemetryMetric] = useState('CpuUtilizationPercent');
-  const [openHostTelemetryCharts, setOpenHostTelemetryCharts] = useState(localHostTelemetryChartOpenDefaults);
   const [providerTelemetryLatest, setProviderTelemetryLatest] = useState(null);
   const [providerTelemetrySamples, setProviderTelemetrySamples] = useState([]);
   const [providerTelemetryRollups, setProviderTelemetryRollups] = useState([]);
   const [providerTelemetryMetric, setProviderTelemetryMetric] = useState('ActiveRequests');
   const [providerTelemetryProvider, setProviderTelemetryProvider] = useState('');
   const [providerTelemetryModel, setProviderTelemetryModel] = useState('');
-  const [range, setRange] = useState('lastHour');
+  const [range, setRange] = useState('lastDay');
   const [providerFilter, setProviderFilter] = useState('');
   const [logSeverity, setLogSeverity] = useState('all');
   const [logTail, setLogTail] = useState(200);
@@ -178,7 +190,7 @@ export default function LocalDashboardApp() {
       } else if (page === 'localEndpoint') {
         const [routingResponse, requestsResponse] = await Promise.all([
           localApi('/api/v1/local-inference/routing'),
-          localApi('/api/v1/local-inference/requests?page=1&pageSize=200')
+          localApi('/api/v1/local-inference/requests?page=1&pageSize=500')
         ]);
         setLocalRouting(routingResponse);
         setLocalEndpointRequests(Array.isArray(requestsResponse.items) ? requestsResponse.items : []);
@@ -190,7 +202,7 @@ export default function LocalDashboardApp() {
         setModels(response.models || []);
       } else if (page === 'requests') {
         const [historyResponse, summaryResponse] = await Promise.all([
-          localApi('/api/v1/requests'),
+          localApi(drill?.page === 'requests' ? '/api/v1/requests?limit=5000' : '/api/v1/requests'),
           localApi(`/api/v1/requests/summary?range=${encodeURIComponent(localApiRange(range))}&bucketMinutes=${telemetryBucketMinutes(range)}`)
         ]);
         setRequests(historyResponse.entries || []);
@@ -202,11 +214,14 @@ export default function LocalDashboardApp() {
             method: 'POST',
             body: jsonBody({ metric: telemetryMetric, limit: 250 })
           }),
-          loadLocalHostTelemetryRollups(range)
+          localApi(`/api/v1/telemetry/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
+            method: 'POST',
+            body: jsonBody({ metric: telemetryMetric, bucketMinutes: telemetryBucketMinutes(range) })
+          })
         ]);
         setTelemetryLatest(latestResponse);
         setTelemetrySamples(localRows(searchResponse.samples || searchResponse));
-        setHostTelemetryRollups(rollupResponses);
+        setHostTelemetryRollups(localRows(rollupResponses));
       } else if (page === 'providerTelemetry') {
         const [latestResponse, searchResponse, rollupResponse] = await Promise.all([
           localApi(`/api/v1/telemetry/providers/latest${providerTelemetryProvider ? `?providerName=${encodeURIComponent(providerTelemetryProvider)}` : ''}`),
@@ -238,6 +253,25 @@ export default function LocalDashboardApp() {
     }
   }
 
+  // A Usage bucket opens the list for its dataset, showing only that window until the user clears it or leaves.
+  function drillDown(dataset, window) {
+    const target = dataset === 'LocalEndpoint' ? 'localEndpoint' : dataset === 'Chat' ? 'chatHistory' : 'requests';
+    setDrill({ ...window, page: target });
+    setPage(target);
+  }
+
+  function openPage(id) {
+    setDrill(null);
+    setPage(id);
+  }
+
+  const pageDrill = drill?.page === page ? drill : null;
+
+  function openChatConversation(id) {
+    setChatConversationId(id || null);
+    setPage('chat');
+  }
+
   function navLabel(value) {
     const pageDefinition = pages.find((item) => item.id === value);
     return pageDefinition ? t(pageDefinition.labelKey) : title(value, t);
@@ -264,7 +298,7 @@ export default function LocalDashboardApp() {
             <div className="sidebar-group" key={group.key}>
               <div className="sidebar-group-label">{t(group.key)}</div>
               {group.pageIds.map((id) => pages.find((item) => item.id === id)).filter(Boolean).map((item) => (
-                <SidebarButton item={item} key={item.id} page={page} setPage={setPage} />
+                <SidebarButton item={item} key={item.id} page={page} setPage={openPage} />
               ))}
             </div>
           ))}
@@ -298,20 +332,25 @@ export default function LocalDashboardApp() {
             <button className="icon-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title={t('tooltipToggleTheme')} type="button">
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            <button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button">
+            <button className="icon-button" onClick={() => { setUsageRefresh((value) => value + 1); refresh(); }} title={t('tooltipManualRefresh')} type="button">
               <RefreshCw size={17} />
             </button>
           </div>
         </header>
-        <main className="workspace">
+        <main className={`workspace${page === 'chat' ? ' workspace-chat' : ''}`}>
           {error ? <div className="settings-restart-banner error-state"><CircleAlert size={18} /><span>{error}</span></div> : null}
+          {page === 'chat' ? <ChatApiContext.Provider value={localChatProvider}><ChatPage conversationId={chatConversationId} setConversationId={setChatConversationId} setModal={setModal} /></ChatApiContext.Provider> : null}
+          <DrillBanner drill={pageDrill} onClear={() => setDrill(null)} />
+          {page === 'usage' ? <UsageApiContext.Provider value={localUsageApi}><UsagePage onDrill={drillDown} refreshSignal={usageRefresh} /></UsageApiContext.Provider> : null}
+          {page === 'chatHistory' ? <ChatHistoryPage drill={pageDrill} openConversation={openChatConversation} setModal={setModal} /> : null}
+          {page === 'chatFeedback' ? <ChatFeedbackPage openConversation={openChatConversation} setModal={setModal} /> : null}
           {page === 'home' ? <Home range={range} refresh={refresh} routing={localRouting} setRange={setRange} state={state} statistics={statistics} summary={summary} /> : null}
           {page === 'providers' ? <Providers providers={providers} refresh={refresh} setModal={setModal} /> : null}
-          {page === 'localEndpoint' ? <LocalEndpoint modalOpen={!!modal} refresh={refresh} requests={localEndpointRequests} routing={localRouting} setModal={setModal} /> : null}
+          {page === 'localEndpoint' ? <LocalEndpoint modalOpen={!!modal} refresh={refresh} requests={pageDrill ? localEndpointRequests.filter((item) => matchesDrill(pageDrill, item.receivedUtc, item.model)) : localEndpointRequests} routing={localRouting} setModal={setModal} /> : null}
           {page === 'models' ? <Models models={models} providerFilter={providerFilter} providers={providers} refresh={refresh} setModal={setModal} setProviderFilter={setProviderFilter} /> : null}
-          {page === 'requests' ? <Requests range={range} refresh={refresh} requests={requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
+          {page === 'requests' ? <Requests range={range} refresh={refresh} requests={pageDrill ? requests.filter((item) => matchesDrill(pageDrill, item.receivedUtc, item.modelName)) : requests} setModal={setModal} setRange={setRange} summary={summary} /> : null}
           {page === 'apiExplorer' ? <LocalApiExplorer state={state} /> : null}
-          {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} metric={telemetryMetric} openCharts={openHostTelemetryCharts} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setOpenCharts={setOpenHostTelemetryCharts} setRange={setRange} setModal={setModal} /> : null}
+          {page === 'telemetry' ? <Telemetry hostRollups={hostTelemetryRollups} latest={telemetryLatest} metric={telemetryMetric} range={range} refresh={refresh} samples={telemetrySamples} setMetric={setTelemetryMetric} setRange={setRange} setModal={setModal} /> : null}
           {page === 'logs' ? <Logs followLogs={followLogs} logSeverity={logSeverity} logTail={logTail} logs={logs} setFollowLogs={setFollowLogs} setLogSeverity={setLogSeverity} setLogTail={setLogTail} /> : null}
           {page === 'providerTelemetry' ? <ProviderTelemetry advertisedModels={models} latest={providerTelemetryLatest} metric={providerTelemetryMetric} modelFilter={providerTelemetryModel} providerEndpoints={providers} providerFilter={providerTelemetryProvider} range={range} refresh={refresh} rollups={providerTelemetryRollups} samples={providerTelemetrySamples} setMetric={setProviderTelemetryMetric} setModal={setModal} setModelFilter={setProviderTelemetryModel} setProviderFilter={setProviderTelemetryProvider} setRange={setRange} /> : null}
           {page === 'settings' ? <Settings database={database} refresh={refresh} state={state} /> : null}
@@ -383,19 +422,19 @@ function Home({ range, refresh, routing, setRange, state, statistics, summary })
           <button className="action-button" onClick={async () => { await localApi('/api/v1/local-inference/port-migration/acknowledge', { method: 'POST', body: '{}' }); refresh(); }} title={t('tooltipDismissNotice')} type="button">{t('dismiss')}</button>
         </div>
       ) : null}
-      <div className="metric-grid">
+      <KpiGrid>
         <Metric icon={<Zap size={18} />} label={t('connected')} subtext={state?.connection?.webSocketUrl} tone={state?.connection?.isConnected ? 'success' : 'danger'} value={state?.connection?.isConnected ? t('yes') : t('no')} />
         <Metric icon={<Server size={18} />} label={t('registered')} tone={state?.connection?.isRegistered ? 'success' : 'warning'} value={state?.connection?.isRegistered ? t('yes') : t('no')} />
-        <Metric icon={<History size={18} />} label={t('requests')} value={statistics?.requests || 0} />
-        <Metric icon={<Gauge size={18} />} label={t('failures')} tone={statistics?.failures ? 'danger' : 'neutral'} value={statistics?.failures || 0} />
-      </div>
+        <Metric icon={<History size={18} />} label={t('requests')} value={formatCount(statistics?.requests || 0, t)} />
+        <Metric icon={<Gauge size={18} />} label={t('failures')} tone={statistics?.failures ? 'danger' : 'neutral'} value={formatCount(statistics?.failures || 0, t)} />
+      </KpiGrid>
       {routing ? (
-        <div className="metric-grid">
+        <KpiGrid>
           <Metric icon={<RouteIcon size={18} />} label={t('localEndpoint')} subtext={routing.url} value={t(`routingMode${routing.routingMode}`, routing.routingMode)} />
-          <Metric icon={<Zap size={18} />} label={t('answeredHere')} subtext={t('sinceStart')} tone="success" value={display(routing.localRequests, t)} />
-          <Metric icon={<Activity size={18} />} label={t('sentToNetwork')} subtext={t('fallbacksCount', { count: routing.fallbacks || 0 })} value={display(routing.networkRequests, t)} />
+          <Metric icon={<Zap size={18} />} label={t('answeredHere')} subtext={t('sinceStart')} tone="success" value={formatCount(routing.localRequests, t)} />
+          <Metric icon={<Activity size={18} />} label={t('sentToNetwork')} subtext={t('fallbacksCount', { count: routing.fallbacks || 0 })} value={formatCount(routing.networkRequests, t)} />
           <Metric icon={<Server size={18} />} label={t('providersHealthy')} subtext={routing.runtimeAvailable ? '' : t('healthUnknownNotRunning')} tone={routing.runtimeAvailable && routing.healthyBackends < routing.routableBackends ? 'warning' : 'neutral'} value={routing.runtimeAvailable ? `${routing.healthyBackends} / ${routing.routableBackends}` : '-'} />
-        </div>
+        </KpiGrid>
       ) : null}
       <Panel className="chart-panel-card" title={t('requestsOverTime')} actions={<button className="icon-button" onClick={refresh} title={t('tooltipManualRefresh')} type="button"><RefreshCw size={16} /></button>}>
         <ActivityChart onRangeChange={setRange} onRefresh={refresh} range={range} summary={{ buckets: summary }} />
@@ -545,8 +584,10 @@ function Requests({ range, refresh, requests, setModal, setRange, summary }) {
   );
 }
 
-function Telemetry({ hostRollups, latest, metric, openCharts, range, refresh, samples, setMetric, setOpenCharts, setRange, setModal }) {
+function Telemetry({ hostRollups, latest, metric, range, refresh, samples, setMetric, setRange, setModal }) {
   const { t } = useTranslation();
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
+  useAutoRefresh(autoRefreshSeconds, refresh);
   const sample = latest?.detail?.sample || {};
   const snapshot = latest?.snapshot || {};
   const gpus = latest?.detail?.gpus || snapshot?.gpu?.devices || [];
@@ -585,22 +626,23 @@ function Telemetry({ hostRollups, latest, metric, openCharts, range, refresh, sa
         <TimeRangeButtons range={range} setRange={setRange} />
         <div className="chart-action-row telemetry-control-actions">
           <TelemetryMetricSelect metric={metric} setMetric={setMetric} />
+          <AutoRefreshSelect onChange={setAutoRefreshSeconds} onRefresh={refresh} seconds={autoRefreshSeconds} />
           <button className="icon-button" onClick={collect} title={t('tooltipCollectTelemetry')} type="button"><Zap size={16} /></button>
         </div>
       </div>
-      <div className="metric-grid">
+      <KpiGrid>
         <Metric icon={<Cpu size={18} />} label={t('cpuUtilization')} value={formatPercent(sample.cpuUtilizationPercent)} />
         <Metric icon={<MemoryStick size={18} />} label={t('memoryUtilization')} value={formatPercent(sample.memoryUtilizationPercent)} />
         <Metric icon={<HardDrive size={18} />} label={t('diskUtilization')} value={formatPercent(sample.diskUtilizationPercent)} />
         <Metric icon={<Gauge size={18} />} label={t('gpuUtilization')} value={formatPercent(sample.gpuAverageUtilizationPercent)} />
-      </div>
-      <div className="metric-grid">
+      </KpiGrid>
+      <KpiGrid>
         <Metric icon={<History size={18} />} label={t('samples')} value={samples.length} />
         <Metric icon={<Gauge size={18} />} label={t('average')} value={formatMetric(average)} />
         <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
         <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
-      </div>
-      <HostTelemetryChartGrid hostRollups={hostRollups} openCharts={openCharts} range={range} setOpenCharts={setOpenCharts} t={t} />
+      </KpiGrid>
+      <RollupChart id="telemetry.host" metric={metric} range={range} rollups={hostRollups} unit={hostMetricUnit(metric)} />
       <DataTable
         actions={(row) => [
           { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteTelemetrySample') }
@@ -631,55 +673,19 @@ function Telemetry({ hostRollups, latest, metric, openCharts, range, refresh, sa
   );
 }
 
-function HostTelemetryChartGrid({ hostRollups, openCharts, range, setOpenCharts, t }) {
-  function updateOpen(key, open) {
-    setOpenCharts((current) => ({ ...current, [key]: open }));
-  }
-
-  return (
-    <div className="client-telemetry-chart-grid view-stack" aria-label={t('telemetryOverTime')}>
-      {localHostTelemetryChartConfigs.map((config) => (
-        <TelemetryChartDisclosure
-          key={config.key}
-          onToggle={(open) => updateOpen(config.key, open)}
-          open={Boolean(openCharts[config.key])}
-          subtitle={t('hostTelemetryMetricSubtitle', 'Local host telemetry for the selected time range.')}
-          title={t(config.titleKey, config.titleFallback)}
-        >
-          <TelemetrySparkChart
-            emptyTitle={t('noData')}
-            framed={false}
-            series={[{
-              color: config.color,
-              key: config.key,
-              label: t(config.labelKey, config.labelFallback),
-              values: localTelemetryRollupValues(hostRollups[config.key], range)
-            }]}
-            subtitle={t('hostTelemetryMetricSubtitle', 'Local host telemetry for the selected time range.')}
-            title={t(config.titleKey, config.titleFallback)}
-            totalLabel={t('total')}
-            valueFormatter={(nextValue) => formatPercent(nextValue)}
-          />
-        </TelemetryChartDisclosure>
-      ))}
-    </div>
-  );
-}
-
 function TelemetryMetricSelect({ metric, setMetric }) {
   const { t } = useTranslation();
-  const metrics = ['CpuUtilizationPercent', 'MemoryUtilizationPercent', 'DiskUtilizationPercent', 'GpuUtilizationPercent', 'GpuMemoryUtilizationPercent', 'GpuTemperatureCelsius', 'GpuPowerWatts'];
   return (
     <label className="form-field inline compact-field" title={t('tooltipTelemetryMetric')}>
       <span>{t('metric')}</span>
       <select value={metric} onChange={(event) => setMetric(event.target.value)} title={t('tooltipTelemetryMetric')}>
-        {metrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
+        {hostMetrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
       </select>
     </label>
   );
 }
 
-function TimeRangeButtons({ range, setRange }) {
+export function TimeRangeButtons({ range, setRange }) {
   const { t } = useTranslation();
   return (
     <div className="time-range-button-row">
@@ -692,6 +698,8 @@ function TimeRangeButtons({ range, setRange }) {
 
 function ProviderTelemetry({ advertisedModels, latest, metric, modelFilter, providerEndpoints, providerFilter, range, refresh, rollups, samples, setMetric, setModal, setModelFilter, setProviderFilter, setRange }) {
   const { t } = useTranslation();
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
+  useAutoRefresh(autoRefreshSeconds, refresh);
   const configuredModels = Array.isArray(advertisedModels) ? advertisedModels : [];
   const configuredProviders = Array.isArray(providerEndpoints) ? providerEndpoints : [];
   const providers = latest?.snapshot?.providers || [];
@@ -746,26 +754,28 @@ function ProviderTelemetry({ advertisedModels, latest, metric, modelFilter, prov
         <TimeRangeButtons range={range} setRange={setRange} />
         <div className="chart-action-row telemetry-control-actions">
           <ProviderTelemetryControls metric={metric} modelFilter={modelFilter} modelOptions={modelOptions} providerFilter={providerFilter} providerOptions={providerOptions} setMetric={setMetric} setModelFilter={setModelFilter} setProviderFilter={setProviderFilter} />
+          <AutoRefreshSelect onChange={setAutoRefreshSeconds} onRefresh={refresh} seconds={autoRefreshSeconds} />
           <button className="icon-button" onClick={collect} title={t('tooltipCollectProviderTelemetry')} type="button"><Zap size={16} /></button>
         </div>
       </div>
-      <div className="metric-grid">
+      <KpiGrid>
         <Metric icon={<Server size={18} />} label={t('healthyProviders')} value={activeProviders} />
         <Metric icon={<BrainCircuit size={18} />} label={t('loadedModels')} value={loadedModels} />
         <Metric icon={<Activity size={18} />} label={t('activeRequests')} value={formatMetric(activeRequests)} />
         <Metric icon={<History size={18} />} label={t('queuedRequests')} value={formatMetric(queuedRequests)} />
-      </div>
-      <div className="metric-grid">
+      </KpiGrid>
+      <KpiGrid>
         <Metric icon={<History size={18} />} label={t('samples')} value={samples.length} />
         <Metric icon={<Gauge size={18} />} label={t('average')} value={formatMetric(average)} />
         <Metric icon={<Gauge size={18} />} label={t('maximum')} value={formatMetric(maximum)} />
         <Metric icon={<Activity size={18} />} label={t('metric')} value={t(metric)} />
-      </div>
+      </KpiGrid>
+      <UsageApiContext.Provider value={localUsageApi}><ProviderHealthPanel providerName={providerFilter || undefined} range={range} /></UsageApiContext.Provider>
       <Panel
         className="chart-panel-card telemetry-chart-card"
         title={t('providerTelemetryOverTime')}
       >
-        <MetricChart onRangeChange={setRange} onRefresh={refresh} range={range} rollups={rollups} showControls={false} />
+        <RollupChart id="telemetry.provider" metric={metric} range={range} rollups={rollups} unit={providerMetricUnit(metric)} />
       </Panel>
       <DataTable
         actions={(row) => [
@@ -827,12 +837,11 @@ function ProviderTelemetryControls({ metric, modelFilter, modelOptions, provider
 
 function ProviderTelemetryMetricSelect({ metric, setMetric }) {
   const { t } = useTranslation();
-  const metrics = ['ActiveRequests', 'QueuedRequests', 'WaitingRequests', 'RequestRatePerSecond', 'ErrorRatePerSecond', 'PromptTokensPerSecond', 'GenerationTokensPerSecond', 'TotalTokensPerSecond', 'LatencyP95Ms', 'TimeToFirstTokenP95Ms', 'CacheUsagePercent', 'LoadedModelCount', 'AvailableModelCount'];
   return (
     <label className="form-field inline compact-field" title={t('tooltipProviderTelemetryMetric')}>
       <span>{t('metric')}</span>
       <select value={metric} onChange={(event) => setMetric(event.target.value)} title={t('tooltipProviderTelemetryMetric')}>
-        {metrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
+        {providerMetrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
       </select>
     </label>
   );
@@ -901,6 +910,9 @@ function LocalEndpoint({ modalOpen, refresh, requests, routing, setModal }) {
   const rules = Array.isArray(routing.rules) ? routing.rules : [];
   const records = Array.isArray(requests) ? requests : [];
   const status = !routing.enabled ? t('localEndpointDisabled') : routing.runtimeAvailable ? t('listening') : t('localEndpointNotRunning');
+  const statusShort = !routing.enabled ? t('localEndpointDisabledShort') : routing.runtimeAvailable ? t('listening') : t('localEndpointNotRunningShort');
+  const statusTone = !routing.enabled ? 'neutral' : routing.runtimeAvailable ? 'success' : 'warning';
+  const baseUrl = String(routing.url || '').replace(/\/+$/, '');
   const providerNames = backends.filter((item) => item.routable).map((item) => item.provider);
 
   async function check() {
@@ -922,14 +934,44 @@ function LocalEndpoint({ modalOpen, refresh, requests, routing, setModal }) {
   return (
     <>
       {!routing.runtimeAvailable && routing.enabled ? <div className="settings-restart-banner" role="status"><CircleAlert size={18} /><span>{t('localEndpointNotRunningBanner')}</span></div> : null}
-      <div className="metric-grid">
-        <Metric icon={<RouteIcon size={18} />} label={t('localEndpoint')} subtext={status} value={<CopyableValue label={t('copyValue')} value={routing.url} />} />
-        <Metric icon={<Activity size={18} />} label={t('localRoutingMode')} subtext={t('defaultLimitEach', { limit: routing.defaultMaxConcurrentRequests })} value={t(`routingMode${routing.routingMode}`, routing.routingMode)} />
-        <Metric icon={<Server size={18} />} label={t('providersHealthy')} subtext={routing.runtimeAvailable ? '' : t('healthUnknownNotRunning')} tone={routing.runtimeAvailable && routing.healthyBackends < routing.routableBackends ? 'warning' : 'neutral'} value={routing.runtimeAvailable ? `${routing.healthyBackends} / ${routing.routableBackends}` : '-'} />
-        <Metric icon={<Zap size={18} />} label={t('answeredHere')} subtext={t('sinceStart')} tone="success" value={display(routing.localRequests, t)} />
-        <Metric icon={<Activity size={18} />} label={t('sentToNetwork')} subtext={t('fallbacksCount', { count: routing.fallbacks || 0 })} value={display(routing.networkRequests, t)} />
-        <Metric icon={<CircleAlert size={18} />} label={t('errors')} subtext={t('sinceStart')} tone={routing.errors > 0 ? 'danger' : 'neutral'} value={display(routing.errors, t)} />
-      </div>
+      <section className="workspace-card endpoint-hero" aria-label={t('localEndpoint')}>
+        <div className="endpoint-hero-main">
+          <div className="endpoint-hero-heading">
+            <span className="endpoint-hero-icon"><RouteIcon size={20} /></span>
+            <h2>{t('localEndpoint')}</h2>
+            <span className={`status-chip ${statusTone}`} title={status}>{statusShort}</span>
+          </div>
+          <p className="endpoint-hero-lede">{t('localEndpointHeroLede')}</p>
+          <dl className="endpoint-urls">
+            <div>
+              <dt>{t('openAiBaseUrl')}</dt>
+              <dd><CopyableValue label={t('copyValue')} value={`${baseUrl}/v1`} /></dd>
+            </div>
+            <div>
+              <dt>{t('ollamaBaseUrl')}</dt>
+              <dd><CopyableValue label={t('copyValue')} value={baseUrl} /></dd>
+            </div>
+          </dl>
+        </div>
+        <dl className="endpoint-hero-facts">
+          <div>
+            <dt>{t('localRoutingMode')}</dt>
+            <dd>{t(`routingMode${routing.routingMode}`, routing.routingMode)}</dd>
+            <small>{t('defaultLimitEach', { limit: routing.defaultMaxConcurrentRequests })}</small>
+          </div>
+          <div className={routing.runtimeAvailable && routing.healthyBackends < routing.routableBackends ? 'warning' : ''}>
+            <dt>{t('providersHealthy')}</dt>
+            <dd>{routing.runtimeAvailable ? `${routing.healthyBackends} / ${routing.routableBackends}` : '-'}</dd>
+            {routing.runtimeAvailable ? null : <small>{t('healthUnknownNotRunning')}</small>}
+          </div>
+        </dl>
+      </section>
+      <KpiGrid>
+        <Metric icon={<Zap size={18} />} label={t('answeredHere')} subtext={t('sinceStart')} tone="success" value={formatCount(routing.localRequests, t)} />
+        <Metric icon={<Activity size={18} />} label={t('sentToNetwork')} subtext={t('sinceStart')} tone="info" value={formatCount(routing.networkRequests, t)} />
+        <Metric icon={<RefreshCw size={18} />} label={t('networkFallbacks')} subtext={t('networkFallbacksHelp')} tone={routing.fallbacks > 0 ? 'warning' : 'neutral'} value={formatCount(routing.fallbacks || 0, t)} />
+        <Metric icon={<CircleAlert size={18} />} label={t('errors')} subtext={t('sinceStart')} tone={routing.errors > 0 ? 'danger' : 'neutral'} value={formatCount(routing.errors, t)} />
+      </KpiGrid>
       <Panel
         actions={(
           <div className="button-row">
@@ -945,10 +987,16 @@ function LocalEndpoint({ modalOpen, refresh, requests, routing, setModal }) {
         actions={(row) => [
           { icon: <Play size={14} />, key: 'resolve', label: t('testRoute'), onSelect: () => setModal(resolveModal(t, '')), tooltip: t('tooltipTestRoute') }
         ]}
-        columns={['provider', 'apiType', 'health', 'latencyMs', 'inFlight', 'inFlightLocal', 'inFlightNetwork', 'queued', 'limit', 'shared', 'routable', 'lastError']}
+        columns={['provider', 'apiType', 'health', 'latencyMs', 'inFlight', 'queued', 'usedFor', 'lastError']}
         headerActions={<button className="action-button" onClick={check} title={t('tooltipCheckProviders')} type="button"><RefreshCw size={16} />{t('checkProviders')}</button>}
         onRefresh={refresh}
-        rows={backends.map((item) => ({ ...item, latencyMs: item.latencyMs == null ? '' : Math.round(item.latencyMs), health: t(`health_${item.health}`, item.health) }))}
+        rows={backends.map((item) => ({
+          ...item,
+          latencyMs: item.latencyMs == null ? '' : Math.round(item.latencyMs),
+          health: t(`health_${item.health}`, item.health),
+          inFlight: t('inUseValue', { used: item.inFlight || 0, limit: item.limit ?? '-', local: item.inFlightLocal || 0, network: item.inFlightNetwork || 0 }),
+          usedFor: t(item.routable && item.shared ? 'usedForBoth' : item.routable ? 'usedForLocal' : item.shared ? 'usedForNetwork' : 'usedForNone')
+        }))}
         title={t('providersOnThisMachine')}
       />
       <DataTable
@@ -1172,12 +1220,13 @@ function LocalApiExplorer({ state }) {
         headers: { Accept: 'application/json' },
         signal: controller.signal
       };
+      if (selected.target === 'local') request.headers['X-Xeno-Local-Token'] = window.__XENO_LOCAL_TOKEN__ || '';
       if (selected.method !== 'GET') {
         request.headers['Content-Type'] = 'application/json';
         request.body = body || '{}';
       }
 
-      const result = await fetch(baseUrl + selected.path, request);
+      const result = await fetch(sampleBase(selected, baseUrl) + selected.path, request);
       setStatus(`${result.status} ${result.statusText}`);
       setRouteHeaders({ route: result.headers.get('x-xeno-route') || '', fallback: result.headers.get('x-xeno-fallback') === 'true' });
       const contentType = result.headers.get('content-type') || '';
@@ -1218,7 +1267,7 @@ function LocalApiExplorer({ state }) {
     abortRef.current?.abort();
   }
 
-  const curl = buildLocalInferenceCurl(baseUrl, selected, body);
+  const curl = buildLocalInferenceCurl(sampleBase(selected, baseUrl), selected, body);
   return (
     <div className="local-api-explorer">
       <Panel title={t('localInferenceStatus')} actions={<CopyButton label={t('copyValue')} value={baseUrl} />}>
@@ -1247,7 +1296,7 @@ function LocalApiExplorer({ state }) {
           <div className="explorer-detail">
             <div className="explorer-endpoint">
               <span className="method-pill">{selected.method}</span>
-              <CopyableValue label={t('copyValue')} value={baseUrl + selected.path} />
+              <CopyableValue label={t('copyValue')} value={sampleBase(selected, baseUrl) + selected.path} />
             </div>
             {selected.method !== 'GET' ? (
               <label className="field span-full">
@@ -1290,12 +1339,28 @@ function localInferenceSamples(t) {
     { id: 'ollama-chat', group: 'Ollama', label: t('chat'), method: 'POST', path: '/api/chat', body: { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'Say hello from Xeno.' }], stream: false } },
     { id: 'ollama-chat-stream', group: 'Ollama', label: t('streamingChat'), method: 'POST', path: '/api/chat', body: { model: 'llama3.2:latest', messages: [{ role: 'user', content: 'Stream a short greeting from Xeno.' }], stream: true } },
     { id: 'ollama-embeddings', group: 'Ollama', label: t('legacyEmbeddings'), method: 'POST', path: '/api/embeddings', body: { model: 'nomic-embed-text:latest', prompt: 'local inference' } },
-    { id: 'ollama-embed', group: 'Ollama', label: t('embeddings'), method: 'POST', path: '/api/embed', body: { model: 'nomic-embed-text:latest', input: ['local inference', 'xeno client'] } }
+    { id: 'ollama-embed', group: 'Ollama', label: t('embeddings'), method: 'POST', path: '/api/embed', body: { model: 'nomic-embed-text:latest', input: ['local inference', 'xeno client'] } },
+    { id: 'chat-models', group: t('chatApiGroup'), label: t('chatApiModels'), method: 'GET', path: '/api/v1/chat/models', target: 'local' },
+    { id: 'chat-tools', group: t('chatApiGroup'), label: t('chatApiTools'), method: 'GET', path: '/api/v1/chat/tools', target: 'local' },
+    { id: 'chat-conversations', group: t('chatApiGroup'), label: t('chatApiConversations'), method: 'GET', path: '/api/v1/chat/conversations?limit=20', target: 'local' },
+    { id: 'chat-create', group: t('chatApiGroup'), label: t('chatApiCreate'), method: 'POST', path: '/api/v1/chat/conversations', body: { model: 'llama3.2:latest', title: 'API Explorer', surface: 'Web' }, target: 'local' },
+    { id: 'chat-history', group: t('chatApiGroup'), label: t('chatApiHistory'), method: 'GET', path: '/api/v1/chat/history?pageSize=20', target: 'local' },
+    { id: 'chat-feedback', group: t('chatApiGroup'), label: t('chatApiFeedback'), method: 'GET', path: '/api/v1/chat/feedback?pageSize=20', target: 'local' },
+    { id: 'chat-analytics', group: t('chatApiGroup'), label: t('chatApiAnalytics'), method: 'GET', path: '/api/v1/chat/analytics?bucketMinutes=60', target: 'local' },
+    { id: 'usage-served', group: t('usage'), label: t('usageDatasetServedRequests'), method: 'GET', path: '/api/v1/requests/analytics/usage?bucketMinutes=15', target: 'local' },
+    { id: 'usage-endpoint', group: t('usage'), label: t('usageDatasetLocalEndpoint'), method: 'GET', path: '/api/v1/local-inference/analytics/usage?bucketMinutes=15', target: 'local' },
+    { id: 'usage-chat', group: t('usage'), label: t('usageDatasetChat'), method: 'GET', path: '/api/v1/chat/analytics/usage?bucketMinutes=15', target: 'local' },
+    { id: 'usage-health', group: t('usage'), label: t('usageChartHealth'), method: 'GET', path: '/api/v1/telemetry/providers/health?bucketMinutes=15', target: 'local' }
   ];
+}
+
+function sampleBase(sample, baseUrl) {
+  return sample.target === 'local' ? window.location.origin : baseUrl;
 }
 
 function buildLocalInferenceCurl(baseUrl, sample, body) {
   const lines = [`curl -i -X ${sample.method} "${baseUrl}${sample.path}"`];
+  if (sample.target === 'local') lines.push('  -H "X-Xeno-Local-Token: <token from ~/.xeno/local-api.json>"');
   if (sample.method !== 'GET') {
     lines.push('  -H "Content-Type: application/json"');
     lines.push(`  -d '${body || '{}'}'`);
@@ -1307,6 +1372,8 @@ function buildLocalInferenceCurl(baseUrl, sample, body) {
 function Settings({ database, refresh, state }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState('');
+  const chatSettings = state?.settings?.chat || {};
+  const mcpSettings = state?.settings?.mcp || {};
 
   async function save(event) {
     event.preventDefault();
@@ -1316,6 +1383,15 @@ function Settings({ database, refresh, state }) {
     const localInference = state?.settings?.localInferenceServer || {};
     const telemetry = state?.settings?.telemetry || {};
     const providerTelemetry = telemetry.providerTelemetry || {};
+    const chat = state?.settings?.chat || {};
+    const mcp = state?.settings?.mcp || {};
+    let mcpServers = chat.mcpServers || [];
+    try {
+      if (form.has('chatMcpServers')) mcpServers = parseMcpServers(form.get('chatMcpServers'), t);
+    } catch (err) {
+      setStatus(err.message);
+      return;
+    }
     await localApi('/api/v1/settings', {
       method: 'PUT',
       body: jsonBody({
@@ -1343,9 +1419,42 @@ function Settings({ database, refresh, state }) {
           routes: localInference.routes || [],
           discoverLocalModels: form.has('localInferenceRoutingMode') ? form.get('localInferenceDiscoverLocalModels') === 'on' : localInference.discoverLocalModels !== false,
           healthCheckIntervalMs: Number(form.get('localInferenceHealthCheckIntervalMs') || localInference.healthCheckIntervalMs || 15000),
-          localQueueTimeoutMs: form.has('localInferenceLocalQueueTimeoutMs') && form.get('localInferenceLocalQueueTimeoutMs') !== '' ? Number(form.get('localInferenceLocalQueueTimeoutMs')) : (localInference.localQueueTimeoutMs ?? 30000)
+          localQueueTimeoutMs: form.has('localInferenceLocalQueueTimeoutMs') && form.get('localInferenceLocalQueueTimeoutMs') !== '' ? Number(form.get('localInferenceLocalQueueTimeoutMs')) : (localInference.localQueueTimeoutMs ?? 30000),
+          requestRetentionDays: Number(form.get('localInferenceRequestRetentionDays') || localInference.requestRetentionDays || 30)
         },
         defaultMaxConcurrentRequests: Number(form.get('defaultMaxConcurrentRequests') || state?.settings?.defaultMaxConcurrentRequests || 4),
+        analytics: {
+          maxRecordsPerQuery: Number(form.get('analyticsMaxRecordsPerQuery') || state?.settings?.analytics?.maxRecordsPerQuery || 250000),
+          defaultTopN: Number(form.get('analyticsDefaultTopN') || state?.settings?.analytics?.defaultTopN || 8)
+        },
+        mcp: {
+          enabled: form.has('mcpHost') ? form.get('mcpEnabled') === 'on' : !!mcp.enabled,
+          host: form.get('mcpHost') || mcp.host || '127.0.0.1',
+          port: Number(form.get('mcpPort') || mcp.port || 11436),
+          requireToken: form.has('mcpHost') ? form.get('mcpRequireToken') === 'on' : mcp.requireToken !== false
+        },
+        chat: {
+          // Keep every chat setting this form does not show (it replaces the whole Chat section).
+          ...chat,
+          historyRetentionDays: Number(form.get('chatHistoryRetentionDays') || chat.historyRetentionDays || 30),
+          maxToolIterations: Number(form.get('chatMaxToolIterations') || chat.maxToolIterations || 8),
+          maxToolCallsPerTurn: Number(form.get('chatMaxToolCallsPerTurn') || chat.maxToolCallsPerTurn || 16),
+          toolApprovalTimeoutSeconds: Number(form.get('chatToolApprovalTimeoutSeconds') || chat.toolApprovalTimeoutSeconds || 120),
+          defaultSystemPrompt: form.has('chatDefaultSystemPrompt') ? (form.get('chatDefaultSystemPrompt') || null) : (chat.defaultSystemPrompt || null),
+          defaultWorkingDirectory: form.has('chatDefaultWorkingDirectory') ? (String(form.get('chatDefaultWorkingDirectory') || '').trim() || null) : (chat.defaultWorkingDirectory || null),
+          processTimeoutSeconds: Number(form.get('chatProcessTimeoutSeconds') || chat.processTimeoutSeconds || 120),
+          maxToolOutputCharacters: Number(form.get('chatMaxToolOutputCharacters') || chat.maxToolOutputCharacters || 50000),
+          taskPlanningEnabled: form.has('chatProcessTimeoutSeconds') ? form.get('chatTaskPlanningEnabled') === 'on' : chat.taskPlanningEnabled !== false,
+          memoryEnabled: form.has('chatProcessTimeoutSeconds') ? form.get('chatMemoryEnabled') === 'on' : chat.memoryEnabled !== false,
+          webRetrieveAllowPrivateNetworks: form.has('chatProcessTimeoutSeconds') ? form.get('chatWebRetrieveAllowPrivateNetworks') === 'on' : !!chat.webRetrieveAllowPrivateNetworks,
+          webSearch: form.has('chatWebSearchProvider') ? {
+            provider: form.get('chatWebSearchProvider') || 'None',
+            tavilyApiKey: String(form.get('chatTavilyApiKey') || '').trim() || null,
+            youApiKey: String(form.get('chatYouApiKey') || '').trim() || null,
+            maxResults: Number(form.get('chatWebSearchMaxResults') || chat.webSearch?.maxResults || 5)
+          } : chat.webSearch,
+          mcpServers
+        },
         telemetry: {
           enabled: form.has('telemetryEnabled') ? form.get('telemetryEnabled') === 'on' : !!telemetry.enabled,
           collectionIntervalMs: Number(form.get('telemetryCollectionIntervalMs') || telemetry.collectionIntervalMs || 15000),
@@ -1430,6 +1539,9 @@ function Settings({ database, refresh, state }) {
           <Toggle checked={localInference.discoverLocalModels !== false} label={t('discoverLocalModels')} name="localInferenceDiscoverLocalModels" tooltip={t('tooltipDiscoverLocalModels')} />
           <Field defaultValue={localInference.healthCheckIntervalMs || 15000} label={t('healthCheckIntervalMs')} name="localInferenceHealthCheckIntervalMs" tooltip={t('tooltipHealthCheckIntervalMs')} type="number" />
           <Field defaultValue={localInference.localQueueTimeoutMs ?? 30000} label={t('localQueueTimeoutMs')} name="localInferenceLocalQueueTimeoutMs" tooltip={t('tooltipLocalQueueTimeoutMs')} type="number" />
+          <Field defaultValue={localInference.requestRetentionDays || 30} label={t('usageSettingRetention')} name="localInferenceRequestRetentionDays" tooltip={t('tooltipUsageSettingRetention')} type="number" />
+          <Field defaultValue={state?.settings?.analytics?.maxRecordsPerQuery || 250000} label={t('usageSettingMaxRecords')} name="analyticsMaxRecordsPerQuery" tooltip={t('tooltipUsageSettingMaxRecords')} type="number" />
+          <Field defaultValue={state?.settings?.analytics?.defaultTopN || 8} label={t('usageSettingTopN')} name="analyticsDefaultTopN" tooltip={t('tooltipUsageSettingTopN')} type="number" />
           <Field defaultValue={state?.settings?.defaultMaxConcurrentRequests || 4} label={t('defaultMaxConcurrentRequests')} name="defaultMaxConcurrentRequests" tooltip={t('tooltipDefaultMaxConcurrentRequests')} type="number" />
           <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
         </form>
@@ -1461,6 +1573,55 @@ function Settings({ database, refresh, state }) {
           <Toggle checked={providerTelemetry.collectModelDetails} label={t('collectModelDetails')} name="providerTelemetryCollectModelDetails" tooltip={t('tooltipProviderTelemetryModelDetails')} />
           <Toggle checked={providerTelemetry.collectProcessCorrelation} label={t('collectProcessCorrelation')} name="providerTelemetryCollectProcessCorrelation" tooltip={t('tooltipProviderTelemetryProcessCorrelation')} />
           <Toggle checked={providerTelemetry.collectCloudHeaderTelemetry} label={t('collectCloudHeaderTelemetry')} name="providerTelemetryCollectCloudHeaderTelemetry" tooltip={t('tooltipProviderTelemetryCloudHeaders')} />
+          <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
+        </form>
+      </Panel>
+      <Panel title={t('mcpSettings')}>
+        <div className="empty-state">{t('mcpSettingsNotice')}</div>
+        <form className="form-grid" onSubmit={save}>
+          <Toggle checked={mcpSettings.enabled} label={t('mcpSettingEnabled')} name="mcpEnabled" tooltip={t('tooltipMcpSettingEnabled')} />
+          <Toggle checked={mcpSettings.requireToken !== false} label={t('mcpSettingRequireToken')} name="mcpRequireToken" tooltip={t('tooltipMcpSettingRequireToken')} />
+          <SelectField defaultValue={mcpSettings.host || '127.0.0.1'} label={t('host')} name="mcpHost" options={['127.0.0.1', 'localhost', '::1', '[::1]'].map((value) => ({ value, label: value }))} tooltip={t('tooltipMcpSettingHost')} />
+          <Field defaultValue={mcpSettings.port || 11436} label={t('port')} name="mcpPort" tooltip={t('tooltipMcpSettingPort')} type="number" />
+          <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
+        </form>
+      </Panel>
+      <Panel title={t('chatSettings')}>
+        <div className="empty-state">{t('chatSettingsNotice')}</div>
+        <form className="form-grid" onSubmit={save}>
+          <Field defaultValue={chatSettings.historyRetentionDays || 30} label={t('chatSettingRetention')} name="chatHistoryRetentionDays" tooltip={t('tooltipChatSettingRetention')} type="number" />
+          <Field defaultValue={chatSettings.toolApprovalTimeoutSeconds || 120} label={t('chatSettingApprovalTimeout')} name="chatToolApprovalTimeoutSeconds" tooltip={t('tooltipChatSettingApprovalTimeout')} type="number" />
+          <Field defaultValue={chatSettings.maxToolIterations || 8} label={t('chatSettingMaxIterations')} name="chatMaxToolIterations" tooltip={t('tooltipChatSettingMaxIterations')} type="number" />
+          <Field defaultValue={chatSettings.maxToolCallsPerTurn || 16} label={t('chatSettingMaxToolCalls')} name="chatMaxToolCallsPerTurn" tooltip={t('tooltipChatSettingMaxToolCalls')} type="number" />
+          <label className="form-field span-full" title={t('tooltipChatSettingSystemPrompt')}><span>{t('chatSettingSystemPrompt')}</span><textarea defaultValue={chatSettings.defaultSystemPrompt || ''} name="chatDefaultSystemPrompt" rows={4} title={t('tooltipChatSettingSystemPrompt')} /></label>
+          <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
+        </form>
+      </Panel>
+      <Panel title={t('chatToolSettings')}>
+        <div className="empty-state">{t('chatToolSettingsNotice')}</div>
+        <form className="form-grid" onSubmit={save}>
+          <Field defaultValue={chatSettings.defaultWorkingDirectory || ''} label={t('chatSettingWorkingDirectory')} name="chatDefaultWorkingDirectory" tooltip={t('tooltipChatSettingWorkingDirectory')} />
+          <Field defaultValue={chatSettings.processTimeoutSeconds || 120} label={t('chatSettingProcessTimeout')} name="chatProcessTimeoutSeconds" tooltip={t('tooltipChatSettingProcessTimeout')} type="number" />
+          <Field defaultValue={chatSettings.maxToolOutputCharacters || 50000} label={t('chatSettingMaxToolOutput')} name="chatMaxToolOutputCharacters" tooltip={t('tooltipChatSettingMaxToolOutput')} type="number" />
+          <Toggle checked={chatSettings.taskPlanningEnabled !== false} label={t('chatSettingTaskPlanning')} name="chatTaskPlanningEnabled" tooltip={t('tooltipChatSettingTaskPlanning')} />
+          <Toggle checked={chatSettings.memoryEnabled !== false} label={t('chatSettingMemory')} name="chatMemoryEnabled" tooltip={t('tooltipChatSettingMemory')} />
+          <Toggle checked={!!chatSettings.webRetrieveAllowPrivateNetworks} label={t('chatSettingWebPrivate')} name="chatWebRetrieveAllowPrivateNetworks" tooltip={t('tooltipChatSettingWebPrivate')} />
+          <label className="form-field" title={t('tooltipChatSettingWebSearch')}>
+            <span>{t('chatSettingWebSearch')}</span>
+            <select defaultValue={chatSettings.webSearch?.provider || 'None'} name="chatWebSearchProvider" title={t('tooltipChatSettingWebSearch')}>
+              <option value="None">{t('none')}</option>
+              <option value="Tavily">Tavily</option>
+              <option value="You">You.com</option>
+            </select>
+          </label>
+          <Field defaultValue={chatSettings.webSearch?.maxResults || 5} label={t('chatSettingWebSearchResults')} name="chatWebSearchMaxResults" tooltip={t('tooltipChatSettingWebSearchResults')} type="number" />
+          <Field defaultValue={chatSettings.webSearch?.tavilyApiKey || ''} label={t('chatSettingTavilyKey')} name="chatTavilyApiKey" tooltip={t('tooltipChatSettingTavilyKey')} type="password" />
+          <Field defaultValue={chatSettings.webSearch?.youApiKey || ''} label={t('chatSettingYouKey')} name="chatYouApiKey" tooltip={t('tooltipChatSettingYouKey')} type="password" />
+          <label className="form-field span-full" title={t('tooltipChatSettingMcpServers')}>
+            <span>{t('chatSettingMcpServers')}</span>
+            <textarea className="code-textarea" defaultValue={JSON.stringify(chatSettings.mcpServers || [], null, 2)} name="chatMcpServers" rows={10} spellCheck={false} title={t('tooltipChatSettingMcpServers')} />
+          </label>
+          <McpServerStatusList />
           <div className="button-row"><button className="primary-button" title={t('tooltipSaveSettings')} type="submit">{t('saveSettings')}</button></div>
         </form>
       </Panel>
@@ -1569,7 +1730,7 @@ function messageModal(t, titleText, message, json) {
   };
 }
 
-function DataTable({ actions, columns, compact = false, headerActions, onRefresh, onRowClick, rowActionLabel, rows, title: tableTitle }) {
+export function DataTable({ actions, columns, compact = false, headerActions, onRefresh, onRowClick, rowActionLabel, rows, title: tableTitle }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [draftFilters, setDraftFilters] = useState({});
@@ -1723,6 +1884,8 @@ function RequestDetails({ entry }) {
   return (
     <div className="details-stack">
       <RecordTable fields={['id', 'tenantId', 'requestorTenantId', 'requestorPrincipalType', 'requestorPrincipalId', 'clientId', 'requestorIp', 'providerName', 'apiType', 'modelName', 'outcome', 'statusCode']} record={entry} />
+      <h3>{t('usageChartRequestTiming')}</h3>
+      <TimingBars stages={servedRequestStages(entry.telemetry)} />
       {['requestHeaders', 'requestBody', 'responseHeaders', 'responseBody', 'telemetry', 'timeline'].map((field) => (
         <details key={field} open>
           <summary>{title(field, t)} <CopyButton label={t('copyValue')} value={typeof entry[field] === 'string' ? entry[field] : JSON.stringify(entry[field] || {}, null, 2)} /></summary>
@@ -1748,363 +1911,6 @@ function TelemetryDetails({ detail }) {
   );
 }
 
-function TelemetryChartDisclosure({ children, loading = false, onToggle, open, subtitle, title }) {
-  return (
-    <details className="workspace-card telemetry-collapsible-chart" onToggle={(event) => onToggle?.(event.currentTarget.open)} open={open}>
-      <summary className="workspace-card-header telemetry-collapsible-summary">
-        <div>
-          <h2>{title}</h2>
-          {subtitle ? <p>{subtitle}</p> : null}
-        </div>
-        <div className="workspace-card-actions">
-          {loading ? <div aria-hidden="true" className="table-loading-spinner compact-spinner" /> : null}
-          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </div>
-      </summary>
-      {open ? <div className="workspace-card-body">{children}</div> : null}
-    </details>
-  );
-}
-
-function TelemetrySparkChart({ emptyTitle, framed = true, loading = false, loadingLabel = 'Loading...', series, subtitle, title: chartTitle, totalLabel = 'Total', valueFormatter }) {
-  const canvasRef = useRef(null);
-  const [hovered, setHovered] = useState(null);
-  const normalizedSeries = series.map((item) => ({
-    ...item,
-    values: Array.isArray(item.values) ? item.values : []
-  }));
-  const finiteValues = normalizedSeries.flatMap((item) => item.values.map((point) => Number(point.value)).filter((nextValue) => Number.isFinite(nextValue)));
-  const chart = { width: 900, height: 360, left: 54, right: 28, top: 24, bottom: 44 };
-  const plotWidth = chart.width - chart.left - chart.right;
-  const plotHeight = chart.height - chart.top - chart.bottom;
-  const hasData = finiteValues.length > 0;
-  const bucketCount = Math.max(0, ...normalizedSeries.map((item) => item.values.length));
-  const stackedTotals = Array.from({ length: bucketCount }, (_, index) => normalizedSeries.reduce((total, item) => {
-    const pointValue = Number(item.values[index]?.value);
-    return total + (Number.isFinite(pointValue) ? Math.max(0, pointValue) : 0);
-  }, 0));
-  const max = Math.max(1, ...stackedTotals);
-  const axisMax = telemetryAxisMaximum(max);
-  const yTicks = buildTelemetryYAxisTicks(axisMax);
-  const bucketSlot = plotWidth / Math.max(1, bucketCount);
-  const barWidth = Math.max(2, Math.min(18, bucketSlot - Math.min(12, Math.max(2, bucketSlot * 0.22))));
-  const xTicks = buildTelemetryXAxisTicks(normalizedSeries, bucketCount, chart.left, plotWidth);
-
-  function updateHover(event) {
-    if (bucketCount === 0 || !canvasRef.current) {
-      setHovered(null);
-      return;
-    }
-
-    const bounds = canvasRef.current.getBoundingClientRect();
-    const svgX = (event.clientX - bounds.left) / Math.max(1, bounds.width) * chart.width;
-    const boundedX = Math.max(chart.left, Math.min(chart.left + plotWidth, svgX));
-    const index = Math.max(0, Math.min(bucketCount - 1, Math.floor(((boundedX - chart.left) / Math.max(1, plotWidth)) * bucketCount)));
-    const x = chart.left + index * bucketSlot + bucketSlot / 2;
-    const rows = normalizedSeries.map((item) => {
-      const point = item.values[index] || {};
-      const pointValue = Number(point.value);
-      return {
-        color: item.color,
-        key: item.key,
-        label: item.label,
-        value: Number.isFinite(pointValue) ? pointValue : null
-      };
-    });
-    const label = normalizedSeries.map((item) => item.values[index]?.label).find(Boolean) || '';
-    const total = rows.reduce((sum, row) => sum + (Number.isFinite(Number(row.value)) ? Number(row.value) : 0), 0);
-    setHovered({
-      label,
-      rows,
-      svgX: x,
-      total,
-      ...telemetryTooltipFromPointer(event, canvasRef.current)
-    });
-  }
-
-  const chartBody = (
-    <>
-      {!hasData && !loading ? <EmptyState title={emptyTitle} message={subtitle} /> : (
-        <div className="activity-chart-panel compact-chart-panel telemetry-spark-chart-panel">
-          <div className="chart-canvas" ref={canvasRef}>
-            <svg className="activity-chart" onMouseLeave={() => setHovered(null)} onMouseMove={updateHover} viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={chartTitle}>
-              <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.top + plotHeight} stroke="var(--color-border)" />
-              <line x1={chart.left} y1={chart.top + plotHeight} x2={chart.left + plotWidth} y2={chart.top + plotHeight} stroke="var(--color-border)" />
-              {yTicks.map((tick) => {
-                const y = chart.top + (1 - tick.ratio) * plotHeight;
-                return (
-                  <g key={tick.key}>
-                    <line x1={chart.left} y1={y} x2={chart.left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" opacity="0.72" />
-                    <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{valueFormatter(tick.value)}</text>
-                  </g>
-                );
-              })}
-              {Array.from({ length: bucketCount }, (_, index) => {
-                const x = chart.left + index * bucketSlot + (bucketSlot - barWidth) / 2;
-                let stackedHeight = 0;
-                return (
-                  <g key={`bucket-${index}`}>
-                    <rect x={chart.left + index * bucketSlot} y={chart.top} width={bucketSlot} height={plotHeight} fill="transparent" />
-                    {normalizedSeries.map((item) => {
-                      const point = item.values[index] || {};
-                      const pointValue = Number(point.value);
-                      if (!Number.isFinite(pointValue)) return null;
-                      const height = Math.max(0, (Math.max(0, pointValue) / axisMax) * plotHeight);
-                      const y = chart.top + plotHeight - stackedHeight - height;
-                      stackedHeight += height;
-                      return (
-                        <rect
-                          fill={item.color}
-                          height={height}
-                          key={`${item.key}-${index}`}
-                          rx="2"
-                          width={barWidth}
-                          x={x}
-                          y={y}
-                        >
-                          <title>{`${item.label} ${point.label}: ${valueFormatter(pointValue)}`}</title>
-                        </rect>
-                      );
-                    })}
-                  </g>
-                );
-              })}
-              {hovered ? (
-                <rect className="chart-hover-band" x={hovered.svgX - bucketSlot / 2} y={chart.top} width={bucketSlot} height={plotHeight} />
-              ) : null}
-              {xTicks.map((tick) => (
-                <text className="axis-label" key={tick.key} x={tick.x} y={chart.top + plotHeight + 18} textAnchor="middle">{tick.label}</text>
-              ))}
-              <rect
-                fill="transparent"
-                height={plotHeight}
-                onFocus={(event) => updateHover({ ...event, clientX: event.currentTarget.getBoundingClientRect().left, clientY: event.currentTarget.getBoundingClientRect().top })}
-                width={plotWidth}
-                x={chart.left}
-                y={chart.top}
-              />
-            </svg>
-            {hovered ? (
-              <div className="chart-tooltip telemetry-chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
-                <strong>{hovered.label}</strong>
-                {hovered.rows.map((row) => (
-                  <span className="chart-tooltip-row" key={row.key}>
-                    <i style={{ background: row.color }} />
-                    <span>{row.label}</span>
-                    <b>{row.value === null ? '-' : valueFormatter(row.value)}</b>
-                  </span>
-                ))}
-                <span className="chart-tooltip-row">
-                  <i />
-                  <span>{totalLabel}</span>
-                  <b>{valueFormatter(hovered.total)}</b>
-                </span>
-              </div>
-            ) : null}
-            {loading ? <ChartLoadingOverlay label={loadingLabel} /> : null}
-          </div>
-          <div className="chart-legend">
-            {normalizedSeries.map((item) => <span key={item.key}><i style={{ background: item.color }} />{item.label}</span>)}
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  if (!framed) return chartBody;
-  return <Panel title={chartTitle}>{chartBody}</Panel>;
-}
-
-function ChartLoadingOverlay({ label }) {
-  return (
-    <div aria-live="polite" className="chart-loading-overlay" role="status">
-      <div aria-hidden="true" className="table-loading-spinner" />
-      <strong>{label}</strong>
-    </div>
-  );
-}
-
-function MetricChart({ onRangeChange, onRefresh, range, rollups, showControls = true }) {
-  const { t } = useTranslation();
-  const canvasRef = useRef(null);
-  const refreshRef = useRef(onRefresh);
-  const [chartWidth, setChartWidth] = useState(760);
-  const [chartHeight, setChartHeight] = useState(525);
-  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
-  const [hovered, setHovered] = useState(null);
-  const buckets = useMemo(() => buildMetricBuckets(rollups, range), [range, rollups]);
-  const max = Math.max(1, ...buckets.map((bucket) => Number(bucket.maximum ?? bucket.average ?? 0)));
-  const axisMax = metricAxisMaximum(max);
-  const height = chartHeight;
-  const left = 58;
-  const right = 28;
-  const top = 28;
-  const bottom = 52;
-  const width = chartWidth;
-  const plotWidth = width - left - right;
-  const plotHeight = height - top - bottom;
-  const baseY = top + plotHeight;
-  const slot = plotWidth / Math.max(1, buckets.length);
-  const barWidth = Math.max(2, Math.min(14, slot - 2));
-  const yTicks = buildMetricYAxisTicks(axisMax);
-  const xTicks = buildMetricXAxisTicks(buckets, left, plotWidth);
-
-  useEffect(() => {
-    refreshRef.current = onRefresh;
-  }, [onRefresh]);
-
-  useEffect(() => {
-    if (!autoRefreshSeconds || !refreshRef.current) return undefined;
-    const interval = window.setInterval(() => {
-      refreshRef.current?.();
-    }, autoRefreshSeconds * 1000);
-    return () => window.clearInterval(interval);
-  }, [autoRefreshSeconds]);
-
-  useEffect(() => {
-    const element = canvasRef.current;
-    if (!element) return undefined;
-
-    function updateSize() {
-      setChartWidth(Math.max(360, Math.round(element.clientWidth || 760)));
-      setChartHeight(Math.max(360, Math.round(element.clientHeight || 525)));
-    }
-
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div className="activity-chart-panel">
-      {showControls || onRefresh ? (
-        <div className="chart-controls" aria-label={t('chartRange')}>
-          {showControls ? ['lastHour', 'lastDay', 'lastWeek', 'lastMonth'].map((item) => (
-            <button className={item === range ? 'active' : ''} key={item} onClick={() => onRangeChange?.(item)} title={t('tooltipChartRangeOption', { range: t(item) })} type="button">{t(item)}</button>
-          )) : null}
-          <MetricChartRefresh
-            autoRefreshSeconds={autoRefreshSeconds}
-            disabled={!onRefresh}
-            onRefresh={onRefresh}
-            setAutoRefreshSeconds={setAutoRefreshSeconds}
-            t={t}
-          />
-        </div>
-      ) : null}
-      <div className="chart-canvas" ref={canvasRef}>
-        <svg className="activity-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('telemetry')}>
-          <line x1={left} y1={top} x2={left} y2={baseY} stroke="var(--color-border)" />
-          <line x1={left} y1={baseY} x2={left + plotWidth} y2={baseY} stroke="var(--color-border)" />
-          {yTicks.map((tick) => {
-            const y = baseY - tick.ratio * plotHeight;
-            return <g key={tick.value}><line x1={left} y1={y} x2={left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" /><text className="axis-label" x={left - 10} y={y + 4} textAnchor="end">{formatMetric(tick.value)}</text></g>;
-          })}
-          <text className="axis-title" transform={`translate(16 ${top + plotHeight / 2}) rotate(-90)`}>{t('metric')}</text>
-          <text className="axis-title" x={left + plotWidth / 2} y={height - 12} textAnchor="middle">{t('time')}</text>
-          {buckets.map((bucket, index) => {
-            const value = Number(bucket.average ?? 0);
-            const x = left + index * slot + (slot - barWidth) / 2;
-            const barHeight = (value / axisMax) * plotHeight;
-            const y = baseY - barHeight;
-            return (
-              <g key={`${bucket.label}-${index}`} onMouseLeave={() => setHovered(null)} onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}>
-                <rect x={x} y={top} width={barWidth} height={plotHeight} fill="transparent" />
-                <rect x={x} y={y} width={barWidth} height={barHeight} rx="3" fill="var(--color-accent)" />
-              </g>
-            );
-          })}
-          {xTicks.map((tick) => (
-            <text className="axis-label" key={tick.key} x={tick.x} y={baseY + 18} textAnchor="middle">{tick.label}</text>
-          ))}
-        </svg>
-        {hovered ? (
-          <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
-            <strong>{hovered.bucket.label}</strong>
-            <span>{t('average')}: {formatMetric(hovered.bucket.average)}</span>
-            <span>{t('minimum')}: {formatMetric(hovered.bucket.minimum)}</span>
-            <span>{t('maximum')}: {formatMetric(hovered.bucket.maximum)}</span>
-            <span>{t('samples')}: {hovered.bucket.count}</span>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function MetricChartRefresh({ autoRefreshSeconds, disabled, onRefresh, setAutoRefreshSeconds, t }) {
-  if (!onRefresh) return null;
-  return (
-    <label className="chart-refresh" title={t('tooltipAutoRefresh')}>
-      <span>{t('autoRefresh')}</span>
-      <select
-        disabled={disabled}
-        value={autoRefreshSeconds}
-        onChange={(event) => setAutoRefreshSeconds(Number(event.target.value))}
-        title={t('tooltipAutoRefresh')}
-      >
-        {chartRefreshIntervals.map((seconds) => (
-          <option key={seconds} value={seconds}>{seconds === 0 ? t('none') : `${seconds}s`}</option>
-        ))}
-      </select>
-      <button className="pagination-button" disabled={disabled} onClick={onRefresh} title={t('tooltipManualRefresh')} type="button">
-        <RefreshCw size={14} />
-      </button>
-    </label>
-  );
-}
-
-function buildMetricBuckets(rollups, range) {
-  const desiredCount = desiredChartBuckets(range);
-  const raw = Array.isArray(rollups) ? rollups.slice(-desiredCount) : [];
-  const normalized = raw.map((bucket, index) => ({
-    average: Number(bucket.average ?? bucket.Average ?? 0),
-    count: Number(bucket.count ?? bucket.Count ?? 0),
-    label: String(bucket.label ?? bucket.Label ?? fallbackMetricLabel(range, Math.max(0, desiredCount - raw.length + index), desiredCount)),
-    maximum: Number(bucket.maximum ?? bucket.Maximum ?? bucket.average ?? bucket.Average ?? 0),
-    minimum: Number(bucket.minimum ?? bucket.Minimum ?? bucket.average ?? bucket.Average ?? 0)
-  }));
-  const missing = Math.max(0, desiredCount - normalized.length);
-  const padding = Array.from({ length: missing }, (_, index) => ({
-    average: 0,
-    count: 0,
-    label: fallbackMetricLabel(range, index, desiredCount),
-    maximum: 0,
-    minimum: 0
-  }));
-  return [...padding, ...normalized].slice(-desiredCount);
-}
-
-function localTelemetryRollupValues(rollups, range) {
-  const desiredCount = desiredChartBuckets(range);
-  const raw = Array.isArray(rollups) ? rollups.slice(-desiredCount) : [];
-  const normalized = raw.map((bucket, index) => {
-    const average = bucket.average ?? bucket.Average;
-    const value = Number(average);
-    return {
-      label: String(bucket.label ?? bucket.Label ?? fallbackMetricLabel(range, Math.max(0, desiredCount - raw.length + index), desiredCount)),
-      value: average === null || average === undefined || !Number.isFinite(value) ? null : value
-    };
-  });
-  const missing = Math.max(0, desiredCount - normalized.length);
-  const padding = Array.from({ length: missing }, (_, index) => ({
-    label: fallbackMetricLabel(range, index, desiredCount),
-    value: null
-  }));
-  return [...padding, ...normalized].slice(-desiredCount);
-}
-
-async function loadLocalHostTelemetryRollups(range) {
-  const entries = await Promise.all(localHostTelemetryChartConfigs.map(async (config) => {
-    const response = await localApi(`/api/v1/telemetry/history/rollups?range=${encodeURIComponent(localApiRange(range))}`, {
-      method: 'POST',
-      body: jsonBody({ metric: config.metric, bucketMinutes: telemetryBucketMinutes(range) })
-    });
-    return [config.key, localRows(response)];
-  }));
-  return Object.fromEntries(entries);
-}
-
 function localRows(input) {
   if (Array.isArray(input)) return input;
   if (!input || typeof input !== 'object') return [];
@@ -2117,149 +1923,7 @@ function localRows(input) {
   return [];
 }
 
-function desiredChartBuckets(range) {
-  if (range === 'lastHour') return 60;
-  if (range === 'lastDay') return 96;
-  if (range === 'lastWeek') return 84;
-  if (range === 'lastMonth') return 90;
-  return 96;
-}
-
-function fallbackMetricLabel(range, index, count) {
-  if (range === 'lastHour') return `${Math.max(0, count - index - 1)}m`;
-  if (range === 'lastDay') return `${Math.max(0, Math.floor(index / 4))}h`;
-  if (range === 'lastWeek' || range === 'lastMonth') return fallbackMetricDateLabel(range, index, count);
-  return String(index + 1);
-}
-
-function fallbackMetricDateLabel(range, index, count) {
-  const durationMs = range === 'lastWeek'
-    ? 7 * 24 * 60 * 60 * 1000
-    : 30 * 24 * 60 * 60 * 1000;
-  const bucketMs = durationMs / Math.max(1, count);
-  const timestamp = Date.now() - durationMs + index * bucketMs + bucketMs / 2;
-  return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function metricAxisMaximum(max) {
-  if (!Number.isFinite(max) || max <= 1) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(max));
-  const normalized = max / magnitude;
-  let niceNormalized = 10;
-  if (normalized <= 1) niceNormalized = 1;
-  else if (normalized <= 2) niceNormalized = 2;
-  else if (normalized <= 4) niceNormalized = 4;
-  else if (normalized <= 8) niceNormalized = 8;
-  return niceNormalized * magnitude;
-}
-
-function buildMetricYAxisTicks(max) {
-  if (!Number.isFinite(max) || max <= 1) return [{ value: 1, ratio: 1 }, { value: 0, ratio: 0 }];
-  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
-    ratio,
-    value: max * ratio
-  }));
-}
-
-function buildMetricXAxisTicks(buckets, left, plotWidth) {
-  const count = buckets.length;
-  if (count === 0) return [];
-
-  const tickCount = Math.min(8, count);
-  if (tickCount === 1) {
-    return [{ key: 'x-0', label: buckets[0]?.label || '', x: left + plotWidth / 2 }];
-  }
-
-  return Array.from({ length: tickCount }, (_, tickIndex) => {
-    const ratio = tickIndex / (tickCount - 1);
-    const bucketIndex = Math.min(count - 1, Math.max(0, Math.round(ratio * (count - 1))));
-    return {
-      key: `x-${tickIndex}-${bucketIndex}`,
-      label: buckets[bucketIndex]?.label || '',
-      x: left + ratio * plotWidth
-    };
-  });
-}
-
-function telemetryTooltipFromPointer(event, element) {
-  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
-  const bounds = element.getBoundingClientRect();
-  return telemetryTooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
-}
-
-function telemetryAxisMaximum(maximum) {
-  if (!Number.isFinite(maximum) || maximum <= 1) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(maximum));
-  const normalized = maximum / magnitude;
-  let niceNormalized = 10;
-  if (normalized <= 1) niceNormalized = 1;
-  else if (normalized <= 2) niceNormalized = 2;
-  else if (normalized <= 4) niceNormalized = 4;
-  else if (normalized <= 8) niceNormalized = 8;
-  return niceNormalized * magnitude;
-}
-
-function buildTelemetryYAxisTicks(axisMax) {
-  if (!Number.isFinite(axisMax) || axisMax <= 1) {
-    return [
-      { key: 'y-1', ratio: 1, value: 1 },
-      { key: 'y-0', ratio: 0, value: 0 }
-    ];
-  }
-
-  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
-    key: `y-${ratio}`,
-    ratio,
-    value: axisMax * ratio
-  }));
-}
-
-function buildTelemetryXAxisTicks(series, bucketCount, left, plotWidth) {
-  if (bucketCount <= 0) return [];
-  const tickCount = Math.min(8, bucketCount);
-  if (tickCount === 1) {
-    return [{ key: 'x-0', label: telemetryLabelAt(series, 0), x: left + plotWidth / 2 }];
-  }
-
-  return Array.from({ length: tickCount }, (_, tickIndex) => {
-    const ratio = tickIndex / (tickCount - 1);
-    const bucketIndex = Math.min(bucketCount - 1, Math.max(0, Math.round(ratio * (bucketCount - 1))));
-    return {
-      key: `x-${tickIndex}-${bucketIndex}`,
-      label: telemetryLabelAt(series, bucketIndex),
-      x: left + ratio * plotWidth
-    };
-  });
-}
-
-function telemetryLabelAt(series, index) {
-  return series.map((item) => item.values[index]?.label).find(Boolean) || '';
-}
-
-function telemetryTooltipPosition(x, y, width, height) {
-  const tooltipWidth = 220;
-  const clampedX = Math.max(10, Math.min(width - 10, x));
-  const clampedY = Math.max(24, Math.min(height - 24, y));
-  const transform = clampedX > width - tooltipWidth ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
-  return { x: clampedX, y: clampedY, transform };
-}
-
-function tooltipFromPointer(event, element) {
-  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
-  const bounds = element.getBoundingClientRect();
-  const tooltipWidth = 188;
-  const tooltipHeight = 118;
-  const x = event.clientX - bounds.left;
-  const y = event.clientY - bounds.top;
-  const clampedX = Math.min(Math.max(x, 18), Math.max(18, bounds.width - 18));
-  const clampedY = Math.min(Math.max(y, 42), Math.max(42, bounds.height - 42));
-  const nearRight = clampedX > bounds.width - tooltipWidth;
-  const nearBottom = clampedY > bounds.height - tooltipHeight;
-  const transform = `${nearRight ? 'translateX(calc(-100% - 14px))' : 'translateX(14px)'} ${nearBottom ? 'translateY(calc(-100% + 24px))' : 'translateY(-50%)'}`;
-  return { x: clampedX, y: clampedY, transform };
-}
-
-function Panel({ actions, children, className = '', title: panelTitle }) {
+export function Panel({ actions, children, className = '', title: panelTitle }) {
   return (
     <section className={`workspace-card ${className}`.trim()}>
       <div className="workspace-card-header">
@@ -2273,21 +1937,94 @@ function Panel({ actions, children, className = '', title: panelTitle }) {
   );
 }
 
-function Metric({ icon, label, subtext, tone = 'neutral', value }) {
+export function Metric({ icon, label, subtext, tone = 'neutral', value }) {
+  // Words (a routing mode, Yes/No) get a smaller type size than numbers so they fit on one or two lines.
+  const textValue = typeof value === 'string' && !/^[-+]?[\d.,\s/%:]*$/.test(value);
+  const valueTitle = typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
   return (
     <div className={`metric-card ${tone}`}>
       <div className="metric-icon">{icon}</div>
       <div className="metric-copy">
-        <span>{label}</span>
-        <strong>{value}</strong>
-        {subtext ? <small>{subtext}</small> : null}
+        <span title={label}>{label}</span>
+        <strong className={textValue ? 'metric-text-value' : undefined} title={valueTitle}>{value}</strong>
+        {subtext ? <small title={typeof subtext === 'string' ? subtext : undefined}>{subtext}</small> : null}
       </div>
     </div>
   );
 }
 
+// Four KPI cards per row, two by two, or one column, chosen from the width the grid actually has, so a row of four
+// never leaves a single card on its own line.
+export function KpiGrid({ children }) {
+  return (
+    <div className="kpi-strip">
+      <div className="metric-grid kpi-grid">{children}</div>
+    </div>
+  );
+}
+
+function formatCount(value, t) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value.toLocaleString();
+  return display(value, t);
+}
+
 function camelCaseOnly(value) {
   return Object.fromEntries(Object.entries(value || {}).filter(([key]) => key && key[0] === key[0].toLowerCase()));
+}
+
+// MCP servers from the settings JSON editor: an array of { name, transport, command, arguments, url, ... }.
+function parseMcpServers(text, t) {
+  let value;
+  try {
+    value = JSON.parse(String(text || '').trim() || '[]');
+  } catch (err) {
+    throw new Error(t('chatMcpServersInvalid', { message: err.message }));
+  }
+  if (!Array.isArray(value) || value.some((item) => !item || typeof item !== 'object' || !String(item.name || '').trim())) throw new Error(t('chatMcpServersInvalid', { message: t('chatMcpServersShape') }));
+  return value;
+}
+
+// Connection state of each external MCP server, with a button to connect again after a settings change.
+function McpServerStatusList() {
+  const { t } = useTranslation();
+  const [servers, setServers] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load(refresh) {
+    setBusy(true);
+    try {
+      const value = await localApi('/api/v1/chat/mcp-servers', refresh ? { method: 'POST' } : undefined);
+      setServers(Array.isArray(value) ? value : []);
+    } catch {
+      setServers([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    load(false);
+  }, []);
+
+  return (
+    <div className="span-full mcp-server-status">
+      <div className="button-row">
+        <button className="action-button" disabled={busy} onClick={() => load(true)} title={t('tooltipChatMcpReconnect')} type="button">{t('chatMcpReconnect')}</button>
+      </div>
+      {servers && servers.length ? (
+        <table className="data-table compact-record">
+          <tbody>
+            {servers.map((server) => (
+              <tr key={server.name}>
+                <th>{server.name} <span className="chat-muted">({server.transport})</span></th>
+                <td>{!server.enabled ? t('chatMcpDisabled') : server.connected ? t('chatMcpConnected', { count: server.toolCount }) : (server.error || t('chatMcpNotConnected'))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <div className="chat-muted">{t('chatMcpNoServers')}</div>}
+    </div>
+  );
 }
 
 function Field({ defaultValue, label, name, tooltip, type = 'text' }) {
@@ -2348,7 +2085,7 @@ function telemetryBucketMinutes(range) {
   if (range === 'lastHour') return 1;
   if (range === 'lastDay') return 15;
   if (range === 'lastWeek') return 120;
-  return 480;
+  return 360;
 }
 
 function telemetryMetricField(metric) {

@@ -21,6 +21,12 @@ namespace Xeno.Desktop.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return !_DrillActive; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.LocalEndpoint; }
@@ -30,6 +36,7 @@ namespace Xeno.Desktop.Pages
 
         #region Private-Members
 
+        private bool _DrillActive = false;
         private readonly StackPanel _Summary = new StackPanel();
         private readonly ColumnChart _Chart = new ColumnChart();
         private XenoTable<LocalBackendRow>? _Backends;
@@ -119,6 +126,9 @@ namespace Xeno.Desktop.Pages
             {
                 _View = await Workspace.GetLocalInferenceRoutingAsync(None).ConfigureAwait(true);
                 List<LocalInferenceRequestRecord> records = await Workspace.GetLocalInferenceRequestsAsync(0, 500, None).ConfigureAwait(true);
+                XenoDrillDownRequest? window = XenoDrillDown.Take(Page);
+                _DrillActive = window != null;
+                if (window != null) Report("Showing " + XenoDrillDown.Describe(window) + " from the Usage page. Refresh to see every recent request.");
                 RenderSummary(_View);
                 _Chart.SetChart(XenoCharts.LocalEndpointTraffic(records, DateTime.UtcNow));
                 _Backends?.SetRows(_View.Backends.Select(LocalBackendRow.From).ToList(), (left, right) => String.Equals(left.Provider, right.Provider, StringComparison.OrdinalIgnoreCase));
@@ -130,7 +140,7 @@ namespace Xeno.Desktop.Pages
                 }
 
                 _Rules?.SetRows(rules, (left, right) => String.Equals(left.Model, right.Model, StringComparison.OrdinalIgnoreCase));
-                _Requests?.SetRows(records.Take(100).Select(LocalInferenceRequestRow.From).ToList());
+                _Requests?.SetRows((window == null ? records : records.Where(item => window.Matches(item.ReceivedUtc, item.Model)).ToList()).Take(100).Select(LocalInferenceRequestRow.From).ToList());
             }).ConfigureAwait(true);
         }
 

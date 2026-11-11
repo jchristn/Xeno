@@ -21,6 +21,12 @@ namespace Xeno.Desktop.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return !_DrillActive; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.Requests; }
@@ -36,6 +42,7 @@ namespace Xeno.Desktop.Pages
 
         #region Private-Members
 
+        private bool _DrillActive = false;
         private static readonly List<string> Outcomes = new List<string> { "All outcomes", "Succeeded", "Failed" };
         private XenoTable<RequestRow>? _Table;
         private ColumnChart _Chart = new ColumnChart();
@@ -75,7 +82,7 @@ namespace Xeno.Desktop.Pages
         /// <inheritdoc />
         public override Control Build()
         {
-            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 0, MinWidth = 140 };
+            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 1, MinWidth = 140 };
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Outcome = new ComboBox { ItemsSource = Outcomes, SelectedIndex = 0, MinWidth = 140 };
             _Outcome.SelectionChanged += (sender, args) => Apply();
@@ -116,7 +123,11 @@ namespace Xeno.Desktop.Pages
                 List<LocalRequestHistorySummaryBucket> buckets = await Workspace.SummarizeRequestsAsync(range, None).ConfigureAwait(true);
                 _Chart.SetChart(XenoCharts.Requests(buckets, range));
                 DateTime from = HistoryRanges.StartUtc(range, DateTime.UtcNow);
-                _Rows = (await Workspace.ListRequestsAsync(0, None).ConfigureAwait(true)).Where(item => item.ReceivedUtc >= from).ToList();
+                XenoDrillDownRequest? window = XenoDrillDown.Take(Page);
+                _DrillActive = window != null;
+                List<RequestRow> all = await Workspace.ListRequestsAsync(0, None).ConfigureAwait(true);
+                _Rows = window == null ? all.Where(item => item.ReceivedUtc >= from).ToList() : all.Where(item => window.Matches(item.ReceivedUtc, item.Model)).ToList();
+                if (window != null) Report("Showing " + XenoDrillDown.Describe(window) + " from the Usage page. Refresh to see the whole range.");
                 Apply();
             }).ConfigureAwait(true);
         }

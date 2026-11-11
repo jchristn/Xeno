@@ -1,0 +1,408 @@
+{
+  "Charts": [
+    {
+      "Id": "usage.outcome",
+      "Kind": "StackedColumns",
+      "Title": "Requests by outcome",
+      "TitleKey": "usageChartOutcome",
+      "Unit": " req",
+      "Additive": true,
+      "Stacked": true,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "succeeded",
+          "Name": "Succeeded",
+          "LabelKey": "usageSeriesSucceeded",
+          "Tone": "Success"
+        },
+        {
+          "Key": "fallback",
+          "Name": "Answered by network fallback",
+          "LabelKey": "usageSeriesFallback",
+          "Tone": "Warning"
+        },
+        {
+          "Key": "failed",
+          "Name": "Failed",
+          "LabelKey": "usageSeriesFailed",
+          "Tone": "Danger"
+        }
+      ]
+    },
+    {
+      "Id": "usage.latency",
+      "Kind": "Lines",
+      "Title": "Latency",
+      "TitleKey": "usageChartLatency",
+      "Unit": " ms",
+      "Additive": false,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "p50",
+          "Name": "Median",
+          "LabelKey": "usageSeriesMedian",
+          "Tone": "Info"
+        },
+        {
+          "Key": "p95",
+          "Name": "95th percentile",
+          "LabelKey": "usageSeriesP95",
+          "Tone": "Warning"
+        },
+        {
+          "Key": "p99",
+          "Name": "99th percentile",
+          "LabelKey": "usageSeriesP99",
+          "Tone": "Danger"
+        },
+        {
+          "Key": "maximum",
+          "Name": "Slowest",
+          "LabelKey": "usageSeriesMaximum",
+          "Tone": "Neutral"
+        }
+      ]
+    },
+    {
+      "Id": "usage.ttft",
+      "Kind": "Lines",
+      "Title": "Time to first token",
+      "TitleKey": "usageChartTimeToFirstToken",
+      "Unit": " ms",
+      "Additive": false,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "p50",
+          "Name": "Median",
+          "LabelKey": "usageSeriesMedian",
+          "Tone": "Info"
+        },
+        {
+          "Key": "p95",
+          "Name": "95th percentile",
+          "LabelKey": "usageSeriesP95",
+          "Tone": "Warning"
+        },
+        {
+          "Key": "p99",
+          "Name": "99th percentile",
+          "LabelKey": "usageSeriesP99",
+          "Tone": "Danger"
+        },
+        {
+          "Key": "maximum",
+          "Name": "Slowest",
+          "LabelKey": "usageSeriesMaximum",
+          "Tone": "Neutral"
+        }
+      ]
+    },
+    {
+      "Id": "usage.streaming",
+      "Kind": "Lines",
+      "Title": "Streaming time",
+      "TitleKey": "usageChartStreaming",
+      "Unit": " ms",
+      "Additive": false,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "p50",
+          "Name": "Median",
+          "LabelKey": "usageSeriesMedian",
+          "Tone": "Info"
+        },
+        {
+          "Key": "p95",
+          "Name": "95th percentile",
+          "LabelKey": "usageSeriesP95",
+          "Tone": "Warning"
+        },
+        {
+          "Key": "p99",
+          "Name": "99th percentile",
+          "LabelKey": "usageSeriesP99",
+          "Tone": "Danger"
+        },
+        {
+          "Key": "maximum",
+          "Name": "Slowest",
+          "LabelKey": "usageSeriesMaximum",
+          "Tone": "Neutral"
+        }
+      ]
+    },
+    {
+      "Id": "usage.throughput",
+      "Kind": "Lines",
+      "Title": "Throughput",
+      "TitleKey": "usageChartThroughput",
+      "Unit": " tok/s",
+      "Additive": false,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "p50",
+          "Name": "Median",
+          "LabelKey": "usageSeriesMedian",
+          "Tone": "Info"
+        },
+        {
+          "Key": "p95",
+          "Name": "95th percentile",
+          "LabelKey": "usageSeriesP95",
+          "Tone": "Warning"
+        }
+      ]
+    },
+    {
+      "Id": "usage.tokens",
+      "Kind": "StackedColumns",
+      "Title": "Tokens by type",
+      "TitleKey": "usageChartTokens",
+      "Unit": " tok",
+      "Additive": true,
+      "Stacked": true,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "prompt",
+          "Name": "Prompt",
+          "LabelKey": "usageSeriesPrompt",
+          "Tone": "Info"
+        },
+        {
+          "Key": "cached",
+          "Name": "Cached prompt",
+          "LabelKey": "usageSeriesCached",
+          "Tone": "Accent"
+        },
+        {
+          "Key": "completion",
+          "Name": "Completion",
+          "LabelKey": "usageSeriesCompletion",
+          "Tone": "Success"
+        }
+      ]
+    },
+    {
+      "Id": "usage.groups",
+      "Kind": "StackedColumns",
+      "Title": "Activity by group",
+      "TitleKey": "usageChartGroups",
+      "Unit": "",
+      "Additive": true,
+      "Stacked": true,
+      "DynamicSeries": true,
+      "ChatOnly": false,
+      "Series": []
+    },
+    {
+      "Id": "usage.groupTotals",
+      "Kind": "HorizontalBars",
+      "Title": "Totals by group",
+      "TitleKey": "usageChartGroupTotals",
+      "Unit": "",
+      "Additive": true,
+      "Stacked": true,
+      "DynamicSeries": true,
+      "ChatOnly": false,
+      "Series": []
+    },
+    {
+      "Id": "usage.heatmap",
+      "Kind": "Heatmap",
+      "Title": "Token activity",
+      "TitleKey": "usageChartHeatmap",
+      "Unit": " tok",
+      "Additive": true,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "tokens",
+          "Name": "Tokens",
+          "LabelKey": "usageSeriesTokens",
+          "Tone": "Accent"
+        }
+      ]
+    },
+    {
+      "Id": "usage.stages",
+      "Kind": "StackedColumns",
+      "Title": "Timing by stage",
+      "TitleKey": "usageChartStages",
+      "Unit": " ms",
+      "Additive": false,
+      "Stacked": true,
+      "DynamicSeries": true,
+      "ChatOnly": false,
+      "Series": []
+    },
+    {
+      "Id": "usage.stageAverages",
+      "Kind": "HorizontalBars",
+      "Title": "Average time by stage",
+      "TitleKey": "usageChartStageAverages",
+      "Unit": " ms",
+      "Additive": false,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "average",
+          "Name": "Average",
+          "LabelKey": "usageSeriesAverage",
+          "Tone": "Info"
+        },
+        {
+          "Key": "p95",
+          "Name": "95th percentile",
+          "LabelKey": "usageSeriesP95",
+          "Tone": "Warning"
+        }
+      ]
+    },
+    {
+      "Id": "usage.feedback",
+      "Kind": "StackedColumns",
+      "Title": "Feedback",
+      "TitleKey": "usageChartFeedback",
+      "Unit": "",
+      "Additive": true,
+      "Stacked": true,
+      "DynamicSeries": false,
+      "ChatOnly": true,
+      "Series": [
+        {
+          "Key": "up",
+          "Name": "Thumbs up",
+          "LabelKey": "usageSeriesThumbsUp",
+          "Tone": "Success"
+        },
+        {
+          "Key": "down",
+          "Name": "Thumbs down",
+          "LabelKey": "usageSeriesThumbsDown",
+          "Tone": "Danger"
+        }
+      ]
+    },
+    {
+      "Id": "usage.tools",
+      "Kind": "StackedColumns",
+      "Title": "Tool calls",
+      "TitleKey": "usageChartTools",
+      "Unit": " calls",
+      "Additive": true,
+      "Stacked": true,
+      "DynamicSeries": false,
+      "ChatOnly": true,
+      "Series": [
+        {
+          "Key": "succeeded",
+          "Name": "Ran",
+          "LabelKey": "usageSeriesToolsRan",
+          "Tone": "Success"
+        },
+        {
+          "Key": "failed",
+          "Name": "Failed",
+          "LabelKey": "usageSeriesFailed",
+          "Tone": "Danger"
+        },
+        {
+          "Key": "denied",
+          "Name": "Denied",
+          "LabelKey": "usageSeriesToolsDenied",
+          "Tone": "Warning"
+        }
+      ]
+    },
+    {
+      "Id": "usage.health",
+      "Kind": "StatusStrip",
+      "Title": "Provider health",
+      "TitleKey": "usageChartHealth",
+      "Unit": "",
+      "Additive": false,
+      "Stacked": false,
+      "DynamicSeries": false,
+      "ChatOnly": false,
+      "Series": [
+        {
+          "Key": "healthy",
+          "Name": "Healthy",
+          "LabelKey": "usageStatusHealthy",
+          "Tone": "Success"
+        },
+        {
+          "Key": "degraded",
+          "Name": "Degraded",
+          "LabelKey": "usageStatusDegraded",
+          "Tone": "Warning"
+        },
+        {
+          "Key": "unhealthy",
+          "Name": "Unhealthy",
+          "LabelKey": "usageStatusUnhealthy",
+          "Tone": "Danger"
+        },
+        {
+          "Key": "noData",
+          "Name": "No data",
+          "LabelKey": "usageStatusNoData",
+          "Tone": "Neutral"
+        }
+      ]
+    },
+    {
+      "Id": "request.timing",
+      "Kind": "HorizontalBars",
+      "Title": "Where the time went",
+      "TitleKey": "usageChartRequestTiming",
+      "Unit": " ms",
+      "Additive": false,
+      "Stacked": true,
+      "DynamicSeries": true,
+      "ChatOnly": false,
+      "Series": []
+    }
+  ],
+  "CategoryTones": [
+    "Series1",
+    "Series2",
+    "Series3",
+    "Series4",
+    "Series5",
+    "Series6",
+    "Series7",
+    "Series8"
+  ],
+  "CategoryColors": [
+    "#3B82F6",
+    "#F59E0B",
+    "#14B8A6",
+    "#8B5CF6",
+    "#EC4899",
+    "#06B6D4",
+    "#84CC16",
+    "#F97316"
+  ],
+  "NeutralColor": "#9CA3AF"
+}

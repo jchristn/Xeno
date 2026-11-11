@@ -74,5 +74,39 @@ namespace Xeno.Client.LocalDashboard.Database
         /// <param name="token">Cancellation token.</param>
         /// <returns>Statistics.</returns>
         Task<LocalDashboardStatisticsResponse> StatisticsAsync(CancellationToken token);
+
+        /// <summary>
+        /// Usage records for network requests this machine served in a range, from typed columns.
+        /// </summary>
+        /// <param name="fromUtc">Start, UTC, inclusive.</param>
+        /// <param name="toUtc">End, UTC, exclusive.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Records.</returns>
+        IAsyncEnumerable<Xeno.Core.Analytics.UsageRecord> EnumerateServedUsageAsync(DateTime fromUtc, DateTime toUtc, CancellationToken token);
+
+        /// <summary>
+        /// Store local endpoint request records, skipping ones already stored.
+        /// </summary>
+        /// <param name="records">Records.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Records added.</returns>
+        Task<int> IngestLocalInferenceAsync(IEnumerable<Xeno.Client.Routing.LocalInferenceRequestRecord> records, CancellationToken token);
+
+        /// <summary>
+        /// Usage records for local endpoint requests in a range.
+        /// </summary>
+        /// <param name="fromUtc">Start, UTC, inclusive.</param>
+        /// <param name="toUtc">End, UTC, exclusive.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Records.</returns>
+        IAsyncEnumerable<Xeno.Core.Analytics.UsageRecord> EnumerateLocalInferenceUsageAsync(DateTime fromUtc, DateTime toUtc, CancellationToken token);
+
+        /// <summary>
+        /// Delete stored local endpoint requests received before a cutoff.
+        /// </summary>
+        /// <param name="cutoffUtc">Cutoff, UTC.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Rows deleted.</returns>
+        Task<int> PruneLocalInferenceAsync(DateTime cutoffUtc, CancellationToken token);
     }
 }

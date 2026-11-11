@@ -162,6 +162,9 @@ namespace Test.Shared
                     Check(XenoLaunchOptions.Parse(new[] { "--server" }).Error != null, "A missing server value was accepted.");
                     Check(XenoLaunchOptions.Parse(new[] { "--server", "gopher://x" }).Error != null, "An invalid server was accepted.");
                     Check(XenoLaunchOptions.Parse(new[] { "--help" }).ShowHelp, "--help was not recognized.");
+                    XenoLaunchOptions settings = XenoLaunchOptions.Parse(new[] { "--settings", "--page", "providers" });
+                    Check(settings.Error == null && settings.OpenSettings && settings.StartPage == XenoPageEnum.Providers, "--settings was not parsed.");
+                    Check(!XenoLaunchOptions.Parse(new[] { "--page", "models" }).OpenSettings, "Settings opened without --settings.");
                 }),
                 AsyncCase(suite, "WorkspaceUseServerPersistsAndForwardsHome", "Pointing at a server saves client.json and the home is forwarded to other apps", async () =>
                 {
@@ -353,7 +356,7 @@ namespace Test.Shared
                     Check(!XenoCharts.Requests(new List<LocalRequestHistorySummaryBucket>(), HistoryRangeEnum.Day).HasData, "An empty chart reported data.");
                     Check(XenoCharts.Requests(new List<LocalRequestHistorySummaryBucket>(), HistoryRangeEnum.Day).EmptyText.StartsWith("No requests in the last day.", StringComparison.Ordinal), "Empty text should name the range.");
 
-                    Check(XenoCharts.HostMetrics.Select(XenoCharts.HostMetricName).SequenceEqual(new[] { "CPU", "Memory", "GPU" }), "Host charts must match the web dashboard (CPU, Memory, GPU).");
+                    Check(XenoCharts.HostMetrics.Count == 7 && XenoCharts.HostMetrics.Select(XenoCharts.HostMetricName).Take(3).SequenceEqual(new[] { "CPU", "Memory", "Disk" }), "The host metric picker must offer all seven metrics, like the web dashboards.");
                     List<Xeno.Client.Telemetry.Models.ClientTelemetryRollupBucket> cpu = new List<Xeno.Client.Telemetry.Models.ClientTelemetryRollupBucket>
                     {
                         new Xeno.Client.Telemetry.Models.ClientTelemetryRollupBucket { StartUtc = start, Count = 0, Average = null },
@@ -362,7 +365,7 @@ namespace Test.Shared
                     };
                     XenoChart host = XenoCharts.HostMetric(Xeno.Client.Telemetry.Models.ClientTelemetryMetricEnum.CpuUtilizationPercent, cpu, HistoryRangeEnum.Hour);
                     Check(host.HasData && host.Title == "CPU" && host.Unit == "%" && host.FormatValue(42.26) == "42.3%", "Host chart is wrong.");
-                    Check(host.Downsample(1).Series[0].Values[0] == 20, "Downsampling must average utilization.");
+                    Check(host.Kind == XenoChartKindEnum.Lines && host.Series.Select(item => item.Name).SequenceEqual(new[] { "Average", "Minimum", "Maximum" }) && host.Downsample(1).Series[0].Values[0] == 30, "Host charts should draw average, minimum, and maximum, and downsampling must average the average.");
                     XenoChart gpu = XenoCharts.HostMetric(Xeno.Client.Telemetry.Models.ClientTelemetryMetricEnum.GpuUtilizationPercent, cpu.Take(1).ToList(), HistoryRangeEnum.Week);
                     Check(!gpu.HasData && gpu.EmptyText.Contains("NVIDIA", StringComparison.Ordinal) && gpu.RangeText == "last week", "GPU empty state is wrong.");
                     XenoChart provider = XenoCharts.ProviderMetric(Xeno.Client.Telemetry.Models.ClientProviderTelemetryMetricEnum.TotalTokensPerSecond, "lab-vllm", new List<Xeno.Client.Telemetry.Models.ClientProviderTelemetryRollupBucket>(), HistoryRangeEnum.Hour);
@@ -543,6 +546,35 @@ namespace Test.Shared
                     Check(XenoMenuLayout.TrayMenu()[0].Kind == XenoMenuEntryKindEnum.StatusLine, "Tray menu should start with the status line.");
                     Check(XenoMenuLayout.ApplicationMenu(XenoSurfaceEnum.Tray)[0].Header == "About Xeno Agent", "macOS application menu should name the agent.");
                 }),
+                Case(suite, "TrayMenuOpensSettings", "Tray menus offer Settings, which is always available", () =>
+                {
+                    Check(XenoMenuLayout.Commands(XenoMenuLayout.TrayMenu()).Contains(XenoCommandEnum.Settings), "The tray menu has no Settings item.");
+                    Check(XenoMenuLayout.ApplicationMenu(XenoSurfaceEnum.Tray).Any(item => item.Command == XenoCommandEnum.Settings), "The tray's macOS application menu has no Settings item.");
+                    Check(XenoMenuLayout.ApplicationMenu(XenoSurfaceEnum.Desktop).Any(item => item.Command == XenoCommandEnum.Settings && item.Key == ","), "The desktop application menu has no Settings item.");
+                    Check(XenoCommandAvailability.IsEnabled(XenoCommandEnum.Settings, null), "Settings should be available before status loads.");
+                    Check(XenoCommandAvailability.IsEnabled(XenoCommandEnum.Settings, new ClientStatusSnapshot { Status = ClientStatusEnum.NotSignedIn }), "Settings should be available when signed out.");
+                }),
+                Case(suite, "DesktopActivationHandsRequestsToRunningApp", "A request for the running desktop app is taken once, and stale requests are dropped", () =>
+                {
+                    using (ClientHomeScope home = new ClientHomeScope())
+                    {
+                        Check(DesktopActivation.Take() == null, "A request appeared from nowhere.");
+                        DesktopActivation.Post(new DesktopActivationRequest { Page = XenoPageEnum.LocalEndpoint, OpenSettings = true });
+                        Check(File.Exists(DesktopActivation.FilePath) && DesktopActivation.FilePath.StartsWith(ClientSettings.SettingsDirectory, StringComparison.Ordinal), "The request was not written under the client home.");
+                        DesktopActivationRequest? taken = DesktopActivation.Take();
+                        Check(taken != null && taken.Page == XenoPageEnum.LocalEndpoint && taken.OpenSettings, "The request did not round-trip.");
+                        Check(DesktopActivation.Take() == null, "A request was taken twice.");
+
+                        File.WriteAllText(DesktopActivation.FilePath, Xeno.Core.Serialization.JsonUtil.Serialize(new DesktopActivationRequest { OpenSettings = true, RequestedUtc = DateTime.UtcNow.AddMinutes(-5) }));
+                        Check(DesktopActivation.Take() == null && !File.Exists(DesktopActivation.FilePath), "A stale request was acted on or left behind.");
+                        File.WriteAllText(DesktopActivation.FilePath, "not json");
+                        Check(DesktopActivation.Take() == null, "An unreadable request was acted on.");
+
+                        List<string> args = XenoAppLauncher.DesktopArguments(new DesktopActivationRequest { Page = XenoPageEnum.Settings, OpenSettings = true });
+                        Check(String.Join(" ", args) == "--page settings --settings", "Fresh launch arguments are wrong: " + String.Join(" ", args));
+                        Check(XenoLaunchOptions.Parse(args).OpenSettings && XenoLaunchOptions.Parse(args).StartPage == XenoPageEnum.Settings, "Fresh launch arguments do not parse back.");
+                    }
+                }),
                 Case(suite, "CommandAvailabilityFollowsStatus", "Start, stop, and dashboard availability follow the client status", () =>
                 {
                     ClientStatusSnapshot signedOut = new ClientStatusSnapshot { Status = ClientStatusEnum.NotSignedIn, StatusText = "Not signed in" };
@@ -616,7 +648,7 @@ namespace Test.Shared
                         Check(view.Contains(definition.Command), page + " is not in the View menu.");
                     }
 
-                    Check(XenoNavigationCatalog.Pages.Select(item => item.ShortcutDigit).Distinct().Count() == XenoNavigationCatalog.Pages.Count, "Page shortcut digits collide.");
+                    Check(XenoNavigationCatalog.Pages.Where(item => item.ShortcutDigit >= 0).GroupBy(item => item.ShortcutDigit).All(group => group.Count() == 1), "Page shortcut digits collide.");
                     Check(XenoNavigationCatalog.Get(XenoPageEnum.HostTelemetry).Title == "Host" && XenoNavigationCatalog.Get(XenoPageEnum.ProviderTelemetry).Title == "Provider", "Telemetry pages should be named Host and Provider under the Telemetry section.");
                     Check(XenoNavigationCatalog.Get(XenoPageEnum.HostTelemetry).LongTitle == "Host Telemetry" && XenoNavigationCatalog.Get(XenoPageEnum.Server).Title == "General" && XenoNavigationCatalog.Get(XenoPageEnum.Server).LongTitle == "General", "Long titles are wrong.");
                     Check(XenoMenuLayout.MenuBar(XenoSurfaceEnum.Desktop, false).Single(item => item.Header == "View").Flatten().Any(item => item.Header == "Host Telemetry"), "Menus should use the long title.");

@@ -125,7 +125,7 @@ namespace Xeno.Client.Routing
                     LocalInferenceRequestRecord? record = JsonUtil.Deserialize<LocalInferenceRequestRecord>(lines[i]);
                     if (record != null) records.Add(record);
                 }
-                catch (JsonException)
+                catch (Exception ex) when (ex is JsonException || ex is System.IO.InvalidDataException)
                 {
                 }
             }

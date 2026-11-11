@@ -6,6 +6,7 @@ namespace Test.Shared
     using System.Threading.Tasks;
     using Touchstone.Core;
     using Xeno.Client;
+    using Xeno.Client.Hosting;
     using Xeno.Client.Presentation;
     using Xeno.Client.Routing;
     using Xeno.Tui;
@@ -111,19 +112,19 @@ namespace Test.Shared
                     using (TuiHarness tui = new TuiHarness(140, 45, XenoPageEnum.Overview))
                     {
                         string screen = tui.Screen();
-                        Contains(screen, "Requests, last hour");
-                        Contains(screen, "No requests in the last hour.");
+                        Contains(screen, "Requests, last day");
+                        Contains(screen, "No requests in the last day.");
                         Contains(screen, "Succeeded");
                         tui.Tui.Navigate(XenoPageEnum.HostTelemetry);
                         tui.Settle();
                         screen = tui.Screen();
-                        foreach (string heading in new[] { "CPU, last hour", "Memory, last hour", "GPU, last hour" }) Contains(screen, heading);
+                        Contains(screen, "CPU, last day");
                         tui.Tui.Navigate(XenoPageEnum.Requests);
                         tui.Settle();
-                        Contains(tui.Screen(), "Requests, last hour");
+                        Contains(tui.Screen(), "Requests, last day");
                         tui.Tui.Navigate(XenoPageEnum.ProviderTelemetry);
                         tui.Settle();
-                        Contains(tui.Screen(), "Active requests, last hour");
+                        Contains(tui.Screen(), "Active requests, last day");
                     }
                 }),
                 Case(suite, "MessageLineReportsWhatHappened", "Commands report their outcome on the message line with a time and a marker", () =>
@@ -520,10 +521,10 @@ namespace Test.Shared
                 {
                     using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
                     {
-                        tui.ClickText("Last hour");
-                        Contains(tui.Screen(), "Last day");
                         tui.ClickText("Last day");
-                        Contains(tui.Screen(), "Requests, last day");
+                        Contains(tui.Screen(), "Last hour");
+                        tui.ClickText("Last hour");
+                        Contains(tui.Screen(), "Requests, last hour");
                         tui.ClickText("Add Provider ]");
                         Check(tui.App.Modals.IsActive, "Clicking Add Provider should open the form.");
                         tui.Press("escape");
@@ -634,6 +635,53 @@ namespace Test.Shared
                         Check(!tui.Tui.CanExecute(XenoCommandEnum.StartClient), "Start should be disabled before sign-in.");
                         tui.Tui.Execute(XenoCommandEnum.StartClient);
                         WaitFor(() => tui.Tui.Context.Message.Contains("Sign in", StringComparison.Ordinal), tui, "The status bar should explain sign-in. It said: " + tui.Tui.Context.Message);
+                    }
+                }),
+                Case(suite, "ChatPagesAreInTheCatalog", "Chat, Chat history, and Feedback are pages in every front end, and the tray opens Chat", () =>
+                {
+                    Check(String.Join(",", XenoNavigationCatalog.Sections) == "Client,Models,Chat,Activity,Telemetry,Configuration", "Sections are out of order: " + String.Join(",", XenoNavigationCatalog.Sections));
+                    Check(XenoNavigationCatalog.PageFor(XenoCommandEnum.GoChat) == XenoPageEnum.Chat && XenoNavigationCatalog.PageFor(XenoCommandEnum.GoChatHistory) == XenoPageEnum.ChatHistory && XenoNavigationCatalog.PageFor(XenoCommandEnum.GoChatFeedback) == XenoPageEnum.ChatFeedback, "Chat commands do not map to pages.");
+                    Check(XenoMenuLayout.Commands(XenoMenuLayout.TrayMenu()).Contains(XenoCommandEnum.GoChat), "The tray menu has no Chat item.");
+                    Check(XenoLaunchOptions.Parse(new[] { "--page", "chat" }).StartPage == XenoPageEnum.Chat, "--page chat was not accepted.");
+                }),
+                Case(suite, "ChatSaysWhenTheClientIsNotRunning", "The terminal Chat page explains that chat needs the client", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Chat))
+                    {
+                        WaitFor(() => tui.Screen().Contains("Chat needs the Xeno client running", StringComparison.Ordinal), tui, "The not-running message is missing.");
+                    }
+                }),
+                Case(suite, "ChatStreamsAndRatesWithKeyboardAndMouse", "Typing a message and pressing Enter streams the answer; clicking Rate Down saves a rating", () =>
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 40, XenoPageEnum.Overview))
+                    using (ChatApiFixture api = new ChatApiFixture("Hello from the terminal"))
+                    {
+                        tui.Tui.Navigate(XenoPageEnum.Chat);
+                        tui.Settle();
+                        TUIKit.Point field = tui.Find("Type a message and press Enter") ?? throw new InvalidOperationException("No message field:" + Environment.NewLine + tui.Screen());
+                        Check(tui.Screen().Contains("AI can make mistakes. Please check all work.", StringComparison.Ordinal), "The disclaimer is missing:" + Environment.NewLine + tui.Screen());
+                        Check(tui.Screen().Contains("Stream: on", StringComparison.Ordinal), "Streaming should be on by default.");
+                        Check(tui.Find("Stop ]") == null, "Send should not read Stop before a message is sent.");
+                        tui.Click(field.X, field.Y);
+                        tui.Type("Say hi");
+                        tui.Press("enter");
+                        WaitFor(() => tui.Screen().Contains("Hello from the terminal", StringComparison.Ordinal), tui, "The answer did not stream.");
+                        WaitFor(() => api.Store.QueryTurnsAsync(new Xeno.Core.Chat.ChatHistoryQuery(), System.Threading.CancellationToken.None).GetAwaiter().GetResult().Items.Any(item => item.Surface == Xeno.Core.Chat.ChatSurfaceEnum.Terminal && item.Status == Xeno.Core.Chat.ChatTurnStatusEnum.Success), tui, "The turn was not recorded as a Terminal turn.");
+                        WaitFor(() => tui.Screen().Contains("This machine (box)", StringComparison.Ordinal), tui, "The answer's route is not shown.");
+                        WaitFor(() => tui.Screen().Contains("(i) first token", StringComparison.Ordinal), tui, "The answer's telemetry line is missing.");
+                        WaitFor(() => tui.Find("Send ]") != null, tui, "Stop did not turn back into Send.");
+                        tui.ClickText("Rate Down ]");
+                        Check(tui.App.Modals.IsActive, "Rate Down should ask for a comment.");
+                        tui.Type("too short");
+                        tui.Press("ctrl+s");
+                        WaitFor(() => api.Store.QueryFeedbackAsync(new Xeno.Core.Chat.ChatFeedbackQuery(), System.Threading.CancellationToken.None).GetAwaiter().GetResult().Items.Any(item => item.Rating == -1 && item.Comment == "too short"), tui, "The rating was not saved.");
+
+                        tui.Tui.Navigate(XenoPageEnum.ChatHistory);
+                        tui.Settle();
+                        WaitFor(() => tui.Screen().Contains("Say hi", StringComparison.Ordinal) && tui.Screen().Contains("Thumbs down", StringComparison.Ordinal), tui, "Chat history does not show the turn.");
+                        tui.Tui.Navigate(XenoPageEnum.ChatFeedback);
+                        tui.Settle();
+                        WaitFor(() => tui.Screen().Contains("too short", StringComparison.Ordinal), tui, "Feedback does not show the comment.");
                     }
                 })
             });

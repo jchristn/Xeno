@@ -574,7 +574,7 @@ The dashboard is the primary administration surface for Xeno. It includes:
 - Request history with telemetry, headers, bodies, streaming details, and routing decisions.
 - Tenant, user, credential, role, and permission create/edit/delete workflows.
 - Settings management for server configuration, including email provider setup and global-admin test email sends.
-- Analytics by time window, path, model, and request behavior.
+- Usage charts for latency, time to first token, throughput, tokens, a token heatmap, time by stage, and totals by model, provider, client, user, credential, or tenant, with drill-down into request history. See [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md).
 - Integrated API Explorer with editable JSON request bodies, response headers, streaming previews, and copy-to-clipboard controls.
 
 ### Dashboard Screenshot Carousel
@@ -695,6 +695,9 @@ Developer documentation:
 - [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
 - [MODEL_ROUTING.md](MODEL_ROUTING.md)
 - [HYBRID_MODELS.md](HYBRID_MODELS.md) (local and Xeno network models through one local endpoint)
+- [CHAT.md](CHAT.md) (chat with any local or network model in every Xeno app, with feedback and history)
+- [MCP.md](MCP.md) (Xeno's tools for Claude Code and other MCP clients)
+- [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md) (usage charts, `xeno usage`, and how to read them)
 - [getting-started/](getting-started/)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
 - [DESKTOP_AND_TERMINAL.md](DESKTOP_AND_TERMINAL.md)

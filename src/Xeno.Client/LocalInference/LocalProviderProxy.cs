@@ -67,6 +67,7 @@ namespace Xeno.Client.LocalInference
                 }
                 catch (Exception ex) when (ex is HttpRequestException || ex is IOException || ex is InvalidOperationException || ex is UriFormatException || (ex is OperationCanceledException && !token.IsCancellationRequested))
                 {
+                    result.TimedOut = ex is OperationCanceledException;
                     result.Error = ex is OperationCanceledException
                         ? "Provider '" + provider.Name + "' did not respond within " + Math.Max(1000, timeoutMs) + " ms."
                         : "Provider '" + provider.Name + "' is unavailable: " + ex.Message;
@@ -138,6 +139,79 @@ namespace Xeno.Client.LocalInference
         }
 
         /// <summary>
+        /// Send a request to a provider and hand each piece of the response body to a sink, without a listener
+        /// context. Used by chat, which reads the response itself.
+        /// </summary>
+        /// <param name="provider">Provider to call.</param>
+        /// <param name="method">HTTP method.</param>
+        /// <param name="path">Request path, appended to the provider endpoint.</param>
+        /// <param name="body">Request body.</param>
+        /// <param name="timeoutMs">Request timeout in milliseconds. Minimum 1000.</param>
+        /// <param name="sink">Receives response bytes and how many to read.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Outcome.</returns>
+        /// <exception cref="ArgumentNullException">provider or sink is null.</exception>
+        /// <exception cref="OperationCanceledException">token was cancelled.</exception>
+        public async Task<LocalProviderProxyResult> SendAsync(ClientRunnerSettings provider, string method, string path, string body, int timeoutMs, Func<byte[], int, Task> sink, CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(provider);
+            ArgumentNullException.ThrowIfNull(sink);
+            LocalProviderProxyResult result = new LocalProviderProxyResult();
+            string url = ProviderConfiguration.NormalizeEndpoint(provider.Endpoint) + path;
+            using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            using (HttpRequestMessage request = BuildRequest(provider, method, url, body))
+            {
+                timeout.CancelAfter(Math.Max(1000, timeoutMs));
+                System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+                    result.FirstByteMs = clock.Elapsed.TotalMilliseconds;
+                }
+                catch (Exception ex) when (ex is HttpRequestException || ex is IOException || ex is InvalidOperationException || ex is UriFormatException || (ex is OperationCanceledException && !token.IsCancellationRequested))
+                {
+                    result.TimedOut = ex is OperationCanceledException;
+                    result.Error = ex is OperationCanceledException
+                        ? "Provider '" + provider.Name + "' did not respond within " + Math.Max(1000, timeoutMs) + " ms."
+                        : "Provider '" + provider.Name + "' is unavailable: " + ex.Message;
+                    return result;
+                }
+
+                using (response)
+                {
+                    result.StatusCode = (int)response.StatusCode;
+                    result.Started = true;
+                    try
+                    {
+                        using (Stream upstream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
+                        {
+                            byte[] buffer = new byte[BufferSize];
+                            while (true)
+                            {
+                                int read = await upstream.ReadAsync(buffer.AsMemory(0, buffer.Length), timeout.Token).ConfigureAwait(false);
+                                if (read <= 0) break;
+                                result.ResponseBytes += read;
+                                await sink(buffer, read).ConfigureAwait(false);
+                            }
+                        }
+
+                        result.Completed = true;
+                    }
+                    catch (Exception ex) when (ex is HttpRequestException || ex is IOException || (ex is OperationCanceledException && !token.IsCancellationRequested))
+                    {
+                        result.TimedOut = ex is OperationCanceledException;
+                        result.Error = ex is OperationCanceledException
+                            ? "Provider '" + provider.Name + "' took longer than " + Math.Max(1000, timeoutMs) + " ms."
+                            : "Provider '" + provider.Name + "' stopped in the middle of its response.";
+                    }
+
+                    return result;
+                }
+            }
+        }
+
+        /// <summary>
         /// GET a JSON document from a provider and read it as a named type.
         /// </summary>
         /// <typeparam name="T">Response type.</typeparam>
@@ -165,7 +239,7 @@ namespace Xeno.Client.LocalInference
                     }
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException || ex is IOException || ex is InvalidOperationException || ex is UriFormatException || ex is JsonException || (ex is OperationCanceledException && !token.IsCancellationRequested))
+            catch (Exception ex) when (ex is HttpRequestException || ex is IOException || ex is InvalidOperationException || ex is UriFormatException || ex is JsonException || ex is System.IO.InvalidDataException || (ex is OperationCanceledException && !token.IsCancellationRequested))
             {
                 return null;
             }

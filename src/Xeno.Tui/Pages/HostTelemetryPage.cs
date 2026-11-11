@@ -22,6 +22,12 @@ namespace Xeno.Tui.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return true; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.HostTelemetry; }
@@ -46,7 +52,8 @@ namespace Xeno.Tui.Pages
         private readonly FramedStack _Root = new FramedStack(SplitOrientation.Vertical);
         private readonly DetailsView _Latest = new DetailsView();
         private readonly Dropdown<string> _Range = new Dropdown<string>(HistoryRanges.Labels);
-        private readonly List<ChartView> _Charts = XenoCharts.HostMetrics.Select(item => new ChartView()).ToList();
+        private readonly Dropdown<string> _Metric = new Dropdown<string>(XenoCharts.HostMetrics.Select(XenoCharts.HostMetricName).ToList());
+        private readonly UsageChartView _Chart = new UsageChartView();
         private readonly DataTable<HostSampleRow> _Samples;
 
         #endregion
@@ -59,8 +66,10 @@ namespace Xeno.Tui.Pages
         /// <param name="context">Context.</param>
         public HostTelemetryPage(TuiContext context) : base(context)
         {
-            _Range.SelectedIndex = 0;
+            _Range.SelectedIndex = 1;
+            _Metric.SelectedIndex = 0;
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
+            _Metric.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Samples = Table<HostSampleRow>("No samples in this range. Press c to collect a reading.", row => row.Id);
             Column(_Samples, "Collected", row => row.Collected, 20);
             Column(_Samples, "CPU", row => row.Cpu, 8);
@@ -69,15 +78,12 @@ namespace Xeno.Tui.Pages
             Column(_Samples, "GPU", row => row.Gpu, 8);
             Column(_Samples, "GPU mem", row => row.GpuMemory, 8);
             Column(_Samples, "GPU temp", row => row.GpuTemperature, 0);
-            FramedStack charts = new FramedStack(SplitOrientation.Horizontal);
-            for (int i = 0; i < _Charts.Count; i++)
-            {
-                Frame(charts, _Charts[i], StackSize.Weighted(1, 20));
-            }
-
+            FramedStack filters = new FramedStack(SplitOrientation.Horizontal);
+            Frame(filters, _Range, StackSize.Weighted(1, 14), "Chart range");
+            Frame(filters, _Metric, StackSize.Weighted(1, 18), "Metric");
             Frame(_Root, _Latest, StackSize.Fixed(7), "Latest reading");
-            Frame(_Root, _Range, StackSize.Fixed(1), "Chart range");
-            Frame(_Root, charts, StackSize.Fixed(9));
+            Frame(_Root, filters, StackSize.Fixed(1));
+            Frame(_Root, _Chart, StackSize.Fixed(9));
             Frame(_Root, _Samples, StackSize.Weighted(1, 3), "Samples");
         }
 
@@ -89,23 +95,20 @@ namespace Xeno.Tui.Pages
         public override Task RefreshAsync()
         {
             HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
+            ClientTelemetryMetricEnum selected = XenoCharts.HostMetrics[Math.Clamp(_Metric.SelectedIndex, 0, XenoCharts.HostMetrics.Count - 1)];
             return LoadAsync(async token =>
             {
                 ClientTelemetrySampleDetail? latest = await Workspace.GetLatestHostTelemetryAsync(token).ConfigureAwait(false);
                 ClientTelemetryPersistenceStatus status = await Workspace.GetHostTelemetryStatusAsync(token).ConfigureAwait(false);
-                List<XenoChart> charts = new List<XenoChart>();
-                foreach (ClientTelemetryMetricEnum metric in XenoCharts.HostMetrics)
-                {
-                    List<ClientTelemetryRollupBucket> buckets = await Workspace.RollupHostTelemetryAsync(metric, range, token).ConfigureAwait(false);
-                    charts.Add(XenoCharts.HostMetric(metric, buckets, range));
-                }
+                List<ClientTelemetryRollupBucket> buckets = await Workspace.RollupHostTelemetryAsync(selected, range, token).ConfigureAwait(false);
+                List<XenoChart> charts = new List<XenoChart> { XenoCharts.HostMetric(selected, buckets, range) };
 
                 List<HostSampleRow> samples = await Workspace.SearchHostTelemetryAsync(range, 500, token).ConfigureAwait(false);
                 return new HostTelemetryData(latest, status, charts, samples);
             }, data =>
             {
                 RenderLatest(data.Latest, data.Status);
-                for (int i = 0; i < _Charts.Count && i < data.Charts.Count; i++) _Charts[i].Chart = data.Charts[i];
+                _Chart.Chart = data.Charts[0];
                 _Samples.Bind(data.Samples);
             });
         }

@@ -21,6 +21,12 @@ namespace Xeno.Tui.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return true; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.ProviderTelemetry; }
@@ -43,12 +49,15 @@ namespace Xeno.Tui.Pages
         #region Private-Members
 
         private const string AllProviders = "All providers";
+        private const string AllModels = "All models";
         private readonly FramedStack _Root = new FramedStack(SplitOrientation.Vertical);
         private readonly DataTable<ProviderSampleRow> _Latest;
         private readonly Dropdown<string> _Provider = new Dropdown<string>(new List<string> { AllProviders });
         private readonly Dropdown<string> _Metric = new Dropdown<string>(Enum.GetNames(typeof(ClientProviderTelemetryMetricEnum)));
         private readonly Dropdown<string> _Range = new Dropdown<string>(HistoryRanges.Labels);
-        private readonly ChartView _Chart = new ChartView();
+        private readonly UsageChartView _Chart = new UsageChartView();
+        private readonly Dropdown<string> _Model = new Dropdown<string>(new List<string> { AllModels });
+        private readonly UsageChartView _Health = new UsageChartView { LoadingText = "Provider health needs the Xeno client running." };
         private readonly DataTable<ProviderSampleRow> _Samples;
 
         #endregion
@@ -63,7 +72,9 @@ namespace Xeno.Tui.Pages
         {
             _Provider.SelectedIndex = 0;
             _Metric.SelectedIndex = 0;
-            _Range.SelectedIndex = 0;
+            _Model.SelectedIndex = 0;
+            _Range.SelectedIndex = 1;
+            _Model.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Provider.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Metric.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
@@ -72,11 +83,13 @@ namespace Xeno.Tui.Pages
             _Samples = BuildTable("No samples in this range.", row => row.Id);
             FramedStack filters = new FramedStack(SplitOrientation.Horizontal);
             Frame(filters, _Provider, StackSize.Weighted(1, 16), "Provider");
+            Frame(filters, _Model, StackSize.Weighted(1, 16), "Model");
             Frame(filters, _Metric, StackSize.Weighted(2, 24), "Metric");
             Frame(filters, _Range, StackSize.Weighted(1, 14), "Range");
             Frame(_Root, _Latest, StackSize.Weighted(1, 4), "Latest by provider");
             Frame(_Root, filters, StackSize.Fixed(1));
-            Frame(_Root, _Chart, StackSize.Fixed(9));
+            Frame(_Root, _Health, StackSize.Fixed(5));
+            Frame(_Root, _Chart, StackSize.Fixed(8));
             Frame(_Root, _Samples, StackSize.Weighted(2, 3), "Samples");
         }
 
@@ -88,12 +101,13 @@ namespace Xeno.Tui.Pages
         public override Task RefreshAsync()
         {
             string? provider = _Provider.SelectedItem == AllProviders ? null : _Provider.SelectedItem;
+            string? model = _Model.SelectedItem == AllModels ? null : _Model.SelectedItem;
             HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
             ClientProviderTelemetryMetricEnum metric = Enum.TryParse(_Metric.SelectedItem, out ClientProviderTelemetryMetricEnum parsed) ? parsed : ClientProviderTelemetryMetricEnum.ActiveRequests;
             return LoadAsync(async token =>
             {
                 List<ProviderSampleRow> latest = await Workspace.GetLatestProviderTelemetryAsync(token).ConfigureAwait(false);
-                List<ClientProviderTelemetryRollupBucket> buckets = await Workspace.RollupProviderTelemetryAsync(metric, provider, range, token).ConfigureAwait(false);
+                List<ClientProviderTelemetryRollupBucket> buckets = await Workspace.RollupProviderTelemetryAsync(metric, provider, range, token, model).ConfigureAwait(false);
                 List<ProviderSampleRow> samples = await Workspace.SearchProviderTelemetryAsync(provider, range, 500, token).ConfigureAwait(false);
                 List<string> providers = Workspace.LoadSettings().Runners.Select(item => item.Name).ToList();
                 return new ProviderTelemetryData(latest, XenoCharts.ProviderMetric(metric, provider, buckets, range), samples, providers);
@@ -109,9 +123,26 @@ namespace Xeno.Tui.Pages
                     _Provider.SelectedIndex = Math.Max(0, choices.IndexOf(selected ?? AllProviders));
                 }
 
+                List<string> modelChoices = new List<string> { AllModels };
+                modelChoices.AddRange(Workspace.LoadSettings().Runners.SelectMany(item => item.Models.Select(entry => entry.Name)).Distinct(StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal));
+                if (!modelChoices.SequenceEqual(_Model.Items))
+                {
+                    string? selectedModel = _Model.SelectedItem;
+                    _Model.SetItems(modelChoices);
+                    _Model.SelectedIndex = Math.Max(0, modelChoices.IndexOf(selectedModel ?? AllModels));
+                }
+
                 _Chart.Chart = data.Chart;
                 _Samples.Bind(data.Samples);
-            });
+            }).ContinueWith(task => RefreshHealthAsync(provider, range)).Unwrap();
+        }
+
+        private Task RefreshHealthAsync(string? provider, HistoryRangeEnum range)
+        {
+            if (!Workspace.Usage.IsAvailable) return Task.CompletedTask;
+            DateTime to = DateTime.UtcNow;
+            Xeno.Core.Analytics.ProviderHealthQuery query = new Xeno.Core.Analytics.ProviderHealthQuery { FromUtc = HistoryRanges.StartUtc(range, to), ToUtc = to, BucketMinutes = HistoryRanges.DefaultBucketMinutes(range), ProviderName = provider };
+            return LoadAsync(token => Workspace.Usage.GetProviderHealthAsync(query, token), strip => _Health.Chart = XenoUsageCharts.Health(strip, HistoryRanges.Describe(range)));
         }
 
         /// <inheritdoc />

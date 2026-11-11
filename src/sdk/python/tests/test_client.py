@@ -393,6 +393,40 @@ class XenoClientTests(unittest.TestCase):
         self.assertIn('"toEmail": "joel.christner@gmail.com"', opener.calls[0]["body"])
         self.assertIn('"body": "hello world"', opener.calls[0]["body"])
 
+    def test_usage_analytics_send_every_parameter_and_return_a_model(self):
+        opener = FakeOpener(lambda request: FakeResponse('{"Dataset":"NetworkRequests","Totals":{"Requests":3},"Buckets":[],"Truncated":false}'))
+        client = XenoClient("https://xeno.local", opener=opener)
+        analytics = client.get_usage_analytics({"fromUtc": "2026-11-01T00:00:00Z", "toUtc": "2026-11-02T00:00:00Z", "bucketMinutes": 15, "model": "llama3", "provider": "p", "clientId": "c", "userId": "u", "credentialId": "k", "tenantId": "t", "groupBy": "User", "groupMetric": "Tokens", "topN": 5, "utcOffsetMinutes": -480, "sections": "Totals,Groups"})
+        self.assertEqual(analytics.Totals["Requests"], 3)
+        self.assertEqual(analytics.dataset, "NetworkRequests")
+        url = opener.calls[0]["request"].full_url
+        self.assertTrue(url.startswith("https://xeno.local/v1.0/api/request-history/analytics/usage?"))
+        for part in ["bucketMinutes=15", "model=llama3", "provider=p", "clientId=c", "userId=u", "credentialId=k", "tenantId=t", "groupBy=User", "groupMetric=Tokens", "topN=5", "utcOffsetMinutes=-480"]:
+            self.assertIn(part, url)
+
+    def test_chat_usage_and_provider_health_use_their_routes(self):
+        opener = FakeOpener(lambda request: FakeResponse('{"BucketMinutes":1,"Providers":[]}'))
+        client = XenoClient("https://xeno.local", opener=opener)
+        client.get_chat_usage_analytics({"scope": "tenant"})
+        strip = client.get_provider_health({"bucketMinutes": 1, "clientId": "c", "providerName": "ollama"})
+        client.get_usage_analytics()
+        self.assertEqual(strip.bucket_minutes, 1)
+        self.assertEqual([call["request"].full_url for call in opener.calls], [
+            "https://xeno.local/v1.0/api/chat/analytics/usage?scope=tenant",
+            "https://xeno.local/v1.0/api/client-telemetry/providers/health?bucketMinutes=1&clientId=c&providerName=ollama",
+            "https://xeno.local/v1.0/api/request-history/analytics/usage",
+        ])
+
+    def test_usage_analytics_surface_api_errors(self):
+        for status in (400, 403):
+            def respond(request, status=status):
+                return HTTPError(request.full_url, status, "Nope", {}, FakeResponse('{"message":"no"}', status))
+
+            client = XenoClient("https://xeno.local", opener=FakeOpener(respond))
+            with self.assertRaises(XenoApiError) as caught:
+                client.get_usage_analytics({"groupBy": "Tenant"})
+            self.assertEqual(caught.exception.status, status)
+
 
 if __name__ == "__main__":
     unittest.main()

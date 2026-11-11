@@ -89,6 +89,13 @@ ON CONFLICT (id) DO NOTHING;
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new PostgresqlRequestHistoryMethods(_ConnectionString);
             Audit = new PostgresqlAuditMethods(_ConnectionString);
+            string chatConnectionString = _ConnectionString;
+            DbChatMethods chat = new DbChatMethods(ChatSqlDialectEnum.Postgresql, () => new NpgsqlConnection(chatConnectionString));
+            await chat.InitializeAsync(token).ConfigureAwait(false);
+            Chat = chat;
+            DbConnectedClientSampleMethods connectedClientSamples = new DbConnectedClientSampleMethods(ChatSqlDialectEnum.Postgresql, () => new NpgsqlConnection(chatConnectionString));
+            await connectedClientSamples.InitializeAsync(token).ConfigureAwait(false);
+            ConnectedClientSamples = connectedClientSamples;
             Onboarding = new PostgresqlOnboardingMethods(_ConnectionString);
 
             Tenants = new PostgresqlTenantMethods(_ConnectionString);

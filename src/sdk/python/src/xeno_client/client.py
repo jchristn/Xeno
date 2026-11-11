@@ -140,6 +140,14 @@ class RequestHistorySummary(XenoModel):
     pass
 
 
+class UsageAnalytics(XenoModel):
+    pass
+
+
+class ProviderHealthStrip(XenoModel):
+    pass
+
+
 class Role(XenoModel):
     pass
 
@@ -479,6 +487,18 @@ class XenoClient:
 
     def get_request_history_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._request("GET", f"/v1.0/api/request-history/summary{self._query_string(filters)}")
+
+    def get_usage_analytics(self, query: dict[str, Any] | None = None) -> UsageAnalytics:
+        """Usage analytics for the requests the server relayed."""
+        return UsageAnalytics.from_dict(self._request("GET", f"/v1.0/api/request-history/analytics/usage{self._query_string(query)}"))
+
+    def get_chat_usage_analytics(self, query: dict[str, Any] | None = None) -> UsageAnalytics:
+        """Usage analytics for chat turns, including feedback and tool calls."""
+        return UsageAnalytics.from_dict(self._request("GET", f"/v1.0/api/chat/analytics/usage{self._query_string(query)}"))
+
+    def get_provider_health(self, query: dict[str, Any] | None = None) -> ProviderHealthStrip:
+        """Provider health strip: one row per provider, one status cell per bucket."""
+        return ProviderHealthStrip.from_dict(self._request("GET", f"/v1.0/api/client-telemetry/providers/health{self._query_string(query)}"))
 
     def get_request_analytics_overview(self) -> dict[str, Any]:
         return self._request("GET", "/v1.0/api/request-history/analytics/overview")

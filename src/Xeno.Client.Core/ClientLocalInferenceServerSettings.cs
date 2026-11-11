@@ -25,6 +25,7 @@ namespace Xeno.Client
         private int _MaxRequestBodyBytes = 10485760;
         private int _HealthCheckIntervalMs = DefaultHealthCheckIntervalMs;
         private int _LocalQueueTimeoutMs = DefaultLocalQueueTimeoutMs;
+        private int _RequestRetentionDays = 30;
         private List<LocalInferenceRouteRule> _Routes = new List<LocalInferenceRouteRule>();
 
         /// <summary>
@@ -149,6 +150,22 @@ namespace Xeno.Client
             set
             {
                 _LocalQueueTimeoutMs = Clamp(value, 0, 300000);
+            }
+        }
+
+        /// <summary>
+        /// Days local endpoint requests are kept for usage analytics in the local dashboard database. Default 30.
+        /// Clamped to 1 through 365.
+        /// </summary>
+        public int RequestRetentionDays
+        {
+            get
+            {
+                return _RequestRetentionDays;
+            }
+            set
+            {
+                _RequestRetentionDays = Clamp(value, 1, 365);
             }
         }
 

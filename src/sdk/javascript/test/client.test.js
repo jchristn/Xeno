@@ -385,3 +385,33 @@ test('sendTestEmail uses administrative email route', async () => {
   assert.match(fetchImpl.calls[0].options.body, /"toEmail":"joel.christner@gmail.com"/);
   assert.match(fetchImpl.calls[0].options.body, /"body":"hello world"/);
 });
+
+test('usage analytics send every parameter and return the response', async () => {
+  const fetchImpl = createFetch(() => jsonResponse({ Dataset: 'NetworkRequests', Totals: { Requests: 3 }, Buckets: [], Truncated: false }));
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
+  const result = await client.getUsageAnalytics({ fromUtc: '2026-11-01T00:00:00Z', toUtc: '2026-11-02T00:00:00Z', bucketMinutes: 15, model: 'llama3', provider: 'p', clientId: 'c', userId: 'u', credentialId: 'k', tenantId: 't', groupBy: 'User', groupMetric: 'Tokens', topN: 5, utcOffsetMinutes: -480, sections: 'Totals,Groups' });
+  assert.equal(result.Totals.Requests, 3);
+  const url = new URL(fetchImpl.calls[0].url);
+  assert.equal(url.pathname, '/v1.0/api/request-history/analytics/usage');
+  assert.deepEqual(Object.fromEntries(url.searchParams), { fromUtc: '2026-11-01T00:00:00Z', toUtc: '2026-11-02T00:00:00Z', bucketMinutes: '15', model: 'llama3', provider: 'p', clientId: 'c', userId: 'u', credentialId: 'k', tenantId: 't', groupBy: 'User', groupMetric: 'Tokens', topN: '5', utcOffsetMinutes: '-480', sections: 'Totals,Groups' });
+});
+
+test('chat usage and provider health use their routes, and an empty query adds nothing', async () => {
+  const fetchImpl = createFetch(() => jsonResponse({}));
+  const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl });
+  await client.getChatUsageAnalytics({ scope: 'tenant' });
+  await client.getProviderHealth({ bucketMinutes: 1, clientId: 'c', providerName: 'ollama' });
+  await client.getUsageAnalytics();
+  assert.deepEqual(fetchImpl.calls.map((call) => call.url), [
+    'https://xeno.local/v1.0/api/chat/analytics/usage?scope=tenant',
+    'https://xeno.local/v1.0/api/client-telemetry/providers/health?bucketMinutes=1&clientId=c&providerName=ollama',
+    'https://xeno.local/v1.0/api/request-history/analytics/usage'
+  ]);
+});
+
+test('usage analytics surface 400 and 403 as API errors', async () => {
+  for (const status of [400, 403]) {
+    const client = new XenoClient({ baseUrl: 'https://xeno.local', fetchImpl: createFetch(() => jsonResponse({ Message: 'no' }, status)) });
+    await assert.rejects(() => client.getUsageAnalytics({ groupBy: 'Tenant' }), (error) => error instanceof XenoApiError && error.status === status);
+  }
+});

@@ -45,7 +45,9 @@ import {
   Trash2,
   Upload,
   UserPlus,
-  Zap
+  Zap,
+  MessageSquareText,
+  MessagesSquare
 } from 'lucide-react';
 import ApiClient, { authFailureEventName, defaultServerUrl, normalizeServerUrl } from './utils/api.js';
 import ActionMenu from './components/ActionMenu.jsx';
@@ -53,12 +55,23 @@ import ConfirmModal from './components/ConfirmModal.jsx';
 import CopyButton from './components/CopyButton.jsx';
 import CopyableValue from './components/CopyableValue.jsx';
 import ConnectedClientsChart from './components/ConnectedClientsChart.jsx';
+import { AutoRefreshSelect, useAutoRefresh } from './charts/autoRefresh.jsx';
+import RollupChart from './charts/RollupChart.jsx';
+import { hostMetrics, hostMetricUnit, providerMetrics, providerMetricUnit } from './charts/telemetryMetrics.js';
 import EmptyState from './components/EmptyState.jsx';
 import LanguageSelector from './components/LanguageSelector.jsx';
 import ActivityChart from './components/ActivityChart.jsx';
 import Modal from './components/Modal.jsx';
 import { ToastContainer, showToast } from './components/Toast.jsx';
 import Pagination from './components/Pagination.jsx';
+import { ServerChatReviewView, ServerChatView } from './chat/ServerChatViews.jsx';
+import UsagePage from './usage/UsagePage.jsx';
+import ProviderHealthPanel from './usage/ProviderHealthPanel.jsx';
+import DrillBanner, { matchesDrill } from './usage/DrillBanner.jsx';
+import { UsageApiContext } from './usage/UsageApiContext.js';
+import { createServerUsageApi } from './usage/serverUsageApi.js';
+import TimingBars, { networkRequestStages } from './charts/TimingBars.jsx';
+import { camelKeys } from './chat/chatStream.js';
 
 const api = new ApiClient();
 const dashboardSessionKey = 'xeno.dashboard.session';
@@ -80,25 +93,7 @@ const analyticsRanges = [
   { key: 'lastHour', durationMs: 60 * 60 * 1000, bucketMinutes: 1 },
   { key: 'lastDay', durationMs: 24 * 60 * 60 * 1000, bucketMinutes: 15 },
   { key: 'lastWeek', durationMs: 7 * 24 * 60 * 60 * 1000, bucketMinutes: 120 },
-  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, bucketMinutes: 480 }
-];
-const telemetryChartOpenDefaults = {
-  cpu: true,
-  memory: false,
-  gpu: false,
-  providerAvailable: true,
-  providerLoaded: false,
-  providerActive: false
-};
-const hostTelemetryChartConfigs = [
-  { color: 'var(--color-info)', key: 'cpu', labelFallback: 'CPU', labelKey: 'cpu', metric: 'CpuUtilizationPercent', titleFallback: 'CPU Telemetry', titleKey: 'cpuTelemetry' },
-  { color: 'var(--color-success)', key: 'memory', labelFallback: 'Memory', labelKey: 'memory', metric: 'MemoryUtilizationPercent', titleFallback: 'Memory Telemetry', titleKey: 'memoryTelemetry' },
-  { color: 'var(--color-warning)', key: 'gpu', labelFallback: 'GPU', labelKey: 'gpu', metric: 'GpuUtilizationPercent', titleFallback: 'GPU Telemetry', titleKey: 'gpuTelemetry' }
-];
-const providerTelemetryChartConfigs = [
-  { color: 'var(--color-success)', key: 'providerAvailable', labelFallback: 'Available Models', labelKey: 'availableModels', metric: 'AvailableModelCount', rollupKey: 'available', titleFallback: 'Available Models Telemetry', titleKey: 'availableModelsTelemetry' },
-  { color: 'var(--color-warning)', key: 'providerLoaded', labelFallback: 'Loaded Models', labelKey: 'loadedModels', metric: 'LoadedModelCount', rollupKey: 'loaded', titleFallback: 'Loaded Models Telemetry', titleKey: 'loadedModelsTelemetry' },
-  { color: 'var(--color-info)', key: 'providerActive', labelFallback: 'Active Requests', labelKey: 'activeRequests', metric: 'ActiveRequests', rollupKey: 'active', titleFallback: 'Active Requests Telemetry', titleKey: 'activeRequestsTelemetry' }
+  { key: 'lastMonth', durationMs: 30 * 24 * 60 * 60 * 1000, bucketMinutes: 360 }
 ];
 const defaultOpenAiPrompt = 'Hello! Can you give me a brief explanation of how an inverted index works?';
 const defaultOpenAiSystemPrompt = 'You are a helpful and concise assistant.';
@@ -134,9 +129,11 @@ const navGroups = [
     key: 'operate',
     links: [
       { to: '/dashboard/home', key: 'home', icon: Gauge },
+      { to: '/dashboard/usage', key: 'usage', icon: BarChart3 },
+      { to: '/dashboard/chat', key: 'chat', icon: MessagesSquare },
+      { to: '/dashboard/chat-review', key: 'chatReview', icon: MessageSquareText },
       { to: '/dashboard/requests', key: 'requests', icon: History },
       { to: '/dashboard/explorer', key: 'explorer', icon: Globe2 },
-      { to: '/dashboard/analytics', key: 'analytics', icon: BarChart3 },
       { to: '/dashboard/ledger', key: 'ledger', icon: Activity }
     ]
   },
@@ -165,6 +162,8 @@ const navGroups = [
 
 const pageMeta = {
   '/dashboard/home': { title: 'home', description: 'homeDescription' },
+  '/dashboard/chat': { title: 'chat', description: 'serverChatDescription' },
+  '/dashboard/chat-review': { title: 'chatReview', description: 'chatReviewDescription' },
   '/dashboard/requests': { title: 'requests', description: 'requestsDescription' },
   '/dashboard/explorer': { title: 'explorer', description: 'explorerDescription' },
   '/dashboard/tenants': { title: 'tenants', description: 'tenantsDescription' },
@@ -177,7 +176,7 @@ const pageMeta = {
   '/dashboard/clients/advertised-models/leaderboard': { title: 'xenoModelLeaderboard', description: 'modelLeaderboardDescription' },
   '/dashboard/client-telemetry': { title: 'clientTelemetry', description: 'clientTelemetryDescription' },
   '/dashboard/routing-policies': { title: 'routingPolicies', description: 'routingPoliciesDescription' },
-  '/dashboard/analytics': { title: 'analytics', description: 'analyticsDescription' },
+  '/dashboard/usage': { title: 'usage', description: 'usageDescription' },
   '/dashboard/ledger': { title: 'ledger', description: 'ledgerDescription' },
   '/dashboard/settings': { title: 'settings', description: 'settingsDescription' }
 };
@@ -302,7 +301,10 @@ function writeDashboardSession(session) {
 function navTooltipKey(key) {
   const mapped = {
     advertisedModels: 'tooltipNavAdvertisedModels',
+    chat: 'tooltipNavChat',
+    chatReview: 'tooltipNavChatReview',
     analytics: 'tooltipNavAnalytics',
+    usage: 'tooltipNavUsage',
     clients: 'tooltipNavClients',
     clientTelemetry: 'tooltipNavClientTelemetry',
     credentials: 'tooltipNavCredentials',
@@ -500,6 +502,8 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
           <Routes>
             <Route index element={<HomeView />} />
             <Route path="home" element={<HomeView />} />
+            <Route path="chat" element={<ServerChatView api={api} />} />
+            <Route path="chat-review" element={<ServerChatReviewView api={api} canReviewTenant={isGlobalAdmin || isTenantAdmin} />} />
             <Route path="requests" element={<RequestHistoryView />} />
             <Route path="explorer" element={<ApiExplorerView />} />
             <Route path="tenants" element={<TenantsView session={session} />} />
@@ -512,7 +516,8 @@ function Shell({ onLogout, onToggleTheme, session, theme }) {
             <Route path="clients/advertised-models/leaderboard" element={<ModelLeaderboardView session={session} />} />
             <Route path="client-telemetry" element={<ClientTelemetryView canCollect={isGlobalAdmin || isTenantAdmin} />} />
             <Route path="routing-policies" element={<RoutingPoliciesView />} />
-            <Route path="analytics" element={<AnalyticsView />} />
+            <Route path="usage" element={<ServerUsageView isGlobalAdmin={isGlobalAdmin} isTenantAdmin={isTenantAdmin} />} />
+            <Route path="analytics" element={<Navigate replace to="/dashboard/usage" />} />
             <Route path="ledger" element={<LedgerView canOperate={isGlobalAdmin || isTenantAdmin} session={session} />} />
             <Route path="settings" element={isGlobalAdmin ? <SettingsView /> : <NotFoundView />} />
             <Route path="*" element={<NotFoundView />} />
@@ -531,14 +536,18 @@ function ClientTelemetryView({ canCollect = false }) {
   const [status, setStatus] = useState(null);
   const [latest, setLatest] = useState({ hostTelemetry: [], providerTelemetry: [] });
   const [attempts, setAttempts] = useState([]);
-  const [hostRollups, setHostRollups] = useState({ cpu: [], memory: [], gpu: [] });
-  const [providerRollups, setProviderRollups] = useState({ active: [], available: [], loaded: [] });
-  const [telemetryRange, setTelemetryRange] = useState('lastHour');
+  const [hostMetric, setHostMetric] = useState('CpuUtilizationPercent');
+  const [providerMetric, setProviderMetric] = useState('ActiveRequests');
+  const [providerFilter, setProviderFilter] = useState('');
+  const [modelFilter, setModelFilter] = useState('');
+  const [hostRollups, setHostRollups] = useState([]);
+  const [providerRollups, setProviderRollups] = useState([]);
+  const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
+  const [telemetryRange, setTelemetryRange] = useState('lastDay');
   const [rangeAnchor, setRangeAnchor] = useState(Date.now());
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [attemptsLoading, setAttemptsLoading] = useState(true);
-  const [rollupLoading, setRollupLoading] = useState({});
-  const [openTelemetryCharts, setOpenTelemetryCharts] = useState(telemetryChartOpenDefaults);
+  const [rollupLoading, setRollupLoading] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const telemetryWindow = useMemo(() => buildAnalyticsWindow(telemetryRange, rangeAnchor), [rangeAnchor, telemetryRange]);
   const selectedClientId = searchParams.get('clientId') || 'all';
@@ -546,6 +555,7 @@ function ClientTelemetryView({ canCollect = false }) {
   const selectedClientName = value(selectedClient, 'name') || selectedClientId;
   const selectedClientExists = selectedClientId === 'all' || Boolean(selectedClient);
   const selectedClientQuery = selectedClientId === 'all' ? '' : `?clientId=${encodeURIComponent(selectedClientId)}`;
+  const healthApi = useMemo(() => createServerUsageApi(api, { isGlobalAdmin: false, isTenantAdmin: false }), []);
   const latestHostTelemetry = value(latest, 'hostTelemetry');
   const latestProviderTelemetry = value(latest, 'providerTelemetry');
   const hostRows = collectionRows(latestHostTelemetry);
@@ -558,12 +568,15 @@ function ClientTelemetryView({ canCollect = false }) {
   const averageMemory = average(hostRows.map((item) => value(item, 'memoryUtilizationPercent')));
   const averageGpu = average(hostRows.map((item) => value(item, 'gpuAverageUtilizationPercent')));
   const unhealthyProviders = providerRows.filter((item) => String(value(item, 'healthStatus') || '').toLowerCase() === 'unhealthy').length;
-  const openTelemetryChartKeys = Object.keys(openTelemetryCharts).filter((key) => openTelemetryCharts[key]).join('|');
-  const chartLoading = Object.values(rollupLoading).some(Boolean);
+  const chartLoading = rollupLoading;
+  const providerOptions = [...new Set(providerRows.map((item) => value(item, 'providerName')).filter(Boolean))].sort();
+  const modelOptions = [...new Set(clients.data.flatMap((client) => value(client, 'models') || []).map((model) => value(model, 'name')).filter(Boolean))].sort();
 
   function refreshWithCurrentTime() {
     setRangeAnchor(Date.now());
   }
+
+  useAutoRefresh(autoRefreshSeconds, refreshWithCurrentTime);
 
   async function collectNow() {
     setCollecting(true);
@@ -588,11 +601,6 @@ function ClientTelemetryView({ canCollect = false }) {
     }
 
     setSearchParams({ clientId: nextClientId });
-  }
-
-  function updateTelemetryChartOpen(key, open) {
-    setOpenTelemetryCharts((current) => ({ ...current, [key]: open }));
-    if (!open) setRollupLoading((current) => ({ ...current, [key]: false }));
   }
 
   useEffect(() => {
@@ -639,39 +647,22 @@ function ClientTelemetryView({ canCollect = false }) {
       toUtc: telemetryWindow.toUtc
     };
 
-    async function loadHost(config) {
-      setRollupLoading((current) => ({ ...current, [config.key]: true }));
-      try {
-        const result = await api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: config.metric });
-        if (alive) setHostRollups((current) => ({ ...current, [config.key]: collectionRows(result) }));
-      } catch {
-        if (alive) setHostRollups((current) => ({ ...current, [config.key]: [] }));
-      } finally {
-        if (alive) setRollupLoading((current) => ({ ...current, [config.key]: false }));
-      }
-    }
-
-    async function loadProvider(config) {
-      setRollupLoading((current) => ({ ...current, [config.key]: true }));
-      try {
-        const result = await api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: config.metric });
-        if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: collectionRows(result) }));
-      } catch {
-        if (alive) setProviderRollups((current) => ({ ...current, [config.rollupKey]: [] }));
-      } finally {
-        if (alive) setRollupLoading((current) => ({ ...current, [config.key]: false }));
-      }
-    }
-
-    hostTelemetryChartConfigs
-      .filter((config) => openTelemetryCharts[config.key])
-      .forEach((config) => { loadHost(config); });
-    providerTelemetryChartConfigs
-      .filter((config) => openTelemetryCharts[config.key])
-      .forEach((config) => { loadProvider(config); });
+    setRollupLoading(true);
+    Promise.allSettled([
+      api.post('/v1.0/api/client-telemetry/history/rollups', { ...rollupBase, metric: hostMetric }),
+      api.post('/v1.0/api/client-telemetry/providers/history/rollups', { ...rollupBase, metric: providerMetric, providerName: providerFilter || null, modelName: modelFilter || null })
+    ])
+      .then(([hostResult, providerResult]) => {
+        if (!alive) return;
+        setHostRollups(hostResult.status === 'fulfilled' ? collectionRows(hostResult.value) : []);
+        setProviderRollups(providerResult.status === 'fulfilled' ? collectionRows(providerResult.value) : []);
+      })
+      .finally(() => {
+        if (alive) setRollupLoading(false);
+      });
 
     return () => { alive = false; };
-  }, [openTelemetryChartKeys, rangeAnchor, selectedClientId, telemetryRange]);
+  }, [hostMetric, modelFilter, providerFilter, providerMetric, rangeAnchor, selectedClientId, telemetryRange]);
 
   return (
     <div className="view-stack client-telemetry-view">
@@ -726,62 +717,44 @@ function ClientTelemetryView({ canCollect = false }) {
         <MetricCard icon={<History size={18} />} label={t('nextCycle', 'Next Cycle')} value={formatDateTime(value(status, 'nextCycleUtc'))} valueClassName="metric-value-timestamp" />
       </div>
 
-      <div className="client-telemetry-chart-grid view-stack">
-        {hostTelemetryChartConfigs.map((config) => (
-          <TelemetryChartDisclosure
-            key={config.key}
-            loading={Boolean(rollupLoading[config.key])}
-            onToggle={(open) => updateTelemetryChartOpen(config.key, open)}
-            open={Boolean(openTelemetryCharts[config.key])}
-            subtitle={t('hostTelemetryMetricSubtitle', 'Server-collected host telemetry for the selected time range.')}
-            title={t(config.titleKey, config.titleFallback)}
-          >
-            <TelemetrySparkChart
-              emptyTitle={t('noData')}
-              framed={false}
-              loading={Boolean(rollupLoading[config.key])}
-              loadingLabel={t('loading')}
-              series={[{
-                color: config.color,
-                key: config.key,
-                label: t(config.labelKey, config.labelFallback),
-                values: telemetryRollupValues(hostRollups[config.key], telemetryWindow)
-              }]}
-              subtitle={t('hostTelemetryMetricSubtitle', 'Server-collected host telemetry for the selected time range.')}
-              title={t(config.titleKey, config.titleFallback)}
-              totalLabel={t('total')}
-              valueFormatter={(nextValue) => formatPercent(nextValue / 100)}
-            />
-          </TelemetryChartDisclosure>
-        ))}
-        {providerTelemetryChartConfigs.map((config) => (
-          <TelemetryChartDisclosure
-            key={config.key}
-            loading={Boolean(rollupLoading[config.key])}
-            onToggle={(open) => updateTelemetryChartOpen(config.key, open)}
-            open={Boolean(openTelemetryCharts[config.key])}
-            subtitle={t('providerTelemetryMetricSubtitle', 'Server-collected provider telemetry for the selected time range.')}
-            title={t(config.titleKey, config.titleFallback)}
-          >
-            <TelemetrySparkChart
-              emptyTitle={t('noData')}
-              framed={false}
-              loading={Boolean(rollupLoading[config.key])}
-              loadingLabel={t('loading')}
-              series={[{
-                color: config.color,
-                key: config.key,
-                label: t(config.labelKey, config.labelFallback),
-                values: telemetryRollupValues(providerRollups[config.rollupKey], telemetryWindow)
-              }]}
-              subtitle={t('providerTelemetryMetricSubtitle', 'Server-collected provider telemetry for the selected time range.')}
-              title={t(config.titleKey, config.titleFallback)}
-              totalLabel={t('total')}
-              valueFormatter={(nextValue) => formatOptionalNumber(nextValue)}
-            />
-          </TelemetryChartDisclosure>
-        ))}
+      <div className="client-telemetry-toolbar">
+        <div className="filter-control-pair">
+          <label className="form-field inline compact-field table-inline-filter" title={t('tooltipTelemetryMetric')}>
+            <span>{t('hostMetric', 'Host metric')}</span>
+            <select onChange={(event) => setHostMetric(event.target.value)} title={t('tooltipTelemetryMetric')} value={hostMetric}>
+              {hostMetrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
+            </select>
+          </label>
+          <label className="form-field inline compact-field table-inline-filter" title={t('tooltipProviderTelemetryMetric')}>
+            <span>{t('providerMetric', 'Provider metric')}</span>
+            <select onChange={(event) => setProviderMetric(event.target.value)} title={t('tooltipProviderTelemetryMetric')} value={providerMetric}>
+              {providerMetrics.map((item) => <option key={item} value={item}>{t(item)}</option>)}
+            </select>
+          </label>
+          <label className="form-field inline compact-field table-inline-filter" title={t('tooltipProviderTelemetryProviderFilter')}>
+            <span>{t('provider', 'Provider')}</span>
+            <select onChange={(event) => setProviderFilter(event.target.value)} title={t('tooltipProviderTelemetryProviderFilter')} value={providerFilter}>
+              <option value="">{t('all')}</option>
+              {providerOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+          <label className="form-field inline compact-field table-inline-filter" title={t('tooltipProviderTelemetryModelFilter')}>
+            <span>{t('model', 'Model')}</span>
+            <select onChange={(event) => setModelFilter(event.target.value)} title={t('tooltipProviderTelemetryModelFilter')} value={modelFilter}>
+              <option value="">{t('all')}</option>
+              {modelOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+          <AutoRefreshSelect onChange={setAutoRefreshSeconds} seconds={autoRefreshSeconds} />
+        </div>
       </div>
+
+      <div className="usage-grid client-telemetry-charts">
+        <RollupChart id="telemetry.host" metric={hostMetric} range={telemetryRange} rollups={hostRollups} unit={hostMetricUnit(hostMetric)} />
+        <RollupChart id="telemetry.provider" metric={providerMetric} range={telemetryRange} rollups={providerRollups} unit={providerMetricUnit(providerMetric)} />
+      </div>
+
+      <UsageApiContext.Provider value={healthApi}><ProviderHealthPanel clientId={selectedClientId === 'all' ? undefined : selectedClientId} range={telemetryRange} /></UsageApiContext.Provider>
 
       <DataTable
         columns={[
@@ -829,245 +802,6 @@ function ClientTelemetryView({ canCollect = false }) {
 
     </div>
   );
-}
-
-function TelemetryChartDisclosure({ children, loading, onToggle, open, subtitle, title }) {
-  return (
-    <details className="workspace-card telemetry-collapsible-chart" onToggle={(event) => onToggle?.(event.currentTarget.open)} open={open}>
-      <summary className="workspace-card-header telemetry-collapsible-summary">
-        <div>
-          <h2>{title}</h2>
-          {subtitle ? <p>{subtitle}</p> : null}
-        </div>
-        <div className="workspace-card-actions">
-          {loading ? <div aria-hidden="true" className="table-loading-spinner compact-spinner" /> : null}
-          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </div>
-      </summary>
-      {open ? <div className="workspace-card-body">{children}</div> : null}
-    </details>
-  );
-}
-
-function TelemetrySparkChart({ emptyTitle, framed = true, loading = false, loadingLabel = 'Loading...', series, subtitle, title, totalLabel = 'Total', valueFormatter }) {
-  const canvasRef = useRef(null);
-  const [hovered, setHovered] = useState(null);
-  const normalizedSeries = series.map((item) => ({
-    ...item,
-    values: Array.isArray(item.values) ? item.values : []
-  }));
-  const finiteValues = normalizedSeries.flatMap((item) => item.values.map((point) => Number(point.value)).filter((nextValue) => Number.isFinite(nextValue)));
-  const chart = { width: 900, height: 360, left: 54, right: 28, top: 24, bottom: 44 };
-  const plotWidth = chart.width - chart.left - chart.right;
-  const plotHeight = chart.height - chart.top - chart.bottom;
-  const hasData = finiteValues.length > 0;
-  const bucketCount = Math.max(0, ...normalizedSeries.map((item) => item.values.length));
-  const stackedTotals = Array.from({ length: bucketCount }, (_, index) => normalizedSeries.reduce((total, item) => {
-    const pointValue = Number(item.values[index]?.value);
-    return total + (Number.isFinite(pointValue) ? Math.max(0, pointValue) : 0);
-  }, 0));
-  const max = Math.max(1, ...stackedTotals);
-  const axisMax = telemetryAxisMaximum(max);
-  const yTicks = buildTelemetryYAxisTicks(axisMax);
-  const bucketSlot = plotWidth / Math.max(1, bucketCount);
-  const barWidth = Math.max(2, Math.min(18, bucketSlot - Math.min(12, Math.max(2, bucketSlot * 0.22))));
-  const xTicks = buildTelemetryXAxisTicks(normalizedSeries, bucketCount, chart.left, plotWidth);
-
-  function updateHover(event) {
-    if (bucketCount === 0 || !canvasRef.current) {
-      setHovered(null);
-      return;
-    }
-
-    const bounds = canvasRef.current.getBoundingClientRect();
-    const svgX = (event.clientX - bounds.left) / Math.max(1, bounds.width) * chart.width;
-    const boundedX = Math.max(chart.left, Math.min(chart.left + plotWidth, svgX));
-    const index = Math.max(0, Math.min(bucketCount - 1, Math.floor(((boundedX - chart.left) / Math.max(1, plotWidth)) * bucketCount)));
-    const x = chart.left + index * bucketSlot + bucketSlot / 2;
-    const rows = normalizedSeries.map((item) => {
-      const point = item.values[index] || {};
-      const pointValue = Number(point.value);
-      return {
-        color: item.color,
-        key: item.key,
-        label: item.label,
-        value: Number.isFinite(pointValue) ? pointValue : null
-      };
-    });
-    const label = normalizedSeries.map((item) => item.values[index]?.label).find(Boolean) || '';
-    const total = rows.reduce((sum, row) => sum + (Number.isFinite(Number(row.value)) ? Number(row.value) : 0), 0);
-    setHovered({
-      label,
-      rows,
-      svgX: x,
-      total,
-      ...telemetryTooltipFromPointer(event, canvasRef.current)
-    });
-  }
-
-  const chartBody = (
-    <>
-      {!hasData && !loading ? <EmptyState title={emptyTitle} description={subtitle} /> : (
-        <div className="activity-chart-panel compact-chart-panel telemetry-spark-chart-panel">
-          <div className="chart-canvas" ref={canvasRef}>
-            <svg className="activity-chart" onMouseLeave={() => setHovered(null)} onMouseMove={updateHover} viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={title}>
-              <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.top + plotHeight} stroke="var(--color-border)" />
-              <line x1={chart.left} y1={chart.top + plotHeight} x2={chart.left + plotWidth} y2={chart.top + plotHeight} stroke="var(--color-border)" />
-              {yTicks.map((tick) => {
-                const y = chart.top + (1 - tick.ratio) * plotHeight;
-                return (
-                  <g key={tick.key}>
-                    <line x1={chart.left} y1={y} x2={chart.left + plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" opacity="0.72" />
-                    <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{valueFormatter(tick.value)}</text>
-                  </g>
-                );
-              })}
-              {Array.from({ length: bucketCount }, (_, index) => {
-                const x = chart.left + index * bucketSlot + (bucketSlot - barWidth) / 2;
-                let stackedHeight = 0;
-                return (
-                  <g key={`bucket-${index}`}>
-                    <rect x={chart.left + index * bucketSlot} y={chart.top} width={bucketSlot} height={plotHeight} fill="transparent" />
-                    {normalizedSeries.map((item) => {
-                      const point = item.values[index] || {};
-                      const pointValue = Number(point.value);
-                      if (!Number.isFinite(pointValue)) return null;
-                      const height = Math.max(0, (Math.max(0, pointValue) / axisMax) * plotHeight);
-                      const y = chart.top + plotHeight - stackedHeight - height;
-                      stackedHeight += height;
-                      return (
-                        <rect
-                          fill={item.color}
-                          height={height}
-                          key={`${item.key}-${index}`}
-                          rx="2"
-                          width={barWidth}
-                          x={x}
-                          y={y}
-                        >
-                          <title>{`${item.label} ${point.label}: ${valueFormatter(pointValue)}`}</title>
-                        </rect>
-                      );
-                    })}
-                  </g>
-                );
-              })}
-              {hovered ? (
-                <rect className="chart-hover-band" x={hovered.svgX - bucketSlot / 2} y={chart.top} width={bucketSlot} height={plotHeight} />
-              ) : null}
-              {xTicks.map((tick) => (
-                <text className="axis-label" key={tick.key} x={tick.x} y={chart.top + plotHeight + 18} textAnchor="middle">{tick.label}</text>
-              ))}
-              <rect
-                fill="transparent"
-                height={plotHeight}
-                onFocus={(event) => updateHover({ ...event, clientX: event.currentTarget.getBoundingClientRect().left, clientY: event.currentTarget.getBoundingClientRect().top })}
-                width={plotWidth}
-                x={chart.left}
-                y={chart.top}
-              />
-            </svg>
-            {hovered ? (
-              <div className="chart-tooltip telemetry-chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
-                <strong>{hovered.label}</strong>
-                {hovered.rows.map((row) => (
-                  <span className="chart-tooltip-row" key={row.key}>
-                    <i style={{ background: row.color }} />
-                    <span>{row.label}</span>
-                    <b>{row.value === null ? '-' : valueFormatter(row.value)}</b>
-                  </span>
-                ))}
-                <span className="chart-tooltip-row">
-                  <i />
-                  <span>{totalLabel}</span>
-                  <b>{valueFormatter(hovered.total)}</b>
-                </span>
-              </div>
-            ) : null}
-            {loading ? <ChartLoadingOverlay label={loadingLabel} /> : null}
-          </div>
-          <div className="chart-legend">
-            {normalizedSeries.map((item) => <span key={item.key}><i style={{ background: item.color }} />{item.label}</span>)}
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  if (!framed) return chartBody;
-  return <Panel title={title}>{chartBody}</Panel>;
-}
-
-function ChartLoadingOverlay({ label }) {
-  return (
-    <div aria-live="polite" className="chart-loading-overlay" role="status">
-      <div aria-hidden="true" className="table-loading-spinner" />
-      <strong>{label}</strong>
-    </div>
-  );
-}
-
-function telemetryTooltipFromPointer(event, element) {
-  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
-  const bounds = element.getBoundingClientRect();
-  return telemetryTooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
-}
-
-function telemetryAxisMaximum(maximum) {
-  if (!Number.isFinite(maximum) || maximum <= 1) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(maximum));
-  const normalized = maximum / magnitude;
-  let niceNormalized = 10;
-  if (normalized <= 1) niceNormalized = 1;
-  else if (normalized <= 2) niceNormalized = 2;
-  else if (normalized <= 4) niceNormalized = 4;
-  else if (normalized <= 8) niceNormalized = 8;
-  return niceNormalized * magnitude;
-}
-
-function buildTelemetryYAxisTicks(axisMax) {
-  if (!Number.isFinite(axisMax) || axisMax <= 1) {
-    return [
-      { key: 'y-1', ratio: 1, value: 1 },
-      { key: 'y-0', ratio: 0, value: 0 }
-    ];
-  }
-
-  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
-    key: `y-${ratio}`,
-    ratio,
-    value: axisMax * ratio
-  }));
-}
-
-function buildTelemetryXAxisTicks(series, bucketCount, left, plotWidth) {
-  if (bucketCount <= 0) return [];
-  const tickCount = Math.min(8, bucketCount);
-  if (tickCount === 1) {
-    return [{ key: 'x-0', label: telemetryLabelAt(series, 0), x: left + plotWidth / 2 }];
-  }
-
-  return Array.from({ length: tickCount }, (_, tickIndex) => {
-    const ratio = tickIndex / (tickCount - 1);
-    const bucketIndex = Math.min(bucketCount - 1, Math.max(0, Math.round(ratio * (bucketCount - 1))));
-    return {
-      key: `x-${tickIndex}-${bucketIndex}`,
-      label: telemetryLabelAt(series, bucketIndex),
-      x: left + ratio * plotWidth
-    };
-  });
-}
-
-function telemetryLabelAt(series, index) {
-  return series.map((item) => item.values[index]?.label).find(Boolean) || '';
-}
-
-function telemetryTooltipPosition(x, y, width, height) {
-  const tooltipWidth = 220;
-  const clampedX = Math.max(10, Math.min(width - 10, x));
-  const clampedY = Math.max(24, Math.min(height - 24, y));
-  const transform = clampedX > width - tooltipWidth ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
-  return { x: clampedX, y: clampedY, transform };
 }
 
 function LoginView({ onLogin, onToggleTheme, theme }) {
@@ -1322,6 +1056,7 @@ function LoginView({ onLogin, onToggleTheme, theme }) {
 
 function HomeView() {
   const { t } = useTranslation();
+  const connectedHistoryApi = useMemo(() => createServerUsageApi(api, { isGlobalAdmin: false, isTenantAdmin: false }), []);
   const [activityRange, setActivityRange] = useState('lastDay');
   const [rangeAnchor, setRangeAnchor] = useState(Date.now());
   const activityWindow = useMemo(() => buildAnalyticsWindow(activityRange, rangeAnchor), [activityRange, rangeAnchor]);
@@ -1376,14 +1111,7 @@ function HomeView() {
         className="chart-panel-card"
         title={t('connectedClients')}
       >
-        <ConnectedClientsChart
-          connected={connected}
-          loading={analytics.loading}
-          range={activityRange}
-          sampleVersion={analytics.updatedAt}
-          showControls={false}
-          total={totalClientCount}
-        />
+        <ConnectedClientsChart load={connectedHistoryApi.getConnectedHistory} range={activityRange} refreshSignal={analytics.updatedAt} />
       </Panel>
     </div>
   );
@@ -1683,10 +1411,12 @@ function RegistrationSuccessModal({ onContinue, response }) {
 
 function RequestHistoryView() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const drill = searchParams.get('fromUtc') && searchParams.get('toUtc') ? { fromUtc: searchParams.get('fromUtc'), toUtc: searchParams.get('toUtc'), model: searchParams.get('model') } : null;
   const [activityRange, setActivityRange] = useState('lastDay');
   const [rangeAnchor, setRangeAnchor] = useState(Date.now());
   const activityWindow = useMemo(() => buildAnalyticsWindow(activityRange, rangeAnchor), [activityRange, rangeAnchor]);
-  const history = useResource(requestHistoryListPath(), { items: [], total: 0, page: 1, pageSize: 100 });
+  const history = useResource(requestHistoryListPath(drill), { items: [], total: 0, page: 1, pageSize: 100 });
   const summary = useResource(requestHistorySummaryPath(activityWindow), { buckets: [] });
   const [selected, setSelected] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -1713,6 +1443,7 @@ function RequestHistoryView() {
 
   return (
     <div className="view-stack">
+      <DrillBanner drill={drill} onClear={() => setSearchParams({})} />
       <div className="metric-grid compact">
         <MetricCard icon={<Activity size={18} />} label={t('success')} value={formatNumber(bucketTotals.success)} tone="success" />
         <MetricCard icon={<Shield size={18} />} label={t('failed')} value={formatNumber(bucketTotals.failed)} tone="danger" />
@@ -1739,7 +1470,7 @@ function RequestHistoryView() {
         onRowClick={setSelected}
         onRefresh={refreshAll}
         loading={history.loading}
-        rows={collectionRows(history.data)}
+        rows={drill ? collectionRows(history.data).filter((row) => matchesDrill(drill, value(row, 'createdUtc'), value(row, 'model'))) : collectionRows(history.data)}
         subtitle={t('requestHistorySubtitle')}
         title={t('requests')}
       />
@@ -3696,56 +3427,42 @@ function RoutingPoliciesView() {
   );
 }
 
-function AnalyticsView() {
+// The Usage page, then the tenant's raw totals by model and path and the Prometheus metrics.
+function ServerUsageView({ isGlobalAdmin, isTenantAdmin }) {
+  const navigate = useNavigate();
+  const usageApi = useMemo(() => createServerUsageApi(api, { isGlobalAdmin, isTenantAdmin }), [isGlobalAdmin, isTenantAdmin]);
+
+  function drillDown(dataset, window) {
+    const parameters = new URLSearchParams({ fromUtc: window.fromUtc, toUtc: window.toUtc });
+    if (window.model) parameters.set('model', window.model);
+    navigate(`/dashboard/${dataset === 'Chat' ? 'chat-review' : 'requests'}?${parameters.toString()}`);
+  }
+
+  return (
+    <div className="view-stack">
+      <UsageApiContext.Provider value={usageApi}><UsagePage onDrill={drillDown} /></UsageApiContext.Provider>
+      <AnalyticsDetails />
+    </div>
+  );
+}
+
+function AnalyticsDetails() {
   const { t } = useTranslation();
-  const [analyticsRange, setAnalyticsRange] = useState('lastDay');
   const [rangeAnchor, setRangeAnchor] = useState(() => Date.now());
-  const analyticsWindow = useMemo(() => buildAnalyticsWindow(analyticsRange, rangeAnchor), [analyticsRange, rangeAnchor]);
-  const summary = useResource(requestHistorySummaryPath(analyticsWindow), { buckets: [] });
+  const analyticsWindow = useMemo(() => buildAnalyticsWindow('lastDay', rangeAnchor), [rangeAnchor]);
   const overview = useResource(analyticsOverviewPath(analyticsWindow), { total: 0, success: 0, failures: 0, failureRate: 0, byModel: [], byPath: [] });
   const metrics = useTextResource('/metrics', '');
-  const analyticsTotals = {
-    failed: Number(value(overview.data, 'failures') || value(overview.data, 'failed') || 0),
-    failureRate: Number(value(overview.data, 'failureRate') || 0),
-    success: Number(value(overview.data, 'success') || 0),
-    total: Number(value(overview.data, 'total') || 0)
-  };
   const byModel = collectionRows(value(overview.data, 'byModel'));
   const byPath = collectionRows(value(overview.data, 'byPath'));
 
   function refreshAnalytics() {
     setRangeAnchor(Date.now());
-    summary.refresh();
     overview.refresh();
     metrics.refresh();
   }
 
-  function updateAnalyticsRange(nextRange) {
-    setAnalyticsRange(nextRange);
-    setRangeAnchor(Date.now());
-  }
-
   return (
-    <div className="view-stack">
-      <div className="analytics-range-toolbar">
-        <div>
-          <span className="eyebrow">{t('timeRange')}</span>
-          <h2>{t('analyticsTimeRange')}</h2>
-        </div>
-        <TimeRangeSelector onChange={updateAnalyticsRange} range={analyticsRange} />
-      </div>
-      <div className="metric-grid compact">
-        <MetricCard icon={<Activity size={18} />} label={t('total')} value={formatNumber(analyticsTotals.total)} />
-        <MetricCard icon={<Zap size={18} />} label={t('success')} value={formatNumber(analyticsTotals.success)} tone="success" />
-        <MetricCard icon={<Shield size={18} />} label={t('failed')} value={formatNumber(analyticsTotals.failed)} tone="danger" />
-        <MetricCard icon={<Gauge size={18} />} label={t('failureRate')} value={formatPercent(analyticsTotals.failureRate)} tone={analyticsTotals.failureRate > 0 ? 'warning' : 'success'} />
-      </div>
-      <Panel
-        actions={<IconButton iconOnly onClick={refreshAnalytics} label={t('refresh')} tooltip={t('tooltipManualRefresh')} icon={<RefreshCw size={16} />} />}
-        title={t('requestActivity')}
-      >
-        <ActivityChart loading={summary.loading} onRangeChange={updateAnalyticsRange} onRefresh={refreshAnalytics} range={analyticsRange} showControls={false} summary={summary.data} />
-      </Panel>
+    <>
       <div className="workspace-grid">
         <DataTable title={t('requestsByModel')} rows={byModel} columns={['name', 'count', 'success', 'failed']} loading={overview.loading} onDelete={(row) => deleteRequestHistoryGroup({ model: value(row, 'name') })} onRefresh={refreshAnalytics} />
         <DataTable title={t('requestsByPath')} rows={byPath} columns={['name', 'count', 'success', 'failed']} loading={overview.loading} onDelete={(row) => deleteRequestHistoryGroup({ path: value(row, 'name') })} onRefresh={refreshAnalytics} />
@@ -3756,7 +3473,7 @@ function AnalyticsView() {
       >
         <pre className="metrics-output">{metrics.data || t('noData')}</pre>
       </Panel>
-    </div>
+    </>
   );
 }
 
@@ -4522,6 +4239,20 @@ function SettingsView() {
             </label>
           </div>
         </Panel>
+        <Panel actions={<SettingImpactBadge type="live" />} title={t('usage')}>
+          <div className="form-grid two">
+            <label className="form-field" title={t('tooltipUsageSettingMaxRecords')}>
+              <span>{t('usageSettingMaxRecords')}</span>
+              <input max="5000000" min="10000" type="number" value={draft.Analytics.MaxRecordsPerQuery} onChange={(event) => updateSetting('Analytics', 'MaxRecordsPerQuery', Number(event.target.value))} title={t('tooltipUsageSettingMaxRecords')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+            <label className="form-field" title={t('tooltipUsageSettingTopN')}>
+              <span>{t('usageSettingTopN')}</span>
+              <input max="20" min="1" type="number" value={draft.Analytics.DefaultTopN} onChange={(event) => updateSetting('Analytics', 'DefaultTopN', Number(event.target.value))} title={t('tooltipUsageSettingTopN')} />
+              <small className="setting-impact live">{t('appliesToNewActivity')}</small>
+            </label>
+          </div>
+        </Panel>
         <Panel actions={<SettingImpactBadge type="live" />} title={t('routingSettings')}>
           <SettingImpactNote live={t('routingLiveNote')} />
           <div className="form-grid two">
@@ -5067,6 +4798,7 @@ function useTextResource(path, fallback) {
 function defaultServerSettings() {
   return {
     Rest: { Hostname: '0.0.0.0', Port: 9000, Ssl: false, RequireAuthentication: false },
+    Analytics: { MaxRecordsPerQuery: 250000, DefaultTopN: 8 },
     Cors: {
       Enabled: true,
       AllowedOrigins: ['http://localhost:9100'],
@@ -5151,6 +4883,7 @@ function normalizeSettings(input) {
   return {
     ...source,
     Rest: { ...defaults.Rest, ...(source.Rest || source.rest || {}) },
+    Analytics: { ...defaults.Analytics, ...(source.Analytics || source.analytics || {}) },
     Cors: { ...defaults.Cors, ...(source.Cors || source.cors || {}) },
     WebSocket: { ...defaults.WebSocket, ...(source.WebSocket || source.webSocket || source.websocket || {}) },
     Routing: {
@@ -5583,6 +5316,10 @@ function StatusChip({ tone = 'neutral', value }) {
   return <span className={`status-chip ${tone}`}>{value}</span>;
 }
 
+function camelRecord(record) {
+  return camelKeys(record || {});
+}
+
 function RequestDetailsModal({ data, onClose }) {
   const { t } = useTranslation();
   const record = data || {};
@@ -5657,6 +5394,10 @@ function RequestDetailsModal({ data, onClose }) {
       title={t('requestDetails')}
     >
       <div className="request-detail-layout">
+        <section className="request-detail-timing">
+          <h3>{t('usageChartRequestTiming')}</h3>
+          <TimingBars stages={networkRequestStages(camelRecord(record))} />
+        </section>
         <section className="request-detail-summary">
           <div className="request-detail-titleline">
             <span className={`method-pill ${methodTone(value(record, 'method'))}`}>{value(record, 'method') || '-'}</span>
@@ -7624,42 +7365,6 @@ function buildAnalyticsWindow(rangeKey, anchorMs) {
   };
 }
 
-function telemetryRollupValues(rollups, window) {
-  const bucketMs = Math.max(1, Number(window.bucketMinutes || 1)) * 60 * 1000;
-  const bucketCount = Math.max(1, Math.ceil((window.toMs - window.fromMs) / bucketMs));
-  const values = Array.from({ length: bucketCount }, (_, index) => {
-    const startMs = window.fromMs + index * bucketMs;
-    return {
-      label: telemetryBucketLabel(startMs, window.key),
-      value: null
-    };
-  });
-
-  (Array.isArray(rollups) ? rollups : []).forEach((bucket) => {
-    const startUtc = value(bucket, 'startUtc');
-    const startMs = Date.parse(String(startUtc || ''));
-    if (!Number.isFinite(startMs)) return;
-    const index = Math.floor((startMs - window.fromMs) / bucketMs);
-    if (index < 0 || index >= values.length) return;
-    const averageValue = Number(value(bucket, 'average'));
-    values[index] = {
-      label: value(bucket, 'label') || telemetryBucketLabel(startMs, window.key),
-      value: Number.isFinite(averageValue) ? averageValue : null
-    };
-  });
-
-  return values;
-}
-
-function telemetryBucketLabel(timestamp, rangeKey) {
-  const date = new Date(timestamp);
-  if (rangeKey === 'lastHour' || rangeKey === 'lastDay') {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
 function requestHistorySummaryPath(window) {
   const parameters = new URLSearchParams({
     bucketMinutes: String(window.bucketMinutes),
@@ -7669,11 +7374,15 @@ function requestHistorySummaryPath(window) {
   return `${requestHistorySummaryEndpoint}?${parameters.toString()}`;
 }
 
-function requestHistoryListPath() {
+function requestHistoryListPath(drill) {
   const parameters = new URLSearchParams({
     page: '1',
-    pageSize: '250'
+    pageSize: drill ? '1000' : '250'
   });
+  if (drill) {
+    parameters.set('fromUtc', drill.fromUtc);
+    parameters.set('toUtc', drill.toUtc);
+  }
   return `${requestHistoryEndpoint}?${parameters.toString()}`;
 }
 

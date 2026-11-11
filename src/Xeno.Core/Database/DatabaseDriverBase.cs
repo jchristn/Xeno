@@ -56,6 +56,16 @@ namespace Xeno.Core.Database
         public IAuditMethods? Audit { get; protected set; } = null;
 
         /// <summary>
+        /// Server chat methods: conversations, messages, feedback, and chat turns per tenant and user.
+        /// </summary>
+        public IChatMethods? Chat { get; protected set; } = null;
+
+        /// <summary>
+        /// Connected-client samples.
+        /// </summary>
+        public IConnectedClientSampleMethods? ConnectedClientSamples { get; protected set; } = null;
+
+        /// <summary>
         /// Persisted cloud onboarding request methods. Onboarding requests are stored in their own
         /// table, never in the in-memory platform state.
         /// </summary>

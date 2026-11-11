@@ -23,6 +23,14 @@ namespace Xeno.Desktop.Pages
         public abstract XenoPageEnum Page { get; }
 
         /// <summary>
+        /// True when the page's charts follow the auto-refresh choice right now.
+        /// </summary>
+        public virtual bool AutoRefreshes
+        {
+            get { return false; }
+        }
+
+        /// <summary>
         /// True when the view should be wrapped in a scroll viewer; false for views that size to the window.
         /// </summary>
         public virtual bool Scrolls

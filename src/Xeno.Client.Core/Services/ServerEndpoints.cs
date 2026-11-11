@@ -123,9 +123,22 @@ namespace Xeno.Client.Services
         public static string DescribeAuth(ClientSettings settings)
         {
             ArgumentNullException.ThrowIfNull(settings);
-            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey)) return "access key " + settings.Server.AccessKey;
+            if (!String.IsNullOrWhiteSpace(settings.Server.AccessKey)) return "access key " + MaskSecret(settings.Server.AccessKey);
             if (!String.IsNullOrWhiteSpace(settings.Server.Token)) return "REST token only";
             return "not configured";
+        }
+
+        /// <summary>
+        /// Describe a secret for display without revealing it: whether it is set and, for longer values, its last four
+        /// characters so two secrets can be told apart.
+        /// </summary>
+        /// <param name="value">Secret, or null.</param>
+        /// <returns>Text that is safe to print.</returns>
+        public static string MaskSecret(string? value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return "(not set)";
+            if (value.Length <= 8) return "configured";
+            return "configured (..." + value.Substring(value.Length - 4) + ")";
         }
 
         private static string RestSource(ClientSettings settings)

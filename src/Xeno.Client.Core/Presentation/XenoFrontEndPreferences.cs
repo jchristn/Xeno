@@ -21,9 +21,30 @@ namespace Xeno.Client.Presentation
         }
 
         /// <summary>
+        /// Seconds between chart refreshes: 0 (off), 15, or 60, the same choices as the web dashboards. Default 15. Other
+        /// values round to the nearest choice.
+        /// </summary>
+        public int AutoRefreshSeconds
+        {
+            get { return _AutoRefreshSeconds; }
+            set { _AutoRefreshSeconds = value <= 0 ? 0 : value <= 30 ? 15 : 60; }
+        }
+
+        /// <summary>
         /// Appearance for the desktop app.
         /// </summary>
         public XenoAppearanceEnum DesktopAppearance { get; set; } = XenoAppearanceEnum.System;
+
+        /// <summary>
+        /// Color scheme for the desktop app and the tray agent: a <see cref="XenoColorSchemes.BuiltIn"/> identifier, or
+        /// <see cref="XenoColorSchemes.CustomId"/> for <see cref="DesktopCustomColors"/>. Default "xeno".
+        /// </summary>
+        public string DesktopColorScheme { get; set; } = XenoColorSchemes.DefaultId;
+
+        /// <summary>
+        /// The user's own colors, used when <see cref="DesktopColorScheme"/> is "custom". Null until the user makes one.
+        /// </summary>
+        public XenoColorScheme? DesktopCustomColors { get; set; } = null;
 
         /// <summary>
         /// Appearance for the terminal app.
@@ -54,6 +75,7 @@ namespace Xeno.Client.Presentation
         #region Private-Members
 
         private int _RefreshSeconds = 5;
+        private int _AutoRefreshSeconds = 15;
 
         #endregion
 

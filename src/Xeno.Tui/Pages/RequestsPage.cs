@@ -21,6 +21,12 @@ namespace Xeno.Tui.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return _Window == null; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.Requests; }
@@ -50,6 +56,7 @@ namespace Xeno.Tui.Pages
         private readonly ChartView _Chart = new ChartView();
         private readonly DataTable<RequestRow> _Table;
         private List<RequestRow> _Rows = new List<RequestRow>();
+        private XenoDrillDownRequest? _Window = null;
 
         #endregion
 
@@ -61,9 +68,13 @@ namespace Xeno.Tui.Pages
         /// <param name="context">Context.</param>
         public RequestsPage(TuiContext context) : base(context)
         {
-            _Range.SelectedIndex = 0;
+            _Range.SelectedIndex = 1;
             _Outcome.SelectedIndex = 0;
-            _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
+            _Range.SelectionChanged += (sender, args) =>
+            {
+                _Window = null;
+                _ = RefreshAsync();
+            };
             _Outcome.SelectionChanged += (sender, args) => Apply();
             _Search.ValueChanged += (sender, args) => Apply();
             _Table = Table<RequestRow>("No requests in this range.", row => row.Id);
@@ -94,11 +105,16 @@ namespace Xeno.Tui.Pages
         public override Task RefreshAsync()
         {
             HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
+            XenoDrillDownRequest? taken = XenoDrillDown.Take(Page);
+            if (taken != null) _Window = taken;
+            XenoDrillDownRequest? window = _Window;
             return LoadAsync(async token =>
             {
                 List<LocalRequestHistorySummaryBucket> buckets = await Workspace.SummarizeRequestsAsync(range, token).ConfigureAwait(false);
                 DateTime from = HistoryRanges.StartUtc(range, DateTime.UtcNow);
-                List<RequestRow> rows = (await Workspace.ListRequestsAsync(0, token).ConfigureAwait(false)).Where(item => item.ReceivedUtc >= from).ToList();
+                List<RequestRow> all = await Workspace.ListRequestsAsync(0, token).ConfigureAwait(false);
+                // A window from the Usage page shows only that bucket until the range changes.
+                List<RequestRow> rows = window == null ? all.Where(item => item.ReceivedUtc >= from).ToList() : all.Where(item => window.Matches(item.ReceivedUtc, item.Model)).ToList();
                 return new RequestsData(XenoCharts.Requests(buckets, range), rows);
             }, data =>
             {
@@ -152,7 +168,7 @@ namespace Xeno.Tui.Pages
             if (row == null) return;
             LocalRequestHistoryEntry? entry = await Workspace.GetRequestAsync(row.Id, System.Threading.CancellationToken.None).ConfigureAwait(false);
             if (entry == null) return;
-            string markdown = RequestDetailFormatter.ToMarkdown(entry, true);
+            string markdown = XenoMarkdown.Join(new[] { RequestDetailFormatter.ToMarkdown(entry, true), XenoUsageCharts.TimingMarkdown(XenoUsageCharts.StagesFor(entry)) });
             Context.Post(() => _ = Context.ShowMarkdownAsync("Request " + entry.Id, markdown));
         }
 

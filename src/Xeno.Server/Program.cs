@@ -1,6 +1,7 @@
 namespace Xeno.Server
 {
     using System;
+    using System.Globalization;
     using System.IO;
     using System.Threading;
     using System.Threading.Tasks;
@@ -35,12 +36,26 @@ namespace Xeno.Server
             }
         }
 
+        /// <summary>
+        /// The notice printed when no settings file existed and defaults were written, so an operator can see which
+        /// file was created and which address the server is about to listen on.
+        /// </summary>
+        /// <param name="filename">Settings file that was created.</param>
+        /// <param name="settings">Settings that were written.</param>
+        /// <returns>One line of text.</returns>
+        public static string DescribeCreatedSettings(string filename, XenoSettings settings)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            return "Settings file '" + Path.GetFullPath(filename) + "' did not exist, so defaults were written. Listening on " + settings.Rest.Hostname + ":" + settings.Rest.Port.ToString(CultureInfo.InvariantCulture) + ".";
+        }
+
         private static XenoSettings LoadSettings(string filename)
         {
             if (!File.Exists(filename))
             {
                 XenoSettings created = new XenoSettings();
                 File.WriteAllText(filename, JsonUtil.Serialize(created, true));
+                Console.WriteLine(DescribeCreatedSettings(filename, created));
                 return created;
             }
 

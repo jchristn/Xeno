@@ -51,6 +51,11 @@ namespace Xeno.Core.Telemetry
         private static readonly ActivitySource _ActivitySource = new ActivitySource(ActivitySourceName, ResolveVersion());
 
         // Request / relay counters and histograms.
+        private static readonly Histogram<double> _AnalyticsQueryDuration = _Meter.CreateHistogram<double>(
+            "xeno.analytics.query.duration", "s", "Usage analytics query duration.");
+        private static readonly Counter<long> _AnalyticsRecordsScanned = _Meter.CreateCounter<long>(
+            "xeno.analytics.records.scanned", "{record}", "Records read by usage analytics queries.");
+
         private static readonly Counter<long> _HttpRequests = _Meter.CreateCounter<long>(
             "xeno.http.requests", "{request}", "Total HTTP requests handled by the server.");
         private static readonly Histogram<double> _HttpRequestDuration = _Meter.CreateHistogram<double>(
@@ -374,6 +379,26 @@ namespace Xeno.Core.Telemetry
         {
             _TelemetryCollectionCycles.Add(1);
             if (!success) _TelemetryCollectionFailures.Add(1);
+        }
+
+        /// <summary>
+        /// Record one usage analytics query. Best effort; never throws.
+        /// </summary>
+        /// <param name="dataset">Dataset name (low cardinality: one of four values).</param>
+        /// <param name="outcome">ok, truncated, or error.</param>
+        /// <param name="seconds">Duration in seconds.</param>
+        /// <param name="records">Records scanned.</param>
+        public static void RecordAnalyticsQuery(string dataset, string outcome, double seconds, long records)
+        {
+            try
+            {
+                KeyValuePair<string, object?>[] tags = { new KeyValuePair<string, object?>("dataset", dataset), new KeyValuePair<string, object?>("outcome", outcome) };
+                _AnalyticsQueryDuration.Record(seconds, tags);
+                if (records > 0) _AnalyticsRecordsScanned.Add(records, new KeyValuePair<string, object?>("dataset", dataset));
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }
 
         /// <summary>

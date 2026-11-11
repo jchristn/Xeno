@@ -200,7 +200,7 @@ namespace Xeno.Desktop.Common
         /// <returns>Button.</returns>
         public static Button Button(string text, Action onClick, string? tip = null)
         {
-            Button button = new Button { Content = text, Padding = new Thickness(12, 5) };
+            Button button = new Button { Content = text, Padding = new Thickness(12, 5), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
             button.Click += (sender, args) => onClick();
             if (!String.IsNullOrWhiteSpace(tip)) ToolTip.SetTip(button, tip);
             return button;

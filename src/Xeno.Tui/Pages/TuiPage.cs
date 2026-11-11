@@ -38,6 +38,14 @@ namespace Xeno.Tui.Pages
         }
 
         /// <summary>
+        /// True when the page's charts follow the auto-refresh choice right now.
+        /// </summary>
+        public virtual bool AutoRefreshes
+        {
+            get { return false; }
+        }
+
+        /// <summary>
         /// True when the page should refresh on the status timer.
         /// </summary>
         public virtual bool RefreshWithStatus

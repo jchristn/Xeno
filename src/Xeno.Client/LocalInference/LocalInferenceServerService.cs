@@ -626,7 +626,7 @@ namespace Xeno.Client.LocalInference
                     }
                 }
             }
-            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is SocketException || ex is WebSocketException || ex is System.Text.Json.JsonException || (ex is OperationCanceledException && !token.IsCancellationRequested))
+            catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is SocketException || ex is WebSocketException || ex is System.Text.Json.JsonException || ex is System.IO.InvalidDataException || (ex is OperationCanceledException && !token.IsCancellationRequested))
             {
                 return null;
             }
@@ -685,7 +685,7 @@ namespace Xeno.Client.LocalInference
                     loaded.LocalInferenceServer.Port = _Settings.LocalInferenceServer.Port;
                     _Current = loaded;
                 }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Text.Json.JsonException || ex is InvalidOperationException)
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Text.Json.JsonException || ex is System.IO.InvalidDataException || ex is InvalidOperationException)
                 {
                 }
 

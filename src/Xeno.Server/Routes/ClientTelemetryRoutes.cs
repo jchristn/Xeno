@@ -64,6 +64,8 @@ namespace Xeno.Server.Routes
             AddStatic(server, HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/rollups", "Provider telemetry rollups", "Client Telemetry", ProvidersHistoryRollupsAsync, metadataFactory, exceptionHandler);
             AddStatic(server, HttpMethod.POST, "/v1.0/api/client-telemetry/providers/history/delete", "Bulk delete provider telemetry", "Client Telemetry", ProvidersHistoryBulkDeleteAsync, metadataFactory, exceptionHandler);
             AddStatic(server, HttpMethod.GET, "/v1.0/api/client-telemetry/collection-attempts", "List client telemetry collection attempts", "Client Telemetry", CollectionAttemptsAsync, metadataFactory, exceptionHandler);
+            AddStatic(server, HttpMethod.GET, "/v1.0/api/client-telemetry/providers/health", "Provider health strip", "Client Telemetry", ProvidersHealthAsync, metadataFactory, exceptionHandler);
+            AddStatic(server, HttpMethod.GET, "/v1.0/api/client-telemetry/connected-history", "Connected client history", "Client Telemetry", ConnectedHistoryAsync, metadataFactory, exceptionHandler);
             AddStatic(server, HttpMethod.GET, "/v1.0/api/client-telemetry/metrics", "Client telemetry metric catalog", "Client Telemetry", MetricsAsync, metadataFactory, exceptionHandler);
 
             AddParameter(server, HttpMethod.GET, "/v1.0/api/client-telemetry/history/{id}", "Get client telemetry detail", "Client Telemetry", HistoryGetAsync, metadataFactory, exceptionHandler);
@@ -162,6 +164,24 @@ namespace Xeno.Server.Routes
             {
                 RequestContext requestContext = await _Server.CreateRequestContextAsync(context, token).ConfigureAwait(false);
                 await _Server.HandleClientTelemetryHistoryRollupsAsync(context, requestContext, token).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+
+        private async Task ConnectedHistoryAsync(HttpContextBase context)
+        {
+            await _Server.ExecuteRouteAsync(context, async token =>
+            {
+                RequestContext requestContext = await _Server.CreateRequestContextAsync(context, token).ConfigureAwait(false);
+                await _Server.HandleConnectedClientHistoryAsync(context, requestContext, token).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+
+        private async Task ProvidersHealthAsync(HttpContextBase context)
+        {
+            await _Server.ExecuteRouteAsync(context, async token =>
+            {
+                RequestContext requestContext = await _Server.CreateRequestContextAsync(context, token).ConfigureAwait(false);
+                await _Server.HandleProviderHealthAsync(context, requestContext, token).ConfigureAwait(false);
             }).ConfigureAwait(false);
         }
 

@@ -6,9 +6,10 @@ namespace Xeno.Client.Presentation
     using System.Linq;
 
     /// <summary>
-    /// A column chart's content, built once by <see cref="XenoCharts"/> and drawn by the desktop and terminal apps: a
-    /// title, the range it covers, bucket labels, one or more series, a unit, and what to say when there is no data.
-    /// Series are stacked. Immutable.
+    /// A chart's content, built once by <see cref="XenoCharts"/> or <see cref="XenoUsageCharts"/> and drawn by the
+    /// desktop and terminal apps: a title, the range it covers, its kind, labels, series, a unit, what to say when there
+    /// is no data, and (for time charts) the window each column covers. The web dashboards draw the same charts from
+    /// the same catalog (<see cref="XenoChartCatalog"/>). Immutable.
     /// </summary>
     public sealed class XenoChart
     {
@@ -56,6 +57,42 @@ namespace Xeno.Client.Presentation
         public bool HasData { get; }
 
         /// <summary>
+        /// Catalog id, for example "usage.latency", or empty for older charts.
+        /// </summary>
+        public string Id { get; } = String.Empty;
+
+        /// <summary>
+        /// How the chart is drawn. Default stacked columns.
+        /// </summary>
+        public XenoChartKindEnum Kind { get; } = XenoChartKindEnum.StackedColumns;
+
+        /// <summary>
+        /// True when column and bar series stack; false draws them side by side. Lines never stack.
+        /// </summary>
+        public bool Stacked { get; } = true;
+
+        /// <summary>
+        /// Row labels for heatmaps and status strips.
+        /// </summary>
+        public IReadOnlyList<string> RowLabels { get; } = new List<string>();
+
+        /// <summary>
+        /// Cell values for heatmaps (shading) and status strips (<see cref="XenoChartStatusEnum"/>), row by row, one value
+        /// per label.
+        /// </summary>
+        public IReadOnlyList<IReadOnlyList<double>> Grid { get; } = new List<IReadOnlyList<double>>();
+
+        /// <summary>
+        /// The window each column covers, for drill-down; empty when the chart has no time buckets.
+        /// </summary>
+        public IReadOnlyList<XenoChartBucket> Buckets { get; } = new List<XenoChartBucket>();
+
+        /// <summary>
+        /// A note shown with the chart, for example that the range was not read in full; null for none.
+        /// </summary>
+        public string? Notice { get; } = null;
+
+        /// <summary>
         /// Number of buckets.
         /// </summary>
         public int BucketCount
@@ -71,7 +108,19 @@ namespace Xeno.Client.Presentation
             get
             {
                 double maximum = 0;
-                for (int i = 0; i < BucketCount; i++) maximum = Math.Max(maximum, Total(i));
+                if (Kind == XenoChartKindEnum.Heatmap)
+                {
+                    foreach (IReadOnlyList<double> row in Grid) foreach (double value in row) if (!Double.IsNaN(value)) maximum = Math.Max(maximum, value);
+                    return maximum;
+                }
+
+                if (Kind == XenoChartKindEnum.StatusStrip) return 3;
+                for (int i = 0; i < BucketCount; i++)
+                {
+                    if (Stacked) maximum = Math.Max(maximum, Total(i));
+                    else foreach (XenoChartSeries series in Series) if (i < series.Values.Count && !Double.IsNaN(series.Values[i])) maximum = Math.Max(maximum, series.Values[i]);
+                }
+
                 return maximum;
             }
         }
@@ -112,6 +161,37 @@ namespace Xeno.Client.Presentation
             HasData = hasData;
         }
 
+        /// <summary>
+        /// Create a chart of any kind.
+        /// </summary>
+        /// <param name="id">Catalog id.</param>
+        /// <param name="kind">Kind.</param>
+        /// <param name="title">Title.</param>
+        /// <param name="rangeText">Range description.</param>
+        /// <param name="unit">Unit.</param>
+        /// <param name="labels">Labels: bucket labels, bar labels, or heatmap and strip columns.</param>
+        /// <param name="series">Series.</param>
+        /// <param name="emptyText">Empty-state text.</param>
+        /// <param name="additive">True for counts.</param>
+        /// <param name="hasData">True when anything has data.</param>
+        /// <param name="stacked">True when series stack.</param>
+        /// <param name="rowLabels">Row labels (heatmap and strip), or null.</param>
+        /// <param name="grid">Cells (heatmap and strip), or null.</param>
+        /// <param name="buckets">Window per column, or null.</param>
+        /// <param name="notice">Note, or null.</param>
+        /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+        public XenoChart(string id, XenoChartKindEnum kind, string title, string rangeText, string unit, IReadOnlyList<string> labels, IReadOnlyList<XenoChartSeries> series, string emptyText, bool additive, bool hasData, bool stacked, IReadOnlyList<string>? rowLabels, IReadOnlyList<IReadOnlyList<double>>? grid, IReadOnlyList<XenoChartBucket>? buckets, string? notice)
+            : this(title, rangeText, unit, labels, series, emptyText, additive, hasData)
+        {
+            Id = id ?? String.Empty;
+            Kind = kind;
+            Stacked = stacked && kind != XenoChartKindEnum.Lines;
+            RowLabels = rowLabels ?? new List<string>();
+            Grid = grid ?? new List<IReadOnlyList<double>>();
+            Buckets = buckets ?? new List<XenoChartBucket>();
+            Notice = String.IsNullOrWhiteSpace(notice) ? null : notice;
+        }
+
         #endregion
 
         #region Public-Methods
@@ -139,10 +219,25 @@ namespace Xeno.Client.Presentation
         /// <returns>Text, for example "42%", "12 req", or "3.5".</returns>
         public string FormatValue(double value)
         {
+            if (Double.IsNaN(value)) return "-";
+            if (Unit == " ms") return FormatMilliseconds(value);
             string number = value >= 100 || (Additive && value == Math.Floor(value))
                 ? value.ToString("0", CultureInfo.InvariantCulture)
                 : value.ToString("0.#", CultureInfo.InvariantCulture);
             return number + Unit;
+        }
+
+        /// <summary>
+        /// Format milliseconds as "850 ms", "1.2 s", or "3.4 min".
+        /// </summary>
+        /// <param name="milliseconds">Milliseconds.</param>
+        /// <returns>Text.</returns>
+        public static string FormatMilliseconds(double milliseconds)
+        {
+            if (Double.IsNaN(milliseconds)) return "-";
+            if (milliseconds < 1000) return Math.Round(milliseconds).ToString("0", CultureInfo.InvariantCulture) + " ms";
+            if (milliseconds < 60000) return (milliseconds / 1000).ToString("0.0", CultureInfo.InvariantCulture) + " s";
+            return (milliseconds / 60000).ToString("0.0", CultureInfo.InvariantCulture) + " min";
         }
 
         /// <summary>
@@ -155,7 +250,7 @@ namespace Xeno.Client.Presentation
         {
             int max = Math.Max(1, maximum);
             int count = BucketCount;
-            if (count <= max) return this;
+            if (count <= max || Kind == XenoChartKindEnum.HorizontalBars || Kind == XenoChartKindEnum.Heatmap) return this;
             int group = (int)Math.Ceiling(count / (double)max);
             List<string> labels = new List<string>();
             for (int i = 0; i < count; i += group) labels.Add(i < Labels.Count ? Labels[i] : String.Empty);
@@ -166,13 +261,25 @@ namespace Xeno.Client.Presentation
                 for (int i = 0; i < count; i += group)
                 {
                     List<double> slice = item.Values.Skip(i).Take(group).ToList();
-                    values.Add(slice.Count == 0 ? 0 : Additive ? slice.Sum() : slice.Average());
+                    List<double> known = slice.Where(value => !Double.IsNaN(value)).ToList();
+                    if (Kind == XenoChartKindEnum.Lines) values.Add(known.Count == 0 ? Double.NaN : Additive ? known.Sum() : item.Name == "Average" ? known.Average() : item.Name == "Minimum" ? known.Min() : known.Max());
+                    else values.Add(known.Count == 0 ? 0 : Additive ? known.Sum() : known.Average());
                 }
 
                 series.Add(new XenoChartSeries(item.Name, item.Tone, values));
             }
 
-            return new XenoChart(Title, RangeText, Unit, labels, series, EmptyText, Additive, HasData);
+            List<IReadOnlyList<double>> grid = new List<IReadOnlyList<double>>();
+            foreach (IReadOnlyList<double> row in Grid)
+            {
+                List<double> cells = new List<double>();
+                for (int i = 0; i < row.Count; i += group) cells.Add(row.Skip(i).Take(group).Max());
+                grid.Add(cells);
+            }
+
+            List<XenoChartBucket> buckets = new List<XenoChartBucket>();
+            for (int i = 0; i < Buckets.Count; i += group) buckets.Add(new XenoChartBucket(Buckets[i].StartUtc, Buckets[Math.Min(Buckets.Count - 1, i + group - 1)].EndUtc));
+            return new XenoChart(Id, Kind, Title, RangeText, Unit, labels, series, EmptyText, Additive, HasData, Stacked, RowLabels, grid, buckets, Notice);
         }
 
         #endregion

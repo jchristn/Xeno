@@ -20,7 +20,7 @@ namespace Test.Nunit
         /// <returns>Test cases.</returns>
         public static IEnumerable TestCases()
         {
-            return new TouchstoneTestCaseSource(SharedTestSuites.All);
+            return TouchstoneNunitCases.From(SharedTestSuites.All);
         }
 
         /// <summary>
@@ -43,7 +43,7 @@ namespace Test.Nunit
         [TestCaseSource(nameof(TestCases))]
         public async Task RunTest(TestCaseDescriptor testCase)
         {
-            await testCase.ExecuteAsync(CancellationToken.None).ConfigureAwait(false);
+            await TouchstoneNunit.ExecuteAsync(testCase, null, null, TestContext.CurrentContext.CancellationToken).ConfigureAwait(false);
         }
     }
 }
