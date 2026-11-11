@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build and run the Xeno client worker from source in the foreground (xeno connect --foreground), so its log
 # prints to this terminal. Ctrl+C stops it. The worker connects to the server in client.json and serves the local
-# web dashboard (http://127.0.0.1:9343 by default).
+# web dashboard (http://127.0.0.1:9343 by default). It also starts the Xeno Agent tray app when there is a desktop
+# session (XENO_AGENT_AUTOSTART=0 turns that off).
 #
 # Usage: run-client.sh [--server <cloud|url|host[:port]>]
 #   --server   point this client at a server first (saved to client.json), for example http://localhost:9000

@@ -14,6 +14,14 @@ namespace Xeno.Client.LocalInference
         private static LocalInferenceServerService? _Service;
 
         /// <summary>
+        /// Health of local providers from the running listener, or null when the listener is not running.
+        /// </summary>
+        public static Xeno.Client.Routing.LocalBackendHealthMonitor? Backends
+        {
+            get { return _Service?.Backends; }
+        }
+
+        /// <summary>
         /// Start the local inference server when enabled.
         /// </summary>
         /// <param name="settings">Client settings.</param>

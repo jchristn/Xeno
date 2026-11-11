@@ -65,7 +65,7 @@ namespace Xeno.Client.Routing
             {
                 return JsonUtil.Deserialize<LocalUsageProbe>(System.Text.Encoding.UTF8.GetString(body));
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException || ex is System.IO.InvalidDataException)
             {
                 return null;
             }

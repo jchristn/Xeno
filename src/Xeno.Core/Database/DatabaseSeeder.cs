@@ -2,8 +2,10 @@ namespace Xeno.Core.Database
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
+    using Xeno.Core.Enums;
     using Xeno.Core.Models;
     using Xeno.Core.Services;
 
@@ -152,6 +154,8 @@ namespace Xeno.Core.Database
             // statement/transaction by the repository) rather than enumerating and deleting row by row.
             // onboarding_requests is a leaf table, deleted first so ordering never depends on other tables.
             if (driver.Onboarding != null) await driver.Onboarding.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.Chat != null) await driver.Chat.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
+            if (driver.ConnectedClientSamples != null) await driver.ConnectedClientSamples.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
             if (driver.AuthSessions != null) await driver.AuthSessions.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
             if (driver.RoleAssignments != null) await driver.RoleAssignments.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
             if (driver.Roles != null) await driver.Roles.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
@@ -166,6 +170,48 @@ namespace Xeno.Core.Database
             if (driver.LedgerTenantLinks != null) await driver.LedgerTenantLinks.DeleteByTenantAsync(tenantId, token).ConfigureAwait(false);
 
             if (includeTenantRow && driver.Tenants != null) await driver.Tenants.DeleteAsync(tenantId, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Give every tenant's built-in TenantMember role the Chat permissions (read, write, delete, execute), creating the
+        /// permissions when missing. Runs at startup so databases created before chat get them; it touches nothing else.
+        /// TenantAdmin already holds the wildcard permissions.
+        /// </summary>
+        /// <param name="driver">Database driver.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of roles changed.</returns>
+        /// <exception cref="ArgumentNullException">driver is null.</exception>
+        public static async Task<int> EnsureChatPermissionsAsync(DatabaseDriverBase driver, CancellationToken token = default)
+        {
+            if (driver == null) throw new ArgumentNullException(nameof(driver));
+            if (driver.Tenants == null || driver.Permissions == null || driver.Roles == null) return 0;
+            int changed = 0;
+            foreach (Tenant tenant in await driver.Tenants.EnumerateAsync(token).ConfigureAwait(false))
+            {
+                List<Permission> permissions = await driver.Permissions.EnumerateAsync(tenant.Id, token).ConfigureAwait(false);
+                List<string> chatIds = new List<string>();
+                foreach (OperationTypeEnum operation in new[] { OperationTypeEnum.Read, OperationTypeEnum.Write, OperationTypeEnum.Delete, OperationTypeEnum.Execute })
+                {
+                    Permission? permission = permissions.FirstOrDefault(item => String.Equals(item.ResourceType, "Chat", StringComparison.OrdinalIgnoreCase) && item.OperationType == operation);
+                    if (permission == null)
+                    {
+                        permission = await driver.Permissions.CreateAsync(new Permission { TenantId = tenant.Id, ResourceType = "Chat", OperationType = operation, Permit = true, BuiltIn = true, Active = true }, token).ConfigureAwait(false);
+                    }
+
+                    chatIds.Add(permission.Id);
+                }
+
+                Role? member = (await driver.Roles.EnumerateAsync(tenant.Id, token).ConfigureAwait(false)).FirstOrDefault(item => item.BuiltIn && String.Equals(item.Name, "TenantMember", StringComparison.OrdinalIgnoreCase));
+                if (member == null) continue;
+                List<string> missing = chatIds.Where(id => !member.PermissionIds.Contains(id, StringComparer.OrdinalIgnoreCase)).ToList();
+                if (missing.Count == 0) continue;
+                member.PermissionIds.AddRange(missing);
+                member.LastUpdateUtc = DateTime.UtcNow;
+                await driver.Roles.CreateAsync(member, token).ConfigureAwait(false);
+                changed++;
+            }
+
+            return changed;
         }
 
         /// <summary>

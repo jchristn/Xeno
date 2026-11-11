@@ -220,15 +220,19 @@ namespace Test.Shared
                         for (int i = 0; i < 200; i++) LocalInferenceRequestLog.Append(new LocalInferenceRequestRecord { Id = i.ToString(System.Globalization.CultureInfo.InvariantCulture), Model = "m" }, 60);
                         Check(LocalInferenceRequestLog.Count() == 60, "Retention was not applied: " + LocalInferenceRequestLog.Count());
                         Check(LocalInferenceRequestLog.Read(0, 1).Single().Id == "199", "Newest record is not first.");
+                        File.AppendAllText(LocalInferenceRequestLog.FilePath, "{not json\n");
+                        Check(LocalInferenceRequestLog.Read(0, 1000).Count == 60, "A corrupt line broke reading the request log.");
                     }
 
                     return Task.CompletedTask;
                 }),
                 Case(suite, "RuntimeStatusPublishesCounters", "The listener publishes provider health and request counters for other processes", async () =>
                 {
+                    string statusPath;
                     using (FakeProviderServer ollama = new FakeProviderServer(request => request.Path == "/v1/chat/completions" ? FakeProviderResponse.Json("{}") : FakeProviderResponse.Json("{\"models\":[{\"name\":\"llama3.1:8b\"}]}")))
                     using (ListenerRoutingHarness listener = new ListenerRoutingHarness(settings => settings.Providers.Add(ListenerRoutingHarness.Provider("ollama", "Ollama", ollama.BaseUrl, "llama3.1:8b"))))
                     {
+                        statusPath = LocalInferenceRuntimeStatus.FilePath;
                         await listener.Service.Backends.CheckNowAsync(CancellationToken.None).ConfigureAwait(false);
                         using (HttpResponseMessage local = await listener.Http.PostAsync(listener.Url("/v1/chat/completions"), new StringContent("{\"model\":\"llama3.1:8b\",\"messages\":[]}", Encoding.UTF8, "application/json")).ConfigureAwait(false)) { }
                         using (HttpResponseMessage network = await listener.Http.PostAsync(listener.Url("/v1/chat/completions"), new StringContent("{\"model\":\"remote\",\"messages\":[]}", Encoding.UTF8, "application/json")).ConfigureAwait(false)) { }
@@ -245,7 +249,8 @@ namespace Test.Shared
                         Check(view.RuntimeAvailable && view.HealthyBackends == 1 && view.Backends.Single().Health == "healthy", "Routing view did not use the published status.");
                     }
 
-                    Check(LocalInferenceRuntimeStatus.Load() == null, "The status file was not removed when the listener stopped.");
+                    // Check the test home's file by path: once the harness is disposed, Load() would read the real ~/.xeno.
+                    Check(!File.Exists(statusPath), "The status file was not removed when the listener stopped.");
                 }),
                 Case(suite, "RoutingServiceSavesAndDeletesRules", "Saving a rule replaces any rule for the same model, renames, and validates", () =>
                 {

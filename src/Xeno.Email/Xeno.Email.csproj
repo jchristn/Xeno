@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="HtmlPageBuilder" Version="1.2.0" />
-    <PackageReference Include="SendWithMailgun" Version="1.2.0" />
+    <PackageReference Include="SendWithMailgun" Version="1.2.1" />
   </ItemGroup>
 
   <PropertyGroup>

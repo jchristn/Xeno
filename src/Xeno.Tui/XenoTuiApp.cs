@@ -169,9 +169,11 @@ namespace Xeno.Tui
         public void Start()
         {
             StartupTask = RefreshStatusAndPageAsync(true);
+            if (_Options.AutoConnect) AutoConnect();
             if (_Options.Live)
             {
                 _ = RefreshLoopAsync(_Stop.Token);
+                _ = AutoRefreshLoopAsync(_Stop.Token);
                 _ = SpinnerLoopAsync(_Stop.Token);
             }
         }
@@ -225,6 +227,16 @@ namespace Xeno.Tui
                 Context.Preferences.TerminalAppearance = appearance.Value;
                 Context.SavePreferences();
                 ApplyAppearance(appearance.Value);
+                return;
+            }
+
+            int? autoRefresh = XenoCommandAvailability.AutoRefreshFor(command);
+            if (autoRefresh != null)
+            {
+                Context.Preferences.AutoRefreshSeconds = autoRefresh.Value;
+                Context.SavePreferences();
+                BuildMenuBar();
+                Context.Notify(autoRefresh.Value == 0 ? "Auto refresh is off." : "Charts refresh every " + autoRefresh.Value + " seconds.", NotificationSeverity.Info);
                 return;
             }
 
@@ -327,6 +339,10 @@ namespace Xeno.Tui
             {
                 case XenoPageEnum.Models: created = new ModelsPage(Context); break;
                 case XenoPageEnum.Providers: created = new ProvidersPage(Context); break;
+                case XenoPageEnum.Chat: created = new ChatPage(Context); break;
+                case XenoPageEnum.ChatHistory: created = new ChatHistoryPage(Context); break;
+                case XenoPageEnum.Usage: created = new UsagePage(Context); break;
+                case XenoPageEnum.ChatFeedback: created = new ChatFeedbackPage(Context); break;
                 case XenoPageEnum.LocalEndpoint: created = new LocalEndpointPage(Context); break;
                 case XenoPageEnum.Requests: created = new RequestsPage(Context); break;
                 case XenoPageEnum.Logs: created = new LogsPage(Context); break;
@@ -537,7 +553,9 @@ namespace Xeno.Tui
                 if (entry.Kind == XenoMenuEntryKindEnum.Radio)
                 {
                     XenoAppearanceEnum? appearance = XenoCommandAvailability.AppearanceFor(command);
-                    label = (appearance == Context.Preferences.TerminalAppearance ? "(•) " : "( ) ") + label;
+                    int? refresh = XenoCommandAvailability.AutoRefreshFor(command);
+                    bool selected = refresh != null ? refresh == Context.Preferences.AutoRefreshSeconds : appearance == Context.Preferences.TerminalAppearance;
+                    label = (selected ? "(•) " : "( ) ") + label;
                 }
 
                 KeyChord? chord = Chord(entry);
@@ -611,7 +629,7 @@ namespace Xeno.Tui
                 {
                     status = await Task.Run(() => Context.Workspace.GetStatus()).ConfigureAwait(false);
                 }
-                catch (Exception ex) when ((ex is System.IO.IOException || ex is UnauthorizedAccessException || ex is System.Text.Json.JsonException) && attempt < 3)
+                catch (Exception ex) when ((ex is System.IO.IOException || ex is UnauthorizedAccessException || ex is System.Text.Json.JsonException || ex is System.IO.InvalidDataException) && attempt < 3)
                 {
                     // Another process may be rewriting client.json; a failed first read must not leave the app without status.
                     await Task.Delay(200 * attempt).ConfigureAwait(false);
@@ -655,6 +673,43 @@ namespace Xeno.Tui
                 {
                     _App.Post(() => Context.Report("Refresh failed: " + ex.Message));
                 }
+            }
+        }
+
+        private async Task AutoRefreshLoopAsync(CancellationToken token)
+        {
+            DateTime last = DateTime.UtcNow;
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
+                    int seconds = Context.Preferences.AutoRefreshSeconds;
+                    if (seconds <= 0 || (DateTime.UtcNow - last).TotalSeconds < seconds) continue;
+                    last = DateTime.UtcNow;
+                    _App.Post(() =>
+                    {
+                        // Modals pause refreshing, and pages that already refresh with status do not need it twice.
+                        if (!_App.Modals.IsActive && CurrentView.AutoRefreshes && !CurrentView.RefreshWithStatus) _ = CurrentView.RefreshAsync();
+                    });
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+        }
+
+        private void AutoConnect()
+        {
+            XenoAutoConnectDecisionEnum decision = XenoAutoConnect.Decide(Context.Workspace);
+            if (decision == XenoAutoConnectDecisionEnum.Connect)
+            {
+                RunClientOperation(XenoAutoConnect.ProgressMessage, token => XenoAutoConnect.ConnectAsync(Context.Workspace, token));
+            }
+            else if (decision == XenoAutoConnectDecisionEnum.NotSignedIn)
+            {
+                Context.Notify(XenoAutoConnect.NotSignedInMessage, NotificationSeverity.Info);
             }
         }
 

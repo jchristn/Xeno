@@ -648,5 +648,55 @@ namespace Xeno.Sdk.Tests
             Assert.Equal(uri, request.Uri?.ToString());
             if (bodyContains != null) Assert.Contains(bodyContains, request.Body);
         }
+
+        [Fact]
+        public async Task UsageAnalyticsSendsEveryParameterAndReadsTheResponse()
+        {
+            RecordingHandler handler = new RecordingHandler(request => JsonResponse("{\"Dataset\":\"NetworkRequests\",\"BucketMinutes\":15,\"Totals\":{\"Requests\":3,\"Failed\":1,\"Latency\":{\"Count\":3,\"P95\":900}},\"Buckets\":[{\"Requests\":3,\"Groups\":[{\"Key\":\"llama3\",\"Requests\":3}],\"Stages\":[{\"Stage\":\"Streaming\",\"Count\":3,\"AverageMs\":500}]}],\"GroupKeys\":[\"llama3\"],\"Heatmap\":{\"Layout\":\"DayByHour\",\"Rows\":1,\"Columns\":24,\"Cells\":[{\"Row\":0,\"Column\":3,\"Tokens\":9}],\"MaximumTokens\":9},\"StageOrder\":[\"Streaming\"],\"Truncated\":true,\"TruncatedReason\":\"too many\"}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", "token-123", "ten_123", httpClient))
+            {
+                UsageAnalytics analytics = await client.GetUsageAnalyticsAsync(new UsageAnalyticsQuery { FromUtc = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc), ToUtc = new DateTime(2026, 11, 2, 0, 0, 0, DateTimeKind.Utc), BucketMinutes = 15, Model = "llama3", Provider = "p", ClientId = "c", UserId = "u", CredentialId = "k", TenantId = "t", GroupBy = "User", GroupMetric = "Tokens", TopN = 5, UtcOffsetMinutes = -480, Sections = "Totals,Groups" });
+                Assert.Equal(3, analytics.Totals.Requests);
+                Assert.Equal(900, analytics.Totals.Latency.P95);
+                Assert.Equal("llama3", analytics.Buckets[0].Groups[0].Key);
+                Assert.Equal("Streaming", analytics.Buckets[0].Stages[0].Stage);
+                Assert.Equal(9, analytics.Heatmap!.MaximumTokens);
+                Assert.True(analytics.Truncated);
+                string url = Assert.Single(handler.Requests).Uri!.AbsoluteUri;
+                Assert.StartsWith("https://xeno.local/v1.0/api/request-history/analytics/usage?", url);
+                foreach (string part in new[] { "fromUtc=2026-11-01", "toUtc=2026-11-02", "bucketMinutes=15", "model=llama3", "provider=p", "clientId=c", "userId=u", "credentialId=k", "tenantId=t", "groupBy=User", "groupMetric=Tokens", "topN=5", "utcOffsetMinutes=-480", "sections=Totals%2CGroups" }) Assert.Contains(part, url);
+            }
+        }
+
+        [Fact]
+        public async Task ChatUsageAndProviderHealthUseTheirRoutes()
+        {
+            RecordingHandler handler = new RecordingHandler(request => JsonResponse(request.RequestUri!.AbsolutePath.EndsWith("health", StringComparison.Ordinal) ? "{\"BucketMinutes\":1,\"Providers\":[{\"ProviderName\":\"ollama\",\"UptimePercent\":75,\"Cells\":[{\"Status\":\"Degraded\",\"Samples\":4,\"Failures\":1}]}]}" : "{\"Dataset\":\"Chat\"}"));
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", "token-123", "ten_123", httpClient))
+            {
+                Assert.Equal("Chat", (await client.GetChatUsageAnalyticsAsync(new UsageAnalyticsQuery { Scope = "tenant" })).Dataset);
+                ProviderHealthStrip strip = await client.GetProviderHealthAsync(new ProviderHealthQuery { BucketMinutes = 1, ClientId = "c", ProviderName = "ollama" });
+                Assert.Equal("Degraded", strip.Providers[0].Cells[0].Status);
+                Assert.Equal("https://xeno.local/v1.0/api/chat/analytics/usage?scope=tenant", handler.Requests[0].Uri!.AbsoluteUri);
+                Assert.Equal("https://xeno.local/v1.0/api/client-telemetry/providers/health?bucketMinutes=1&clientId=c&providerName=ollama", handler.Requests[1].Uri!.AbsoluteUri);
+            }
+        }
+
+        [Fact]
+        public async Task UsageAnalyticsSurfacesErrorsAndEmptyQueries()
+        {
+            RecordingHandler handler = new RecordingHandler(request => new HttpResponseMessage(request.RequestUri!.Query.Contains("groupBy", StringComparison.Ordinal) ? System.Net.HttpStatusCode.Forbidden : System.Net.HttpStatusCode.BadRequest) { Content = new StringContent("{\"Message\":\"no\"}") });
+            using (HttpClient httpClient = new HttpClient(handler))
+            using (XenoClient client = new XenoClient("https://xeno.local", "token-123", "ten_123", httpClient))
+            {
+                XenoApiException bad = await Assert.ThrowsAsync<XenoApiException>(() => client.GetUsageAnalyticsAsync());
+                Assert.Equal(400, (int)bad.StatusCode);
+                XenoApiException forbidden = await Assert.ThrowsAsync<XenoApiException>(() => client.GetUsageAnalyticsAsync(new UsageAnalyticsQuery { GroupBy = "Tenant" }));
+                Assert.Equal(403, (int)forbidden.StatusCode);
+                Assert.Equal("https://xeno.local/v1.0/api/request-history/analytics/usage", handler.Requests[0].Uri!.AbsoluteUri);
+            }
+        }
     }
 }

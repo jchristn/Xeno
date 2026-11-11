@@ -142,6 +142,10 @@ Instrument names are the OpenTelemetry (dotted) names the server emits. The Prom
 
 The `AddRuntimeInstrumentation()` package adds the standard `process_runtime_dotnet_*` series (GC heap and collections, JIT, thread pool, exceptions, monitor contention).
 
+### Usage analytics
+
+Usage analytics queries emit `xeno.analytics.query.duration` (histogram) and `xeno.analytics.records.scanned` (histogram), with an `analytics usage` span around each query. Use them to spot ranges that read close to `Analytics.MaxRecordsPerQuery`. The charts themselves are described in [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md).
+
 ## Troubleshooting
 
 **No metrics in Grafana or Prometheus.** Confirm `Telemetry.Enable` and `Telemetry.Metrics.Enable` are true and the server logged `[Telemetry] exporting to ...` at startup. Check that the OTLP endpoint resolves from the server (`http://otel-collector:4317` inside compose, `http://localhost:4317` from the host). Confirm Prometheus is scraping: open http://localhost:9090/targets and check the `otel-collector` target is up. Query the Collector directly at http://localhost:8889/metrics and look for `xeno_` series.

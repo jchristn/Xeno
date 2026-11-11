@@ -1,6 +1,8 @@
 namespace Xeno.Core.Database.Postgresql
 {
     using System;
+    using Xeno.Core.Analytics;
+    using System.Runtime.CompilerServices;
     using System.Collections.Generic;
     using System.Data.Common;
     using System.Globalization;
@@ -46,6 +48,8 @@ namespace Xeno.Core.Database.Postgresql
                 command.CommandText = SchemaSql();
                 await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
             }
+
+            await EnsureUsageColumnsAsync(connection, token).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
@@ -242,6 +246,69 @@ namespace Xeno.Core.Database.Postgresql
             }
         }
 
+        /// <inheritdoc />
+        public async IAsyncEnumerable<UsageRecord> EnumerateUsageAsync(RequestHistoryUsageFilter filter, [EnumeratorCancellation] CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(filter);
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                await foreach (UsageRecord record in RequestHistoryUsageSql.EnumerateAsync(connection, filter, token).ConfigureAwait(false))
+                {
+                    yield return record;
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task<int> BackfillUsageAsync(int batchSize, CancellationToken token)
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(_ConnectionString))
+            {
+                await connection.OpenAsync(token).ConfigureAwait(false);
+                return await RequestHistoryUsageSql.BackfillAsync(connection, batchSize, false, token).ConfigureAwait(false);
+            }
+        }
+
+        private static readonly Dictionary<string, string> UsageIndexes = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["idx_request_history_tenant_client_created"] = "tenant_id, selected_client_id, created_utc",
+            ["idx_request_history_tenant_user_created"] = "tenant_id, user_id, created_utc",
+            ["idx_request_history_usage_version"] = "usage_version"
+        };
+
+        private static async Task EnsureUsageColumnsAsync(NpgsqlConnection connection, CancellationToken token)
+        {
+            HashSet<string> existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (NpgsqlCommand info = connection.CreateCommand())
+            {
+                info.CommandText = "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'request_history';";
+                using (NpgsqlDataReader reader = await info.ExecuteReaderAsync(token).ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(token).ConfigureAwait(false)) existing.Add(reader.GetString(0));
+                }
+            }
+
+            foreach (string column in RequestHistoryUsageSql.Columns)
+            {
+                if (existing.Contains(column)) continue;
+                using (NpgsqlCommand alter = connection.CreateCommand())
+                {
+                    alter.CommandText = "ALTER TABLE request_history ADD COLUMN " + column + " " + RequestHistoryUsageSql.ColumnType(column, "TEXT", "BIGINT", "INTEGER") + ";";
+                    await alter.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+
+            foreach (KeyValuePair<string, string> index in UsageIndexes)
+            {
+                using (NpgsqlCommand command = connection.CreateCommand())
+                {
+                    command.CommandText = "CREATE INDEX IF NOT EXISTS " + index.Key + " ON request_history(" + index.Value + ");";
+                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+            }
+        }
+
         private const string ProjectionColumns =
             "id, tenant_id, requestor_tenant_id, created_utc, completed_utc, path, method, model, selected_client_id, status_code, duration_ms, source_ip, user_id, credential_id, session_id, principal_type, requestor_principal_type, requestor_principal_id, auth_scheme, total_tokens";
 
@@ -249,9 +316,9 @@ namespace Xeno.Core.Database.Postgresql
         {
             return """
 INSERT INTO request_history
-    (id, tenant_id, requestor_tenant_id, created_utc, completed_utc, path, method, model, selected_client_id, status_code, duration_ms, source_ip, user_id, credential_id, session_id, principal_type, requestor_principal_type, requestor_principal_id, auth_scheme, total_tokens, entry_json)
+    (id, tenant_id, requestor_tenant_id, created_utc, completed_utc, path, method, model, selected_client_id, status_code, duration_ms, source_ip, user_id, credential_id, session_id, principal_type, requestor_principal_type, requestor_principal_id, auth_scheme, total_tokens, entry_json, ttft_ms, streaming_ms, client_round_trip_ms, upstream_ms, request_to_headers_ms, prompt_tokens, completion_tokens, selected_provider, usage_version)
 VALUES
-    (@id, @tenant_id, @requestor_tenant_id, @created_utc, @completed_utc, @path, @method, @model, @selected_client_id, @status_code, @duration_ms, @source_ip, @user_id, @credential_id, @session_id, @principal_type, @requestor_principal_type, @requestor_principal_id, @auth_scheme, @total_tokens, @entry_json)
+    (@id, @tenant_id, @requestor_tenant_id, @created_utc, @completed_utc, @path, @method, @model, @selected_client_id, @status_code, @duration_ms, @source_ip, @user_id, @credential_id, @session_id, @principal_type, @requestor_principal_type, @requestor_principal_id, @auth_scheme, @total_tokens, @entry_json, @ttft_ms, @streaming_ms, @client_round_trip_ms, @upstream_ms, @request_to_headers_ms, @prompt_tokens, @completion_tokens, @selected_provider, @usage_version)
 ON CONFLICT (id) DO NOTHING;
 """;
         }
@@ -279,6 +346,7 @@ ON CONFLICT (id) DO NOTHING;
             command.Parameters.AddWithValue("@auth_scheme", entry.AuthScheme.ToString());
             command.Parameters.AddWithValue("@total_tokens", entry.Telemetry?.TotalTokens.HasValue == true ? (object)entry.Telemetry.TotalTokens!.Value : DBNull.Value);
             command.Parameters.AddWithValue("@entry_json", JsonUtil.Serialize(entry));
+            RequestHistoryUsageSql.AddParameters(command, entry);
         }
 
         private static void AppendFilter(NpgsqlCommand command, RequestHistoryQuery query, StringBuilder where)

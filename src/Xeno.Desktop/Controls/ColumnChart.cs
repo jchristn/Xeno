@@ -28,6 +28,20 @@ namespace Xeno.Desktop.Controls
             get { return _Chart; }
         }
 
+        /// <summary>
+        /// Raised when the user drills into a time bucket (click, or Enter on the keyboard cursor): its window and, for
+        /// group charts, the series clicked.
+        /// </summary>
+        public event Action<XenoChartBucket, string?>? BucketActivated;
+
+        /// <summary>
+        /// Keyboard cursor bucket, or null.
+        /// </summary>
+        public int? CursorBucket
+        {
+            get { return _Cursor; }
+        }
+
         #endregion
 
         #region Private-Members
@@ -37,6 +51,7 @@ namespace Xeno.Desktop.Controls
         private const double LabelHeight = 18;
         private XenoChart? _Chart = null;
         private string _LoadingText = "Loading...";
+        private int? _Cursor = null;
 
         #endregion
 
@@ -49,8 +64,11 @@ namespace Xeno.Desktop.Controls
         {
             Height = 180;
             ClipToBounds = true;
+            Focusable = true;
             PointerMoved += (sender, args) => UpdateTip(args.GetPosition(this));
             PointerExited += (sender, args) => ToolTip.SetTip(this, null);
+            PointerPressed += (sender, args) => OnPressed(args.GetPosition(this));
+            KeyDown += (sender, args) => args.Handled = OnKey(args.Key);
         }
 
         #endregion
@@ -64,6 +82,21 @@ namespace Xeno.Desktop.Controls
         public void SetChart(XenoChart? chart)
         {
             _Chart = chart;
+            if (_Cursor.HasValue && (chart == null || _Cursor.Value >= chart.BucketCount)) _Cursor = null;
+            InvalidateVisual();
+        }
+
+        /// <summary>
+        /// Drill into a bucket as a click would, for keyboard use and tests.
+        /// </summary>
+        /// <param name="index">Bucket index.</param>
+        /// <param name="series">Series name, or null.</param>
+        public void Activate(int index, string? series)
+        {
+            XenoChart? chart = _Chart;
+            if (chart == null || index < 0 || index >= chart.Buckets.Count) return;
+            _Cursor = index;
+            BucketActivated?.Invoke(chart.Buckets[index], series);
             InvalidateVisual();
         }
 
@@ -86,6 +119,8 @@ namespace Xeno.Desktop.Controls
         public static IBrush ToneBrush(XenoPalette palette, XenoChartToneEnum tone)
         {
             ArgumentNullException.ThrowIfNull(palette);
+            string? hex = XenoChartPalette.Hex(tone);
+            if (hex != null) return new SolidColorBrush(Color.Parse(hex));
             switch (tone)
             {
                 case XenoChartToneEnum.Success: return palette.Success;
@@ -124,6 +159,25 @@ namespace Xeno.Desktop.Controls
                 return;
             }
 
+            if (chart.Notice != null)
+            {
+                FormattedText notice = Format("! " + chart.Notice, palette.Warning, 11, FontWeight.Normal);
+                notice.MaxTextWidth = Math.Max(40, bounds.Width);
+                context.DrawText(notice, new Point(0, bounds.Height - notice.Height));
+            }
+
+            if (chart.Kind == XenoChartKindEnum.HorizontalBars)
+            {
+                RenderBars(context, palette, chart, bounds);
+                return;
+            }
+
+            if (chart.Kind == XenoChartKindEnum.Heatmap || chart.Kind == XenoChartKindEnum.StatusStrip)
+            {
+                RenderGrid(context, palette, chart, bounds);
+                return;
+            }
+
             double maximum = NiceMaximum(chart.Maximum);
             Pen grid = new Pen(palette.Border, 1, new DashStyle(new double[] { 3, 4 }, 0));
             foreach (double ratio in new[] { 1.0, 0.5 })
@@ -138,16 +192,42 @@ namespace Xeno.Desktop.Controls
             int count = chart.BucketCount;
             double slot = plot.Width / Math.Max(1, count);
             double barWidth = Math.Max(1, slot * 0.72);
-            for (int i = 0; i < count; i++)
+            if (_Cursor.HasValue && _Cursor.Value < count) context.FillRectangle(palette.Border, new Rect(plot.Left + _Cursor.Value * slot, plot.Top, slot, plot.Height));
+            if (chart.Kind == XenoChartKindEnum.Lines)
             {
-                double x = plot.Left + i * slot + (slot - barWidth) / 2;
-                double stacked = 0;
-                foreach (XenoChartSeries series in chart.Series)
+                for (int s = chart.Series.Count - 1; s >= 0; s--)
                 {
-                    double value = i < series.Values.Count && !Double.IsNaN(series.Values[i]) ? Math.Max(0, series.Values[i]) : 0;
-                    double height = plot.Height * value / maximum;
-                    if (height > 0) context.FillRectangle(ToneBrush(palette, series.Tone), new Rect(x, plot.Bottom - stacked - height, barWidth, height));
-                    stacked += height;
+                    XenoChartSeries series = chart.Series[s];
+                    Pen pen = new Pen(ToneBrush(palette, series.Tone), s == 0 ? 2.5 : 1.5);
+                    Point? previous = null;
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (i >= series.Values.Count || Double.IsNaN(series.Values[i]))
+                        {
+                            previous = null;
+                            continue;
+                        }
+
+                        Point point = new Point(plot.Left + i * slot + slot / 2, plot.Bottom - plot.Height * Math.Min(1, series.Values[i] / maximum));
+                        if (previous.HasValue) context.DrawLine(pen, previous.Value, point);
+                        else context.DrawEllipse(ToneBrush(palette, series.Tone), null, point, 1.8, 1.8);
+                        previous = point;
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    double x = plot.Left + i * slot + (slot - barWidth) / 2;
+                    double stacked = 0;
+                    foreach (XenoChartSeries series in chart.Series)
+                    {
+                        double value = i < series.Values.Count && !Double.IsNaN(series.Values[i]) ? Math.Max(0, series.Values[i]) : 0;
+                        double height = plot.Height * value / maximum;
+                        if (height > 0) context.FillRectangle(ToneBrush(palette, series.Tone), new Rect(x, plot.Bottom - stacked - height, barWidth, height));
+                        stacked += height;
+                    }
                 }
             }
 
@@ -157,6 +237,156 @@ namespace Xeno.Desktop.Controls
         #endregion
 
         #region Private-Methods
+
+        private void RenderBars(DrawingContext context, XenoPalette palette, XenoChart chart, Rect bounds)
+        {
+            double top = HeaderHeight + 8;
+            double rowHeight = Math.Max(14, Math.Min(24, (bounds.Height - top - 16) / Math.Max(1, chart.Labels.Count)));
+            double labelWidth = Math.Min(200, Math.Max(60, chart.Labels.Count == 0 ? 60 : chart.Labels.Max(item => Format(item, palette.Text, 12, FontWeight.Normal).Width) + 10));
+            double valueWidth = 120;
+            double barWidth = Math.Max(20, bounds.Width - labelWidth - valueWidth);
+            double maximum = chart.Maximum <= 0 ? 1 : chart.Maximum;
+            for (int row = 0; row < chart.Labels.Count; row++)
+            {
+                double y = top + row * rowHeight;
+                if (y + rowHeight > bounds.Height) break;
+                context.DrawText(Format(chart.Labels[row], palette.Text, 12, FontWeight.Normal), new Point(0, y + 2));
+                if (chart.Stacked)
+                {
+                    double x = labelWidth;
+                    double total = 0;
+                    foreach (XenoChartSeries series in chart.Series)
+                    {
+                        double value = row < series.Values.Count ? Math.Max(0, series.Values[row]) : 0;
+                        double width = barWidth * value / maximum;
+                        if (width > 0) context.FillRectangle(ToneBrush(palette, series.Tone), new Rect(x, y + 3, width, rowHeight - 6), 2);
+                        x += width;
+                        total += value;
+                    }
+
+                    context.DrawText(Format(chart.FormatValue(total), palette.Muted, 11, FontWeight.Normal), new Point(labelWidth + barWidth + 6, y + 3));
+                }
+                else
+                {
+                    double band = (rowHeight - 6) / Math.Max(1, chart.Series.Count);
+                    for (int s = 0; s < chart.Series.Count; s++)
+                    {
+                        XenoChartSeries series = chart.Series[s];
+                        double value = row < series.Values.Count ? Math.Max(0, series.Values[row]) : 0;
+                        double width = barWidth * value / maximum;
+                        if (width > 0) context.FillRectangle(ToneBrush(palette, series.Tone), new Rect(labelWidth, y + 3 + s * band, width, Math.Max(2, band - 1)), 1);
+                    }
+
+                    string values = String.Join(" / ", chart.Series.Select(series => chart.FormatValue(row < series.Values.Count ? series.Values[row] : 0)));
+                    context.DrawText(Format(values, palette.Muted, 11, FontWeight.Normal), new Point(labelWidth + barWidth + 6, y + 3));
+                }
+            }
+        }
+
+        private void RenderGrid(DrawingContext context, XenoPalette palette, XenoChart chart, Rect bounds)
+        {
+            bool status = chart.Kind == XenoChartKindEnum.StatusStrip;
+            double top = HeaderHeight + 8;
+            double labelWidth = Math.Min(220, Math.Max(40, chart.RowLabels.Count == 0 ? 40 : chart.RowLabels.Max(item => Format(item, palette.Muted, 11, FontWeight.Normal).Width) + 8));
+            int columns = Math.Max(1, chart.Labels.Count);
+            double cellWidth = Math.Max(2, (bounds.Width - labelWidth) / columns);
+            double cellHeight = Math.Max(8, Math.Min(22, (bounds.Height - top - 22) / Math.Max(1, chart.RowLabels.Count)));
+            double maximum = chart.Maximum <= 0 ? 1 : chart.Maximum;
+            IBrush accent = ToneBrush(palette, XenoChartToneEnum.Accent);
+            for (int row = 0; row < chart.RowLabels.Count; row++)
+            {
+                double y = top + row * cellHeight;
+                context.DrawText(Format(chart.RowLabels[row], palette.Muted, 11, FontWeight.Normal), new Point(0, y + 1));
+                IReadOnlyList<double> cells = row < chart.Grid.Count ? chart.Grid[row] : new List<double>();
+                for (int column = 0; column < cells.Count && column < columns; column++)
+                {
+                    Rect cell = new Rect(labelWidth + column * cellWidth, y + 1, Math.Max(1, cellWidth - 1), Math.Max(1, cellHeight - 2));
+                    double value = cells[column];
+                    if (status)
+                    {
+                        int code = (int)value;
+                        XenoChartToneEnum tone = code == (int)XenoChartStatusEnum.Healthy ? XenoChartToneEnum.Success : code == (int)XenoChartStatusEnum.Degraded ? XenoChartToneEnum.Warning : code == (int)XenoChartStatusEnum.Unhealthy ? XenoChartToneEnum.Danger : XenoChartToneEnum.Neutral;
+                        context.FillRectangle(ToneBrush(palette, tone), cell, 1);
+                        if (code == (int)XenoChartStatusEnum.Unhealthy) context.DrawLine(new Pen(palette.Text, 1), cell.TopLeft, cell.BottomRight);
+                        if (code == (int)XenoChartStatusEnum.Degraded) context.DrawLine(new Pen(palette.Text, 1), cell.BottomLeft, cell.TopRight);
+                    }
+                    else if (value > 0 && !Double.IsNaN(value))
+                    {
+                        using (context.PushOpacity(0.15 + 0.85 * Math.Min(1, value / maximum)))
+                        {
+                            context.FillRectangle(accent, cell, 2);
+                        }
+                    }
+                    else
+                    {
+                        context.FillRectangle(palette.Border, cell, 2);
+                    }
+                }
+            }
+
+            int every = Math.Max(1, (int)Math.Ceiling(40 / cellWidth));
+            double labelY = top + chart.RowLabels.Count * cellHeight + 2;
+            for (int column = 0; column < chart.Labels.Count; column += every)
+            {
+                context.DrawText(Format(chart.Labels[column], palette.Muted, 10, FontWeight.Normal), new Point(labelWidth + column * cellWidth, labelY));
+            }
+        }
+
+        private int? BucketAt(Point position)
+        {
+            XenoChart? chart = _Chart;
+            if (chart == null || chart.Buckets.Count == 0 || (chart.Kind != XenoChartKindEnum.StackedColumns && chart.Kind != XenoChartKindEnum.Lines)) return null;
+            Rect plot = PlotRect(new Rect(Bounds.Size));
+            if (position.X < plot.Left || position.X > plot.Right) return null;
+            return Math.Clamp((int)((position.X - plot.Left) / (plot.Width / Math.Max(1, chart.BucketCount))), 0, Math.Max(0, chart.BucketCount - 1));
+        }
+
+        private void OnPressed(Point position)
+        {
+            Focus();
+            int? index = BucketAt(position);
+            if (!index.HasValue || _Chart == null) return;
+            string? series = null;
+            if (_Chart.Kind == XenoChartKindEnum.StackedColumns && _Chart.Stacked)
+            {
+                Rect plot = PlotRect(new Rect(Bounds.Size));
+                double maximum = NiceMaximum(_Chart.Maximum);
+                double stacked = 0;
+                foreach (XenoChartSeries item in _Chart.Series)
+                {
+                    double value = index.Value < item.Values.Count && !Double.IsNaN(item.Values[index.Value]) ? Math.Max(0, item.Values[index.Value]) : 0;
+                    double height = plot.Height * value / maximum;
+                    if (position.Y <= plot.Bottom - stacked && position.Y >= plot.Bottom - stacked - height) series = item.Name;
+                    stacked += height;
+                }
+            }
+
+            Activate(index.Value, series);
+        }
+
+        private bool OnKey(Key key)
+        {
+            XenoChart? chart = _Chart;
+            if (chart == null || chart.Buckets.Count == 0) return false;
+            int last = chart.BucketCount - 1;
+            switch (key)
+            {
+                case Key.Left:
+                    _Cursor = Math.Max(0, (_Cursor ?? last + 1) - 1);
+                    break;
+                case Key.Right:
+                    _Cursor = Math.Min(last, (_Cursor ?? -1) + 1);
+                    break;
+                case Key.Enter:
+                    Activate(_Cursor ?? last, null);
+                    return true;
+                default:
+                    return false;
+            }
+
+            InvalidateVisual();
+            return true;
+        }
 
         private static Rect PlotRect(Rect bounds)
         {

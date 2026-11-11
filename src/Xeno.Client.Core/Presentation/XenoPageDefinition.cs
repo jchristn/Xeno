@@ -40,7 +40,7 @@ namespace Xeno.Client.Presentation
         public string Description { get; set; } = String.Empty;
 
         /// <summary>
-        /// Shortcut digit (1 through 9) used with Cmd/Ctrl in the desktop app and Alt in the terminal app.
+        /// Shortcut digit (0 through 9) used with Cmd/Ctrl in the desktop app and Alt in the terminal app, or -1 for none.
         /// </summary>
         public int ShortcutDigit { get; set; } = 0;
 

@@ -24,7 +24,7 @@ namespace Xeno.Client.LocalDashboard
     /// <summary>
     /// Watson-backed local dashboard service for the Xeno client.
     /// </summary>
-    public sealed class LocalDashboardService : IDisposable
+    public sealed partial class LocalDashboardService : IDisposable
     {
         private readonly ClientSettings _Settings;
         private readonly ILocalRequestHistoryMethods _History;
@@ -43,8 +43,14 @@ namespace Xeno.Client.LocalDashboard
         /// <param name="history">Local history database methods.</param>
         /// <param name="telemetryHistory">Telemetry history database methods.</param>
         /// <param name="telemetryService">Telemetry persistence service.</param>
-        public LocalDashboardService(ClientSettings settings, ILocalRequestHistoryMethods history, IClientTelemetryHistoryMethods telemetryHistory, ClientTelemetryPersistenceService? telemetryService, IClientProviderTelemetryHistoryMethods? providerTelemetryHistory = null, ClientProviderTelemetryPersistenceService? providerTelemetryService = null)
+        /// <param name="providerTelemetryHistory">Provider telemetry history database methods.</param>
+        /// <param name="providerTelemetryService">Provider telemetry persistence service.</param>
+        /// <param name="chat">Chat storage, or null when chat is unavailable.</param>
+        /// <param name="chatEngine">Chat engine, or null when chat is unavailable.</param>
+        public LocalDashboardService(ClientSettings settings, ILocalRequestHistoryMethods history, IClientTelemetryHistoryMethods telemetryHistory, ClientTelemetryPersistenceService? telemetryService, IClientProviderTelemetryHistoryMethods? providerTelemetryHistory = null, ClientProviderTelemetryPersistenceService? providerTelemetryService = null, Xeno.Core.Chat.IChatStore? chat = null, Xeno.Core.Chat.ChatEngine? chatEngine = null)
         {
+            _Chat = chat;
+            _ChatEngine = chatEngine;
             _Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _History = history ?? throw new ArgumentNullException(nameof(history));
             _TelemetryHistory = telemetryHistory ?? throw new ArgumentNullException(nameof(telemetryHistory));
@@ -56,6 +62,14 @@ namespace Xeno.Client.LocalDashboard
             _Webserver = new Webserver(webserverSettings, DefaultRouteAsync);
             _Webserver.Routes.Preflight = PreflightRouteAsync;
             _Token = Guid.NewGuid().ToString("N");
+        }
+
+        /// <summary>
+        /// Token the local API requires in the X-Xeno-Local-Token header.
+        /// </summary>
+        public string ApiToken
+        {
+            get { return _Token; }
         }
 
         /// <summary>
@@ -206,6 +220,13 @@ namespace Xeno.Client.LocalDashboard
         private async Task HandleApiAsync(HttpContextBase context, string method, string path, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
+            if (await TryHandleUsageAsync(context, method, path, token).ConfigureAwait(false)) return;
+            if (path.StartsWith("/api/v1/chat/", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleChatAsync(context, method, path, token).ConfigureAwait(false);
+                return;
+            }
+
             if (method == "GET" && String.Equals(path, "/api/v1/state", StringComparison.OrdinalIgnoreCase))
             {
                 await SendJsonAsync(context, new LocalDashboardStateResponse
@@ -618,6 +639,11 @@ namespace Xeno.Client.LocalDashboard
             _Settings.LocalInferenceServer = reloaded.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
             _Settings.Telemetry = reloaded.Telemetry ?? new ClientTelemetrySettings();
             _Settings.Providers = reloaded.Providers ?? new List<ClientRunnerSettings>();
+            _Settings.Chat = reloaded.Chat ?? new ClientChatSettings();
+            _Settings.Analytics = reloaded.Analytics ?? new ClientAnalyticsSettings();
+            Xeno.Client.Tools.Mcp.IMcpToolSource? mcp = LocalDashboardRuntime.McpTools;
+            if (mcp != null) _ = Task.Run(() => mcp.RefreshAsync(CancellationToken.None));
+            _Settings.DefaultMaxConcurrentRequests = reloaded.DefaultMaxConcurrentRequests;
         }
 
         private ClientSettings RedactedSettings()
@@ -882,6 +908,8 @@ document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{page=b.datase
             if (disposing)
             {
                 Stop();
+                _ChatPreparer?.Dispose();
+                _ChatServer?.Dispose();
                 IDisposable? disposable = _Webserver as IDisposable;
                 disposable?.Dispose();
             }

@@ -24,6 +24,7 @@ Reach for Xeno when you have more than one machine serving models and want one a
 - Fleet client channel over WebSocket with heartbeats, inventory advertisement, and stale-connection eviction
 - Server-collected client host and provider telemetry (CPU/memory/disk/GPU, model counts, health)
 - Request history with retention and per-request timings (time to first token, streaming duration, tokens, round-trip and upstream timing)
+- Usage analytics: latency percentiles, time to first token, throughput, tokens, heatmap, time by stage, provider health, and connected clients over time
 - NetLedger-backed token ledgering with tenant lifecycle cascade
 - Full OpenTelemetry observability — metrics, distributed traces, and logs over OTLP — with a bundled Prometheus + Tempo + Loki + Grafana stack and eight pre-built dashboards (Grafana on `:9400`)
 - SQLite, MySQL, PostgreSQL, or SQL Server for control-plane storage

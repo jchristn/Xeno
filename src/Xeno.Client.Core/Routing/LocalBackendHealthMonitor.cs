@@ -242,7 +242,7 @@ namespace Xeno.Client.Routing
                     }
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException || ex is OperationCanceledException || ex is InvalidOperationException || ex is UriFormatException || ex is JsonException)
+            catch (Exception ex) when (ex is HttpRequestException || ex is OperationCanceledException || ex is InvalidOperationException || ex is UriFormatException || ex is JsonException || ex is System.IO.InvalidDataException)
             {
                 if (token.IsCancellationRequested) throw;
                 status.Healthy = false;

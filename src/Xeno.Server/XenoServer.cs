@@ -41,7 +41,7 @@ namespace Xeno.Server
     /// <summary>
     /// Watson-backed Xeno REST, OpenAPI, Swagger, and WebSocket server host.
     /// </summary>
-    public sealed class XenoServer : IDisposable
+    public sealed partial class XenoServer : IDisposable
     {
         private const string RoutingTraceExposeHeaders = "X-Xeno-Request-ID";
         private const int MaxCapturedBodyChars = 131072;
@@ -307,6 +307,8 @@ namespace Xeno.Server
             {
                 _Database = await DatabaseDriverFactory.CreateAndInitializeAsync(_Settings.Database, _Logging, token).ConfigureAwait(false);
                 await MarkClientsDisconnectedAsync(token).ConfigureAwait(false);
+                int chatRoles = await DatabaseSeeder.EnsureChatPermissionsAsync(_Database, token).ConfigureAwait(false);
+                if (chatRoles > 0) _Logging.Info(_Header + "granted Chat permissions to " + chatRoles + " TenantMember role(s)");
                 _Routing = new RoutingService(_Database, _Settings.Routing, _Settings.Cache);
                 _Ledger = new LedgerService(_Database, _Settings.Ledger, _Logging);
                 _NetLedgerTenantSubordinate = new NetLedgerTenantSubordinateService(_Database, _Settings.Ledger, _Logging);
@@ -317,6 +319,7 @@ namespace Xeno.Server
                 _Webserver.Start();
                 _Ledger.Start();
                 StartTelemetryCollectionLoop();
+                StartConnectedClientSampling();
                 StartWebSocketMaintenanceLoop();
                 StartRequestHistoryRetentionLoop();
             }
@@ -359,6 +362,7 @@ namespace Xeno.Server
             lock (_StopLock)
             {
                 _Logging?.Info(_Header + "shutting down");
+                StopConnectedClientSampling();
                 _TelemetryCollectionCancellation?.Cancel();
                 _WebSocketMaintenanceCancellation?.Cancel();
                 _RequestHistoryRetentionCancellation?.Cancel();
@@ -459,6 +463,7 @@ namespace Xeno.Server
             new Routes.AdminRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
             new Routes.ClientRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
             new Routes.InferenceRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
+            new Routes.ChatRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
             new Routes.LedgerRoutes(this).Register(_Webserver, BuildRouteMetadata, ExceptionRouteAsync);
             RegisterRestRoutes();
 
@@ -602,6 +607,42 @@ namespace Xeno.Server
                 metadata = metadata
                     .WithParameter(OpenApiParameterMetadata.Query("sequence", "Optional client sequence number echoed by the server.", false, IntegerSchemaMetadata("Sequence number.")))
                     .WithParameter(OpenApiParameterMetadata.Query("clientSentUtc", "Optional UTC timestamp echoed by the server.", false, DateTimeSchema("Client sent timestamp.")));
+            }
+
+            if (IsPath(path, "/v1.0/api/request-history/analytics/usage", "/v1.0/api/chat/analytics/usage"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time. Default 24 hours before toUtc.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time. Default now.", false, DateTimeSchema("Exclusive UTC end time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("bucketMinutes", "Bucket width in minutes; at most 2000 buckets. Default follows the range (1, 15, 120, or 360).", false, IntegerSchemaMetadata("Bucket width in minutes.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("model", "Only this model.", false, OpenApiSchemaMetadata.String("Model.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("clientId", "Only this client.", false, OpenApiSchemaMetadata.String("Client identifier.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("userId", "Only this user (tenant administrators).", false, OpenApiSchemaMetadata.String("User identifier.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("credentialId", "Only this credential (tenant administrators).", false, OpenApiSchemaMetadata.String("Credential identifier.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("tenantId", "Another tenant (global administrators).", false, OpenApiSchemaMetadata.String("Tenant identifier.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("groupBy", "Model, Provider, Route, Client, Tenant (global administrators), User or Credential (tenant administrators).", false, OpenApiSchemaMetadata.String("Grouping.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("groupMetric", "Requests or Tokens; ranks the top groups.", false, OpenApiSchemaMetadata.String("Group metric.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("topN", "Groups shown by name before the rest fold into Other, 1 to 20.", false, IntegerSchemaMetadata("Top groups.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("utcOffsetMinutes", "Viewer's offset from UTC in minutes, for heatmap hours and weekdays.", false, IntegerSchemaMetadata("UTC offset in minutes.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("sections", "Comma-separated sections to compute (Totals, Outcome, Latency, TimeToFirstToken, Streaming, Throughput, Tokens, Groups, Heatmap, Stages, Feedback, Tools). Default all.", false, OpenApiSchemaMetadata.String("Sections.")));
+            }
+
+            if (IsPath(path, "/v1.0/api/client-telemetry/connected-history"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("bucketMinutes", "Bucket width in minutes.", false, IntegerSchemaMetadata("Bucket width in minutes.")));
+            }
+
+            if (IsPath(path, "/v1.0/api/client-telemetry/providers/health"))
+            {
+                metadata = metadata
+                    .WithParameter(OpenApiParameterMetadata.Query("fromUtc", "Inclusive UTC start time.", false, DateTimeSchema("Inclusive UTC start time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("toUtc", "Exclusive UTC end time.", false, DateTimeSchema("Exclusive UTC end time.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("bucketMinutes", "Bucket width in minutes.", false, IntegerSchemaMetadata("Bucket width in minutes.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("clientId", "Only this client.", false, OpenApiSchemaMetadata.String("Client identifier.")))
+                    .WithParameter(OpenApiParameterMetadata.Query("providerName", "Only this provider.", false, OpenApiSchemaMetadata.String("Provider name.")));
             }
 
             if (IsPath(path, "/api/v1/requesthistory/summary", "/v1.0/api/request-history/summary"))
@@ -3030,6 +3071,7 @@ namespace Xeno.Server
             try
             {
                 await PruneRequestHistoryAsync(token).ConfigureAwait(false);
+                _ = Task.Run(() => BackfillUsageColumnsAsync(token), token);
                 using (PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromHours(1)))
                 {
                     while (!token.IsCancellationRequested)
@@ -6413,6 +6455,7 @@ namespace Xeno.Server
             _Settings.Auth = incoming.Auth ?? new AuthSettings();
             _Settings.RequestHistory = incoming.RequestHistory ?? new RequestHistorySettings();
             _Settings.Routing = incoming.Routing ?? new RoutingSettings();
+            _Settings.Analytics = incoming.Analytics ?? new AnalyticsSettings();
             _Settings.Email = incoming.Email ?? new EmailSettings();
             _Settings.Ledger = incoming.Ledger ?? new LedgerSettings();
             ApplyEnvironmentSettings(_Settings);
@@ -6471,6 +6514,47 @@ namespace Xeno.Server
             await SendJsonAsync(context, credentialResult).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Give a credential issued at sign-in the roles its user has in the tenant, so the access key can do what the
+        /// user can. A credential is authorized only by roles assigned to it, and the administrator bypass applies to
+        /// users, not credentials, so an administrator's credential also gets the TenantAdmin role.
+        /// </summary>
+        /// <param name="tenantId">Tenant.</param>
+        /// <param name="user">User who signed in.</param>
+        /// <param name="credential">Credential issued for the user.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Task.</returns>
+        private async Task AssignUserRolesToCredentialAsync(string tenantId, User user, Credential credential, CancellationToken token)
+        {
+            HashSet<string> roleIds = new HashSet<string>(StringComparer.Ordinal);
+            List<RoleAssignment> userAssignments = await _Database!.RoleAssignments!.EnumerateByPrincipalAsync(tenantId, user.Id, token).ConfigureAwait(false);
+            foreach (RoleAssignment assignment in userAssignments)
+            {
+                if (assignment.Active && assignment.PrincipalType == PrincipalTypeEnum.User) roleIds.Add(assignment.RoleId);
+            }
+
+            if (user.IsAdmin || (user.IsTenantAdmin && String.Equals(user.TenantId, tenantId, StringComparison.Ordinal)))
+            {
+                Role? tenantAdmin = await _Database!.Roles!.ReadByNameAsync(tenantId, "TenantAdmin", token).ConfigureAwait(false);
+                if (tenantAdmin != null && tenantAdmin.Active) roleIds.Add(tenantAdmin.Id);
+            }
+
+            DateTime now = DateTime.UtcNow;
+            foreach (string roleId in roleIds)
+            {
+                await _Database!.RoleAssignments!.CreateAsync(new RoleAssignment
+                {
+                    TenantId = tenantId,
+                    RoleId = roleId,
+                    PrincipalType = PrincipalTypeEnum.Credential,
+                    PrincipalId = credential.Id,
+                    Active = true,
+                    CreatedUtc = now,
+                    LastUpdateUtc = now
+                }, token).ConfigureAwait(false);
+            }
+        }
+
         internal async Task HandleLoginAsync(HttpContextBase context, CancellationToken token)
         {
             AuthLoginRequest body = ReadJsonBody<AuthLoginRequest>(context);
@@ -6508,6 +6592,7 @@ namespace Xeno.Server
                 Active = true
             };
             await _Database!.Credentials!.CreateAsync(credential, token).ConfigureAwait(false);
+            await AssignUserRolesToCredentialAsync(tenantId, user, credential, token).ConfigureAwait(false);
             await RecordAuditAsync(loginContext, "Authentication", OperationTypeEnum.Write, true, "ClientCredentialIssued", 200);
             await SendJsonAsync(context, new
             {
@@ -9682,18 +9767,32 @@ namespace Xeno.Server
             if (Int32.TryParse(bucketValue, out int parsedBucket) && parsedBucket > 0) bucketMinutes = parsedBucket;
 
             List<RequestHistoryEntry> entries = await FilterRequestHistoryAsync(requestContext, fromUtc, toUtc, false, token).ConfigureAwait(false);
-            List<object> buckets = new List<object>();
+            RequestHistorySummaryResponse summary = new RequestHistorySummaryResponse { FromUtc = fromUtc, ToUtc = toUtc, BucketMinutes = bucketMinutes };
             DateTime cursor = fromUtc;
             while (cursor < toUtc)
             {
-                DateTime bucketEnd = cursor.AddMinutes(bucketMinutes);
-                int count = entries.Count(item => item.CreatedUtc >= cursor && item.CreatedUtc < bucketEnd);
-                int errors = entries.Count(item => item.CreatedUtc >= cursor && item.CreatedUtc < bucketEnd && item.StatusCode >= 400);
-                buckets.Add(new { startUtc = cursor, endUtc = bucketEnd, count, errors, success = count - errors, failed = errors });
-                cursor = bucketEnd;
+                summary.Buckets.Add(new RequestHistorySummaryBucketResponse { StartUtc = cursor, EndUtc = cursor.AddMinutes(bucketMinutes) });
+                cursor = cursor.AddMinutes(bucketMinutes);
             }
 
-            return new { fromUtc, toUtc, bucketMinutes, buckets };
+            long bucketTicks = TimeSpan.FromMinutes(bucketMinutes).Ticks;
+            foreach (RequestHistoryEntry entry in entries)
+            {
+                if (entry.CreatedUtc < fromUtc) continue;
+                long index = (entry.CreatedUtc - fromUtc).Ticks / bucketTicks;
+                if (index < 0 || index >= summary.Buckets.Count) continue;
+                RequestHistorySummaryBucketResponse bucket = summary.Buckets[(int)index];
+                bucket.Count++;
+                if (entry.StatusCode >= 400) bucket.Errors++;
+            }
+
+            foreach (RequestHistorySummaryBucketResponse bucket in summary.Buckets)
+            {
+                bucket.Success = bucket.Count - bucket.Errors;
+                bucket.Failed = bucket.Errors;
+            }
+
+            return summary;
         }
 
         private static DateTime? ParseDateQuery(HttpContextBase context, string name)
@@ -9975,6 +10074,9 @@ namespace Xeno.Server
                     ["/v1.0/api/request-history/{id}"] = Path(Operation("get", "getRequestHistory", "Request History", "Get request history", "Returns a captured request history entry.", "RequestHistoryEntry", true), Operation("delete", "deleteRequestHistory", "Request History", "Delete request history", "Deletes one captured request history entry.", "GenericObject", true)),
                     ["/v1.0/api/request-history/summary"] = Path(Operation("get", "summarizeRequestHistory", "Request History", "Request history summary", "Returns bucketed request counts.", "RequestHistorySummary", true)),
                     ["/v1.0/api/request-history/bulk"] = Path(Operation("post", "bulkDeleteRequestHistory", "Request History", "Bulk delete request history", "Deletes tenant request history entries.", "GenericObject", true)),
+                    ["/v1.0/api/request-history/analytics/usage"] = Path(Operation("get", "requestUsageAnalytics", "Request History", "Usage analytics for network requests", "Returns gap-filled buckets with outcome, latency, time to first token, streaming, throughput, tokens, groups, heatmap, and stage timing for the tenant's relayed requests.", "UsageAnalytics", true)),
+                    ["/v1.0/api/client-telemetry/connected-history"] = Path(Operation("get", "getConnectedClientHistory", "Client Telemetry", "Connected client history", "Returns the tenant's connected and registered client counts per bucket, sampled each minute and kept for 30 days. A bucket with no sample has null counts.", "ConnectedClientHistory", true)),
+                    ["/v1.0/api/client-telemetry/providers/health"] = Path(Operation("get", "getProviderHealthStrip", "Client Telemetry", "Provider health strip", "Returns one row per provider with healthy, degraded, unhealthy, or no-data cells per bucket, uptime, and the current failure streak.", "ProviderHealthStrip", true)),
                     ["/v1.0/api/request-history/analytics/overview"] = Path(Operation("get", "requestAnalyticsOverview", "Request History", "Analytics overview", "Returns tenant request analytics.", "GenericObject", true)),
                     ["/v1.0/api/analytics/overview"] = Path(Operation("get", "analyticsOverview", "Analytics", "Analytics overview", "Returns tenant analytics.", "GenericObject", true)),
                     ["/v1.0/api/ledger/status"] = Path(Operation("get", "getLedgerStatus", "Ledger", "Ledger status", "Returns in-memory ledger queue status and NetLedger health.", "LedgerStatusResponse", true)),
@@ -10242,6 +10344,9 @@ namespace Xeno.Server
                             Property("subject", StringSchema()),
                             Property("sentUtc", StringSchema("date-time"))),
                         ["GenericObject"] = ObjectSchema(),
+                        ["UsageAnalytics"] = ObjectSchema(Property("dataset", new Dictionary<string, object> { ["type"] = "string" }), Property("bucketMinutes", new Dictionary<string, object> { ["type"] = "integer" }), Property("totals", ObjectSchema()), Property("buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }), Property("groupKeys", new Dictionary<string, object> { ["type"] = "array", ["items"] = new Dictionary<string, object> { ["type"] = "string" } }), Property("groupTotals", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }), Property("heatmap", ObjectSchema()), Property("stageAverages", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() }), Property("truncated", new Dictionary<string, object> { ["type"] = "boolean" })),
+                        ["ConnectedClientHistory"] = ObjectSchema(Property("FromUtc", new Dictionary<string, object> { ["type"] = "string", ["format"] = "date-time" }), Property("ToUtc", new Dictionary<string, object> { ["type"] = "string", ["format"] = "date-time" }), Property("BucketMinutes", new Dictionary<string, object> { ["type"] = "integer" }), Property("Buckets", new Dictionary<string, object> { ["type"] = "array", ["items"] = new Dictionary<string, object> { ["type"] = "object" } })),
+                        ["ProviderHealthStrip"] = ObjectSchema(Property("bucketMinutes", new Dictionary<string, object> { ["type"] = "integer" }), Property("providers", new Dictionary<string, object> { ["type"] = "array", ["items"] = ObjectSchema() })),
                         ["Tenant"] = ObjectSchema(Property("id", StringSchema()), Property("name", StringSchema())),
                         ["User"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("email", StringSchema())),
                         ["Credential"] = ObjectSchema(Property("id", StringSchema()), Property("tenantId", StringSchema()), Property("accessKey", StringSchema())),

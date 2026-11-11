@@ -94,6 +94,13 @@ END;
             ClientTelemetryCollectionAttempts = telemetryMethods;
             RequestHistory = new SqlServerRequestHistoryMethods(_ConnectionString);
             Audit = new SqlServerAuditMethods(_ConnectionString);
+            string chatConnectionString = _ConnectionString;
+            DbChatMethods chat = new DbChatMethods(ChatSqlDialectEnum.SqlServer, () => new SqlConnection(chatConnectionString));
+            await chat.InitializeAsync(token).ConfigureAwait(false);
+            Chat = chat;
+            DbConnectedClientSampleMethods connectedClientSamples = new DbConnectedClientSampleMethods(ChatSqlDialectEnum.SqlServer, () => new SqlConnection(chatConnectionString));
+            await connectedClientSamples.InitializeAsync(token).ConfigureAwait(false);
+            ConnectedClientSamples = connectedClientSamples;
             Onboarding = new SqlServerOnboardingMethods(_ConnectionString);
 
             Tenants = new SqlServerTenantMethods(_ConnectionString);

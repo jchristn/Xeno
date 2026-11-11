@@ -63,7 +63,7 @@ namespace Test.Shared
             Backend = new HeadlessBackend(width, height) { ClaimsTerminal = false };
             App = new TuiApplication(Backend);
             Workspace = new XenoWorkspace(new XenoServerClient(server ?? new StubHttpHandler()), () => null);
-            Tui = new XenoTuiApp(App, new TuiStartOptions { StartPage = page, Live = false, PreferencesPath = Path.Combine(_Home.Directory, "frontend.json") }, Workspace);
+            Tui = new XenoTuiApp(App, new TuiStartOptions { StartPage = page, Live = false, AutoConnect = false, PreferencesPath = Path.Combine(_Home.Directory, "frontend.json") }, Workspace);
             App.Start();
             Tui.Start();
             Settle();

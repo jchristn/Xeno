@@ -24,6 +24,12 @@ namespace Xeno.Tui.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return true; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.Overview; }
@@ -77,7 +83,7 @@ namespace Xeno.Tui.Pages
             Column(_Recent, "Status", row => row.Status, 7);
             Column(_Recent, "Duration", row => row.Duration, 9);
             _Recent.RowActivated += index => Context.Navigate(XenoPageEnum.Requests);
-            _Range.SelectedIndex = 0;
+            _Range.SelectedIndex = 1;
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
             Frame(_Root, _Status, StackSize.Fixed(9), "Status");
             Frame(_Root, _Actions, StackSize.Fixed(1), "Actions");

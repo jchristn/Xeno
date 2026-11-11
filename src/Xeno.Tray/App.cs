@@ -64,7 +64,8 @@ namespace Xeno.Tray
         /// </summary>
         public override void OnFrameworkInitializationCompleted()
         {
-            XenoTheme.Apply(this, XenoFrontEndPreferences.Load().DesktopAppearance);
+            XenoFrontEndPreferences preferences = XenoFrontEndPreferences.Load();
+            XenoTheme.Apply(this, preferences.DesktopAppearance, XenoColorSchemes.Selected(preferences));
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
                 desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -76,6 +77,7 @@ namespace Xeno.Tray
             _Timer.Tick += (sender, args) => _ = RefreshAsync();
             _Timer.Start();
             _ = RefreshAsync();
+            _ = AutoConnectAsync();
             base.OnFrameworkInitializationCompleted();
         }
 
@@ -118,8 +120,14 @@ namespace Xeno.Tray
                 case XenoCommandEnum.OpenWebDashboard:
                     _ = ReportAsync(XenoAppLauncher.OpenLocalDashboard());
                     break;
+                case XenoCommandEnum.GoChat:
+                    _ = ReportAsync(XenoAppLauncher.LaunchDesktop(XenoPageEnum.Chat));
+                    break;
                 case XenoCommandEnum.GoLocalEndpoint:
                     _ = ReportAsync(XenoAppLauncher.LaunchDesktop(XenoPageEnum.LocalEndpoint));
+                    break;
+                case XenoCommandEnum.Settings:
+                    _ = ReportAsync(XenoAppLauncher.LaunchDesktopSettings());
                     break;
                 case XenoCommandEnum.StartClient:
                     _ = RunAsync(token => XenoClientActions.StartAsync(_Workspace, token));
@@ -161,6 +169,32 @@ namespace Xeno.Tray
 
             // A tray icon that is only constructed never appears; it must be registered with the application.
             TrayIcon.SetIcons(this, new TrayIcons { _Tray });
+        }
+
+        private async Task AutoConnectAsync()
+        {
+            // The app that started this agent usually connects first; waiting lets its worker show up in the state file.
+            await Task.Delay(3000).ConfigureAwait(true);
+            if (_Busy || XenoAutoConnect.Decide(_Workspace) != XenoAutoConnectDecisionEnum.Connect) return;
+            _Busy = true;
+            _Menus?.Refresh();
+            if (_Tray != null) _Tray.ToolTipText = XenoProduct.TrayName + " - " + XenoAutoConnect.ProgressMessage;
+            string message;
+            try
+            {
+                message = await XenoAutoConnect.ConnectAsync(_Workspace, CancellationToken.None).ConfigureAwait(true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException || ex is System.IO.IOException || ex is UnauthorizedAccessException)
+            {
+                message = ex.Message;
+            }
+            finally
+            {
+                _Busy = false;
+            }
+
+            await RefreshAsync().ConfigureAwait(true);
+            if (_Tray != null) _Tray.ToolTipText = XenoProduct.TrayName + " - " + message;
         }
 
         private async Task RefreshAsync()

@@ -28,6 +28,11 @@ namespace Xeno.Client.LocalInference
         public string Error { get; set; } = String.Empty;
 
         /// <summary>
+        /// True when the provider did not answer, or finish answering, within the request timeout.
+        /// </summary>
+        public bool TimedOut { get; set; } = false;
+
+        /// <summary>
         /// Milliseconds from forwarding the request until the provider's response headers arrived, when it responded.
         /// </summary>
         public double? FirstByteMs { get; set; } = null;

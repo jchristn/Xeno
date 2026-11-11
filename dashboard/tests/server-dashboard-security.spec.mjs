@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs/promises';
+import { healthStrip, usageAnalytics } from './usageFixture.mjs';
 
 const serverUrl = 'http://localhost:9000';
 
@@ -1353,4 +1354,219 @@ test('role assignment form posts selected principal and role', async ({ page }) 
     principalId: 'cred_target',
     active: true
   });
+});
+
+test('server chat streams an answer, rates it, and tenant admins review everyone', async ({ page }) => {
+  const now = new Date().toISOString();
+  const conversation = { Id: 'chconv_1', Title: 'New chat', Model: 'llama3.2:latest', Surface: 'Server', MessageCount: 0, CreatedUtc: now, UpdatedUtc: now, Messages: [] };
+  let sent = null;
+  let rated = null;
+  const scopes = [];
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session('usr_admin'));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const path = url.pathname;
+    if (path === '/api/v1/users' && method === 'GET') {
+      await route.fulfill({ json: [{ id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: false, isTenantAdmin: true, active: true }] });
+      return;
+    }
+    if (path === '/v1.0/api/chat/models') {
+      await route.fulfill({ json: { Entries: [{ Name: 'llama3.2:latest', OnNetwork: true, ServedLocally: false, SupportsCompletions: true }], NetworkMessage: '' } });
+      return;
+    }
+    if (path === '/v1.0/api/chat/models/prepare') {
+      await route.fulfill({ json: { Model: 'llama3.2:latest', Route: 'network', Loaded: false, SupportsTools: false, Message: 'Loads when first asked.' } });
+      return;
+    }
+    if (path === '/v1.0/api/chat/conversations' && method === 'GET') {
+      await route.fulfill({ json: conversation.Messages.length ? [{ ...conversation, Messages: [] }] : [] });
+      return;
+    }
+    if (path === '/v1.0/api/chat/conversations' && method === 'POST') {
+      await route.fulfill({ status: 201, json: { ...conversation, Messages: [] } });
+      return;
+    }
+    if (path === '/v1.0/api/chat/conversations/chconv_1' && method === 'GET') {
+      await route.fulfill({ json: conversation });
+      return;
+    }
+    if (path === '/v1.0/api/chat/conversations/chconv_1/messages') {
+      sent = route.request().postDataJSON();
+      expect(route.request().headers().authorization).toBe('Bearer token-123');
+      conversation.Title = 'Hello';
+      conversation.Messages = [
+        { Id: 'chmsg_u', ConversationId: 'chconv_1', Role: 'User', Content: sent.content },
+        { Id: 'chmsg_a', ConversationId: 'chconv_1', Role: 'Assistant', Content: 'Network says hi', Model: 'llama3.2:latest', Route: 'network', TotalMs: 800 }
+      ];
+      const events = [
+        { Kind: 'Turn', TurnId: 'chturn_1' },
+        { Kind: 'Chunk', TurnId: 'chturn_1', Text: 'Network says hi' },
+        { Kind: 'Done', TurnId: 'chturn_1', Turn: { Id: 'chturn_1', Status: 'Success' } }
+      ];
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: events.map((item) => `data: ${JSON.stringify(item)}\n\n`).join('') });
+      return;
+    }
+    if (path === '/v1.0/api/chat/messages/chmsg_a/feedback') {
+      rated = route.request().postDataJSON();
+      conversation.Messages[1].Feedback = { Id: 'chfb_1', Rating: rated.rating, Comment: rated.comment };
+      await route.fulfill({ json: conversation.Messages[1].Feedback });
+      return;
+    }
+    if (path === '/v1.0/api/chat/analytics') {
+      scopes.push(url.searchParams.get('scope') || 'mine');
+      await route.fulfill({ json: { Turns: 1, Network: 1, ThumbsDown: 1, NegativeRate: 1, P50Ms: 800, P95Ms: 800, ErrorRate: 0, Buckets: [{ StartUtc: now, Local: 0, Network: 1, Errors: 0 }] } });
+      return;
+    }
+    if (path === '/v1.0/api/chat/history') {
+      await route.fulfill({ json: { Items: [{ Id: 'chturn_1', ConversationTitle: 'Hello', Model: 'llama3.2:latest', Route: 'network', Provider: 'gpu-box', Status: 'Success', TotalMs: 800, CompletionTokens: 4, FeedbackRating: -1, CreatedUtc: now }], Total: 1 } });
+      return;
+    }
+    if (path === '/v1.0/api/chat/feedback') {
+      await route.fulfill({ json: { Items: [{ Id: 'chfb_1', Rating: -1, Comment: 'Too vague', Model: 'llama3.2:latest', ConversationTitle: 'Hello', Excerpt: 'Network says hi', UpdatedUtc: now }], Total: 1 } });
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/dashboard/chat');
+  // The chat reaches the bottom of the window without scrolling the page.
+  await expect(page.locator('.chat-layout')).toBeVisible();
+  const viewport = page.viewportSize();
+  const layout = await page.locator('.chat-layout').boundingBox();
+  expect(viewport.height - (layout.y + layout.height)).toBeGreaterThanOrEqual(0);
+  expect(viewport.height - (layout.y + layout.height)).toBeLessThanOrEqual(24);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(1);
+  await expect(page.locator('h1', { hasText: 'Chat' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Model' }).locator('optgroup[label="Xeno network"] option')).toHaveText(['llama3.2:latest']);
+  await expect(page.getByRole('button', { name: /^Tools (on|off)$/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Streaming on' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Message' }).fill('Hello');
+  await page.getByRole('textbox', { name: 'Message' }).press('Enter');
+  await expect(page.locator('.chat-message.assistant')).toContainText('Network says hi');
+  expect(sent).toEqual({ content: 'Hello', model: 'llama3.2:latest', stream: true, surface: 'Server' });
+  await expect(page.locator('.chat-model-status')).toHaveText('Ready');
+  await expect(page.locator('.chat-meta')).toContainText('Xeno network');
+  await page.getByTitle('Bad answer').click();
+  await page.getByRole('dialog').locator('textarea[name="comment"]').fill('Too vague');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save rating' }).click();
+  await expect.poll(() => rated).toEqual({ rating: -1, comment: 'Too vague' });
+
+  await page.goto('/dashboard/chat-review');
+  await expect(page.locator('.metric-card', { hasText: 'Thumbs down share' })).toContainText('100%');
+  await expect(page.getByText('Too vague')).toBeVisible();
+  await expect(page.getByText('gpu-box')).toBeVisible();
+  await page.getByRole('button', { name: 'Everyone in the tenant' }).click();
+  await expect.poll(() => scopes.includes('tenant')).toBe(true);
+});
+
+async function routeUsage(page, userRecord, onUsage) {
+  await page.addInitScript((storedSession) => {
+    window.localStorage.setItem('xeno.dashboard.session', JSON.stringify(storedSession));
+  }, session(userRecord.id));
+  await page.route(`${serverUrl}/**`, async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    if (path === '/api/v1/users') {
+      await route.fulfill({ json: [userRecord] });
+      return;
+    }
+    if (path === '/v1.0/api/request-history/analytics/usage') {
+      const result = onUsage ? onUsage(url) : null;
+      if (result) await route.fulfill(result);
+      else await route.fulfill({ json: usageAnalytics('NetworkRequests') });
+      return;
+    }
+    if (path === '/v1.0/api/chat/analytics/usage') {
+      if (onUsage) onUsage(url);
+      await route.fulfill({ json: usageAnalytics('Chat') });
+      return;
+    }
+    if (path === '/v1.0/api/client-telemetry/providers/health') {
+      await route.fulfill({ json: healthStrip() });
+      return;
+    }
+    if (path === '/v1.0/api/client-telemetry/connected-history') {
+      const start = new Date(Date.now() - 900000).toISOString();
+      await route.fulfill({ json: { bucketMinutes: 15, buckets: [{ startUtc: start, endUtc: new Date().toISOString(), connected: 2, total: 3 }] } });
+      return;
+    }
+    if (path === '/v1.0/api/request-history') {
+      await route.fulfill({ json: { items: [{ id: 'req_1', method: 'POST', path: '/v1/chat/completions', model: 'llama3', statusCode: 200, durationMs: 1000, createdUtc: url.searchParams.get('fromUtc') || new Date().toISOString(), telemetry: { clientRoundTripMs: 900, upstreamTotalMs: 800, requestToHeadersMs: 100, timeToFirstTokenMs: 300, totalStreamingTimeMs: 500 } }], total: 1, page: 1, pageSize: 100 } });
+      return;
+    }
+    if (path === '/v1.0/api/request-history/summary') {
+      await route.fulfill({ json: { buckets: [] } });
+      return;
+    }
+    if (path === '/v1.0/api/request-history/analytics/overview' || path === '/v1.0/api/analytics/overview') {
+      await route.fulfill({ json: { total: 0, success: 0, failures: 0, failureRate: 0, byModel: [], byPath: [] } });
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+}
+
+test('server usage page follows roles, redirects analytics, and drills into request history', async ({ page }) => {
+  const queries = [];
+  await routeUsage(page, { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: false, isTenantAdmin: true, active: true }, (url) => { queries.push(url); return null; });
+  await page.goto('/dashboard/analytics');
+  await expect(page).toHaveURL(/\/dashboard\/usage$/);
+  await expect(page.locator('[data-chart]')).toHaveCount(12);
+  const links = await page.locator('.sidebar a').allTextContents();
+  expect(links.findIndex((item) => item.includes('Usage'))).toBe(links.findIndex((item) => item.includes('Home')) + 1);
+  expect(links.some((item) => item.trim() === 'Analytics')).toBe(false);
+  const groupBy = page.locator('.usage-filters select').first();
+  await expect(groupBy.locator('option')).toHaveText(['Model', 'Provider', 'Client', 'User', 'Credential']);
+  await groupBy.selectOption('User');
+  await expect.poll(() => queries.at(-1)?.searchParams.get('groupBy')).toBe('User');
+  expect(queries.at(-1).searchParams.get('utcOffsetMinutes')).not.toBeNull();
+
+  await page.getByRole('button', { name: 'Chat', exact: true }).last().click();
+  await expect(page.locator('[data-chart]')).toHaveCount(14);
+  await expect.poll(() => queries.at(-1)?.searchParams.get('scope')).toBe('tenant');
+  await page.getByRole('button', { name: 'Network requests', exact: true }).click();
+  await expect(page.locator('[data-chart]')).toHaveCount(12);
+
+  await page.locator('[data-chart="usage.outcome"] .usage-hover').nth(30).click();
+  await expect(page).toHaveURL(/\/dashboard\/requests\?fromUtc=/);
+  await expect(page.locator('.usage-drill-banner')).toContainText('from the Usage page');
+  await page.locator('tbody tr').first().click();
+  await expect(page.locator('.request-detail-timing .usage-bar-row')).toHaveCount(5);
+  await expect(page.locator('.request-detail-timing')).toContainText('Relay and client');
+});
+
+test('server usage hides groupings a member cannot use and explains a refusal', async ({ page }) => {
+  let refuse = false;
+  await routeUsage(page, { id: 'usr_member', tenantId: 'ten_default', email: 'member@xeno.test', isAdmin: false, isTenantAdmin: false, active: true }, () => (refuse ? { status: 403, json: { Message: 'Forbidden' } } : null));
+  await page.goto('/dashboard/usage');
+  await expect(page.locator('[data-chart]')).toHaveCount(12);
+  await expect(page.locator('.usage-filters select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client']);
+  refuse = true;
+  await page.locator('.usage-toolbar .icon-button').click();
+  await expect(page.locator('.error-state')).toContainText('Your role cannot see usage grouped this way.');
+});
+
+test('server usage fits every width and theme, and client telemetry shows provider health', async ({ page }) => {
+  await routeUsage(page, { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: true, isTenantAdmin: true, active: true });
+  for (const width of [1280, 768, 390]) {
+    for (const theme of ['light', 'dark']) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/dashboard/usage');
+      await expect(page.locator('[data-chart]')).toHaveCount(12);
+      await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
+      await page.waitForTimeout(150);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow, `horizontal overflow at ${width} ${theme}`).toBeLessThanOrEqual(1);
+      await page.screenshot({ fullPage: true, path: `test-results/usage-server-${width}-${theme}.png` });
+    }
+  }
+  await expect(page.locator('.usage-filters select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client', 'User', 'Credential', 'Tenant']);
+  await expect(page.locator('[data-chart="connected.clients"] rect[data-series="connected"]')).toHaveCount(1);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/dashboard/client-telemetry');
+  await expect(page.locator('[data-chart="usage.health"] .usage-strip-row')).toHaveCount(1);
+  await expect(page.locator('[data-chart="usage.health"]')).toContainText('75% up');
 });

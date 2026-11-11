@@ -1,6 +1,7 @@
 @echo off
 REM Build and run the Xeno client worker from source in the foreground (xeno connect --foreground), so its log prints
 REM to this console. Ctrl+C stops it.
+REM It also starts the Xeno Agent tray app (set XENO_AGENT_AUTOSTART=0 to turn that off).
 REM
 REM Usage: run-client.bat [--server <cloud^|url^|host[:port]>]
 setlocal

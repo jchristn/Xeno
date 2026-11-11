@@ -30,6 +30,7 @@ function printHelp() {
   console.log('  permissions     permissions');
   console.log('  routing-policies routing policies');
   console.log('  history         request history');
+  console.log('  usage           usage analytics');
   console.log('  leaderboard     public model token leaderboard');
   console.log('  ledger-status   ledger queue and NetLedger health');
   console.log('  ledger-balance  own ledger balance; append user ID for a specific user');
@@ -72,6 +73,7 @@ async function runCommand(command) {
   if (command === 'permissions') return printJson(await sdk.listPermissions());
   if (command === 'routing-policies') return printJson(await sdk.listRoutingPolicies());
   if (command === 'history') return printJson(await sdk.listRequestHistory());
+  if (command === 'usage') return printJson(await sdk.getUsageAnalytics());
   if (command === 'leaderboard') return printJson(await sdk.getModelTokenLeaderboard());
   if (command === 'ledger-status') return printJson(await sdk.getLedgerStatus());
   if (command === 'ledger-balance') return printJson(await sdk.getMyLedgerBalance());

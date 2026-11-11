@@ -21,6 +21,12 @@ namespace Xeno.Desktop.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return true; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.HostTelemetry; }
@@ -32,7 +38,8 @@ namespace Xeno.Desktop.Pages
 
         private WrapPanel _Latest = new WrapPanel();
         private ComboBox _Range = new ComboBox();
-        private List<ColumnChart> _Charts = new List<ColumnChart>();
+        private ColumnChart _Chart = new ColumnChart();
+        private ComboBox _Metric = new ComboBox();
         private XenoTable<HostSampleRow>? _Samples;
         private TextBlock _Status = new TextBlock();
         private StackPanel _Gpus = new StackPanel();
@@ -71,16 +78,11 @@ namespace Xeno.Desktop.Pages
             _Latest = new WrapPanel();
             _Status = Ui.Muted(String.Empty);
             _Gpus = new StackPanel { Spacing = 6 };
-            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 0, MinWidth = 140 };
+            _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 1, MinWidth = 140 };
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
-            _Charts = XenoCharts.HostMetrics.Select(item => new ColumnChart { Height = 190 }).ToList();
-            Grid charts = new Grid { ColumnDefinitions = new ColumnDefinitions(String.Join(",", _Charts.Select(item => "*"))) };
-            for (int i = 0; i < _Charts.Count; i++)
-            {
-                _Charts[i].Margin = new Thickness(i == 0 ? 0 : 12, 0, i == _Charts.Count - 1 ? 0 : 12, 0);
-                Grid.SetColumn(_Charts[i], i);
-                charts.Children.Add(_Charts[i]);
-            }
+            _Metric = new ComboBox { ItemsSource = XenoCharts.HostMetrics.Select(XenoCharts.HostMetricName).ToList(), SelectedIndex = 0, MinWidth = 160 };
+            _Metric.SelectionChanged += (sender, args) => _ = RefreshAsync();
+            _Chart = new ColumnChart { Height = 220 };
 
             _Samples = new XenoTable<HostSampleRow>(new List<XenoTableColumn<HostSampleRow>>
             {
@@ -96,7 +98,7 @@ namespace Xeno.Desktop.Pages
 
             return Ui.Stack(16,
                 Ui.Card("Latest reading", Ui.Stack(10, _Latest, _Gpus, _Status)),
-                Ui.Card("CPU, memory, and GPU over time", charts, _Range),
+                Ui.Card("Metric over time", _Chart, _Metric, _Range),
                 Ui.Card("Samples", _Samples));
         }
 
@@ -109,12 +111,9 @@ namespace Xeno.Desktop.Pages
                 ClientTelemetryPersistenceStatus status = await Workspace.GetHostTelemetryStatusAsync(None).ConfigureAwait(true);
                 RenderLatest(latest, status);
                 HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
-                for (int i = 0; i < _Charts.Count && i < XenoCharts.HostMetrics.Count; i++)
-                {
-                    ClientTelemetryMetricEnum metric = XenoCharts.HostMetrics[i];
-                    List<ClientTelemetryRollupBucket> buckets = await Workspace.RollupHostTelemetryAsync(metric, range, None).ConfigureAwait(true);
-                    _Charts[i].SetChart(XenoCharts.HostMetric(metric, buckets, range));
-                }
+                ClientTelemetryMetricEnum metric = XenoCharts.HostMetrics[Math.Clamp(_Metric.SelectedIndex, 0, XenoCharts.HostMetrics.Count - 1)];
+                List<ClientTelemetryRollupBucket> buckets = await Workspace.RollupHostTelemetryAsync(metric, range, None).ConfigureAwait(true);
+                _Chart.SetChart(XenoCharts.HostMetric(metric, buckets, range));
 
                 _Samples?.SetRows(await Workspace.SearchHostTelemetryAsync(range, 500, None).ConfigureAwait(true));
             }).ConfigureAwait(true);

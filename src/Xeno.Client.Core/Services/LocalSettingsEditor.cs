@@ -75,7 +75,10 @@ namespace Xeno.Client.Services
                 HistoryRetention = settings.LocalDashboard.HistoryRetention,
                 LocalInferenceServer = settings.LocalInferenceServer,
                 DefaultMaxConcurrentRequests = settings.DefaultMaxConcurrentRequests,
-                Telemetry = settings.Telemetry
+                Telemetry = settings.Telemetry,
+                Chat = settings.Chat,
+                Analytics = settings.Analytics,
+                Mcp = settings.Mcp
             };
         }
 
@@ -95,6 +98,7 @@ namespace Xeno.Client.Services
             ValidateLocalDashboardHost(request.Host);
             ClientLocalInferenceServerSettings localInferenceServer = request.LocalInferenceServer ?? new ClientLocalInferenceServerSettings();
             ValidateLocalInferenceHost(localInferenceServer.Host);
+            if (request.Mcp != null) ValidateLocalInferenceHost(request.Mcp.Host);
             settings.ValidateLocalInferenceProviderEndpoints(localInferenceServer);
             LocalInferenceRouteValidator.Validate(localInferenceServer.Routes, settings.Providers);
             if (request.DefaultMaxConcurrentRequests.HasValue && (request.DefaultMaxConcurrentRequests.Value < 1 || request.DefaultMaxConcurrentRequests.Value > 256))
@@ -112,6 +116,13 @@ namespace Xeno.Client.Services
             settings.LocalInferenceServer = localInferenceServer;
             settings.Telemetry = request.Telemetry ?? new ClientTelemetrySettings();
             if (request.DefaultMaxConcurrentRequests.HasValue) settings.DefaultMaxConcurrentRequests = request.DefaultMaxConcurrentRequests.Value;
+            if (request.Chat != null)
+            {
+                ChatSettingsSecrets.Restore(request.Chat, settings.Chat);
+                settings.Chat = request.Chat;
+            }
+            if (request.Mcp != null) settings.Mcp = request.Mcp;
+            if (request.Analytics != null) settings.Analytics = request.Analytics;
         }
 
         #endregion

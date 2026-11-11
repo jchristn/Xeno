@@ -23,18 +23,18 @@
 
   <ItemGroup>
     <PackageReference Include="Caching" Version="5.1.4" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
-    <PackageReference Include="MySql.Data" Version="26.7.0" />
+    <PackageReference Include="MySql.Data" Version="26.10.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
-    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
-    <PackageReference Include="PrettyId" Version="2.0.1" />
+    <PackageReference Include="OpenTelemetry" Version="1.20.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.1" />
+    <PackageReference Include="PrettyId" Version="2.0.2" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="SyslogLogging" Version="2.3.1" />
+    <PackageReference Include="SyslogLogging" Version="2.4.1" />
     <!-- Pinned above the version Microsoft.Data.SqlClient 7.1.1 brings in (9.0.18) to pick up the fixes for GHSA-846f-f764-76mx and GHSA-2fmv-rv2c-59x7. Remove once SqlClient references a patched version. -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
   </ItemGroup>
 
 </Project>

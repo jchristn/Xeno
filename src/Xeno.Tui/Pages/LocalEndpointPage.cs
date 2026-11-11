@@ -23,6 +23,12 @@ namespace Xeno.Tui.Pages
         #region Public-Members
 
         /// <inheritdoc />
+        public override bool AutoRefreshes
+        {
+            get { return !_DrillActive; }
+        }
+
+        /// <inheritdoc />
         public override XenoPageEnum Page
         {
             get { return XenoPageEnum.LocalEndpoint; }
@@ -44,6 +50,7 @@ namespace Xeno.Tui.Pages
 
         #region Private-Members
 
+        private bool _DrillActive = false;
         private readonly FramedStack _Root = new FramedStack(SplitOrientation.Vertical);
         private readonly DetailsView _Summary = new DetailsView();
         private readonly ButtonRow _Actions = new ButtonRow();
@@ -106,6 +113,8 @@ namespace Xeno.Tui.Pages
         /// <inheritdoc />
         public override Task RefreshAsync()
         {
+            XenoDrillDownRequest? window = XenoDrillDown.Take(Page);
+            _DrillActive = window != null;
             return LoadAsync(async token =>
             {
                 LocalInferenceRoutingView view = await Workspace.GetLocalInferenceRoutingAsync(token).ConfigureAwait(false);
@@ -117,7 +126,7 @@ namespace Xeno.Tui.Pages
                     rules.Add(RouteRuleRow.From(rule, decision));
                 }
 
-                return new LocalEndpointData(view, XenoCharts.LocalEndpointTraffic(records, DateTime.UtcNow), rules, records.Take(100).Select(LocalInferenceRequestRow.From).ToList());
+                return new LocalEndpointData(view, XenoCharts.LocalEndpointTraffic(records, DateTime.UtcNow), rules, (window == null ? records : records.Where(item => window.Matches(item.ReceivedUtc, item.Model)).ToList()).Take(100).Select(LocalInferenceRequestRow.From).ToList());
             }, data =>
             {
                 RenderSummary(data.View);

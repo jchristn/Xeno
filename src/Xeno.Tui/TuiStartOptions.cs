@@ -18,6 +18,12 @@ namespace Xeno.Tui
         public bool Live { get; set; } = true;
 
         /// <summary>
+        /// True to connect this computer when the app starts, unless a worker is running, nobody is signed in, or
+        /// XENO_AUTOCONNECT=0. Tests turn it off.
+        /// </summary>
+        public bool AutoConnect { get; set; } = true;
+
+        /// <summary>
         /// Preferences file, or null for frontend.json in the client home directory.
         /// </summary>
         public string? PreferencesPath { get; set; } = null;

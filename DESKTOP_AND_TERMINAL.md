@@ -22,7 +22,7 @@ The scripts in [scripts/](scripts/README.md) build and run each app. Use `script
 `scripts\windows\*.bat` on Windows:
 
 ```bash
-scripts/macos/run-desktop.sh     # desktop app (also starts the tray agent)
+scripts/macos/run-desktop.sh     # desktop app (also starts the tray agent and connects)
 scripts/macos/run-tui.sh         # terminal app in this terminal
 scripts/macos/run-tray.sh        # tray agent
 scripts/macos/run-local.sh tui   # local server + web dashboard + terminal app, isolated from ~/.xeno
@@ -105,18 +105,22 @@ Things to know:
 
 | Page | What it shows and does |
 |---|---|
+| Chat | Talk to any model on this machine or the Xeno network. Pick a conversation and a model (grouped by this machine and the Xeno network), type a message, and read the answer as it streams, with its route, timing, and tokens. Rate answers thumbs up or down with an optional comment, turn Xeno tools on for a conversation (tools that change something ask with Allow or Deny), set a system prompt and the working folder that file and process tools are confined to (Folder), rename, and delete. Needs the client running. In the terminal app: Enter sends (Send turns into Stop while answering), Ctrl+N starts a new chat, Esc stops an answer; Stream turns streaming on or off, Stats shows the last answer's telemetry, and Prompt sets the system prompt. |
+| Chat history | Every chat turn from every Xeno app on this machine (web, desktop, terminal, CLI, MCP): totals, median and 95th percentile time, time to first token, the thumbs down share, a chart of turns by where they ran, a per-model table (desktop), and the turns themselves, filtered by range, route, and outcome. Open a turn for its details and tool calls. |
+| Feedback | Thumbs up and down counts, the share of answers rated, and every rating with its comment, model, and conversation, filtered by range and rating. |
 | Overview | Client status with Start, Stop, Restart, and Sign In; the local inference URL and routing mode (and, once, a notice when an upgrade moved the listener from port 11434 to 11435); requests served, failures, and latency; a requests-over-time chart with a range (last hour, day, week, or month); how many models are served here and offered by the network; local services; recent requests. |
 | Models | One catalog of the models this machine serves and the models the Xeno network offers it, with where each is available (this machine, the network, or both). Add, edit, rename, move, and delete local models. |
 | Providers | Local inference endpoints (Ollama, vLLM, OpenAI-compatible), their models, and a connection test. Add, edit, and delete providers. Each provider can be shared with the Xeno network or kept local-only (for example your own Ollama Cloud account), used for this machine's local endpoint requests, and given a concurrency limit; each model can have its own limit. |
 | Local endpoint | The URL apps on this machine call, its routing mode, a traffic chart (answered here, sent to the network, fallbacks), each provider's health, latency, and load against its concurrency limit, the route rules, and recent local endpoint requests. Add, edit, and delete rules, test where a model would go, and check every provider now. In the terminal app: a add, e edit, d delete, t test a route, c check providers. |
+| Usage | Requests, failures, latency, time to first token, streaming, throughput, tokens, a heatmap, and time by stage, for served requests, the local endpoint, or chat. Click a bucket to open the matching list. |
 | Requests | Requests this machine served for the network, with a requests-over-time chart, range, outcome, and text filters, and full request details (timeline, headers, and stored bodies). Delete one request or clear the history. |
 | Logs | The worker log or error log, with tail length, severity filter, and live follow. Routine server messages are rolled up (see below). |
-| Host (Telemetry) | CPU, memory, disk, and GPU readings; CPU, memory, and GPU charts over a range; stored samples; and Collect Now. |
+| Host (Telemetry) | CPU, memory, disk, and GPU readings; a chart of the chosen metric over a range; stored samples; and Collect Now. |
 | Provider (Telemetry) | Health, loaded and available models, queue depth, and throughput per provider; a chart of the chosen metric over a range; and stored samples. |
 | General (Configuration) | The server connection, sign-in (username and password, or an access key), sign-out, connectivity checks, and what the network offers this tenant. |
 | Settings | Appearance and every local setting: the web dashboard, the local inference server (port, routing mode, model discovery, provider health checks, and how long a local request waits for a free slot), the default concurrency limit per provider, request history retention, and telemetry. Saved to `client.json`; listener host and port changes apply after a restart, routing and concurrency changes apply right away. |
 
-The sidebar groups pages under section headings (Client, Models, Activity, Telemetry, Configuration), so the
+The sidebar groups pages under section headings (Client, Models, Chat, Activity, Telemetry, Configuration), so the
 telemetry pages are just **Host** and **Provider** there. Menus, the command palette, and page headers use the full
 names (Host Telemetry, Provider Telemetry).
 
@@ -128,13 +132,20 @@ The desktop and terminal apps draw the same charts as the local web dashboard, b
 | Page | Charts |
 |---|---|
 | Overview and Requests | Requests over time: succeeded and failed requests per interval. |
-| Host Telemetry | CPU, memory, and GPU utilization over time. |
-| Provider Telemetry | The chosen provider metric over time, for one provider or all of them. |
+| Usage | Every usage chart for the chosen dataset. See [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md). |
+| Host Telemetry | The chosen host metric over time: average, minimum, and maximum. |
+| Provider Telemetry | The chosen provider metric over time, filtered by provider and model: average, minimum, and maximum. |
 
-Every chart has a range (last hour, day, week, or month), a heading such as "Requests, last hour", a legend, its
+Every chart has a range (last hour, day, week, or month, opening on the last day), a heading such as "Requests, last day", a legend, its
 peak value, and time labels. When there's no data, the chart says why instead of drawing an empty axis: for example,
 no requests yet, telemetry is collected only while the client runs, or GPU telemetry needs an NVIDIA GPU. In the
 desktop app, hover over a column to see its values.
+
+Charts refresh on the **View > Auto Refresh** choice: off, every 15 seconds (the default), or every minute. An open
+dialog pauses the refresh, and so does a list opened from a chart.
+
+On the Usage page, click a bucket or move to it with the arrow keys and press Enter to open the matching list for that
+window. In the terminal app the first click selects a bucket and the second opens it.
 
 ### Log rollup
 
@@ -169,9 +180,31 @@ Menus:
 
 Tables sort by clicking a column header. Double-click or press Enter to open a row, and right-click for row actions.
 
-Only one desktop app runs per client home directory. The desktop app also starts the tray agent if it isn't
-running; set `XENO_AGENT_AUTOSTART=0` to turn that off. Preferences (appearance, last page) are stored in
+Only one desktop app runs per client home directory. Preferences (appearance, colors, last page) are stored in
 `~/.xeno/frontend.json`.
+
+### Colors
+
+**Settings > Appearance** chooses light, dark, or system, and the colors. There are thirteen palettes: Xeno (the
+original purple and green, the default), Graphite, Ocean, Arctic, Forest, Ember, Rose, Indigo, Sand, Lagoon, Citrus,
+Paper (a light sidebar), and High Contrast. Each has a light and a dark version. **Custom** lets you pick six colors
+for light and six for dark (background, panels, text, accent, sidebar, and sidebar highlight) with a swatch grid or a
+hex value, starting from any palette. Secondary text, borders, button text, and status colors are worked out from
+those so they stay readable, and the editor warns when a pair you chose is hard to read. Changes apply right away
+and also color the tray agent the next time it starts. The palettes are defined once in `XenoColorSchemes`
+(`Xeno.Client.Core`), and a test checks every one against WCAG contrast minimums.
+
+### Starting up
+
+Every client app connects this computer when it starts: the desktop app, the terminal app, and the tray agent start
+the client worker if you are signed in and it isn't already running (a sign-in reminder shows otherwise). Starts are
+serialized across apps, so opening two at once starts one worker. Set `XENO_AUTOCONNECT=0` to turn this off.
+
+Starting the desktop app, the terminal app, or the client from a command line (`xeno connect`, `xeno start`,
+`xeno restart`, and so `run-client`) also starts the tray agent if it isn't running. That happens only when there is a
+desktop to show the icon on: not over SSH, not under WSL, and on Linux only with `DISPLAY` or `WAYLAND_DISPLAY`. The
+background worker never starts it, so quitting the agent sticks until you next open an app. Set
+`XENO_AGENT_AUTOSTART=0` to never start it, or `1` to always start it.
 
 ## Terminal app
 
@@ -229,7 +262,9 @@ notification area. Its menu offers:
 - Open Xeno (the desktop app)
 - Open Xeno Terminal (the terminal app, in a new terminal window)
 - Open Web Dashboard
+- Chat... (the desktop app's Chat page)
 - Open Local Endpoint (the desktop app's Local endpoint page)
+- Settings... (the desktop app's Xeno Settings window)
 - Start Client, Stop Client, and Restart Client
 - About Xeno Agent and Quit Xeno Agent
 
@@ -262,7 +297,7 @@ All five front ends share one client library, so behavior and validation stay id
 |---|---|
 | `src/Xeno.Client.Core` | Settings and state (`client.json`, `state.json`), the local history database, telemetry, and the shared services: `XenoWorkspace` (the facade the desktop and terminal apps use), `ProviderConfiguration`, `ClientWorkerController` (start and stop), `ClientStatusSnapshot`, `ModelCatalogBuilder` (local plus network models), `XenoServerClient` (sign-in, ping, network model list), `ClientLogReader` and `ClientLogRollup`, `LocalSettingsEditor`, and `XenoAppLauncher` with `XenoExecutableLocator` and `TerminalLaunchPlanner`. The `Presentation` namespace holds what the UIs render: the navigation catalog, the menu layout, command availability, form specs, the settings catalog, charts (`XenoCharts`), follow-ups after actions (`XenoClientActions.AfterSignIn`), and table rows. |
 | `src/Xeno.Client` | The `xeno` CLI, the background worker, the local web dashboard, and the local inference server. It hosts the terminal app as `xeno tui`. |
-| `src/Xeno.Desktop.Common` | Avalonia building blocks shared by the desktop app and the tray agent: the theme, native menus built from the shared layout, the About window, dialogs, the form dialog, and tables. |
+| `src/Xeno.Desktop.Common` | Avalonia building blocks shared by the desktop app and the tray agent: the theme (which applies a `XenoColorSchemes` palette), native menus built from the shared layout, the About window, dialogs, the form dialog, and tables. |
 | `src/Xeno.Desktop` | The desktop app. |
 | `src/Xeno.Tray` | The tray agent. |
 | `src/Xeno.Tui` | The terminal app, built on TUIKit. |

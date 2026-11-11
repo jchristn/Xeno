@@ -70,5 +70,21 @@ namespace Xeno.Core.Database.Interfaces
         /// <param name="token">Cancellation token.</param>
         /// <returns>Deleted row count.</returns>
         Task<int> PruneOlderThanAsync(DateTime cutoffUtc, CancellationToken token);
+
+        /// <summary>
+        /// Read usage records (typed analytics columns only) for a tenant and range.
+        /// </summary>
+        /// <param name="filter">Filter.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Records.</returns>
+        System.Collections.Generic.IAsyncEnumerable<Xeno.Core.Analytics.UsageRecord> EnumerateUsageAsync(RequestHistoryUsageFilter filter, CancellationToken token);
+
+        /// <summary>
+        /// Fill the analytics columns of rows written before they existed. Call until it returns 0.
+        /// </summary>
+        /// <param name="batchSize">Rows per call.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Rows filled.</returns>
+        Task<int> BackfillUsageAsync(int batchSize, CancellationToken token);
     }
 }

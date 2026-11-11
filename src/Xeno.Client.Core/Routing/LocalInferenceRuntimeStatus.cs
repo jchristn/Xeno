@@ -79,7 +79,7 @@ namespace Xeno.Client.Routing
                     return JsonUtil.Deserialize<LocalInferenceRuntimeStatus>(reader.ReadToEnd());
                 }
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is JsonException)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is JsonException || ex is System.IO.InvalidDataException)
             {
                 return null;
             }

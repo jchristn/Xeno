@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { refreshIntervals, useAutoRefresh } from '../charts/autoRefresh.jsx';
+import TimeChart from '../charts/TimeChart.jsx';
 
-const refreshIntervals = [0, 15, 30, 60, 180, 300];
 const ranges = [
   { key: 'lastHour', buckets: 60 },
   { key: 'lastDay', buckets: 96 },
   { key: 'lastWeek', buckets: 84 },
-  { key: 'lastMonth', buckets: 90 }
+  { key: 'lastMonth', buckets: 120 }
 ];
 
 export default function ActivityChart({
@@ -24,66 +25,33 @@ export default function ActivityChart({
   yAxisLabel
 }) {
   const { t } = useTranslation();
-  const canvasRef = useRef(null);
-  const refreshRef = useRef(onRefresh);
-  const [chartWidth, setChartWidth] = useState(760);
   const [localRange, setLocalRange] = useState('lastDay');
-  const [hovered, setHovered] = useState(null);
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const activeRange = range || localRange;
   const selectedRange = ranges.find((item) => item.key === activeRange) || ranges[1];
   const buckets = useMemo(() => buildBuckets(summary?.buckets, selectedRange), [summary?.buckets, selectedRange]);
-  const max = Math.max(1, ...buckets.map((bucket) => bucket.success + bucket.failed));
-  const axisMax = axisMaximum(max);
 
   function updateRange(nextRange) {
     if (!range) setLocalRange(nextRange);
     onRangeChange?.(nextRange);
   }
 
-  useEffect(() => {
-    refreshRef.current = onRefresh;
-  }, [onRefresh]);
+  useAutoRefresh(onRefresh ? autoRefreshSeconds : 0, onRefresh);
 
-  useEffect(() => {
-    if (!autoRefreshSeconds || !refreshRef.current) return undefined;
-    const interval = window.setInterval(() => {
-      refreshRef.current?.();
-    }, autoRefreshSeconds * 1000);
-    return () => window.clearInterval(interval);
-  }, [autoRefreshSeconds]);
-
-  useEffect(() => {
-    const element = canvasRef.current;
-    if (!element) return undefined;
-
-    function updateWidth() {
-      setChartWidth(Math.max(360, Math.round(element.clientWidth || 760)));
-    }
-
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  const chart = {
-    height: 525,
-    width: chartWidth,
-    left: 58,
-    right: 28,
-    top: 28,
-    bottom: 58
-  };
-  chart.plotWidth = chart.width - chart.left - chart.right;
-  chart.plotHeight = chart.height - chart.top - chart.bottom;
-  chart.baseY = chart.top + chart.plotHeight;
-  const barSlot = chart.plotWidth / Math.max(1, buckets.length);
-  const barWidth = Math.max(2, Math.min(14, barSlot - 2));
-  const yTicks = buildYAxisTicks(axisMax);
-  const xTicks = buildXAxisTicks(buckets, chart.left, chart.plotWidth);
   const successText = successLabel || t('success');
   const failedText = failedLabel || t('failed');
+  const timeChart = {
+    id: 'requests',
+    kind: 'StackedColumns',
+    title: ariaLabel || t('requests'),
+    unit: '',
+    stacked: true,
+    buckets: buckets.map((bucket, index) => ({ ...bucket, startUtc: `${index}-${bucket.label}` })),
+    series: [
+      { key: 'failed', label: failedText, color: 'var(--color-danger)', values: buckets.map((bucket) => bucket.failed) },
+      { key: 'success', label: successText, color: 'var(--color-success)', values: buckets.map((bucket) => bucket.success) }
+    ]
+  };
 
   return (
     <div className="activity-chart-panel">
@@ -110,55 +78,8 @@ export default function ActivityChart({
           />
         </div>
       ) : null}
-      <div className="chart-canvas" ref={canvasRef}>
-        <svg className="activity-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={ariaLabel || t('requests')}>
-          <line x1={chart.left} y1={chart.top} x2={chart.left} y2={chart.baseY} stroke="var(--color-border)" />
-          <line x1={chart.left} y1={chart.baseY} x2={chart.left + chart.plotWidth} y2={chart.baseY} stroke="var(--color-border)" />
-          {yTicks.map((tick) => {
-            const y = chart.baseY - tick.ratio * chart.plotHeight;
-            return (
-              <g key={tick.value}>
-                <line x1={chart.left} y1={y} x2={chart.left + chart.plotWidth} y2={y} stroke="var(--color-border)" strokeDasharray="4 6" opacity="0.72" />
-                <text className="axis-label" x={chart.left - 10} y={y + 4} textAnchor="end">{tick.value}</text>
-              </g>
-            );
-          })}
-          <text className="axis-title" transform={`translate(16 ${chart.top + chart.plotHeight / 2}) rotate(-90)`}>{yAxisLabel || t('requestCount')}</text>
-          <text className="axis-title" x={chart.left + chart.plotWidth / 2} y={chart.height - 12} textAnchor="middle">{xAxisLabel || t('time')}</text>
-          {buckets.map((bucket, index) => {
-            const x = chart.left + index * barSlot + (barSlot - barWidth) / 2;
-            const successHeight = (bucket.success / axisMax) * chart.plotHeight;
-            const failedHeight = (bucket.failed / axisMax) * chart.plotHeight;
-            const failedY = chart.baseY - failedHeight;
-            const successY = chart.baseY - failedHeight - successHeight;
-            const tooltipY = Math.min(successY, failedY) + (successHeight + failedHeight) / 2;
-            return (
-              <g
-                key={`${bucket.label}-${index}`}
-                onBlur={() => setHovered(null)}
-                onFocus={() => setHovered({ bucket, ...tooltipFromChartPoint(x + barWidth / 2, tooltipY, chart, canvasRef.current) })}
-                onMouseLeave={() => setHovered(null)}
-                onMouseMove={(event) => setHovered({ bucket, ...tooltipFromPointer(event, canvasRef.current) })}
-                tabIndex={0}
-              >
-                <title>{`${bucket.label}: ${successText} ${bucket.success}, ${failedText} ${bucket.failed}. ${t('tooltipChartRange')}`}</title>
-                <rect x={x} y={failedY} width={barWidth} height={failedHeight} rx="3" fill="var(--color-danger)" />
-                <rect x={x} y={successY} width={barWidth} height={successHeight} rx="3" fill="var(--color-success)" />
-              </g>
-            );
-          })}
-          {xTicks.map((tick) => (
-            <text className="axis-label" key={tick.key} x={tick.x} y={chart.baseY + 18} textAnchor="middle">{tick.label}</text>
-          ))}
-        </svg>
-        {hovered ? (
-          <div className="chart-tooltip" style={{ left: `${hovered.x}px`, top: `${hovered.y}px`, transform: hovered.transform }}>
-            <strong>{hovered.bucket.label}</strong>
-            <span>{successText}: {hovered.bucket.success}</span>
-            <span>{failedText}: {hovered.bucket.failed}</span>
-            <span>{t('total')}: {hovered.bucket.success + hovered.bucket.failed}</span>
-          </div>
-        ) : null}
+      <div className="chart-canvas">
+        <TimeChart chart={timeChart} height={525} svgClassName="activity-chart" xAxisLabel={xAxisLabel || t('time')} yAxisLabel={yAxisLabel || t('requestCount')} />
         {loading ? <ChartLoadingOverlay label={t('loading')} /> : null}
       </div>
       <div className="chart-legend">
@@ -270,61 +191,4 @@ function dateFallbackLabel(range, index, count) {
   const bucketMs = durationMs / Math.max(1, count);
   const timestamp = Date.now() - durationMs + index * bucketMs + bucketMs / 2;
   return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function buildXAxisTicks(buckets, left, plotWidth) {
-  const count = buckets.length;
-  if (count === 0) return [];
-
-  const tickCount = Math.min(8, count);
-  if (tickCount === 1) {
-    return [{ key: 'x-0', label: buckets[0]?.label || '', x: left + plotWidth / 2 }];
-  }
-
-  return Array.from({ length: tickCount }, (_, tickIndex) => {
-    const ratio = tickIndex / (tickCount - 1);
-    const bucketIndex = Math.min(count - 1, Math.max(0, Math.round(ratio * (count - 1))));
-    return {
-      key: `x-${tickIndex}-${bucketIndex}`,
-      label: buckets[bucketIndex]?.label || '',
-      x: left + ratio * plotWidth
-    };
-  });
-}
-
-function axisMaximum(max) {
-  if (!Number.isFinite(max) || max <= 1) return 1;
-  return Math.max(4, Math.ceil(max / 4) * 4);
-}
-
-function buildYAxisTicks(max) {
-  if (!Number.isFinite(max) || max <= 1) return [{ value: 1, ratio: 1 }, { value: 0, ratio: 0 }];
-  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => ({
-    ratio,
-    value: Math.round(max * ratio)
-  }));
-}
-
-function tooltipFromPointer(event, element) {
-  if (!element) return { x: 0, y: 0, transform: 'translate(14px, -50%)' };
-
-  const bounds = element.getBoundingClientRect();
-  return tooltipPosition(event.clientX - bounds.left, event.clientY - bounds.top, bounds.width, bounds.height);
-}
-
-function tooltipFromChartPoint(x, y, chart, element) {
-  const width = element?.clientWidth || chart.width;
-  const height = element?.clientHeight || chart.height;
-  return tooltipPosition((x / chart.width) * width, (y / chart.height) * height, width, height);
-}
-
-function tooltipPosition(x, y, width, height) {
-  const horizontalPadding = 18;
-  const verticalPadding = 48;
-  const tooltipWidth = 188;
-  const clampedX = Math.min(Math.max(x, horizontalPadding), Math.max(horizontalPadding, width - horizontalPadding));
-  const clampedY = Math.min(Math.max(y, verticalPadding), Math.max(verticalPadding, height - verticalPadding));
-  const transform = clampedX > width - tooltipWidth ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
-
-  return { x: clampedX, y: clampedY, transform };
 }

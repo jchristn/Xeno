@@ -66,6 +66,7 @@ namespace Xeno.Server.Routes
             AddStatic(server, HttpMethod.GET, "/v1.0/api/request-history/analytics/overview", "Request analytics overview", "Request History", AnalyticsOverviewAsync, metadataFactory, exceptionHandler);
             AddStatic(server, HttpMethod.GET, "/api/v1/analytics/overview", "Analytics overview", "Analytics", AnalyticsOverviewAsync, metadataFactory, exceptionHandler);
             AddStatic(server, HttpMethod.GET, "/v1.0/api/analytics/overview", "Analytics overview", "Analytics", AnalyticsOverviewAsync, metadataFactory, exceptionHandler);
+            AddStatic(server, HttpMethod.GET, "/v1.0/api/request-history/analytics/usage", "Usage analytics for network requests", "Request History", UsageAsync, metadataFactory, exceptionHandler);
 
             AddParameter(server, HttpMethod.GET, "/api/v1/requesthistory/{id}", "Get request history entry", "Request History", GetAsync, metadataFactory, exceptionHandler);
             AddParameter(server, HttpMethod.GET, "/v1.0/api/request-history/{id}", "Get request history entry", "Request History", GetAsync, metadataFactory, exceptionHandler);
@@ -118,6 +119,15 @@ namespace Xeno.Server.Routes
             {
                 RequestContext requestContext = await _Server.CreateRequestContextAsync(context, token).ConfigureAwait(false);
                 await _Server.HandleRequestHistorySummaryAsync(context, requestContext, token).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+
+        private async Task UsageAsync(HttpContextBase context)
+        {
+            await _Server.ExecuteRouteAsync(context, async token =>
+            {
+                RequestContext requestContext = await _Server.CreateRequestContextAsync(context, token).ConfigureAwait(false);
+                await _Server.HandleUsageAnalyticsAsync(context, requestContext, token).ConfigureAwait(false);
             }).ConfigureAwait(false);
         }
 

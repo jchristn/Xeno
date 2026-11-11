@@ -46,7 +46,7 @@ namespace Test.Shared
     /// <summary>
     /// Shared Touchstone test suites for Xeno.
     /// </summary>
-    public static class SharedTestSuites
+    public static partial class SharedTestSuites
     {
         private const string _DockerUnavailableSkipReason = "Docker with Linux containers is not available on this machine (Windows runners run Windows containers).";
         private static readonly Lazy<bool> _DockerAvailable = new Lazy<bool>(CheckDockerAvailable);
@@ -84,12 +84,28 @@ namespace Test.Shared
                     HybridRoutingProxyTestSuites.ListenerRoutingSuite(),
                     HybridConcurrencyTestSuites.ConcurrencySuite(),
                     HybridConcurrencyTestSuites.VisibilitySuite(),
+                    ChatTestSuites.ChatSuite(),
+                    McpTestSuites.McpSuite(),
+                    McpClientTestSuites.McpClientSuite(),
+                    WorkspaceFileToolTestSuites.FileToolSuite(),
+                    WorkspaceProcessWebToolTestSuites.ProcessWebToolSuite(),
+                    WorkspacePlanningMemoryToolTestSuites.PlanningMemoryToolSuite(),
+                    WorkspaceToolHostTestSuites.ToolHostSuite(),
+                    ServerChatSuite(),
                     FrontEndTestSuites.SharedClientSuite(),
                     FrontEndTestSuites.TraySuite(),
                     FrontEndTestSuites.DesktopSuite(),
                     TuiTestSuites.TuiSuite(),
                     ManagementApiSuite(),
-                    RelaySuite()
+                    RelaySuite(),
+                    UsageAnalyticsTestSuites.EngineSuite(),
+                    ServerUsageSuite(),
+                    LocalUsageTestSuites.LocalUsageSuite(),
+                    CliHygieneTestSuites.CliHygieneSuite(),
+                    ColorSchemeTestSuites.ColorSchemeSuite(),
+                    AutoStartTestSuites.AutoStartSuite(),
+                    UsageChartTestSuites.ChartSuite(),
+                    UsageTuiTestSuites.TuiUsageSuite()
                 };
             }
         }
@@ -100,10 +116,13 @@ namespace Test.Shared
         /// <returns>Suite descriptor.</returns>
         public static TestSuiteDescriptor SettingsSuite()
         {
-            return new TestSuiteDescriptor(
-                suiteId: "Settings",
-                displayName: "Settings",
-                cases: new List<TestCaseDescriptor>
+            return new TestSuiteDescriptor("Settings", "Settings", SettingsSuiteCases().Where(item => item.SuiteId == "Settings").ToList());
+        }
+
+        // The settings builder also holds ledger settings cases; they keep their Ledger identities and run in LedgerSuite.
+        private static List<TestCaseDescriptor> SettingsSuiteCases()
+        {
+            return new List<TestCaseDescriptor>
                 {
                     new TestCaseDescriptor(
                         suiteId: "Settings",
@@ -1503,8 +1522,7 @@ namespace Test.Shared
                         "Ledger",
                         "DockerNetLedgerContainerEndToEnd",
                         "Docker-backed NetLedger server container processes a real ledger drain and is cleaned up",
-                        skip: !_DockerAvailable.Value,
-                        skipReason: _DockerUnavailableSkipReason,
+                        skipReason: _DockerAvailable.Value ? null : _DockerUnavailableSkipReason,
                         executeAsync: async delegate
                         {
                             if (!_DockerAvailable.Value) return;
@@ -1533,7 +1551,7 @@ namespace Test.Shared
                                 }
                             }
                         })
-                });
+                };
         }
 
         /// <summary>
@@ -1903,11 +1921,11 @@ namespace Test.Shared
 
                                 ClientCommandResult missing = await RunXenoClientAsync(new[] { "model", "delete", "--name", "llama3.2:latest" }, clientHome).ConfigureAwait(false);
                                 if (missing.ExitCode == 0) throw new InvalidOperationException("Deleting a missing model should fail.");
-                                if (!missing.StandardOutput.Contains("Model not found", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Missing model delete did not print a useful error.");
+                                if (!missing.StandardError.Contains("Model not found", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Missing model delete did not print a useful error.");
 
                                 ClientCommandResult addedWithEndpoint = await RunXenoClientAsync(new[] { "model", "add", "--name", "all-minilm", "--provider", "ollama", "--endpoint", "http://view.homedns.org:11434", "--api-type", "Ollama", "--type", "embedding" }, clientHome).ConfigureAwait(false);
                                 if (addedWithEndpoint.ExitCode == 0) throw new InvalidOperationException("Model add should not accept endpoint URL arguments.");
-                                if (!addedWithEndpoint.StandardOutput.Contains("Unknown model add option: --endpoint", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model add endpoint error was not useful: " + addedWithEndpoint.StandardError + addedWithEndpoint.StandardOutput);
+                                if (!addedWithEndpoint.StandardError.Contains("Unknown model add option: --endpoint", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Model add endpoint error was not useful: " + addedWithEndpoint.StandardError + addedWithEndpoint.StandardError);
                                 ClientCommandResult addedEmbedding = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "embed-test", "--type", "embedding" }, clientHome).ConfigureAwait(false);
                                 if (addedEmbedding.ExitCode != 0) throw new InvalidOperationException("Embedding model add failed: " + addedEmbedding.StandardError + addedEmbedding.StandardOutput);
                                 ClientCommandResult addedBoth = await RunXenoClientAsync(new[] { "model", "add", "--provider", "local-ollama", "--name", "both-test", "--completions", "true", "--embeddings", "true" }, clientHome).ConfigureAwait(false);
@@ -3064,7 +3082,7 @@ namespace Test.Shared
                                 if (!String.Equals(status.Queue.LastFailure, "Ledger queue is full.", StringComparison.Ordinal)) throw new InvalidOperationException("Ledger queue failure was not recorded.");
                             }
                         })
-                });
+                }.Concat(SettingsSuiteCases().Where(item => item.SuiteId == "Ledger")).ToList());
         }
 
         /// <summary>
@@ -5244,6 +5262,11 @@ namespace Test.Shared
                         executeAsync: delegate { return RunDashboardLoginSmokeAsync(); }),
                     new TestCaseDescriptor(
                         "ManagementApi",
+                        "SignInCredentialCanListModels",
+                        "A client credential issued at sign-in carries the user's roles and can list network models",
+                        executeAsync: delegate { return RunSignInCredentialPermissionsAsync(); }),
+                    new TestCaseDescriptor(
+                        "ManagementApi",
                         "ModelTokenLeaderboardPublicSmoke",
                         "Model token leaderboard returns ranked public token totals with total count",
                         executeAsync: delegate { return RunModelTokenLeaderboardPublicSmokeAsync(); }),
@@ -6012,6 +6035,60 @@ namespace Test.Shared
                             if ((int)secondLogin.StatusCode != 429) throw new InvalidOperationException("Second login attempt should return 429: " + (int)secondLogin.StatusCode + " " + secondLoginJson);
                             if (!secondLogin.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfterValues) || !retryAfterValues.Contains("60")) throw new InvalidOperationException("Rate limited login response missing Retry-After: " + secondLoginJson);
                             if (!secondLoginJson.Contains("RateLimited", StringComparison.Ordinal)) throw new InvalidOperationException("Rate limited login response missing reason code: " + secondLoginJson);
+                        }
+                    }
+                }
+                finally
+                {
+                    await StopServerAsync(server, serverTask, serverTokenSource, dbFile).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private sealed class SignInCredential
+        {
+            public string AccessKey { get; set; } = String.Empty;
+        }
+
+        private static async Task RunSignInCredentialPermissionsAsync()
+        {
+            int port = GetFreePort();
+            string dbFile = Path.Combine(Path.GetTempPath(), "xeno-signin-key-" + Guid.NewGuid().ToString("N") + ".db");
+            XenoSettings settings = new XenoSettings
+            {
+                Rest = new RestSettings { Hostname = "127.0.0.1", Port = port, RequireAuthentication = true, Ssl = false },
+                Database = TestDatabase.Settings(dbFile)
+            };
+
+            using (CancellationTokenSource serverTokenSource = new CancellationTokenSource())
+            {
+                XenoServer server = new XenoServer(settings);
+                Task serverTask = server.StartAsync(serverTokenSource.Token);
+                try
+                {
+                    await WaitForHealthAsync(port).ConfigureAwait(false);
+                    string baseUrl = "http://127.0.0.1:" + port;
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        string loginBody = JsonUtil.Serialize(new AuthLoginRequest { TenantId = Constants.DefaultTenantId, Email = "admin@xeno", Password = "password" });
+                        string accessKey;
+                        using (HttpResponseMessage login = await PostJsonAsync(httpClient, baseUrl + "/v1.0/api/auth/login", loginBody).ConfigureAwait(false))
+                        {
+                            string loginJson = await login.Content.ReadAsStringAsync().ConfigureAwait(false);
+                            if (!login.IsSuccessStatusCode) throw new InvalidOperationException("Sign-in failed: " + (int)login.StatusCode + " " + loginJson);
+                            SignInCredential issued = DeserializeRequired<SignInCredential>(loginJson);
+                            accessKey = String.IsNullOrWhiteSpace(issued.AccessKey) ? throw new InvalidOperationException("Sign-in returned no access key.") : issued.AccessKey;
+                        }
+
+                        using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, baseUrl + "/v1/models"))
+                        {
+                            request.Headers.Add("x-access-key", accessKey);
+                            request.Headers.Add("x-tenant-guid", Constants.DefaultTenantId);
+                            using (HttpResponseMessage models = await httpClient.SendAsync(request).ConfigureAwait(false))
+                            {
+                                string modelsJson = await models.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (!models.IsSuccessStatusCode) throw new InvalidOperationException("The signed-in credential could not list models: " + (int)models.StatusCode + " " + modelsJson);
+                            }
                         }
                     }
                 }

@@ -967,6 +967,50 @@
         }
 
         /// <summary>
+        /// Gets usage analytics for the requests the server relayed: gap-filled buckets, latency, time to first token,
+        /// throughput, tokens, groups, heatmap, and stage timing.
+        /// </summary>
+        /// <param name="query">Query, or null for the last 24 hours.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Analytics.</returns>
+        public async Task<UsageAnalytics> GetUsageAnalyticsAsync(UsageAnalyticsQuery? query = null, CancellationToken token = default)
+        {
+            return await GetJsonAsync<UsageAnalytics>("/v1.0/api/request-history/analytics/usage" + QueryString(UsageFilters(query)), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets usage analytics for chat turns, including feedback and tool calls.
+        /// </summary>
+        /// <param name="query">Query, or null for the last 24 hours.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Analytics.</returns>
+        public async Task<UsageAnalytics> GetChatUsageAnalyticsAsync(UsageAnalyticsQuery? query = null, CancellationToken token = default)
+        {
+            return await GetJsonAsync<UsageAnalytics>("/v1.0/api/chat/analytics/usage" + QueryString(UsageFilters(query)), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Gets the provider health strip: one row per provider, one status cell per bucket.
+        /// </summary>
+        /// <param name="query">Query, or null for the last 24 hours.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Strip.</returns>
+        public async Task<ProviderHealthStrip> GetProviderHealthAsync(ProviderHealthQuery? query = null, CancellationToken token = default)
+        {
+            Dictionary<string, string> filters = new Dictionary<string, string>();
+            if (query != null)
+            {
+                AddUtc(filters, "fromUtc", query.FromUtc);
+                AddUtc(filters, "toUtc", query.ToUtc);
+                if (query.BucketMinutes.HasValue) filters["bucketMinutes"] = query.BucketMinutes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (query.ClientId != null) filters["clientId"] = query.ClientId;
+                if (query.ProviderName != null) filters["providerName"] = query.ProviderName;
+            }
+
+            return await GetJsonAsync<ProviderHealthStrip>("/v1.0/api/client-telemetry/providers/health" + QueryString(filters), token).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Gets request analytics overview.
         /// </summary>
         /// <param name="token">Cancellation token.</param>
@@ -1250,6 +1294,33 @@
             if (!String.IsNullOrWhiteSpace(error?.Error)) return error.Error;
 
             return fallback;
+        }
+
+        private static Dictionary<string, string> UsageFilters(UsageAnalyticsQuery? query)
+        {
+            Dictionary<string, string> filters = new Dictionary<string, string>();
+            if (query == null) return filters;
+            AddUtc(filters, "fromUtc", query.FromUtc);
+            AddUtc(filters, "toUtc", query.ToUtc);
+            if (query.BucketMinutes.HasValue) filters["bucketMinutes"] = query.BucketMinutes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (query.Model != null) filters["model"] = query.Model;
+            if (query.Provider != null) filters["provider"] = query.Provider;
+            if (query.ClientId != null) filters["clientId"] = query.ClientId;
+            if (query.UserId != null) filters["userId"] = query.UserId;
+            if (query.CredentialId != null) filters["credentialId"] = query.CredentialId;
+            if (query.TenantId != null) filters["tenantId"] = query.TenantId;
+            if (query.GroupBy != null) filters["groupBy"] = query.GroupBy;
+            if (query.GroupMetric != null) filters["groupMetric"] = query.GroupMetric;
+            if (query.TopN.HasValue) filters["topN"] = query.TopN.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (query.UtcOffsetMinutes.HasValue) filters["utcOffsetMinutes"] = query.UtcOffsetMinutes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (query.Sections != null) filters["sections"] = query.Sections;
+            if (query.Scope != null) filters["scope"] = query.Scope;
+            return filters;
+        }
+
+        private static void AddUtc(Dictionary<string, string> filters, string name, DateTime? value)
+        {
+            if (value.HasValue) filters[name] = value.Value.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
         }
     }
 }

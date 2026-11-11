@@ -177,6 +177,26 @@
       "key": "localInferenceBaseUrl",
       "value": "http://127.0.0.1:11435",
       "type": "string"
+    },
+    {
+      "key": "localToken",
+      "value": ""
+    },
+    {
+      "key": "chatConversationId",
+      "value": ""
+    },
+    {
+      "key": "chatMessageId",
+      "value": ""
+    },
+    {
+      "key": "chatTurnId",
+      "value": ""
+    },
+    {
+      "key": "chatToolCallId",
+      "value": ""
     }
   ],
   "item": [
@@ -1149,6 +1169,193 @@
                   }
                 }
               }
+            },
+            {
+              "name": "Served Request Usage",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/requests/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "requests",
+                    "analytics",
+                    "usage"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}",
+                      "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}",
+                      "description": "Exclusive UTC end. Defaults to now.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}",
+                      "description": "Bucket width in minutes.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupBy",
+                      "value": "Model",
+                      "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupMetric",
+                      "value": "Requests",
+                      "description": "Requests or Tokens; ranks the top groups.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "model",
+                      "value": "",
+                      "description": "Only this model.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "provider",
+                      "value": "",
+                      "description": "Only this provider.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "topN",
+                      "value": "8",
+                      "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "utcOffsetMinutes",
+                      "value": "0",
+                      "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "sections",
+                      "value": "",
+                      "description": "Comma-separated sections to compute. Empty computes all of them.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Usage analytics for network requests this machine answered. See USAGE_ANALYTICS.md."
+              },
+              "response": [
+                {
+                  "name": "OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "X-Xeno-Local-Token",
+                        "value": "{{localToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{localDashboardUrl}}/api/v1/requests/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                      "host": [
+                        "{{localDashboardUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "v1",
+                        "requests",
+                        "analytics",
+                        "usage"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupBy",
+                          "value": "Model",
+                          "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupMetric",
+                          "value": "Requests",
+                          "description": "Requests or Tokens; ranks the top groups.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "model",
+                          "value": "",
+                          "description": "Only this model.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "provider",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "topN",
+                          "value": "8",
+                          "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "utcOffsetMinutes",
+                          "value": "0",
+                          "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "sections",
+                          "value": "",
+                          "description": "Comma-separated sections to compute. Empty computes all of them.",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"Dataset\": \"ServedRequests\",\n  \"BucketMinutes\": 60,\n  \"Truncated\": false,\n  \"Totals\": {\n    \"Requests\": 12,\n    \"Failed\": 1,\n    \"PromptTokens\": 840,\n    \"CompletionTokens\": 2210\n  },\n  \"Buckets\": [],\n  \"GroupKeys\": [\n    \"llama3.2:latest\"\n  ],\n  \"GroupTotals\": [],\n  \"StageOrder\": [],\n  \"StageAverages\": []\n}"
+                }
+              ]
             }
           ]
         },
@@ -1599,6 +1806,121 @@
                   }
                 }
               }
+            },
+            {
+              "name": "Provider Health Strip",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/health?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "telemetry",
+                    "providers",
+                    "health"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}",
+                      "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}",
+                      "description": "Exclusive UTC end. Defaults to now.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}",
+                      "description": "Bucket width in minutes.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "providerName",
+                      "value": "",
+                      "description": "Only this provider.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "One row per local provider with health cells per bucket, uptime, and the current failure streak."
+              },
+              "response": [
+                {
+                  "name": "OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "X-Xeno-Local-Token",
+                        "value": "{{localToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{localDashboardUrl}}/api/v1/telemetry/providers/health?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}",
+                      "host": [
+                        "{{localDashboardUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "v1",
+                        "telemetry",
+                        "providers",
+                        "health"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "providerName",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"BucketMinutes\": 60,\n  \"Providers\": [\n    {\n      \"ProviderName\": \"local-ollama\",\n      \"Uptime\": 0.98,\n      \"FailureStreak\": 0,\n      \"Cells\": []\n    }\n  ]\n}"
+                }
+              ]
             }
           ]
         },
@@ -1932,6 +2254,995 @@
                 },
                 "description": "Page the local endpoint request log, newest first. Metadata only: route, provider, status, timing, and token counts. Bodies are never stored."
               }
+            },
+            {
+              "name": "Local Endpoint Usage",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/local-inference/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "local-inference",
+                    "analytics",
+                    "usage"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}",
+                      "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}",
+                      "description": "Exclusive UTC end. Defaults to now.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}",
+                      "description": "Bucket width in minutes.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupBy",
+                      "value": "Model",
+                      "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupMetric",
+                      "value": "Requests",
+                      "description": "Requests or Tokens; ranks the top groups.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "model",
+                      "value": "",
+                      "description": "Only this model.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "provider",
+                      "value": "",
+                      "description": "Only this provider.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "topN",
+                      "value": "8",
+                      "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "utcOffsetMinutes",
+                      "value": "0",
+                      "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "sections",
+                      "value": "",
+                      "description": "Comma-separated sections to compute. Empty computes all of them.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Usage analytics for requests to the local inference listener."
+              },
+              "response": [
+                {
+                  "name": "OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "X-Xeno-Local-Token",
+                        "value": "{{localToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{localDashboardUrl}}/api/v1/local-inference/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                      "host": [
+                        "{{localDashboardUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "v1",
+                        "local-inference",
+                        "analytics",
+                        "usage"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupBy",
+                          "value": "Model",
+                          "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupMetric",
+                          "value": "Requests",
+                          "description": "Requests or Tokens; ranks the top groups.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "model",
+                          "value": "",
+                          "description": "Only this model.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "provider",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "topN",
+                          "value": "8",
+                          "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "utcOffsetMinutes",
+                          "value": "0",
+                          "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "sections",
+                          "value": "",
+                          "description": "Comma-separated sections to compute. Empty computes all of them.",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"Dataset\": \"LocalEndpoint\",\n  \"BucketMinutes\": 60,\n  \"Truncated\": false,\n  \"Totals\": {\n    \"Requests\": 12,\n    \"Failed\": 1,\n    \"PromptTokens\": 840,\n    \"CompletionTokens\": 2210\n  },\n  \"Buckets\": [],\n  \"GroupKeys\": [\n    \"llama3.2:latest\"\n  ],\n  \"GroupTotals\": [],\n  \"StageOrder\": [],\n  \"StageAverages\": []\n}"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Local Chat",
+          "description": "Chat with local and Xeno network models through the running client (see CHAT.md). Every request needs X-Xeno-Local-Token; the client writes the token to ~/.xeno/local-api.json while it runs.",
+          "item": [
+            {
+              "name": "Chat Models",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/models",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "models"
+                  ]
+                },
+                "description": "Models available for chat: this machine's first, then the Xeno network's."
+              }
+            },
+            {
+              "name": "Chat Tools",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/tools",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "tools"
+                  ]
+                },
+                "description": "Xeno tools the chat model can use when a conversation has tools on, each marked read-only or not."
+              }
+            },
+            {
+              "name": "List MCP servers",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/mcp-servers",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "mcp-servers"
+                  ]
+                },
+                "description": "Connection state of each external MCP server in Chat.McpServers: name, transport, enabled, connected, tool count, and the error when not connected."
+              }
+            },
+            {
+              "name": "Connect MCP servers",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/mcp-servers",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "mcp-servers"
+                  ]
+                },
+                "description": "Connect to the configured external MCP servers again (after a settings change) and return their state."
+              }
+            },
+            {
+              "name": "List Conversations",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/conversations?search=&limit=50",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "conversations"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": ""
+                    },
+                    {
+                      "key": "limit",
+                      "value": "50"
+                    }
+                  ]
+                },
+                "description": "Conversations, pinned first, then most recent."
+              }
+            },
+            {
+              "name": "Create Conversation",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/conversations",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "conversations"
+                  ]
+                },
+                "description": "Start a conversation. Save the returned Id as chatConversationId.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"title\": \"Postman\",\n  \"systemPrompt\": null,\n  \"toolsEnabled\": false,\n  \"surface\": \"Web\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Get Conversation",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/conversations/{{chatConversationId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "conversations",
+                    "{{chatConversationId}}"
+                  ]
+                },
+                "description": "A conversation with its messages, tool calls, and ratings."
+              }
+            },
+            {
+              "name": "Update Conversation",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/conversations/{{chatConversationId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "conversations",
+                    "{{chatConversationId}}"
+                  ]
+                },
+                "description": "Change the title, model, system prompt, tools switch, or pin. Omitted fields stay as they are.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Renamed in Postman\",\n  \"toolsEnabled\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Send Message (streaming)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/conversations/{{chatConversationId}}/messages",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "conversations",
+                    "{{chatConversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "Send a message. The answer streams as server-sent events: turn, thinking, chunk, tool_call, error, usage, done.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"{{prompt}}\",\n  \"surface\": \"Web\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Cancel Turn",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/turns/{{chatTurnId}}/cancel",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "turns",
+                    "{{chatTurnId}}",
+                    "cancel"
+                  ]
+                },
+                "description": "Stop a running turn; what arrived is kept.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Approve Tool Call",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/turns/{{chatTurnId}}/tool-calls/{{chatToolCallId}}/approval",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "turns",
+                    "{{chatTurnId}}",
+                    "tool-calls",
+                    "{{chatToolCallId}}",
+                    "approval"
+                  ]
+                },
+                "description": "Allow or deny a tool call that changes something.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"allow\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Rate Answer",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/messages/{{chatMessageId}}/feedback",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "messages",
+                    "{{chatMessageId}}",
+                    "feedback"
+                  ]
+                },
+                "description": "Rate an answer 1 (thumbs up) or -1 (thumbs down) with an optional comment. Rating again replaces it.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rating\": -1,\n  \"comment\": \"Too short\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Remove Rating",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/messages/{{chatMessageId}}/feedback",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "messages",
+                    "{{chatMessageId}}",
+                    "feedback"
+                  ]
+                },
+                "description": "Remove an answer's rating."
+              }
+            },
+            {
+              "name": "Query Feedback",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/feedback?rating=-1&hasComment=true&page=1&pageSize=50",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "feedback"
+                  ],
+                  "query": [
+                    {
+                      "key": "rating",
+                      "value": "-1"
+                    },
+                    {
+                      "key": "hasComment",
+                      "value": "true"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "50"
+                    }
+                  ]
+                },
+                "description": "Ratings, newest first."
+              }
+            },
+            {
+              "name": "Query Chat History",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/history?route=local&status=Success&page=1&pageSize=50",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "history"
+                  ],
+                  "query": [
+                    {
+                      "key": "route",
+                      "value": "local"
+                    },
+                    {
+                      "key": "status",
+                      "value": "Success"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "50"
+                    }
+                  ]
+                },
+                "description": "Chat turns, newest first. route accepts local, network, or local:<provider>; rating 0 means unrated."
+              }
+            },
+            {
+              "name": "Get Chat Turn",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/history/{{chatTurnId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "history",
+                    "{{chatTurnId}}"
+                  ]
+                },
+                "description": "One turn with its tool calls."
+              }
+            },
+            {
+              "name": "Delete Chat History",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/history?status=Error",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "history"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "Error"
+                    }
+                  ]
+                },
+                "description": "Delete the turns matching the filters. Conversations are not affected."
+              }
+            },
+            {
+              "name": "Chat Analytics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/analytics?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketSeconds=900",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "analytics"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}"
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}"
+                    },
+                    {
+                      "key": "bucketSeconds",
+                      "value": "900"
+                    }
+                  ]
+                },
+                "description": "Totals, percentiles, ratings, buckets, and a per-model breakdown."
+              }
+            },
+            {
+              "name": "Chat Usage",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Xeno-Local-Token",
+                    "value": "{{localToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/chat/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "chat",
+                    "analytics",
+                    "usage"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}",
+                      "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}",
+                      "description": "Exclusive UTC end. Defaults to now.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}",
+                      "description": "Bucket width in minutes.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupBy",
+                      "value": "Model",
+                      "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupMetric",
+                      "value": "Requests",
+                      "description": "Requests or Tokens; ranks the top groups.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "model",
+                      "value": "",
+                      "description": "Only this model.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "provider",
+                      "value": "",
+                      "description": "Only this provider.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "topN",
+                      "value": "8",
+                      "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "utcOffsetMinutes",
+                      "value": "0",
+                      "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "sections",
+                      "value": "",
+                      "description": "Comma-separated sections to compute. Empty computes all of them.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Usage analytics for chat turns on this machine."
+              },
+              "response": [
+                {
+                  "name": "OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "X-Xeno-Local-Token",
+                        "value": "{{localToken}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{localDashboardUrl}}/api/v1/chat/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                      "host": [
+                        "{{localDashboardUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "v1",
+                        "chat",
+                        "analytics",
+                        "usage"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupBy",
+                          "value": "Model",
+                          "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupMetric",
+                          "value": "Requests",
+                          "description": "Requests or Tokens; ranks the top groups.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "model",
+                          "value": "",
+                          "description": "Only this model.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "provider",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "topN",
+                          "value": "8",
+                          "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "utcOffsetMinutes",
+                          "value": "0",
+                          "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "sections",
+                          "value": "",
+                          "description": "Comma-separated sections to compute. Empty computes all of them.",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"Dataset\": \"Chat\",\n  \"BucketMinutes\": 60,\n  \"Truncated\": false,\n  \"Totals\": {\n    \"Requests\": 12,\n    \"Failed\": 1,\n    \"PromptTokens\": 840,\n    \"CompletionTokens\": 2210\n  },\n  \"Buckets\": [],\n  \"GroupKeys\": [\n    \"llama3.2:latest\"\n  ],\n  \"GroupTotals\": [],\n  \"StageOrder\": [],\n  \"StageAverages\": []\n}"
+                }
+              ]
             }
           ]
         },
@@ -4609,6 +5920,214 @@
                       }
                     }
                   }
+                },
+                {
+                  "name": "Provider Health Strip",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}/v1.0/api/client-telemetry/providers/health?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "v1.0",
+                        "api",
+                        "client-telemetry",
+                        "providers",
+                        "health"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "clientId",
+                          "value": "",
+                          "description": "Only this client.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "providerName",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        }
+                      ]
+                    },
+                    "description": "One row per provider with healthy, degraded, unhealthy, or no-data cells per bucket, uptime, and the current failure streak."
+                  },
+                  "response": [
+                    {
+                      "name": "OK",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{serverBaseUrl}}/v1.0/api/client-telemetry/providers/health?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}",
+                          "host": [
+                            "{{serverBaseUrl}}"
+                          ],
+                          "path": [
+                            "v1.0",
+                            "api",
+                            "client-telemetry",
+                            "providers",
+                            "health"
+                          ],
+                          "query": [
+                            {
+                              "key": "fromUtc",
+                              "value": "{{fromUtc}}",
+                              "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                              "disabled": false
+                            },
+                            {
+                              "key": "toUtc",
+                              "value": "{{toUtc}}",
+                              "description": "Exclusive UTC end. Defaults to now.",
+                              "disabled": false
+                            },
+                            {
+                              "key": "bucketMinutes",
+                              "value": "{{bucketMinutes}}",
+                              "description": "Bucket width in minutes.",
+                              "disabled": false
+                            },
+                            {
+                              "key": "clientId",
+                              "value": "",
+                              "description": "Only this client.",
+                              "disabled": true
+                            },
+                            {
+                              "key": "providerName",
+                              "value": "",
+                              "description": "Only this provider.",
+                              "disabled": true
+                            }
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "body": "{\n  \"BucketMinutes\": 60,\n  \"Providers\": [\n    {\n      \"ProviderName\": \"local-ollama\",\n      \"Uptime\": 0.98,\n      \"FailureStreak\": 0,\n      \"Cells\": []\n    }\n  ]\n}"
+                    }
+                  ]
+                },
+                {
+                  "name": "Connected Client History",
+                  "request": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}/v1.0/api/client-telemetry/connected-history?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "v1.0",
+                        "api",
+                        "client-telemetry",
+                        "connected-history"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        }
+                      ]
+                    },
+                    "description": "The tenant's connected and registered client counts per bucket, sampled each minute and kept for 30 days. A bucket with no sample has no counts."
+                  },
+                  "response": [
+                    {
+                      "name": "OK",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{serverBaseUrl}}/v1.0/api/client-telemetry/connected-history?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}",
+                          "host": [
+                            "{{serverBaseUrl}}"
+                          ],
+                          "path": [
+                            "v1.0",
+                            "api",
+                            "client-telemetry",
+                            "connected-history"
+                          ],
+                          "query": [
+                            {
+                              "key": "fromUtc",
+                              "value": "{{fromUtc}}",
+                              "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                              "disabled": false
+                            },
+                            {
+                              "key": "toUtc",
+                              "value": "{{toUtc}}",
+                              "description": "Exclusive UTC end. Defaults to now.",
+                              "disabled": false
+                            },
+                            {
+                              "key": "bucketMinutes",
+                              "value": "{{bucketMinutes}}",
+                              "description": "Bucket width in minutes.",
+                              "disabled": false
+                            }
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "body": "{\n  \"FromUtc\": \"2026-11-10T00:00:00Z\",\n  \"ToUtc\": \"2026-11-10T01:00:00Z\",\n  \"BucketMinutes\": 60,\n  \"Buckets\": [\n    {\n      \"StartUtc\": \"2026-11-10T00:00:00Z\",\n      \"EndUtc\": \"2026-11-10T01:00:00Z\",\n      \"Connected\": 2,\n      \"Total\": 3\n    }\n  ]\n}"
+                    }
+                  ]
                 }
               ]
             },
@@ -5190,6 +6709,384 @@
                   ]
                 }
               }
+            },
+            {
+              "name": "Request Usage",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/request-history/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "request-history",
+                    "analytics",
+                    "usage"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}",
+                      "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}",
+                      "description": "Exclusive UTC end. Defaults to now.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}",
+                      "description": "Bucket width in minutes.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupBy",
+                      "value": "Model",
+                      "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupMetric",
+                      "value": "Requests",
+                      "description": "Requests or Tokens; ranks the top groups.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "model",
+                      "value": "",
+                      "description": "Only this model.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "provider",
+                      "value": "",
+                      "description": "Only this provider.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "topN",
+                      "value": "8",
+                      "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "utcOffsetMinutes",
+                      "value": "0",
+                      "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "sections",
+                      "value": "",
+                      "description": "Comma-separated sections to compute. Empty computes all of them.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "clientId",
+                      "value": "",
+                      "description": "Only this client.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Usage analytics for inference requests in the tenant. Needs RequestHistory read. Returns 400 for an invalid range, grouping, or section, and 403 for a grouping the caller may not use. See USAGE_ANALYTICS.md."
+              },
+              "response": [
+                {
+                  "name": "OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}/v1.0/api/request-history/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "v1.0",
+                        "api",
+                        "request-history",
+                        "analytics",
+                        "usage"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupBy",
+                          "value": "Model",
+                          "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupMetric",
+                          "value": "Requests",
+                          "description": "Requests or Tokens; ranks the top groups.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "model",
+                          "value": "",
+                          "description": "Only this model.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "provider",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "topN",
+                          "value": "8",
+                          "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "utcOffsetMinutes",
+                          "value": "0",
+                          "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "sections",
+                          "value": "",
+                          "description": "Comma-separated sections to compute. Empty computes all of them.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "clientId",
+                          "value": "",
+                          "description": "Only this client.",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"Dataset\": \"NetworkRequests\",\n  \"BucketMinutes\": 60,\n  \"Truncated\": false,\n  \"Totals\": {\n    \"Requests\": 12,\n    \"Failed\": 1,\n    \"PromptTokens\": 840,\n    \"CompletionTokens\": 2210\n  },\n  \"Buckets\": [],\n  \"GroupKeys\": [\n    \"llama3.2:latest\"\n  ],\n  \"GroupTotals\": [],\n  \"StageOrder\": [],\n  \"StageAverages\": []\n}"
+                }
+              ]
+            },
+            {
+              "name": "Chat Usage",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "analytics",
+                    "usage"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}",
+                      "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}",
+                      "description": "Exclusive UTC end. Defaults to now.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "bucketMinutes",
+                      "value": "{{bucketMinutes}}",
+                      "description": "Bucket width in minutes.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupBy",
+                      "value": "Model",
+                      "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                      "disabled": false
+                    },
+                    {
+                      "key": "groupMetric",
+                      "value": "Requests",
+                      "description": "Requests or Tokens; ranks the top groups.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "model",
+                      "value": "",
+                      "description": "Only this model.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "provider",
+                      "value": "",
+                      "description": "Only this provider.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "topN",
+                      "value": "8",
+                      "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "utcOffsetMinutes",
+                      "value": "0",
+                      "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                      "disabled": false
+                    },
+                    {
+                      "key": "sections",
+                      "value": "",
+                      "description": "Comma-separated sections to compute. Empty computes all of them.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "scope",
+                      "value": "",
+                      "description": "tenant covers every user in the tenant (tenant administrators).",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Usage analytics for chat turns. Covers the caller's own turns unless a tenant administrator passes scope=tenant."
+              },
+              "response": [
+                {
+                  "name": "OK",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [],
+                    "url": {
+                      "raw": "{{serverBaseUrl}}/v1.0/api/chat/analytics/usage?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketMinutes={{bucketMinutes}}&groupBy=Model&groupMetric=Requests&topN=8&utcOffsetMinutes=0",
+                      "host": [
+                        "{{serverBaseUrl}}"
+                      ],
+                      "path": [
+                        "v1.0",
+                        "api",
+                        "chat",
+                        "analytics",
+                        "usage"
+                      ],
+                      "query": [
+                        {
+                          "key": "fromUtc",
+                          "value": "{{fromUtc}}",
+                          "description": "Inclusive UTC start. Defaults to one day before toUtc.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "toUtc",
+                          "value": "{{toUtc}}",
+                          "description": "Exclusive UTC end. Defaults to now.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "bucketMinutes",
+                          "value": "{{bucketMinutes}}",
+                          "description": "Bucket width in minutes.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupBy",
+                          "value": "Model",
+                          "description": "Model, Provider, or Route; the server adds Client, User and Credential (tenant administrators), and Tenant (global administrators).",
+                          "disabled": false
+                        },
+                        {
+                          "key": "groupMetric",
+                          "value": "Requests",
+                          "description": "Requests or Tokens; ranks the top groups.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "model",
+                          "value": "",
+                          "description": "Only this model.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "provider",
+                          "value": "",
+                          "description": "Only this provider.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "topN",
+                          "value": "8",
+                          "description": "Groups shown by name before the rest fold into Other, 1 to 20.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "utcOffsetMinutes",
+                          "value": "0",
+                          "description": "Offset from UTC in minutes, for heatmap hours and weekdays.",
+                          "disabled": false
+                        },
+                        {
+                          "key": "sections",
+                          "value": "",
+                          "description": "Comma-separated sections to compute. Empty computes all of them.",
+                          "disabled": true
+                        },
+                        {
+                          "key": "scope",
+                          "value": "",
+                          "description": "tenant covers every user in the tenant (tenant administrators).",
+                          "disabled": true
+                        }
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"Dataset\": \"Chat\",\n  \"BucketMinutes\": 60,\n  \"Truncated\": false,\n  \"Totals\": {\n    \"Requests\": 12,\n    \"Failed\": 1,\n    \"PromptTokens\": 840,\n    \"CompletionTokens\": 2210\n  },\n  \"Buckets\": [],\n  \"GroupKeys\": [\n    \"llama3.2:latest\"\n  ],\n  \"GroupTotals\": [],\n  \"StageOrder\": [],\n  \"StageAverages\": []\n}"
+                }
+              ]
             }
           ]
         },
@@ -5512,6 +7409,501 @@
                     }
                   }
                 }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chat",
+          "description": "Server chat (see CHAT.md and REST_API.md). Turns go through the network relay and charge credits.",
+          "item": [
+            {
+              "name": "Chat Models",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/models",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "models"
+                  ]
+                },
+                "description": "Models connected clients serve this tenant."
+              }
+            },
+            {
+              "name": "List Conversations",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/conversations?limit=50",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "conversations"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "50"
+                    }
+                  ]
+                },
+                "description": "Your conversations."
+              }
+            },
+            {
+              "name": "Create Conversation",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/conversations",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "conversations"
+                  ]
+                },
+                "description": "Start a conversation; save the Id as chatConversationId.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"title\": \"Postman\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Get Conversation",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/conversations/{{chatConversationId}}",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "conversations",
+                    "{{chatConversationId}}"
+                  ]
+                },
+                "description": "A conversation with its messages and ratings."
+              }
+            },
+            {
+              "name": "Update Conversation",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/conversations/{{chatConversationId}}",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "conversations",
+                    "{{chatConversationId}}"
+                  ]
+                },
+                "description": "Change the title, model, system prompt, or pin.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Renamed\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Send Message (streaming)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/conversations/{{chatConversationId}}/messages",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "conversations",
+                    "{{chatConversationId}}",
+                    "messages"
+                  ]
+                },
+                "description": "Send a message; the answer streams as server-sent events.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"{{prompt}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Cancel Turn",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/turns/{{chatTurnId}}/cancel",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "turns",
+                    "{{chatTurnId}}",
+                    "cancel"
+                  ]
+                },
+                "description": "Stop your running turn.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Rate Answer",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/messages/{{chatMessageId}}/feedback",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "messages",
+                    "{{chatMessageId}}",
+                    "feedback"
+                  ]
+                },
+                "description": "Rate 1 or -1 with an optional comment.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rating\": 1,\n  \"comment\": \"Helpful\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Remove Rating",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/messages/{{chatMessageId}}/feedback",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "messages",
+                    "{{chatMessageId}}",
+                    "feedback"
+                  ]
+                },
+                "description": "Remove a rating."
+              }
+            },
+            {
+              "name": "Query Feedback",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/feedback?scope=tenant&pageSize=50",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "feedback"
+                  ],
+                  "query": [
+                    {
+                      "key": "scope",
+                      "value": "tenant"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "50"
+                    }
+                  ]
+                },
+                "description": "Ratings; scope=tenant (ChatAdmin Read) for every user."
+              }
+            },
+            {
+              "name": "Query Chat History",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/history?pageSize=50",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "history"
+                  ],
+                  "query": [
+                    {
+                      "key": "pageSize",
+                      "value": "50"
+                    }
+                  ]
+                },
+                "description": "Chat turns; scope=tenant (ChatAdmin Read) for every user."
+              }
+            },
+            {
+              "name": "Get Chat Turn",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/history/{{chatTurnId}}",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "history",
+                    "{{chatTurnId}}"
+                  ]
+                },
+                "description": "One turn."
+              }
+            },
+            {
+              "name": "Chat Analytics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{bearerToken}}"
+                  },
+                  {
+                    "key": "x-tenant-id",
+                    "value": "{{tenantId}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{serverBaseUrl}}/v1.0/api/chat/analytics?fromUtc={{fromUtc}}&toUtc={{toUtc}}&bucketSeconds=900",
+                  "host": [
+                    "{{serverBaseUrl}}"
+                  ],
+                  "path": [
+                    "v1.0",
+                    "api",
+                    "chat",
+                    "analytics"
+                  ],
+                  "query": [
+                    {
+                      "key": "fromUtc",
+                      "value": "{{fromUtc}}"
+                    },
+                    {
+                      "key": "toUtc",
+                      "value": "{{toUtc}}"
+                    },
+                    {
+                      "key": "bucketSeconds",
+                      "value": "900"
+                    }
+                  ]
+                },
+                "description": "Totals, percentiles, ratings, and buckets."
               }
             }
           ]

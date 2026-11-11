@@ -36,7 +36,7 @@ Each `run-*` script builds what it needs first, so you don't need to build the s
 
 | Script | What it runs |
 |---|---|
-| `run-desktop.sh` | The desktop app (`xeno-desktop`). It also starts the tray agent. |
+| `run-desktop.sh` | The desktop app (`xeno-desktop`). It also starts the tray agent and connects. |
 | `run-tui.sh` | The terminal app (`xeno tui`) in the current terminal. |
 | `run-tray.sh` | The Xeno Agent tray app (`xeno-tray`). |
 | `run-cli.sh <args>` | Any `xeno` command, for example `run-cli.sh status` or `run-cli.sh server show`. |
@@ -122,7 +122,8 @@ A fresh install points at the Xeno cloud. An existing `client.json` is kept, alo
 | `XENO_LOCAL_SERVER` | `http://localhost:9000` | `run-local` |
 | `XENO_LOCAL_HOME` | `~/.xeno-local` | `run-local` |
 | `XENO_SKIP_DASHBOARD` | unset | `run-local` (`1` skips the web dashboard) |
-| `XENO_AGENT_AUTOSTART` | unset | The desktop app (`0` stops it from starting the tray agent) |
+| `XENO_AGENT_AUTOSTART` | unset | The desktop app, the terminal app, and `xeno connect`/`start`/`restart` (including `run-client`), which start the tray agent when there is a desktop session. `0` never starts it, `1` always does |
+| `XENO_AUTOCONNECT` | unset | The desktop app, the terminal app, and the tray agent, which connect this computer when they start if you are signed in. `0` turns that off |
 
 ## WSL
 
@@ -146,7 +147,7 @@ What the WSL scripts do differently:
   tool.
 - **Tray agent.** Neither WSLg nor an X server on Windows has a notification area, so the tray icon cannot appear:
   `run-tray.sh` and `run-local.sh tray` stop with a message (set `XENO_WSL_FORCE_TRAY=1` to start it anyway, for
-  example under your own X desktop). The desktop app does not start the tray agent under WSL unless
+  example under your own X desktop). No app or command starts the tray agent under WSL unless
   `XENO_AGENT_AUTOSTART=1`.
 - **Launcher entries.** On WSL 2, `install.sh` writes a "Xeno" launcher entry only (no "Xeno Agent"); it sets
   `XENO_AGENT_AUTOSTART=0` and, for a user-local .NET, `DOTNET_ROOT`. On WSL 1, nothing reads launcher entries, so

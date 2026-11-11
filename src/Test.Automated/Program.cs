@@ -56,7 +56,7 @@ namespace Test.Automated
             Console.WriteLine("Test database provider: " + TestDatabase.Provider);
             try
             {
-                return await ConsoleRunner.RunAsync(suites, resultsPath: resultsPath).ConfigureAwait(false);
+                return await ConsoleRunner.RunAsync(suites, new ConsoleRunnerOptions { JsonResultsPath = resultsPath }).ConfigureAwait(false);
             }
             finally
             {

@@ -31,7 +31,7 @@ namespace Xeno.Client
     /// <summary>
     /// Xeno client CLI entry point.
     /// </summary>
-    public static class Program
+    public static partial class Program
     {
         private const string ClientVersion = "0.2.0";
         private const int DefaultConnectTimeoutMs = 30000;
@@ -59,6 +59,12 @@ namespace Xeno.Client
             if (args.Length > 0 && String.Equals(args[0], "tui", StringComparison.OrdinalIgnoreCase))
             {
                 return await HandleTuiAsync(args).ConfigureAwait(false);
+            }
+
+            // MCP over stdio owns stdout, so it runs before console output wrapping too.
+            if (args.Length > 0 && String.Equals(args[0], "mcp", StringComparison.OrdinalIgnoreCase))
+            {
+                return await HandleMcpAsync(args).ConfigureAwait(false);
             }
 
             TrailingBlankLineTextWriter output = new TrailingBlankLineTextWriter(Console.Out);
@@ -104,6 +110,7 @@ namespace Xeno.Client
             }
 
             launch.ApplyHome();
+            XenoAppLauncher.EnsureTrayRunning();
             TuiStartOptions options = new TuiStartOptions { StartPage = launch.StartPage };
             if (launch.Server != null)
             {
@@ -183,6 +190,10 @@ namespace Xeno.Client
                             return HandleModel(args, settings);
                         case "inference":
                             return await HandleInferenceAsync(args, settings).ConfigureAwait(false);
+                        case "chat":
+                            return await HandleChatAsync(args).ConfigureAwait(false);
+                        case "usage":
+                            return await HandleUsageAsync(args).ConfigureAwait(false);
                         case "inventory":
                             if (_UseJson) WriteJson(settings.BuildInventory());
                             else PrintInventory(settings);
@@ -285,11 +296,17 @@ namespace Xeno.Client
             {
                 _WorkerMode = worker;
                 if (_WorkerMode) ConfigureWorkerLogging();
+
+                // Starting the client from a terminal also brings up the Xeno Agent tray icon; the background worker never
+                // does, so quitting the agent sticks. The agent waits a few seconds before checking whether to connect.
+                if (!worker) XenoAppLauncher.EnsureTrayRunning();
                 await RunForegroundConnectAsync(settings, worker, CancellationToken.None).ConfigureAwait(false);
                 return 0;
             }
 
-            return await StartBackgroundConnectAsync(settings, timeoutMs, CancellationToken.None).ConfigureAwait(false);
+            int connected = await StartBackgroundConnectAsync(settings, timeoutMs, CancellationToken.None).ConfigureAwait(false);
+            XenoAppLauncher.EnsureTrayRunning();
+            return connected;
         }
 
         private static async Task<int> HandleRestartAsync(string[] args, ClientSettings settings)
@@ -2040,10 +2057,12 @@ namespace Xeno.Client
                     ClientConnectionState.MarkStarted(settings, worker);
                     await LocalDashboardRuntime.StartAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
                     await LocalInferenceServerRuntime.StartAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
+                    await Xeno.Client.Mcp.XenoMcpHttpRuntime.StartAsync(settings, LocalDashboardRuntime.Tools, runtimeTokenSource.Token).ConfigureAwait(false);
                     await ConnectAsync(settings, runtimeTokenSource.Token).ConfigureAwait(false);
                 }
                 finally
                 {
+                    Xeno.Client.Mcp.XenoMcpHttpRuntime.Stop();
                     LocalInferenceServerRuntime.Stop(settings);
                     LocalDashboardRuntime.Stop();
                     ClientConnectionState.MarkLocalDashboardStopped(settings);
@@ -4210,7 +4229,7 @@ namespace Xeno.Client
             WritePlainHeading("Server");
             Console.WriteLine("  WebSocket:  " + settings.Server.Url);
             Console.WriteLine("  REST:       " + DisplayValue(settings.Server.RestUrl, "(derived from WebSocket URL)"));
-            Console.WriteLine("  Access key: " + DisplayValue(settings.Server.AccessKey, "(not set)"));
+            Console.WriteLine("  Access key: " + MaskSecret(settings.Server.AccessKey));
             Console.WriteLine("  REST token: " + MaskSecret(settings.Server.Token));
             WritePlainHeading("Local Dashboard");
             Console.WriteLine("  Enabled:    " + FormatBool(settings.LocalDashboard.Enabled));
@@ -4807,9 +4826,7 @@ namespace Xeno.Client
 
         private static string MaskSecret(string? value)
         {
-            if (String.IsNullOrWhiteSpace(value)) return "(not set)";
-            if (value.Length <= 4) return "configured";
-            return "configured (..." + value.Substring(value.Length - 4) + ")";
+            return ServerEndpoints.MaskSecret(value);
         }
 
         private static string FormatBool(bool value)
@@ -5113,7 +5130,17 @@ namespace Xeno.Client
 
         private static void WriteError(string message)
         {
-            WriteColored("Error: " + message, ConsoleColor.Red);
+            // Errors go to stderr so a script reading stdout, for example with --json, never parses them as output.
+            if (!_UseColors || Console.IsErrorRedirected)
+            {
+                Console.Error.WriteLine("Error: " + message);
+                return;
+            }
+
+            ConsoleColor previous = Console.ForegroundColor;
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.WriteLine("Error: " + message);
+            Console.ForegroundColor = previous;
         }
 
         private static void WriteInfoHeading(string message)
@@ -5180,6 +5207,18 @@ namespace Xeno.Client
             Console.WriteLine("  xeno dashboard open");
             Console.WriteLine("  xeno stop");
             Console.WriteLine("  xeno disconnect");
+            WritePlainHeading("Chat:");
+            Console.WriteLine("  xeno chat                Chat with a model on this machine or the Xeno network");
+            Console.WriteLine("  xeno chat -m <model> \"message\"   Ask once");
+            Console.WriteLine("  xeno chat list | show | delete | rate | history | feedback   (xeno chat --help)");
+            WritePlainHeading("Usage:");
+            Console.WriteLine("  xeno usage               Latency, tokens, groups, and stage timing for served requests");
+            Console.WriteLine("  xeno usage --dataset endpoint|chat --range hour|day|week|month [--group-by model|provider|route] [--json]");
+            WritePlainHeading("MCP:");
+            Console.WriteLine("  xeno mcp                 Serve Xeno's tools over stdio (for Claude Code and other MCP clients)");
+            Console.WriteLine("  xeno mcp tools           List the tools");
+            Console.WriteLine("  xeno mcp config          Show how to add Xeno to an MCP client");
+            Console.WriteLine("  xeno mcp token [--rotate]  Show (or replace) the token for the HTTP MCP server");
             WritePlainHeading("Configuration:");
             Console.WriteLine("  xeno config show");
             Console.WriteLine("  xeno config colors on");

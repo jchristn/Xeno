@@ -28,6 +28,51 @@ namespace Xeno.Client.Presentation
         /// <summary>
         /// A warning.
         /// </summary>
-        Warning
+        Warning,
+
+        /// <summary>
+        /// Categorical color 1, for group series (models, providers, stages).
+        /// </summary>
+        Series1,
+
+        /// <summary>
+        /// Categorical color 2.
+        /// </summary>
+        Series2,
+
+        /// <summary>
+        /// Categorical color 3.
+        /// </summary>
+        Series3,
+
+        /// <summary>
+        /// Categorical color 4.
+        /// </summary>
+        Series4,
+
+        /// <summary>
+        /// Categorical color 5.
+        /// </summary>
+        Series5,
+
+        /// <summary>
+        /// Categorical color 6.
+        /// </summary>
+        Series6,
+
+        /// <summary>
+        /// Categorical color 7.
+        /// </summary>
+        Series7,
+
+        /// <summary>
+        /// Categorical color 8.
+        /// </summary>
+        Series8,
+
+        /// <summary>
+        /// Neutral gray, for Other and Unknown.
+        /// </summary>
+        Neutral
     }
 }

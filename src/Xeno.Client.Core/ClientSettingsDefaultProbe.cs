@@ -12,6 +12,12 @@ namespace Xeno.Client
 
         public ClientTelemetrySettings? Telemetry { get; set; } = null;
 
+        public ClientChatSettings? Chat { get; set; } = null;
+
+        public ClientAnalyticsSettings? Analytics { get; set; } = null;
+
+        public ClientMcpSettings? Mcp { get; set; } = null;
+
         public List<ClientRunnerSettingsProbe>? Providers { get; set; } = null;
 
         public int? DefaultMaxConcurrentRequests { get; set; } = null;
@@ -32,6 +38,8 @@ namespace Xeno.Client
         public int? HealthCheckIntervalMs { get; set; } = null;
 
         public int? LocalQueueTimeoutMs { get; set; } = null;
+
+        public int? RequestRetentionDays { get; set; } = null;
     }
 
     internal class ClientRunnerSettingsProbe

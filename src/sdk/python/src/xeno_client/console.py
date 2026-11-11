@@ -65,6 +65,8 @@ def run_command(command: str, client: XenoClient, tenant_id: str) -> None:
         print_json(client.list_routing_policies())
     elif command == "history":
         print_json(client.list_request_history())
+    elif command == "usage":
+        print_json(client.get_usage_analytics().raw)
     elif command == "leaderboard":
         print_json(client.get_model_token_leaderboard())
     elif command == "ledger-status":
@@ -125,6 +127,7 @@ def print_help(base_url: str, tenant_id: str, bearer_token: str | None) -> None:
     print("  permissions     permissions")
     print("  routing-policies routing policies")
     print("  history         request history")
+    print("  usage           usage analytics")
     print("  leaderboard     public model token leaderboard")
     print("  ledger-status   ledger queue and NetLedger health")
     print("  ledger-balance  own ledger balance; append user ID for a specific user")

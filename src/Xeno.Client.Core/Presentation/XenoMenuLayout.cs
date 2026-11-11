@@ -35,6 +35,8 @@ namespace Xeno.Client.Presentation
                 entries.Add(XenoMenuEntry.Item("Open Xeno", XenoCommandEnum.OpenDesktopApp));
                 entries.Add(XenoMenuEntry.Item("Open Xeno Terminal", XenoCommandEnum.OpenTerminalApp));
                 entries.Add(XenoMenuEntry.Item("Open Web Dashboard", XenoCommandEnum.OpenWebDashboard));
+                entries.Add(XenoMenuEntry.Separator());
+                entries.Add(XenoMenuEntry.Item("Settings...", XenoCommandEnum.Settings, ","));
             }
 
             return entries;
@@ -80,12 +82,16 @@ namespace Xeno.Client.Presentation
             List<XenoMenuEntry?> view = new List<XenoMenuEntry?>();
             foreach (XenoPageDefinition page in XenoNavigationCatalog.Pages)
             {
-                view.Add(XenoMenuEntry.Item(page.LongTitle, page.Command, page.ShortcutDigit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                view.Add(page.ShortcutDigit < 0 ? XenoMenuEntry.Item(page.LongTitle, page.Command) : XenoMenuEntry.Item(page.LongTitle, page.Command, page.ShortcutDigit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             }
 
             view.Add(XenoMenuEntry.Separator());
             view.Add(XenoMenuEntry.Item("Refresh", XenoCommandEnum.Refresh, desktop ? "R" : "F5"));
             view.Add(XenoMenuEntry.Item("Command Palette...", XenoCommandEnum.CommandPalette, "K"));
+            view.Add(XenoMenuEntry.Submenu("Auto Refresh",
+                XenoMenuEntry.Radio("Off", XenoCommandEnum.AutoRefreshOff),
+                XenoMenuEntry.Radio("15 Seconds", XenoCommandEnum.AutoRefresh15),
+                XenoMenuEntry.Radio("1 Minute", XenoCommandEnum.AutoRefresh60)));
             view.Add(XenoMenuEntry.Submenu("Appearance",
                 XenoMenuEntry.Radio("System", XenoCommandEnum.AppearanceSystem),
                 XenoMenuEntry.Radio("Light", XenoCommandEnum.AppearanceLight),
@@ -138,7 +144,9 @@ namespace Xeno.Client.Presentation
                 XenoMenuEntry.Item("Open Xeno", XenoCommandEnum.OpenDesktopApp),
                 XenoMenuEntry.Item("Open Xeno Terminal", XenoCommandEnum.OpenTerminalApp),
                 XenoMenuEntry.Item("Open Web Dashboard", XenoCommandEnum.OpenWebDashboard),
+                XenoMenuEntry.Item("Chat...", XenoCommandEnum.GoChat),
                 XenoMenuEntry.Item("Open Local Endpoint", XenoCommandEnum.GoLocalEndpoint),
+                XenoMenuEntry.Item("Settings...", XenoCommandEnum.Settings),
                 XenoMenuEntry.Separator(),
                 XenoMenuEntry.Item("Start Client", XenoCommandEnum.StartClient),
                 XenoMenuEntry.Item("Stop Client", XenoCommandEnum.StopClient),

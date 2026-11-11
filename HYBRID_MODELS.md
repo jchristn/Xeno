@@ -64,6 +64,8 @@ xeno start
 
 Each response's `X-Xeno-Route` header tells you where it went (`local:<provider>` or `network`).
 
+To see how much traffic went each way, open the Usage page and choose the Local endpoint dataset, or run `xeno usage --dataset endpoint --group-by route`. Requests that fell back to the network appear as their own series. See [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md).
+
 ## Override one model
 
 ```bash

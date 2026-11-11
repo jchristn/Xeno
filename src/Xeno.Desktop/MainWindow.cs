@@ -10,6 +10,7 @@ namespace Xeno.Desktop
     using Avalonia.Layout;
     using Avalonia.Media;
     using Avalonia.Media.Imaging;
+    using Avalonia.Threading;
     using Xeno.Client.Hosting;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
@@ -24,6 +25,8 @@ namespace Xeno.Desktop
     {
         #region Private-Members
 
+        private readonly DispatcherTimer _AutoRefresh = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        private DateTime _LastAutoRefresh = DateTime.UtcNow;
         private readonly DesktopSession _Session;
         private readonly App _App;
         private readonly Dictionary<XenoPageEnum, DesktopPage> _Pages = new Dictionary<XenoPageEnum, DesktopPage>();
@@ -68,11 +71,22 @@ namespace Xeno.Desktop
             XenoTheme.Changed += (sender, args) => BuildLayout();
             _Session.Changed += (sender, args) => OnSessionChanged();
             Opened += (sender, args) => Navigate(_Current);
+            _AutoRefresh.Tick += (sender, args) => AutoRefreshTick();
+            Opened += (sender, args) => _AutoRefresh.Start();
+            Closed += (sender, args) => _AutoRefresh.Stop();
         }
 
         #endregion
 
         #region Public-Methods
+
+        /// <summary>
+        /// The page on screen, or null before the first navigation.
+        /// </summary>
+        public DesktopPage? CurrentPage
+        {
+            get { return _Pages.TryGetValue(_Current, out DesktopPage? page) ? page : null; }
+        }
 
         /// <summary>
         /// Show a page.
@@ -125,6 +139,10 @@ namespace Xeno.Desktop
             DesktopPage created;
             switch (page)
             {
+                case XenoPageEnum.Chat: created = new ChatPage(_Session, this); break;
+                case XenoPageEnum.ChatHistory: created = new ChatHistoryPage(_Session, this); break;
+                case XenoPageEnum.Usage: created = new UsagePage(_Session, this); break;
+                case XenoPageEnum.ChatFeedback: created = new ChatFeedbackPage(_Session, this); break;
                 case XenoPageEnum.Models: created = new ModelsPage(_Session, this); break;
                 case XenoPageEnum.Providers: created = new ProvidersPage(_Session, this); break;
                 case XenoPageEnum.LocalEndpoint: created = new LocalEndpointPage(_Session, this); break;
@@ -199,7 +217,7 @@ namespace Xeno.Desktop
             StackPanel brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(18, 18, 18, 14) };
             Bitmap? logo = XenoAssets.LoadLogo();
             if (logo != null) brand.Children.Add(new Image { Source = logo, Width = 30, Height = 30 });
-            brand.Children.Add(new TextBlock { Text = XenoProduct.Name, FontSize = 20, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center });
+            brand.Children.Add(new TextBlock { Text = XenoProduct.Name, FontSize = 20, FontWeight = FontWeight.SemiBold, Foreground = palette.SidebarText, VerticalAlignment = VerticalAlignment.Center });
             DockPanel.SetDock(brand, Dock.Top);
             sidebar.Children.Add(brand);
 
@@ -246,7 +264,7 @@ namespace Xeno.Desktop
         private Border BuildStatusCard(XenoPalette palette)
         {
             _StatusDot = new Ellipse { Width = 9, Height = 9, Fill = palette.SidebarMuted, VerticalAlignment = VerticalAlignment.Center };
-            _StatusText = new TextBlock { Text = "Checking...", Foreground = Brushes.White, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+            _StatusText = new TextBlock { Text = "Checking...", Foreground = XenoTheme.Current.SidebarText, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center };
             _StatusDetail = new TextBlock { Foreground = palette.SidebarMuted, FontSize = 11.5, TextWrapping = TextWrapping.Wrap };
             _StatusAction = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center, Padding = new Thickness(10, 5) };
             _StatusAction.Classes.Add("accent");
@@ -257,7 +275,7 @@ namespace Xeno.Desktop
             stack.Children.Add(_StatusAction);
             return new Border
             {
-                Background = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)),
+                Background = new SolidColorBrush(((ISolidColorBrush)palette.SidebarText).Color, 0.11),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(12),
                 Margin = new Thickness(12),
@@ -272,6 +290,18 @@ namespace Xeno.Desktop
             if (status.Status == ClientStatusEnum.NotSignedIn) _App.Execute(XenoCommandEnum.SignIn);
             else if (status.Running) _App.Execute(XenoCommandEnum.StopClient);
             else _App.Execute(XenoCommandEnum.StartClient);
+        }
+
+        private void AutoRefreshTick()
+        {
+            int seconds = _Session.Preferences.AutoRefreshSeconds;
+            if (seconds <= 0 || (DateTime.UtcNow - _LastAutoRefresh).TotalSeconds < seconds) return;
+            _LastAutoRefresh = DateTime.UtcNow;
+
+            // An open dialog pauses refreshing so nothing moves underneath it.
+            if (OwnedWindows.Count > 0) return;
+            DesktopPage? page = CurrentPage;
+            if (page != null && page.AutoRefreshes) _ = page.RefreshAsync();
         }
 
         private void OnSessionChanged()

@@ -26,7 +26,8 @@ namespace Xeno.Client.Hosting
         public const string DesktopLockName = "desktop";
 
         /// <summary>
-        /// Environment variable that disables starting the tray agent from the desktop app when set to 0.
+        /// Environment variable that controls starting the tray agent from the other front ends: 0 never, 1 always, unset
+        /// when there is a desktop session (see <see cref="ShouldAutostartTray"/>).
         /// </summary>
         public const string AgentAutostartVariable = "XENO_AGENT_AUTOSTART";
 
@@ -48,18 +49,62 @@ namespace Xeno.Client.Hosting
         }
 
         /// <summary>
-        /// Start the tray agent unless it is already running or autostart is disabled with XENO_AGENT_AUTOSTART=0.
+        /// Start the tray agent unless it is already running or <see cref="ShouldAutostartTray"/> says no for this session.
         /// </summary>
         /// <returns>Launch result; success when the agent was started or is already running.</returns>
         public static LaunchResult EnsureTrayRunning()
         {
-            if (String.Equals(Environment.GetEnvironmentVariable(AgentAutostartVariable), "0", StringComparison.Ordinal))
+            if (!ShouldAutostartTray(Environment.GetEnvironmentVariable, OperatingSystem.IsWindows(), OperatingSystem.IsLinux(), Environment.UserInteractive, IsWsl()))
             {
-                return LaunchResult.Ok("Tray agent autostart is disabled.");
+                return LaunchResult.Ok("Tray agent autostart is off for this session.");
             }
 
             if (IsRunning(TrayLockName)) return LaunchResult.Ok(XenoProduct.TrayName + " is already running.");
             return LaunchTray();
+        }
+
+        /// <summary>
+        /// Decide whether starting a front end should also start the tray agent. XENO_AGENT_AUTOSTART=0 always says no
+        /// and =1 always says yes. Otherwise there must be a desktop to show the icon on: not WSL, not an SSH session,
+        /// a DISPLAY or WAYLAND_DISPLAY on Linux, and an interactive session on Windows.
+        /// </summary>
+        /// <param name="environment">Reads an environment variable.</param>
+        /// <param name="isWindows">True on Windows.</param>
+        /// <param name="isLinux">True on Linux.</param>
+        /// <param name="userInteractive">True when the process runs in an interactive desktop session.</param>
+        /// <param name="isWsl">True under the Windows Subsystem for Linux.</param>
+        /// <returns>True to start the tray agent.</returns>
+        /// <exception cref="ArgumentNullException">environment is null.</exception>
+        public static bool ShouldAutostartTray(Func<string, string?> environment, bool isWindows, bool isLinux, bool userInteractive, bool isWsl)
+        {
+            ArgumentNullException.ThrowIfNull(environment);
+            string? setting = environment(AgentAutostartVariable)?.Trim();
+            if (String.Equals(setting, "0", StringComparison.Ordinal)) return false;
+            if (String.Equals(setting, "1", StringComparison.Ordinal)) return true;
+            if (isWsl) return false;
+            if (isWindows) return userInteractive;
+            if (!String.IsNullOrWhiteSpace(environment("SSH_CONNECTION")) || !String.IsNullOrWhiteSpace(environment("SSH_TTY"))) return false;
+            if (isLinux) return !String.IsNullOrWhiteSpace(environment("DISPLAY")) || !String.IsNullOrWhiteSpace(environment("WAYLAND_DISPLAY"));
+            return true;
+        }
+
+        /// <summary>
+        /// True under the Windows Subsystem for Linux (a Microsoft kernel together with WSL interop).
+        /// </summary>
+        /// <returns>True under WSL.</returns>
+        public static bool IsWsl()
+        {
+            if (!OperatingSystem.IsLinux()) return false;
+            try
+            {
+                string version = File.Exists("/proc/version") ? File.ReadAllText("/proc/version") : String.Empty;
+                if (version.IndexOf("microsoft", StringComparison.OrdinalIgnoreCase) < 0) return false;
+                return !String.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WSL_DISTRO_NAME")) || Directory.Exists("/run/WSL");
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -108,22 +153,51 @@ namespace Xeno.Client.Hosting
         }
 
         /// <summary>
-        /// Launch the desktop application.
+        /// Open the desktop app. When it is already running, it is asked to come to the front instead of starting again.
         /// </summary>
         /// <returns>Launch result.</returns>
         public static LaunchResult LaunchDesktop()
         {
-            return LaunchApplication(XenoApplicationEnum.Desktop, XenoProduct.DesktopName);
+            return ActivateOrLaunchDesktop(new DesktopActivationRequest());
         }
 
         /// <summary>
-        /// Launch the desktop app on a page.
+        /// Open the desktop app on a page. When it is already running, it is asked to show the page.
         /// </summary>
         /// <param name="page">Page to open.</param>
         /// <returns>Launch result.</returns>
         public static LaunchResult LaunchDesktop(Presentation.XenoPageEnum page)
         {
-            return LaunchApplication(XenoApplicationEnum.Desktop, XenoProduct.DesktopName, new List<string> { "--page", page.ToString().ToLowerInvariant() });
+            return ActivateOrLaunchDesktop(new DesktopActivationRequest { Page = page });
+        }
+
+        /// <summary>
+        /// Open the Xeno Settings window of the desktop app, starting the app when it is not running.
+        /// </summary>
+        /// <returns>Launch result.</returns>
+        public static LaunchResult LaunchDesktopSettings()
+        {
+            return ActivateOrLaunchDesktop(new DesktopActivationRequest { OpenSettings = true });
+        }
+
+        /// <summary>
+        /// Build the desktop app arguments that carry an activation request on a fresh launch.
+        /// </summary>
+        /// <param name="request">Request.</param>
+        /// <returns>Arguments, never null.</returns>
+        /// <exception cref="ArgumentNullException">request is null.</exception>
+        public static List<string> DesktopArguments(DesktopActivationRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            List<string> arguments = new List<string>();
+            if (request.Page.HasValue)
+            {
+                arguments.Add("--page");
+                arguments.Add(request.Page.Value.ToString().ToLowerInvariant());
+            }
+
+            if (request.OpenSettings) arguments.Add("--settings");
+            return arguments;
         }
 
         /// <summary>
@@ -207,6 +281,24 @@ namespace Xeno.Client.Hosting
         #endregion
 
         #region Private-Methods
+
+        private static LaunchResult ActivateOrLaunchDesktop(DesktopActivationRequest request)
+        {
+            if (IsRunning(DesktopLockName))
+            {
+                try
+                {
+                    DesktopActivation.Post(request);
+                    return LaunchResult.Ok(request.OpenSettings ? "Opened Xeno Settings." : "Brought " + XenoProduct.DesktopName + " to the front.");
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    return LaunchResult.Fail("Could not reach the running " + XenoProduct.DesktopName + ": " + ex.Message);
+                }
+            }
+
+            return LaunchApplication(XenoApplicationEnum.Desktop, XenoProduct.DesktopName, DesktopArguments(request));
+        }
 
         private static LaunchResult LaunchApplication(XenoApplicationEnum application, string displayName, IReadOnlyList<string>? extraArguments = null)
         {

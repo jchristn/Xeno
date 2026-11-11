@@ -29,7 +29,9 @@ namespace Xeno.Desktop.Dialogs
             Background = XenoTheme.Current.Background;
 
             TabControl tabs = new TabControl();
-            tabs.Items.Add(new TabItem { Header = "Summary", Content = Scroll(Ui.Stack(14, Ui.Details(RequestDetailFormatter.Summary(entry), 150), Ui.Heading("Timeline"), Mono(String.Join(Environment.NewLine, RequestDetailFormatter.Timeline(entry))))) });
+            Xeno.Desktop.Controls.ColumnChart timing = new Xeno.Desktop.Controls.ColumnChart { Height = 150 };
+            timing.SetChart(XenoUsageCharts.RequestTiming(XenoUsageCharts.StagesFor(entry)));
+            tabs.Items.Add(new TabItem { Header = "Summary", Content = Scroll(Ui.Stack(14, Ui.Details(RequestDetailFormatter.Summary(entry), 150), Ui.Heading("Where the time went"), timing, Ui.Heading("Timeline"), Mono(String.Join(Environment.NewLine, RequestDetailFormatter.Timeline(entry))))) });
             tabs.Items.Add(new TabItem { Header = "Headers", Content = Scroll(Ui.Stack(14, Ui.Heading("Request headers"), Mono(RequestDetailFormatter.Headers(entry.RequestHeaders)), Ui.Heading("Response headers"), Mono(RequestDetailFormatter.Headers(entry.ResponseHeaders)))) });
             tabs.Items.Add(new TabItem { Header = "Request body", Content = Body(entry.RequestBody) });
             tabs.Items.Add(new TabItem { Header = "Response body", Content = Body(entry.ResponseBody) });

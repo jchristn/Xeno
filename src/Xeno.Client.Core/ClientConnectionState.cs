@@ -287,13 +287,18 @@ namespace Xeno.Client
             try
             {
                 ClientConnectionState state = JsonUtil.Deserialize<ClientConnectionState>(ClientFileIo.ReadAllText(StateFile)) ?? new ClientConnectionState();
-                if ((state.IsConnected || state.IsRegistered) && !state.IsProcessRunning())
+                if ((state.IsConnected || state.IsRegistered || state.IsBackground) && !state.IsProcessRunning())
                 {
-                    state.IsConnected = false;
-                    state.IsRegistered = false;
-                    state.DisconnectedUtc = DateTime.UtcNow;
-                    state.LastDisconnectReason = "Client process is no longer running.";
-                    state.LastUpdatedUtc = state.DisconnectedUtc;
+                    if (state.IsConnected || state.IsRegistered)
+                    {
+                        state.IsConnected = false;
+                        state.IsRegistered = false;
+                        state.DisconnectedUtc = DateTime.UtcNow;
+                        state.LastDisconnectReason = "Client process is no longer running.";
+                        state.LastUpdatedUtc = state.DisconnectedUtc;
+                    }
+
+                    state.IsBackground = false;
                     state.Save();
                 }
 
