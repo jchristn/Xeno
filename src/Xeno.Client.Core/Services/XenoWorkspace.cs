@@ -580,13 +580,35 @@ namespace Xeno.Client.Services
         }
 
         /// <summary>
+        /// Provider metrics that have at least one reading in a range, in display order.
+        /// </summary>
+        /// <param name="providerName">Provider, or null for all.</param>
+        /// <param name="range">Range.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <param name="modelName">Model, or null for all.</param>
+        /// <returns>Metrics with readings.</returns>
+        public async Task<List<ClientProviderTelemetryMetricEnum>> ProviderMetricsWithDataAsync(string? providerName, HistoryRangeEnum range, CancellationToken token, string? modelName = null)
+        {
+            // Providers report different metrics (Ollama reports model counts, vLLM reports queues and throughput), so
+            // pickers offer the ones that have readings in the range.
+            List<ClientProviderTelemetryMetricEnum> found = new List<ClientProviderTelemetryMetricEnum>();
+            foreach (ClientProviderTelemetryMetricEnum metric in Enum.GetValues<ClientProviderTelemetryMetricEnum>())
+            {
+                List<ClientProviderTelemetryRollupBucket> buckets = await RollupProviderTelemetryAsync(metric, providerName, range, token, modelName).ConfigureAwait(false);
+                if (buckets.Any(item => item.Count > 0)) found.Add(metric);
+            }
+
+            return found;
+        }
+
+        /// <summary>
         /// Provider telemetry rollups for a metric over a range.
         /// </summary>
         /// <param name="metric">Metric.</param>
-        /// <param name="providerName">Provider name, or null for all providers.</param>
+        /// <param name="providerName">Provider, or null for all.</param>
         /// <param name="range">Range.</param>
         /// <param name="token">Cancellation token.</param>
-        /// <param name="modelName">Only this model, or null for every model.</param>
+        /// <param name="modelName">Model, or null for all.</param>
         /// <returns>Buckets.</returns>
         public Task<List<ClientProviderTelemetryRollupBucket>> RollupProviderTelemetryAsync(ClientProviderTelemetryMetricEnum metric, string? providerName, HistoryRangeEnum range, CancellationToken token, string? modelName = null)
         {

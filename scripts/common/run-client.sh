@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build and run the Xeno client worker from source in the foreground (xeno connect --foreground), so its log
-# prints to this terminal. Ctrl+C stops it. The worker connects to the server in client.json and serves the local
+# Build and run the Xeno client worker from source in the foreground (xeno connect --foreground). The terminal shows
+# connection changes, warnings, and errors; the full log goes to the log file (xeno logs). Ctrl+C stops it. The worker connects to the server in client.json and serves the local
 # web dashboard (http://127.0.0.1:9343 by default). It also starts the Xeno Agent tray app when there is a desktop
 # session (XENO_AGENT_AUTOSTART=0 turns that off).
 #

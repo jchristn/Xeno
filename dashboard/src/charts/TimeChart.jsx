@@ -54,6 +54,20 @@ export default function TimeChart({ chart, height: HEIGHT = DEFAULT_HEIGHT, onDr
     if (onDrill) onDrill(chart.buckets[index], chart.drillSeries ? seriesKey : null);
   }
 
+  // Dashed segments joining readings across empty buckets, so sparse data reads as one line with visible gaps.
+  function bridgePath(values) {
+    let path = '';
+    let previous = -1;
+    values.forEach((value, index) => {
+      if (value === null || value === undefined) return;
+      if (previous >= 0 && index - previous > 1) {
+        path += `M${(left + previous * slot + slot / 2).toFixed(1)} ${y(values[previous]).toFixed(1)} L${(left + index * slot + slot / 2).toFixed(1)} ${y(value).toFixed(1)} `;
+      }
+      previous = index;
+    });
+    return path;
+  }
+
   function linePath(values) {
     let path = '';
     let drawing = false;
@@ -82,12 +96,12 @@ export default function TimeChart({ chart, height: HEIGHT = DEFAULT_HEIGHT, onDr
         ))}
         {lines ? chart.series.slice().reverse().map((series) => (
           <g key={series.key}>
+            <path className="usage-bridge" d={bridgePath(series.values)} fill="none" stroke={series.color} strokeDasharray="2 4" strokeOpacity="0.8" strokeWidth={series.key === 'p50' ? 2 : 1.25} />
             <path d={linePath(series.values)} fill="none" stroke={series.color} strokeLinejoin="round" strokeWidth={series.key === 'p50' ? 2.5 : 1.5} />
             {series.values.map((value, index) => {
-              // A bucket with no neighbors has no line to draw, so every isolated value gets a dot.
+              // Every reading gets a dot, so a lone value and the ends of a dashed bridge are easy to see.
               if (value === null || value === undefined) return null;
-              const isolated = (series.values[index - 1] ?? null) === null && (series.values[index + 1] ?? null) === null;
-              return isolated ? <circle className="usage-point" cx={left + index * slot + slot / 2} cy={y(value)} fill={series.color} key={chart.buckets[index].startUtc} r={3} /> : null;
+              return <circle className="usage-point" cx={left + index * slot + slot / 2} cy={y(value)} fill={series.color} key={chart.buckets[index].startUtc} r={series.key === 'p50' ? 3 : 2.25} />;
             })}
           </g>
         )) : chart.buckets.map((bucket, index) => {

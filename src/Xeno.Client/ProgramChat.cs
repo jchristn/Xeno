@@ -404,11 +404,37 @@ namespace Xeno.Client
 
         private static async Task<int> ChatDeleteAsync(XenoChatClient chat, string[] args)
         {
-            string id = ChatPositional(args, 2, Array.Empty<string>()).FirstOrDefault() ?? throw new ArgumentException("Usage: xeno chat delete <conversation-id>");
-            bool removed = await chat.DeleteConversationAsync(id, CancellationToken.None).ConfigureAwait(false);
-            if (!removed) throw new KeyNotFoundException("Conversation '" + id + "' not found.");
-            WriteSuccess("Deleted conversation " + id + ".");
-            return 0;
+            // One or more conversation ids, or --all --yes for every conversation.
+            List<string> ids = ChatPositional(args, 2, Array.Empty<string>());
+            bool all = args.Any(item => String.Equals(item, "--all", StringComparison.OrdinalIgnoreCase));
+            if (all)
+            {
+                if (!args.Any(item => String.Equals(item, "--yes", StringComparison.OrdinalIgnoreCase) || String.Equals(item, "-y", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new ArgumentException("Add --yes to delete every conversation: xeno chat delete --all --yes");
+                }
+
+                ids = (await chat.ListConversationsAsync(null, 100000, CancellationToken.None).ConfigureAwait(false)).Select(item => item.Id).ToList();
+            }
+
+            if (ids.Count == 0) throw new ArgumentException("Usage: xeno chat delete <conversation-id> [<conversation-id>...] | --all --yes");
+            List<string> missing = new List<string>();
+            int deleted = 0;
+            foreach (string id in ids)
+            {
+                if (await chat.DeleteConversationAsync(id, CancellationToken.None).ConfigureAwait(false)) deleted++;
+                else missing.Add(id);
+            }
+
+            if (_UseJson)
+            {
+                WriteJson(new { deleted, missing });
+                return missing.Count == 0 ? 0 : 1;
+            }
+
+            if (deleted > 0) WriteSuccess("Deleted " + (deleted == 1 && ids.Count == 1 ? "conversation " + ids[0] : deleted + " conversation" + (deleted == 1 ? String.Empty : "s")) + ".");
+            if (missing.Count > 0) WriteError("Not found: " + String.Join(", ", missing) + ".");
+            return missing.Count == 0 ? 0 : 1;
         }
 
         private static async Task<int> ChatRateAsync(XenoChatClient chat, string[] args)
@@ -580,7 +606,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno chat models                                List models you can chat with");
             Console.WriteLine("  xeno chat list [--search <text>] [--limit <n>]  List conversations");
             Console.WriteLine("  xeno chat show <conversation-id>                Show a conversation");
-            Console.WriteLine("  xeno chat delete <conversation-id>              Delete a conversation");
+            Console.WriteLine("  xeno chat delete <conversation-id>...           Delete one or more conversations (--all --yes for every one)");
             Console.WriteLine("  xeno chat rate <message-id> up|down [comment]   Rate an answer");
             Console.WriteLine("  xeno chat history [--model <m>] [--route local|network] [--status Success|Error|Cancelled]");
             Console.WriteLine("                    [--surface Web|Desktop|Terminal|Cli|Mcp] [--rating up|down|none] [--search <text>] [--limit <n>]");

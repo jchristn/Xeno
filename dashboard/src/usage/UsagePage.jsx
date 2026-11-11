@@ -8,6 +8,9 @@ import { buildUsageChart, formatChartValue, groupKeyLabel, OTHER_KEY, UNKNOWN_KE
 import { useUsageApi } from './UsageApiContext.js';
 import { usageRanges, usageWindow } from './usageRanges.js';
 
+const CONNECTED_CHART = 'connected.clients';
+const USAGE_CHART_HEIGHT = 380;
+
 // The Usage page in both web dashboards. It asks the backend for finished analytics and draws them; nothing is
 // computed here. onDrill(dataset, { fromUtc, toUtc, model }) opens the matching list for a bucket.
 export default function UsagePage({ onDrill, refreshSignal }) {
@@ -23,6 +26,7 @@ export default function UsagePage({ onDrill, refreshSignal }) {
   const [clientId, setClientId] = useState('');
   const [userId, setUserId] = useState('');
   const [analytics, setAnalytics] = useState(null);
+  const [chartId, setChartId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [loadedAt, setLoadedAt] = useState(null);
@@ -60,6 +64,11 @@ export default function UsagePage({ onDrill, refreshSignal }) {
 
   const chartIds = usagePageChartIds(dataset);
   const charts = useMemo(() => (analytics ? chartIds.map((id) => buildUsageChart(id, analytics, t)) : []), [analytics, dataset, t]);
+  const chartOptions = [
+    ...charts.map((chart) => ({ id: chart.id, title: chart.title })),
+    ...(api.getConnectedHistory ? [{ id: CONNECTED_CHART, title: t('connectedClients') }] : [])
+  ];
+  const selectedChart = chartOptions.some((option) => option.id === chartId) ? chartId : (chartOptions[0]?.id || '');
   const totals = analytics?.totals;
   const noTraffic = analytics && !totals?.requests;
   const filtered = !!(model || provider || clientId || userId);
@@ -107,9 +116,19 @@ export default function UsagePage({ onDrill, refreshSignal }) {
             <Kpi icon={<Gauge size={18} />} label={t('usageChartThroughput')} subtext={t('usageSeriesMedian')} value={formatChartValue(totals.throughput?.p50, ' tok/s', locale)} />
           </div>
           {noTraffic ? <div className="usage-empty usage-empty-page">{t(filtered ? 'usageEmptyFiltered' : 'usageEmptyRange')}</div> : null}
-          <div className="usage-grid">
-            {charts.map((chart) => <ChartCard chart={chart} key={chart.id} onDrill={onDrill ? drill : undefined} />)}
-            {api.getConnectedHistory ? <ConnectedClientsCard load={api.getConnectedHistory} range={range} refreshSignal={`${refreshSignal}-${autoRefreshSignal}`} /> : null}
+          {/* One chart at a time, chosen from a list, at the full width of the page. */}
+          <div className="usage-chart-picker">
+            <label className="usage-filter" title={t('tooltipUsageChartPicker')}>
+              <span>{t('usageChartPicker')}</span>
+              <select aria-label={t('usageChartPicker')} onChange={(event) => setChartId(event.target.value)} title={t('tooltipUsageChartPicker')} value={selectedChart}>
+                {chartOptions.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="usage-single">
+            {selectedChart === CONNECTED_CHART
+              ? <ConnectedClientsCard height={USAGE_CHART_HEIGHT} load={api.getConnectedHistory} range={range} refreshSignal={`${refreshSignal}-${autoRefreshSignal}`} />
+              : charts.filter((chart) => chart.id === selectedChart).map((chart) => <ChartCard chart={chart} height={USAGE_CHART_HEIGHT} key={chart.id} onDrill={onDrill ? drill : undefined} />)}
           </div>
           {analytics.groupTotals?.length ? (
             <section className="workspace-card usage-groups">

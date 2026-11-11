@@ -300,6 +300,26 @@ namespace Xeno.Client.Hosting
             return LaunchApplication(XenoApplicationEnum.Desktop, XenoProduct.DesktopName, DesktopArguments(request));
         }
 
+        /// <summary>
+        /// On macOS and Linux, start an app through /bin/sh with its standard streams on /dev/null, so an app started from
+        /// a terminal (for example the tray agent started by run-client) never writes into that terminal. The apps record
+        /// their own errors under logs/ in the client home. Windows GUI apps have no console to share.
+        /// </summary>
+        /// <param name="original">Start information for the app.</param>
+        /// <returns>Start information to use.</returns>
+        public static ProcessStartInfo Detached(ProcessStartInfo original)
+        {
+            ArgumentNullException.ThrowIfNull(original);
+            if (OperatingSystem.IsWindows() || !File.Exists("/bin/sh")) return original;
+            ProcessStartInfo shell = new ProcessStartInfo { FileName = "/bin/sh", UseShellExecute = false, WorkingDirectory = original.WorkingDirectory };
+            shell.ArgumentList.Add("-c");
+            shell.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >/dev/null 2>&1");
+            shell.ArgumentList.Add(original.FileName);
+            foreach (string argument in original.ArgumentList) shell.ArgumentList.Add(argument);
+            foreach (System.Collections.Generic.KeyValuePair<string, string?> variable in original.Environment) shell.Environment[variable.Key] = variable.Value;
+            return shell;
+        }
+
         private static LaunchResult LaunchApplication(XenoApplicationEnum application, string displayName, IReadOnlyList<string>? extraArguments = null)
         {
             XenoExecutableLocation? location = XenoExecutableLocator.Locate(application);
@@ -310,7 +330,7 @@ namespace Xeno.Client.Hosting
 
             List<string> arguments = new List<string>(XenoLaunchOptions.ForwardHomeArguments());
             if (extraArguments != null) arguments.AddRange(extraArguments);
-            ProcessStartInfo startInfo = location.CreateStartInfo(arguments);
+            ProcessStartInfo startInfo = Detached(location.CreateStartInfo(arguments));
             startInfo.UseShellExecute = false;
             startInfo.CreateNoWindow = true;
             string? directory = Path.GetDirectoryName(location.LeadingArguments.Count > 0 ? location.LeadingArguments[0] : location.Executable);

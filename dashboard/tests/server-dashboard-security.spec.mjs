@@ -2,6 +2,13 @@ import { expect, test } from '@playwright/test';
 import fs from 'node:fs/promises';
 import { healthStrip, usageAnalytics } from './usageFixture.mjs';
 
+// The usage page shows one chart at a time; tests pick it from the Chart list.
+const usageChartOptions = (page) => page.locator('.usage-chart-picker select option');
+async function showChart(page, id) {
+  await page.locator('.usage-chart-picker select').selectOption(id);
+  await expect(page.locator(`[data-chart="${id}"]`)).toHaveCount(1);
+}
+
 const serverUrl = 'http://localhost:9000';
 
 function session(userId) {
@@ -1514,7 +1521,7 @@ test('server usage page follows roles, redirects analytics, and drills into requ
   await routeUsage(page, { id: 'usr_admin', tenantId: 'ten_default', email: 'admin@xeno.test', isAdmin: false, isTenantAdmin: true, active: true }, (url) => { queries.push(url); return null; });
   await page.goto('/dashboard/analytics');
   await expect(page).toHaveURL(/\/dashboard\/usage$/);
-  await expect(page.locator('[data-chart]')).toHaveCount(12);
+  await expect(usageChartOptions(page)).toHaveCount(12);
   const links = await page.locator('.sidebar a').allTextContents();
   expect(links.findIndex((item) => item.includes('Usage'))).toBe(links.findIndex((item) => item.includes('Home')) + 1);
   expect(links.some((item) => item.trim() === 'Analytics')).toBe(false);
@@ -1525,11 +1532,12 @@ test('server usage page follows roles, redirects analytics, and drills into requ
   expect(queries.at(-1).searchParams.get('utcOffsetMinutes')).not.toBeNull();
 
   await page.getByRole('button', { name: 'Chat', exact: true }).last().click();
-  await expect(page.locator('[data-chart]')).toHaveCount(14);
+  await expect(usageChartOptions(page)).toHaveCount(14);
   await expect.poll(() => queries.at(-1)?.searchParams.get('scope')).toBe('tenant');
   await page.getByRole('button', { name: 'Network requests', exact: true }).click();
-  await expect(page.locator('[data-chart]')).toHaveCount(12);
+  await expect(usageChartOptions(page)).toHaveCount(12);
 
+  await showChart(page, 'usage.outcome');
   await page.locator('[data-chart="usage.outcome"] .usage-hover').nth(30).click();
   await expect(page).toHaveURL(/\/dashboard\/requests\?fromUtc=/);
   await expect(page.locator('.usage-drill-banner')).toContainText('from the Usage page');
@@ -1542,7 +1550,7 @@ test('server usage hides groupings a member cannot use and explains a refusal', 
   let refuse = false;
   await routeUsage(page, { id: 'usr_member', tenantId: 'ten_default', email: 'member@xeno.test', isAdmin: false, isTenantAdmin: false, active: true }, () => (refuse ? { status: 403, json: { Message: 'Forbidden' } } : null));
   await page.goto('/dashboard/usage');
-  await expect(page.locator('[data-chart]')).toHaveCount(12);
+  await expect(usageChartOptions(page)).toHaveCount(12);
   await expect(page.locator('.usage-filters select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client']);
   refuse = true;
   await page.locator('.usage-toolbar .icon-button').click();
@@ -1555,7 +1563,7 @@ test('server usage fits every width and theme, and client telemetry shows provid
     for (const theme of ['light', 'dark']) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto('/dashboard/usage');
-      await expect(page.locator('[data-chart]')).toHaveCount(12);
+      await expect(usageChartOptions(page)).toHaveCount(12);
       await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
       await page.waitForTimeout(150);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -1564,6 +1572,7 @@ test('server usage fits every width and theme, and client telemetry shows provid
     }
   }
   await expect(page.locator('.usage-filters select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client', 'User', 'Credential', 'Tenant']);
+  await showChart(page, 'connected.clients');
   await expect(page.locator('[data-chart="connected.clients"] rect[data-series="connected"]')).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/dashboard/client-telemetry');

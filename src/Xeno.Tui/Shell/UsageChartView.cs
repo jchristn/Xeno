@@ -464,9 +464,12 @@ namespace Xeno.Tui.Shell
             int cellWidth = Math.Max(1, (width - labelWidth) / columns);
             double maximum = chart.Maximum <= 0 ? 1 : chart.Maximum;
             int rows = Math.Min(chart.RowLabels.Count, Math.Max(0, available - 1));
-            for (int row = 0; row < rows; row++)
+            int skip = status ? 0 : Math.Max(0, chart.RowLabels.Count - rows);
+            for (int line = 0; line < rows; line++)
             {
-                int y = top + row;
+                // A heatmap taller than the space shows its most recent rows.
+                int row = skip + line;
+                int y = top + line;
                 surface.DrawText(0, y, Fit(chart.RowLabels[row], labelWidth - 1), _Theme.Muted);
                 IReadOnlyList<double> cells = row < chart.Grid.Count ? chart.Grid[row] : new List<double>();
                 for (int column = 0; column < cells.Count && column < columns; column++)

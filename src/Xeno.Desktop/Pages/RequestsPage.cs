@@ -89,7 +89,7 @@ namespace Xeno.Desktop.Pages
             _Search = new TextBox { PlaceholderText = "Filter by model, provider, or path", MinWidth = 280 };
             _Search.TextChanged += (sender, args) => Apply();
             _Summary = Ui.Muted(String.Empty);
-            _Chart = new ColumnChart { Height = 170 };
+            _Chart = new ColumnChart { Height = 255 };
             _Table = new XenoTable<RequestRow>(new List<XenoTableColumn<RequestRow>>
             {
                 new XenoTableColumn<RequestRow>("Received", row => row.Received) { SortKey = row => row.ReceivedUtc }.Fixed(160),

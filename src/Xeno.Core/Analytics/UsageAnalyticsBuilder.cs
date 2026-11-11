@@ -186,7 +186,7 @@ namespace Xeno.Core.Analytics
         {
             double minutes = (toUtc - fromUtc).TotalMinutes;
             if (minutes <= 120) return UsageHeatmapLayoutEnum.HourByMinute;
-            if (minutes <= 2 * 24 * 60) return UsageHeatmapLayoutEnum.DayByHour;
+            if (minutes <= 32 * 24 * 60) return UsageHeatmapLayoutEnum.DayByHour;
             return UsageHeatmapLayoutEnum.WeekdayByHour;
         }
 

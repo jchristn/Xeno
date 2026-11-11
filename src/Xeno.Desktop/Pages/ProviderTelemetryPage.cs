@@ -42,6 +42,7 @@ namespace Xeno.Desktop.Pages
         private XenoTable<ProviderSampleRow>? _Samples;
         private ComboBox _Provider = new ComboBox();
         private ComboBox _Metric = new ComboBox();
+        private bool _BindingMetrics = false;
         private ComboBox _Range = new ComboBox();
         private ColumnChart _Chart = new ColumnChart();
         private ColumnChart _Health = new ColumnChart();
@@ -98,7 +99,10 @@ namespace Xeno.Desktop.Pages
             _Provider = new ComboBox { MinWidth = 180 };
             _Provider.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
             _Metric = new ComboBox { ItemsSource = Enum.GetNames(typeof(ClientProviderTelemetryMetricEnum)), SelectedIndex = 0, MinWidth = 220 };
-            _Metric.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
+            _Metric.SelectionChanged += (sender, args) =>
+            {
+                if (!_BindingMetrics) _ = RefreshHistoryAsync();
+            };
             _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 1, MinWidth = 140 };
             _Model = new ComboBox { MinWidth = 180 };
             _Model.SelectionChanged += (sender, args) => _ = RefreshHistoryAsync();
@@ -153,9 +157,22 @@ namespace Xeno.Desktop.Pages
                 string? provider = _Provider.SelectedItem as string;
                 if (provider == AllProviders) provider = null;
                 HistoryRangeEnum range = HistoryRanges.FromIndex(_Range.SelectedIndex);
-                ClientProviderTelemetryMetricEnum metric = Enum.TryParse(_Metric.SelectedItem as string, out ClientProviderTelemetryMetricEnum parsed) ? parsed : ClientProviderTelemetryMetricEnum.ActiveRequests;
                 string? model = _Model.SelectedItem as string;
                 if (model == AllModels) model = null;
+
+                // Offer only metrics with readings for this provider, model, and range; keep the choice when it still has data.
+                List<ClientProviderTelemetryMetricEnum> available = await Workspace.ProviderMetricsWithDataAsync(provider, range, None, model).ConfigureAwait(true);
+                List<string> names = (available.Count > 0 ? available : Enum.GetValues<ClientProviderTelemetryMetricEnum>().ToList()).Select(item => item.ToString()).ToList();
+                string? chosen = _Metric.SelectedItem as string;
+                if (_Metric.ItemsSource is not List<string> current || !current.SequenceEqual(names))
+                {
+                    _BindingMetrics = true;
+                    _Metric.ItemsSource = names;
+                    _Metric.SelectedItem = chosen != null && names.Contains(chosen) ? chosen : names[0];
+                    _BindingMetrics = false;
+                }
+
+                ClientProviderTelemetryMetricEnum metric = Enum.TryParse(_Metric.SelectedItem as string, out ClientProviderTelemetryMetricEnum parsed) ? parsed : ClientProviderTelemetryMetricEnum.ActiveRequests;
                 List<ClientProviderTelemetryRollupBucket> buckets = await Workspace.RollupProviderTelemetryAsync(metric, provider, range, None, model).ConfigureAwait(true);
                 _Chart.SetChart(XenoCharts.ProviderMetric(metric, provider, buckets, range));
                 _Samples.SetRows(await Workspace.SearchProviderTelemetryAsync(provider, range, 500, None).ConfigureAwait(true));

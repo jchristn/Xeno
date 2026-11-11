@@ -55,7 +55,7 @@ namespace Xeno.Client
         }
 
         /// <summary>
-        /// System prompt for new conversations, or null for none.
+        /// System prompt for new conversations, or null for the built-in <see cref="Xeno.Core.Chat.ChatDefaults.SystemPrompt"/>.
         /// </summary>
         public string? DefaultSystemPrompt { get; set; } = null;
 

@@ -110,6 +110,7 @@ namespace Xeno.Tui.Pages
             _Actions.Add("Prompt", () => _ = SystemPromptAsync());
             _Actions.Add("Folder", () => _ = WorkingDirectoryAsync());
             _Actions.Add("Delete", () => _ = DeleteAsync());
+            _Actions.Add("Delete Chats", () => _ = DeleteManyAsync());
             FramedStack pickers = new FramedStack(SplitOrientation.Horizontal);
             Frame(pickers, _Conversation, StackSize.Weighted(3, 20), "Conversation");
             Frame(pickers, _Model, StackSize.Weighted(2, 16), "Model");
@@ -495,8 +496,12 @@ namespace Xeno.Tui.Pages
                 return;
             }
 
-            Dictionary<string, string>? values = await Context.FormAsync("System Prompt", "Instructions sent before every message in this conversation. Leave empty for none.",
-                new List<XenoFormFieldSpec> { new XenoFormFieldSpec { Key = "prompt", Label = "System prompt", Value = _Current.SystemPrompt ?? String.Empty } }, null, "Save", "Saving...").ConfigureAwait(false);
+            bool hasPrompt = !String.IsNullOrWhiteSpace(_Current.SystemPrompt);
+            string intro = hasPrompt
+                ? "Instructions sent before every message in this conversation. Clear it to send none."
+                : "This chat has no system prompt. Xeno's default is filled in: save to use it, edit it, or clear it to keep sending none.";
+            Dictionary<string, string>? values = await Context.FormAsync("System Prompt", intro,
+                new List<XenoFormFieldSpec> { new XenoFormFieldSpec { Key = "prompt", Label = "System prompt", Value = hasPrompt ? _Current.SystemPrompt! : ChatDefaults.SystemPrompt } }, null, "Save", "Saving...").ConfigureAwait(false);
             if (values == null) return;
             string id = _Current.Id;
             await Context.RunAsync(async token =>
@@ -542,6 +547,42 @@ namespace Xeno.Tui.Pages
                 await Workspace.Chat.DeleteConversationAsync(target.Id, token).ConfigureAwait(false);
                 _Current = null;
                 return "Deleted \"" + target.Title + "\".";
+            }, () => _ = RefreshAsync()).ConfigureAwait(false);
+        }
+
+        private async Task DeleteManyAsync()
+        {
+            // A checkbox per conversation; the ticked ones are deleted together after one confirmation.
+            List<ChatConversation> conversations = _Conversations.Take(200).ToList();
+            if (conversations.Count == 0)
+            {
+                Context.Notify("There are no chats to delete.", NotificationSeverity.Info);
+                return;
+            }
+
+            List<XenoFormFieldSpec> fields = conversations.Select((item, index) => new XenoFormFieldSpec
+            {
+                Key = "c" + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Label = item.Title + "  (" + item.Model + ", " + ChatFormat.When(item.UpdatedUtc) + ")",
+                Kind = XenoSettingKindEnum.Toggle,
+                Value = _Current != null && _Current.Id == item.Id ? "true" : "false"
+            }).ToList();
+            Dictionary<string, string>? values = await Context.FormAsync("Delete Chats", "Tick the chats to delete, then press Ctrl+S.", fields, null, "Next", "Checking...").ConfigureAwait(false);
+            if (values == null) return;
+            List<ChatConversation> chosen = conversations.Where((item, index) => values.TryGetValue("c" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), out string? value) && value == "true").ToList();
+            if (chosen.Count == 0)
+            {
+                Context.Notify("No chats were ticked.", NotificationSeverity.Info);
+                return;
+            }
+
+            bool confirmed = await Context.ConfirmAsync("Delete Chats", "Delete " + chosen.Count + " chat" + (chosen.Count == 1 ? String.Empty : "s") + " and their messages and ratings?", "Delete").ConfigureAwait(false);
+            if (!confirmed) return;
+            await Context.RunAsync(async token =>
+            {
+                foreach (ChatConversation conversation in chosen) await Workspace.Chat.DeleteConversationAsync(conversation.Id, token).ConfigureAwait(false);
+                if (_Current != null && chosen.Any(item => item.Id == _Current.Id)) _Current = null;
+                return "Deleted " + chosen.Count + " chat" + (chosen.Count == 1 ? String.Empty : "s") + ".";
             }, () => _ = RefreshAsync()).ConfigureAwait(false);
         }
 

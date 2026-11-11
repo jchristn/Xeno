@@ -11,7 +11,7 @@ namespace Xeno.Core.Analytics
         HourByMinute,
 
         /// <summary>
-        /// Up to 2 days: one row per day, one column per hour of the day.
+        /// Up to 32 days (a day, a week, or a month): one row per day, one column per hour of the day.
         /// </summary>
         DayByHour,
 

@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { emptyUsage, healthStrip, usageAnalytics } from './usageFixture.mjs';
 
+// The usage page shows one chart at a time; tests pick it from the Chart list.
+const usageChartOptions = (page) => page.locator('.usage-chart-picker select option');
+async function showChart(page, id) {
+  await page.locator('.usage-chart-picker select').selectOption(id);
+  await expect(page.locator(`[data-chart="${id}"]`)).toHaveCount(1);
+}
+
 let logRequests = 0;
 
 const stateResponse = {
@@ -433,6 +440,37 @@ test('chat fills the window and says in the conversation why a model did not ans
   await expect(page.locator('.chat-message.assistant').nth(0).locator('.chat-actions')).toHaveCount(0);
 });
 
+test('chat deletes several selected conversations at once', async ({ page }) => {
+  const now = new Date().toISOString();
+  let list = ['cnv_a', 'cnv_b', 'cnv_c'].map((id, index) => ({ id, title: 'Chat ' + 'ABC'[index], model: 'llama3.1:8b', toolsEnabled: false, pinned: false, surface: 'Web', messageCount: 1, createdUtc: now, updatedUtc: now }));
+  const deleted = [];
+  await page.route('**/api/v1/chat/models', async (route) => route.fulfill({ json: { entries: [{ name: 'llama3.1:8b', servedLocally: true, onNetwork: false, supportsCompletions: true }], networkMessage: '' } }));
+  await page.route('**/api/v1/chat/models/prepare', async (route) => route.fulfill({ json: { model: 'llama3.1:8b', route: 'local:ollama', loaded: true, supportsTools: false, message: 'Loaded.' } }));
+  await page.route('**/api/v1/chat/conversations?**', async (route) => route.fulfill({ json: list }));
+  await page.route('**/api/v1/chat/conversations/cnv_*', async (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    if (route.request().method() === 'DELETE') {
+      deleted.push(id);
+      list = list.filter((item) => item.id !== id);
+      await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    await route.fulfill({ json: { ...list.find((item) => item.id === id), messages: [] } });
+  });
+  await page.goto('/index-local.html');
+  await page.getByRole('button', { name: 'Chat', exact: true }).first().click();
+  await expect(page.locator('.chat-conversation-item')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Select conversations to delete several at once' }).click();
+  await page.getByRole('checkbox', { name: 'Select “Chat A”' }).check();
+  await page.locator('.chat-conversation-open', { hasText: 'Chat C' }).click();
+  await expect(page.getByText('2 selected')).toBeVisible();
+  await page.locator('.chat-select-bar').getByRole('button', { name: 'Delete (2)' }).click();
+  await page.locator('.modal, [role="dialog"]').getByRole('button', { name: 'Delete (2)' }).click();
+  await expect.poll(() => deleted.sort().join(',')).toBe('cnv_a,cnv_c');
+  await expect(page.locator('.chat-conversation-item')).toHaveCount(1);
+  await expect(page.locator('.chat-select-bar')).toHaveCount(0);
+});
+
 test('chat streams answers, records feedback, and shows history and ratings', async ({ page }) => {
   const now = new Date().toISOString();
   const conversation = { id: 'cnv_1', title: 'New chat', model: 'llama3.1:8b', toolsEnabled: false, pinned: false, surface: 'Web', messageCount: 0, createdUtc: now, updatedUtc: now, messages: [] };
@@ -610,25 +648,34 @@ test('usage page draws every chart, drills down, and handles empty and failed lo
   expect(nav.indexOf('Usage')).toBeGreaterThanOrEqual(0);
   expect(nav.indexOf('Usage')).toBe(nav.indexOf('Request History') - 1);
   await page.getByRole('button', { name: 'Usage', exact: true }).click();
-  await expect(page.locator('[data-chart]')).toHaveCount(11);
+  await expect(usageChartOptions(page)).toHaveCount(11);
+  await expect(page.locator('[data-chart]')).toHaveCount(1);
   for (const id of ['usage.outcome', 'usage.latency', 'usage.ttft', 'usage.streaming', 'usage.throughput', 'usage.tokens', 'usage.groups', 'usage.groupTotals', 'usage.heatmap', 'usage.stages', 'usage.stageAverages']) {
+    await showChart(page, id);
     await expect(page.locator(`[data-chart="${id}"] .usage-empty`)).toHaveCount(0);
   }
   await expect(page.locator('.metric-card').first()).toContainText('3');
   // A value with no neighbors still shows: one dot per percentile.
+  await showChart(page, 'usage.latency');
   await expect(page.locator('[data-chart="usage.latency"] circle.usage-point')).toHaveCount(4);
+  await showChart(page, 'usage.throughput');
   await expect(page.locator('[data-chart="usage.throughput"] circle.usage-point')).toHaveCount(2);
+  await showChart(page, 'usage.heatmap');
   await expect(page.locator('[data-chart="usage.heatmap"] .usage-heat-cell.active')).toHaveCount(1);
+  await showChart(page, 'usage.stageAverages');
   await expect(page.locator('[data-chart="usage.stageAverages"] .usage-bar-row')).toHaveCount(2);
   await expect(page.locator('.usage-groups table tbody tr')).toHaveCount(2);
 
   // Chat adds the feedback and tool charts.
   await page.getByRole('button', { name: 'Chat', exact: true }).last().click();
-  await expect(page.locator('[data-chart]')).toHaveCount(13);
+  await expect(usageChartOptions(page)).toHaveCount(13);
+  await showChart(page, 'usage.feedback');
   await expect(page.locator('[data-chart="usage.feedback"]')).toContainText('Thumbs up');
+  await showChart(page, 'usage.tools');
   await expect(page.locator('[data-chart="usage.tools"]')).toContainText('Denied');
 
   // The tooltip is drawn on the body, so a card cannot clip it.
+  await showChart(page, 'usage.outcome');
   const hover = page.locator('[data-chart="usage.outcome"] .usage-hover').nth(30);
   await hover.hover();
   await expect(page.locator('body > .usage-chart-tooltip')).toBeVisible();
@@ -648,13 +695,14 @@ test('usage page draws every chart, drills down, and handles empty and failed lo
   mode = 'empty';
   await page.getByRole('button', { name: 'Refresh' }).first().click();
   await expect(page.locator('.usage-empty-page')).toContainText('No traffic retained');
+  await showChart(page, 'usage.latency');
   await expect(page.locator('[data-chart="usage.latency"] .usage-empty')).toContainText('No requests with timing');
   mode = 'error';
   await page.getByRole('button', { name: 'Refresh' }).first().click();
   await expect(page.locator('.error-state')).toContainText('Usage is broken.');
   mode = 'full';
   await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.locator('[data-chart]')).toHaveCount(11);
+  await expect(usageChartOptions(page)).toHaveCount(11);
 });
 
 test('usage page fits every width and theme', async ({ page }) => {
@@ -668,7 +716,7 @@ test('usage page fits every width and theme', async ({ page }) => {
       } else {
         await page.getByRole('button', { name: 'Usage', exact: true }).click();
       }
-      await expect(page.locator('[data-chart]')).toHaveCount(11);
+      await expect(usageChartOptions(page)).toHaveCount(11);
       await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
       await page.waitForTimeout(150);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -686,7 +734,9 @@ test('usage page keeps its layout with longer translated text', async ({ page })
   await page.goto('/index-local.html');
   await page.locator('.language-selector select, select[aria-label="Language"], .topbar select').first().selectOption('es');
   await page.locator('.sidebar-link', { hasText: 'Uso' }).first().evaluate((element) => element.click());
+  await showChart(page, 'usage.stages');
   await expect(page.locator('[data-chart="usage.stages"] h2')).toHaveText('Tiempo por etapa');
+  await showChart(page, 'usage.outcome');
   await expect(page.locator('[data-chart="usage.outcome"] .chart-legend')).toContainText('Respondidas por respaldo de red');
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 });

@@ -52,6 +52,6 @@ export default function ConnectedClientsChart({ load, range, refreshSignal }) {
   );
 }
 
-export function ConnectedClientsCard({ load, range, refreshSignal }) {
-  return <ChartCard chart={useConnectedChart(load, range, refreshSignal)} />;
+export function ConnectedClientsCard({ height, load, range, refreshSignal }) {
+  return <ChartCard chart={useConnectedChart(load, range, refreshSignal)} height={height} />;
 }

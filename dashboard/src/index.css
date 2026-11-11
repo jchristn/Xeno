@@ -4770,6 +4770,40 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 2px;
 }
 
+.chat-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-search-row .chat-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--color-muted);
+}
+
+.chat-select-bar .action-button {
+  margin-left: auto;
+}
+
+.chat-select-check {
+  flex: 0 0 auto;
+  margin: 0 2px 0 8px;
+  accent-color: var(--color-accent);
+}
+
+.chat-conversation-item.selected {
+  background: var(--color-accent-soft, var(--color-panel-soft));
+}
+
 .chat-conversation-item {
   display: flex;
   align-items: center;
@@ -5605,6 +5639,22 @@ html[data-theme='dark'] .primitive-list-item {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.usage-chart-picker {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 4px 0 12px;
+}
+
+.usage-chart-picker select {
+  min-width: 260px;
+}
+
+.usage-single {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .usage-chart-card {

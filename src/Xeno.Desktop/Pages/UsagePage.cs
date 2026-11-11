@@ -52,8 +52,10 @@ namespace Xeno.Desktop.Pages
         private readonly Dictionary<string, ColumnChart> _Charts = new Dictionary<string, ColumnChart>(StringComparer.Ordinal);
         private readonly WrapPanel _Metrics = new WrapPanel();
         private readonly StackPanel _Notice = new StackPanel();
-        private readonly TabControl _Tabs = new TabControl();
-        private readonly Dictionary<string, TabItem> _TabItems = new Dictionary<string, TabItem>(StringComparer.Ordinal);
+        private readonly ComboBox _Chart = new ComboBox { MinWidth = 260 };
+        private readonly ContentControl _ChartHost = new ContentControl();
+        private List<string> _ChartIds = new List<string>();
+        private bool _BindingCharts = false;
         private ComboBox _Range = new ComboBox();
         private ComboBox _Dataset = new ComboBox();
         private ComboBox _GroupBy = new ComboBox();
@@ -106,7 +108,7 @@ namespace Xeno.Desktop.Pages
                 _Notice,
                 Ui.Row(_Range, _Dataset, _GroupBy, _Metric),
                 _Metrics,
-                Ui.Card(null, _Tabs),
+                Ui.Card(null, ChartPanel()),
                 Ui.Card("By group, whole range", _Groups));
         }
 
@@ -178,35 +180,58 @@ namespace Xeno.Desktop.Pages
         private void RenderCharts(UsageAnalytics analytics)
         {
             string range = HistoryRanges.Describe(HistoryRanges.FromIndex(_Range.SelectedIndex));
-            // One tab per chart, each the full width of the page. Tabs are kept across refreshes so the chosen tab stays put;
-            // they are only rebuilt when the dataset offers a different set of charts.
+            // One chart at a time, picked from a dropdown, using the full width of the page. The choice is kept across
+            // refreshes; the list only changes when the dataset offers a different set of charts.
             List<string> ids = XenoUsageCharts.ChartsFor(SelectedDataset).ToList();
-            bool sameTabs = ids.SequenceEqual(_TabItems.Keys);
-            if (!sameTabs)
+            if (!ids.SequenceEqual(_ChartIds))
             {
-                string? selected = (_Tabs.SelectedItem as TabItem)?.Tag as string;
+                string? selected = SelectedChartId();
                 foreach (string stale in _Charts.Keys.Where(key => !ids.Contains(key)).ToList()) _Charts.Remove(stale);
-                _Tabs.Items.Clear();
-                _TabItems.Clear();
                 foreach (string id in ids)
                 {
-                    if (!_Charts.TryGetValue(id, out ColumnChart? created))
-                    {
-                        created = new ColumnChart { Height = 420 };
-                        string target = id;
-                        created.BucketActivated += (bucket, series) => DrillDown(target, bucket, series);
-                        _Charts[id] = created;
-                    }
-
-                    TabItem tab = new TabItem { Header = XenoChartCatalog.Find(id).Title, Tag = id, Content = Ui.Adopt(created), FontSize = 13 };
-                    _TabItems[id] = tab;
-                    _Tabs.Items.Add(tab);
+                    if (_Charts.ContainsKey(id)) continue;
+                    ColumnChart created = new ColumnChart { Height = 420 };
+                    string target = id;
+                    created.BucketActivated += (bucket, series) => DrillDown(target, bucket, series);
+                    _Charts[id] = created;
                 }
 
-                _Tabs.SelectedItem = selected != null && _TabItems.TryGetValue(selected, out TabItem? keep) ? keep : _TabItems.Values.FirstOrDefault();
+                _ChartIds = ids;
+                _BindingCharts = true;
+                _Chart.ItemsSource = ids.Select(id => XenoChartCatalog.Find(id).Title).ToList();
+                _Chart.SelectedIndex = selected != null && ids.Contains(selected) ? ids.IndexOf(selected) : 0;
+                _BindingCharts = false;
             }
 
             foreach (string id in ids) _Charts[id].SetChart(XenoUsageCharts.Build(id, analytics, range));
+            ShowSelectedChart();
+        }
+
+        private Control ChartPanel()
+        {
+            _Chart.SelectionChanged -= OnChartChosen;
+            _Chart.SelectionChanged += OnChartChosen;
+            Avalonia.Automation.AutomationProperties.SetName(_Chart, "Chart");
+            ToolTip.SetTip(_Chart, "Which chart to show");
+            StackPanel picker = Ui.Row(new TextBlock { Text = "Chart", Foreground = XenoTheme.Current.Muted, VerticalAlignment = VerticalAlignment.Center }, _Chart);
+            return Ui.Stack(16, picker, _ChartHost);
+        }
+
+        private void OnChartChosen(object? sender, SelectionChangedEventArgs args)
+        {
+            if (!_BindingCharts) ShowSelectedChart();
+        }
+
+        private string? SelectedChartId()
+        {
+            int index = _Chart.SelectedIndex;
+            return index >= 0 && index < _ChartIds.Count ? _ChartIds[index] : null;
+        }
+
+        private void ShowSelectedChart()
+        {
+            string? id = SelectedChartId();
+            _ChartHost.Content = id != null && _Charts.TryGetValue(id, out ColumnChart? chart) ? Ui.Adopt(chart) : null;
         }
 
         private void DrillDown(string chartId, XenoChartBucket bucket, string? series)

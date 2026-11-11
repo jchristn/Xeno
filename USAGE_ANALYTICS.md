@@ -87,7 +87,7 @@ A stage is left out when its inputs were not recorded, so stages can sum to less
 | Range | Layout |
 |---|---|
 | Up to 2 hours | One row per 10 minutes, one column per minute |
-| Up to 2 days | One row per day, one column per hour |
+| Up to 32 days (last day, week, or month) | One row per day, one column per hour |
 | Longer | One row per weekday (Sunday first), one column per hour |
 
 Hour and weekday cells use the viewer's offset from UTC (`utcOffsetMinutes`), applied as one fixed offset for the whole range. A range that crosses a daylight saving change is off by an hour on one side of it.

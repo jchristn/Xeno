@@ -123,6 +123,70 @@ namespace Test.Shared
                     Check(Xeno.Client.Telemetry.Providers.ClientGpuTelemetryProvider.ParseIoreg("+-o IOAccelerator  <class IOAccelerator>\n  {\n  }\n", null).Count == 0 && Xeno.Client.Telemetry.Providers.ClientGpuTelemetryProvider.ParseIoreg(null, null).Count == 0, "Output without statistics should give no devices.");
                     return Task.CompletedTask;
                 }),
+                new TestCaseDescriptor(suite, "GpuProvidersMatchTheWireFormat", "Every client GPU source converts to the shared telemetry format the server reads", executeAsync: delegate
+                {
+                    List<string> client = Enum.GetNames<Xeno.Client.Telemetry.Models.ClientTelemetryGpuProviderEnum>().ToList();
+                    List<string> shared = Enum.GetNames<Xeno.Core.Models.Telemetry.ClientTelemetryGpuProviderEnum>().ToList();
+                    Check(client.SequenceEqual(shared), "Client and shared GPU sources differ: " + String.Join(",", client) + " vs " + String.Join(",", shared));
+                    Xeno.Client.Telemetry.Models.ClientTelemetrySnapshot local = new Xeno.Client.Telemetry.Models.ClientTelemetrySnapshot();
+                    local.Gpu.Provider = Xeno.Client.Telemetry.Models.ClientTelemetryGpuProviderEnum.AppleIoreg;
+                    Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot? wire = Xeno.Core.Serialization.JsonUtil.Deserialize<Xeno.Core.Models.Telemetry.ClientTelemetrySnapshot>(Xeno.Core.Serialization.JsonUtil.Serialize(local));
+                    Check(wire != null && wire.Gpu.Provider == Xeno.Core.Models.Telemetry.ClientTelemetryGpuProviderEnum.AppleIoreg, "An Apple GPU snapshot did not convert to the wire format.");
+                    return Task.CompletedTask;
+                }),
+                new TestCaseDescriptor(suite, "AppsStartWithoutTheCallersConsole", "Apps started by another Xeno app get their own streams instead of the caller's terminal", executeAsync: async delegate
+                {
+                    System.Diagnostics.ProcessStartInfo original = new System.Diagnostics.ProcessStartInfo { FileName = "/usr/bin/true" };
+                    original.ArgumentList.Add("--page");
+                    original.ArgumentList.Add("chat page");
+                    System.Diagnostics.ProcessStartInfo detached = XenoAppLauncher.Detached(original);
+                    if (OperatingSystem.IsWindows())
+                    {
+                        Check(Object.ReferenceEquals(detached, original), "Windows should launch the app directly.");
+                        return;
+                    }
+
+                    Check(detached.FileName == "/bin/sh" && detached.ArgumentList[0] == "-c" && detached.ArgumentList[1].Contains("/dev/null", StringComparison.Ordinal), "The app should start through /bin/sh with its streams on /dev/null.");
+                    Check(detached.ArgumentList.Skip(2).SequenceEqual(new[] { "/usr/bin/true", "--page", "chat page" }), "The app and its arguments were not passed through: " + String.Join(" | ", detached.ArgumentList));
+                    detached.RedirectStandardOutput = true;
+                    using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(detached) ?? throw new InvalidOperationException("Could not start the detached command."))
+                    {
+                        string output = await process.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+                        await process.WaitForExitAsync().ConfigureAwait(false);
+                        Check(process.ExitCode == 0 && output.Length == 0, "The detached command failed or wrote to the caller: exit " + process.ExitCode);
+                    }
+                }),
+                new TestCaseDescriptor(suite, "ConnectHelpExplainsQuietTerminal", "xeno connect help explains what the terminal shows and offers --verbose", executeAsync: async delegate
+                {
+                    using (ClientHomeScope home = new ClientHomeScope())
+                    {
+                        LocalUsageTestSuites.CliResult help = await LocalUsageTestSuites.RunCliAsync(home.Directory, "connect", "--help").ConfigureAwait(false);
+                        Check(help.Output.Contains("--verbose", StringComparison.Ordinal) && help.Output.Contains("everything else goes to the log", StringComparison.Ordinal), "Connect help does not explain the terminal output.");
+                    }
+                }),
+                new TestCaseDescriptor(suite, "CliDeletesSeveralChats", "xeno chat delete removes several conversations at once, reports missing ones, and --all needs --yes", executeAsync: async delegate
+                {
+                    using (ClientHomeScope home = new ClientHomeScope())
+                    using (ChatApiFixture fixture = new ChatApiFixture("Answer"))
+                    using (Xeno.Client.Chat.XenoChatClient chat = new Xeno.Client.Chat.XenoChatClient())
+                    {
+                        List<string> ids = new List<string>();
+                        for (int i = 0; i < 3; i++)
+                        {
+                            Xeno.Core.Chat.ChatConversation created = await chat.CreateConversationAsync(new Xeno.Core.Chat.ChatConversationRequest { Model = "llama3.1:8b", Title = "chat " + i }, CancellationToken.None).ConfigureAwait(false);
+                            ids.Add(created.Id);
+                            Check(created.SystemPrompt == Xeno.Core.Chat.ChatDefaults.SystemPrompt, "A new chat should start with the default system prompt.");
+                        }
+
+                        LocalUsageTestSuites.CliResult two = await LocalUsageTestSuites.RunCliAsync(home.Directory, "chat", "delete", ids[0], ids[1]).ConfigureAwait(false);
+                        Check(two.ExitCode == 0 && two.Output.Contains("Deleted 2 conversations", StringComparison.Ordinal), "Deleting two chats failed: " + two.Output + two.Error);
+                        LocalUsageTestSuites.CliResult missing = await LocalUsageTestSuites.RunCliAsync(home.Directory, "chat", "delete", ids[2], "cnv_missing").ConfigureAwait(false);
+                        Check(missing.ExitCode != 0 && missing.Error.Contains("cnv_missing", StringComparison.Ordinal), "A missing chat should be reported: " + missing.Output + missing.Error);
+                        LocalUsageTestSuites.CliResult unconfirmed = await LocalUsageTestSuites.RunCliAsync(home.Directory, "chat", "delete", "--all").ConfigureAwait(false);
+                        Check(unconfirmed.ExitCode != 0 && unconfirmed.Error.Contains("--yes", StringComparison.Ordinal), "--all without --yes should refuse.");
+                        Check((await chat.ListConversationsAsync(null, 100, CancellationToken.None).ConfigureAwait(false)).Count == 0, "Every created chat should be gone.");
+                    }
+                }),
                 new TestCaseDescriptor(suite, "LogTimeWindow", "The log reader keeps lines written in a time window, with untimed lines following the line before them", executeAsync: async delegate
                 {
                     string file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "xeno-log-window-" + Guid.NewGuid().ToString("N") + ".log");

@@ -40,7 +40,7 @@ Each `run-*` script builds what it needs first, so you don't need to build the s
 | `run-tui.sh` | The terminal app (`xeno tui`) in the current terminal. |
 | `run-tray.sh` | The Xeno Agent tray app (`xeno-tray`). |
 | `run-cli.sh <args>` | Any `xeno` command, for example `run-cli.sh status` or `run-cli.sh server show`. |
-| `run-client.sh` | The client worker in the foreground (`xeno connect --foreground`), with its log in the terminal. |
+| `run-client.sh` | The client worker in the foreground (`xeno connect --foreground`). The terminal shows connection changes, warnings, and errors; the full log is in the log file (`xeno logs`). |
 | `run-server.sh` | A local Xeno server on port 9000, run from `artifacts/local-server` (described below). |
 | `run-dashboard.sh` | The server web dashboard (Vite dev server) at `http://localhost:9100`. |
 | `run-local.sh [desktop\|tui\|tray\|client]` | Starts a local server and web dashboard in the background, then runs a client app connected to them. |

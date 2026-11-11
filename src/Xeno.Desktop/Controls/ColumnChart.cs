@@ -210,21 +210,24 @@ namespace Xeno.Desktop.Controls
             {
                 for (int s = chart.Series.Count - 1; s >= 0; s--)
                 {
+                    // Buckets with no readings are skipped: the line joins the readings on either side with a dashed segment,
+                    // so sparse data reads as one line with visible gaps instead of scattered fragments. Every reading gets a dot.
                     XenoChartSeries series = chart.Series[s];
-                    Pen pen = new Pen(ToneBrush(palette, series.Tone), s == 0 ? 2.5 : 1.5);
+                    IBrush brush = ToneBrush(palette, series.Tone);
+                    double thickness = s == 0 ? 2.5 : 1.5;
+                    Pen pen = new Pen(brush, thickness);
+                    Pen bridge = new Pen(brush, Math.Max(1, thickness - 0.5), new DashStyle(new double[] { 2, 3 }, 0));
+                    double dot = s == 0 ? 2.6 : 2;
                     Point? previous = null;
+                    int previousIndex = -1;
                     for (int i = 0; i < count; i++)
                     {
-                        if (i >= series.Values.Count || Double.IsNaN(series.Values[i]))
-                        {
-                            previous = null;
-                            continue;
-                        }
-
+                        if (i >= series.Values.Count || Double.IsNaN(series.Values[i])) continue;
                         Point point = new Point(plot.Left + i * slot + slot / 2, plot.Bottom - plot.Height * Math.Min(1, series.Values[i] / maximum));
-                        if (previous.HasValue) context.DrawLine(pen, previous.Value, point);
-                        else context.DrawEllipse(ToneBrush(palette, series.Tone), null, point, 1.8, 1.8);
+                        if (previous.HasValue) context.DrawLine(i - previousIndex > 1 ? bridge : pen, previous.Value, point);
+                        context.DrawEllipse(brush, null, point, dot, dot);
                         previous = point;
+                        previousIndex = i;
                     }
                 }
             }

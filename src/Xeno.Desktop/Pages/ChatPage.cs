@@ -46,11 +46,13 @@ namespace Xeno.Desktop.Pages
         #region Private-Members
 
         private Button _RenameButton = new Button();
+        private Button _DeleteSelected = new Button();
         private Button _DeleteButton = new Button();
         private readonly ListBox _List = new ListBox { Background = Avalonia.Media.Brushes.Transparent };
         private readonly TextBox _Search = new TextBox { PlaceholderText = "Search chats" };
         private readonly ComboBox _Model = new ComboBox { MinWidth = 240 };
         private readonly ToggleButton _Tools = new ToggleButton { Content = "Tools" };
+        private readonly TextBlock _Folder = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.PathSegmentEllipsis, VerticalAlignment = VerticalAlignment.Center, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
         private readonly TextBlock _Title = new TextBlock { FontSize = 16, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         private readonly StackPanel _Messages = new StackPanel { Spacing = 14, Margin = new Thickness(18, 16) };
         private readonly ScrollViewer _Scroll = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -97,11 +99,20 @@ namespace Xeno.Desktop.Pages
         public override Control Build()
         {
             XenoPalette palette = XenoTheme.Current;
+            // Cmd-click (Ctrl-click) or Shift-click selects several chats; a single selection opens the chat.
+            _List.SelectionMode = SelectionMode.Multiple;
+            ToolTip.SetTip(_List, (OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl") + "-click or Shift-click to select several chats, then press Delete.");
             _List.SelectionChanged += (sender, args) =>
             {
-                if (_Loading || _List.SelectedItem is not ListBoxItem item || item.Tag is not ChatConversation conversation) return;
+                UpdateSelectionActions();
+                if (_Loading || _List.SelectedItems == null || _List.SelectedItems.Count != 1) return;
+                if (_List.SelectedItem is not ListBoxItem item || item.Tag is not ChatConversation conversation) return;
+                if (_Conversation != null && _Conversation.Id == conversation.Id) return;
                 _ = OpenAsync(conversation.Id);
             };
+            _DeleteSelected = Ui.Button("Delete selected", () => _ = DeleteManyAsync(SelectedConversations()), "Delete every selected chat.");
+            _DeleteSelected.IsVisible = false;
+            _DeleteSelected.HorizontalAlignment = HorizontalAlignment.Stretch;
             _RenameButton = Ui.Button("Rename...", () => _ = RenameAsync(), "Rename this chat.");
             _DeleteButton = Ui.Button("Delete...", () => _ = DeleteAsync(), "Delete this chat and its messages.");
             _Search.TextChanged += (sender, args) => _ = LoadListAsync();
@@ -116,7 +127,9 @@ namespace Xeno.Desktop.Pages
                 else if (args.Key == Key.Delete || (args.Key == Key.Back && args.KeyModifiers.HasFlag(KeyModifiers.Meta)))
                 {
                     args.Handled = true;
-                    _ = DeleteAsync(conversation);
+                    List<ChatConversation> chosen = SelectedConversations();
+                    if (chosen.Count > 1) _ = DeleteManyAsync(chosen);
+                    else _ = DeleteAsync(conversation);
                 }
             };
             _Model.SelectionChanged += (sender, args) =>
@@ -152,7 +165,7 @@ namespace Xeno.Desktop.Pages
             DockPanel left = new DockPanel { Width = 260 };
             Button newChat = Ui.Primary("New Chat", () => _ = NewChatAsync());
             newChat.HorizontalAlignment = HorizontalAlignment.Stretch;
-            StackPanel leftTop = Ui.Stack(8, newChat, _Search);
+            StackPanel leftTop = Ui.Stack(8, newChat, _Search, _DeleteSelected);
             leftTop.Margin = new Thickness(10);
             DockPanel.SetDock(leftTop, Dock.Top);
             left.Children.Add(leftTop);
@@ -178,6 +191,11 @@ namespace Xeno.Desktop.Pages
                 _RenameButton,
                 _DeleteButton);
             header.Children.Add(Ui.Adopt(_Title));
+            _Folder.Foreground = palette.Muted;
+            ToolTip.SetTip(_Folder, "File and process tools in this chat work in this folder and cannot reach outside it. Click to change it.");
+            _Folder.PointerPressed -= OnFolderPressed;
+            _Folder.PointerPressed += OnFolderPressed;
+            header.Children.Add(Ui.Adopt(_Folder));
             header.Children.Add(headerActions);
 
             DockPanel right = new DockPanel();
@@ -351,8 +369,20 @@ namespace Xeno.Desktop.Pages
                 MenuItem rename = new MenuItem { Header = "Rename..." };
                 rename.Click += (sender, args) => _ = RenameAsync(conversation);
                 MenuItem delete = new MenuItem { Header = "Delete..." };
-                delete.Click += (sender, args) => _ = DeleteAsync(conversation);
-                return new ContextMenu { ItemsSource = new List<MenuItem> { rename, delete } };
+                delete.Click += (sender, args) =>
+                {
+                    // Deleting a chat that is part of a multiple selection deletes the whole selection.
+                    List<ChatConversation> chosen = SelectedConversations();
+                    if (chosen.Count > 1 && chosen.Any(item => item.Id == conversation.Id)) _ = DeleteManyAsync(chosen);
+                    else _ = DeleteAsync(conversation);
+                };
+                ContextMenu context = new ContextMenu { ItemsSource = new List<MenuItem> { rename, delete } };
+                context.Opening += (sender, args) =>
+                {
+                    List<ChatConversation> chosen = SelectedConversations();
+                    delete.Header = chosen.Count > 1 && chosen.Any(item => item.Id == conversation.Id) ? "Delete " + chosen.Count + " selected chats..." : "Delete...";
+                };
+                return context;
             };
             Button more = new Button { Content = "\u22ef", Padding = new Thickness(8, 0), MinHeight = 0, VerticalAlignment = VerticalAlignment.Center, Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Thickness(0) };
             ToolTip.SetTip(more, "Rename or delete this chat");
@@ -371,6 +401,20 @@ namespace Xeno.Desktop.Pages
             return item;
         }
 
+        private void OnFolderPressed(object? sender, Avalonia.Input.PointerPressedEventArgs args)
+        {
+            _ = EditWorkingDirectoryAsync();
+        }
+
+        private void ShowFolder()
+        {
+            string? folder = _Conversation != null ? _Conversation.WorkingDirectory : _NewChatDirectory;
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string shown = String.IsNullOrWhiteSpace(folder) ? "~ (your home folder)" : folder;
+            if (!String.IsNullOrWhiteSpace(folder) && !String.IsNullOrEmpty(home) && folder.StartsWith(home, StringComparison.Ordinal)) shown = "~" + folder.Substring(home.Length);
+            _Folder.Text = "\U0001F4C1 Working folder: " + shown;
+        }
+
         private void InsertNewLine()
         {
             string text = _Input.Text ?? String.Empty;
@@ -378,6 +422,55 @@ namespace Xeno.Desktop.Pages
             int end = Math.Clamp(Math.Max(_Input.SelectionStart, _Input.SelectionEnd), 0, text.Length);
             _Input.Text = text.Substring(0, start) + Environment.NewLine + text.Substring(end);
             _Input.CaretIndex = start + Environment.NewLine.Length;
+        }
+
+        private List<ChatConversation> SelectedConversations()
+        {
+            List<ChatConversation> chosen = new List<ChatConversation>();
+            if (_List.SelectedItems == null) return chosen;
+            foreach (object? selected in _List.SelectedItems)
+            {
+                if (selected is ListBoxItem item && item.Tag is ChatConversation conversation) chosen.Add(conversation);
+            }
+
+            return chosen;
+        }
+
+        private void UpdateSelectionActions()
+        {
+            int count = _List.SelectedItems?.Count ?? 0;
+            _DeleteSelected.IsVisible = count > 1;
+            _DeleteSelected.Content = "Delete " + count + " selected";
+        }
+
+        private async Task DeleteManyAsync(List<ChatConversation> conversations)
+        {
+            if (conversations.Count == 0) return;
+            if (conversations.Count == 1)
+            {
+                await DeleteAsync(conversations[0]).ConfigureAwait(true);
+                return;
+            }
+
+            bool confirmed = await XenoDialogs.ConfirmAsync(Window, "Delete chats", "Delete " + conversations.Count + " chats and their messages and ratings? Chat history keeps the timing records.", "Delete " + conversations.Count).ConfigureAwait(true);
+            if (!confirmed) return;
+            await GuardAsync("Delete chats", async () =>
+            {
+                foreach (ChatConversation conversation in conversations)
+                {
+                    await Workspace.Chat.DeleteConversationAsync(conversation.Id, None).ConfigureAwait(true);
+                }
+
+                if (_Conversation != null && conversations.Any(item => item.Id == _Conversation.Id))
+                {
+                    _Conversation = null;
+                    RenderConversation();
+                }
+
+                await LoadListAsync().ConfigureAwait(true);
+                UpdateSelectionActions();
+                Report("Deleted " + conversations.Count + " chats.");
+            }).ConfigureAwait(true);
         }
 
         private void SelectInList()
@@ -426,9 +519,7 @@ namespace Xeno.Desktop.Pages
             await GuardAsync("Xeno tools", async () =>
             {
                 List<ChatToolInfo> tools = await Workspace.Chat.ListToolsAsync(None).ConfigureAwait(true);
-                StringBuilder text = new StringBuilder("With tools on, the model can call these. Read-only tools run right away; the others wait for you to allow them.\n\n");
-                foreach (ChatToolInfo tool in tools) text.Append(tool.Name).Append(tool.Mutating ? "  (asks first)" : "  (read-only)").Append('\n').Append("    ").Append(tool.Description).Append("\n\n");
-                await XenoDialogs.MessageAsync(Window, "Xeno tools", text.ToString().TrimEnd(), XenoToneEnum.Info).ConfigureAwait(true);
+                await XenoDialogs.ShowModalAsync<object>(new Dialogs.ChatToolsWindow(tools), Window).ConfigureAwait(true);
             }).ConfigureAwait(true);
         }
 
@@ -455,8 +546,12 @@ namespace Xeno.Desktop.Pages
         private async Task EditSystemPromptAsync()
         {
             if (_Conversation == null) return;
-            Dictionary<string, string>? values = await XenoFormDialog.ShowAsync(Window, "System prompt", "Instructions sent before every message in this conversation. Leave empty for none.",
-                new List<XenoFormField> { new XenoFormField { Key = "prompt", Label = "System prompt", Kind = XenoFormFieldKindEnum.MultiLine, Value = _Conversation.SystemPrompt ?? String.Empty } }, "Save").ConfigureAwait(true);
+            bool hasPrompt = !String.IsNullOrWhiteSpace(_Conversation.SystemPrompt);
+            string intro = hasPrompt
+                ? "Instructions sent before every message in this conversation. Clear it to send none."
+                : "This chat has no system prompt. Xeno's default is filled in below: save to use it, edit it, or clear it to keep sending none.";
+            Dictionary<string, string>? values = await XenoFormDialog.ShowAsync(Window, "System prompt", intro,
+                new List<XenoFormField> { new XenoFormField { Key = "prompt", Label = "System prompt", Kind = XenoFormFieldKindEnum.MultiLine, Value = hasPrompt ? _Conversation.SystemPrompt! : ChatDefaults.SystemPrompt } }, "Save").ConfigureAwait(true);
             if (values == null) return;
             await GuardAsync("System prompt", async () =>
             {
@@ -475,6 +570,7 @@ namespace Xeno.Desktop.Pages
             if (_Conversation == null)
             {
                 _NewChatDirectory = value.Length == 0 ? null : value;
+                ShowFolder();
                 Report("New chats will work in " + (_NewChatDirectory ?? "your home folder") + ".");
                 return;
             }
@@ -483,6 +579,7 @@ namespace Xeno.Desktop.Pages
             {
                 ChatConversation updated = await Workspace.Chat.UpdateConversationAsync(_Conversation.Id, new ChatConversationRequest { WorkingDirectory = value }, None).ConfigureAwait(true);
                 _Conversation.WorkingDirectory = updated.WorkingDirectory;
+                ShowFolder();
                 Report("Tools in this chat now work in " + updated.WorkingDirectory + ".");
             }).ConfigureAwait(true);
         }
@@ -607,6 +704,7 @@ namespace Xeno.Desktop.Pages
             try
             {
                 _Title.Text = _Conversation?.Title ?? "New chat";
+                ShowFolder();
                 _RenameButton.IsEnabled = _Conversation != null;
                 _DeleteButton.IsEnabled = _Conversation != null;
                 _Tools.IsChecked = _Conversation?.ToolsEnabled == true;

@@ -43,6 +43,8 @@ namespace Xeno.Client
         private static bool _UseJson = false;
         private static bool _WorkerMode = false;
         private static TimestampedLogWriter? _WorkerOutputLogWriter = null;
+        private static TimestampedLogWriter? _ForegroundLogWriter = null;
+        private static bool _Verbose = false;
         private static readonly SemaphoreSlim _SendLock = new SemaphoreSlim(1, 1);
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _RequestCancellationSources = new ConcurrentDictionary<string, CancellationTokenSource>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, string> _RequestCancellationReasons = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -275,6 +277,12 @@ namespace Xeno.Client
                     continue;
                 }
 
+                if (String.Equals(args[i], "--verbose", StringComparison.OrdinalIgnoreCase))
+                {
+                    _Verbose = true;
+                    continue;
+                }
+
                 if (String.Equals(args[i], "--timeout", StringComparison.OrdinalIgnoreCase))
                 {
                     if (i + 1 >= args.Length || !Int32.TryParse(args[i + 1], out timeoutMs) || timeoutMs < 1000)
@@ -296,6 +304,7 @@ namespace Xeno.Client
             {
                 _WorkerMode = worker;
                 if (_WorkerMode) ConfigureWorkerLogging();
+                else ConfigureForegroundLogging();
 
                 // Starting the client from a terminal also brings up the Xeno Agent tray icon; the background worker never
                 // does, so quitting the agent sticks. The agent waits a few seconds before checking whether to connect.
@@ -2314,7 +2323,18 @@ namespace Xeno.Client
 
         private static async Task HandleServerMessageAsync(ClientWebSocket socket, ClientSettings settings, string message, CancellationToken token)
         {
-            WebSocketMessageEnvelope? envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+            // A message this client cannot read (for example from a newer server) is skipped, never a reason to disconnect.
+            WebSocketMessageEnvelope? envelope;
+            try
+            {
+                envelope = JsonUtil.Deserialize<WebSocketMessageEnvelope>(message);
+            }
+            catch (InvalidDataException)
+            {
+                WriteActivity("Skipped a server message this client could not read (" + message.Length.ToString(CultureInfo.InvariantCulture) + " characters).", true);
+                return;
+            }
+
             string type = envelope?.Type ?? string.Empty;
             if (String.Equals(type, "server.registered", StringComparison.OrdinalIgnoreCase))
             {
@@ -2417,7 +2437,7 @@ namespace Xeno.Client
                         }, token).ConfigureAwait(false);
                     }
                 }
-                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException || ex is TimeoutException)
+                catch (Exception ex) when (ex is InvalidOperationException || ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException || ex is TimeoutException)
                 {
                     await SendMessageAsync(socket, new ClientTelemetryErrorMessage
                     {
@@ -2448,7 +2468,7 @@ namespace Xeno.Client
                         }, token).ConfigureAwait(false);
                     }
                 }
-                catch (Exception ex) when (ex is InvalidOperationException || ex is IOException || ex is UnauthorizedAccessException || ex is TimeoutException)
+                catch (Exception ex) when (ex is InvalidOperationException || ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException || ex is TimeoutException)
                 {
                     await SendMessageAsync(socket, new ClientTelemetryErrorMessage
                     {
@@ -3978,6 +3998,50 @@ namespace Xeno.Client
             WriteInfo("Completed request " + requestId + " for " + requestorIp + ": " + method + " " + path + " via " + proxy + " (" + elapsed + "ms)");
         }
 
+        private static void ConfigureForegroundLogging()
+        {
+            // A client running in a terminal keeps the terminal to lifecycle messages, warnings, and errors, and writes
+            // everything (including per-message activity) to the log file, like the background worker. --verbose prints it all.
+            try
+            {
+                Directory.CreateDirectory(ClientConnectionState.LogDirectory);
+                StreamWriter output = new StreamWriter(new FileStream(ClientConnectionState.LogFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                {
+                    AutoFlush = true
+                };
+                _ForegroundLogWriter = new TimestampedLogWriter(output, "INFO");
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                _ForegroundLogWriter = null;
+            }
+        }
+
+        private static void LogToFile(string severity, string message)
+        {
+            if (_ForegroundLogWriter == null) return;
+            try
+            {
+                _ForegroundLogWriter.WriteLineWithSeverity(severity, message);
+            }
+            catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException)
+            {
+            }
+        }
+
+        private static void WriteActivity(string message, bool debug = false)
+        {
+            // Per-message activity: the log file only, unless the worker writes the log itself or --verbose is set.
+            if (_ForegroundLogWriter != null && !_Verbose)
+            {
+                LogToFile(debug ? "DEBUG" : "INFO", message);
+                return;
+            }
+
+            if (debug) WriteDebug(message);
+            else WriteInfo(message);
+        }
+
         private static void ConfigureWorkerLogging()
         {
             Directory.CreateDirectory(ClientConnectionState.LogDirectory);
@@ -4312,7 +4376,7 @@ namespace Xeno.Client
                     string source = String.IsNullOrWhiteSpace(request?.Source) ? request?.RunnerName ?? "(default provider)" : request.Source;
                     string requestorIp = request == null ? String.Empty : RequestorIpFromServerRequest(request);
                     string requestorLabel = String.IsNullOrWhiteSpace(requestorIp) ? "unknown" : requestorIp;
-                    WriteInfo("Request " + requestId + " received from " + requestorLabel + ": " + method + " " + path + " via " + source);
+                    WriteActivity("Request " + requestId + " received from " + requestorLabel + ": " + method + " " + path + " via " + source);
                     return;
                 }
 
@@ -4354,7 +4418,7 @@ namespace Xeno.Client
                         return;
                     }
 
-                    WriteDebug("Server message: " + type + ".");
+                    WriteActivity("Server message: " + type + ".", true);
                     return;
                 }
 
@@ -4366,7 +4430,7 @@ namespace Xeno.Client
                         return;
                     }
 
-                    WriteInfo("Client inventory update acknowledged by Xeno server.");
+                    WriteActivity("Client inventory update acknowledged by Xeno server.");
                     return;
                 }
 
@@ -4378,7 +4442,7 @@ namespace Xeno.Client
                         return;
                     }
 
-                    WriteInfo("Server message: " + type + ".");
+                    WriteActivity("Server message: " + type + ".");
                     return;
                 }
             }
@@ -4392,7 +4456,7 @@ namespace Xeno.Client
                 return;
             }
 
-            WriteInfo("Received a server message.");
+            WriteActivity("Received a server message.", true);
         }
 
         private static void PrintStatus(ClientSettings settings)
@@ -5026,6 +5090,9 @@ namespace Xeno.Client
             Console.WriteLine("      Stop the background client process, then start it again.");
             Console.WriteLine("  xeno connect --foreground");
             Console.WriteLine("      Run the client WebSocket loop in the current terminal. Prints local dashboard and local inference URLs when enabled.");
+            Console.WriteLine("      The terminal shows connection changes, warnings, and errors; everything else goes to the log (xeno logs).");
+            Console.WriteLine("  xeno connect --foreground --verbose");
+            Console.WriteLine("      Also print every server message and request in the terminal.");
             Console.WriteLine("  xeno connect --timeout <milliseconds>");
             Console.WriteLine("      Wait this long for background registration before returning an error.");
             Console.WriteLine();
@@ -5104,16 +5171,24 @@ namespace Xeno.Client
 
         private static void WriteSuccess(string message)
         {
+            LogToFile("INFO", message);
             WriteColored(message, ConsoleColor.Green);
         }
 
         private static void WriteInfo(string message)
         {
+            LogToFile("INFO", message);
             WriteColored(message, ConsoleColor.Cyan);
         }
 
         private static void WriteDebug(string message)
         {
+            if (_ForegroundLogWriter != null && !_Verbose)
+            {
+                LogToFile("DEBUG", message);
+                return;
+            }
+
             if (_WorkerOutputLogWriter != null)
             {
                 _WorkerOutputLogWriter.WriteLineWithSeverity("DEBUG", message);
@@ -5125,6 +5200,7 @@ namespace Xeno.Client
 
         private static void WriteWarning(string message)
         {
+            LogToFile("WARN", message);
             WriteColored(message, ConsoleColor.Yellow);
         }
 

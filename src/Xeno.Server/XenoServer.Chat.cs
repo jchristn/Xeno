@@ -71,7 +71,7 @@ namespace Xeno.Server
                     {
                         Title = String.IsNullOrWhiteSpace(body.Title) ? "New chat" : body.Title.Trim(),
                         Model = body.Model?.Trim() ?? String.Empty,
-                        SystemPrompt = String.IsNullOrWhiteSpace(body.SystemPrompt) ? null : body.SystemPrompt,
+                        SystemPrompt = body.SystemPrompt == null ? ChatDefaults.SystemPrompt : String.IsNullOrWhiteSpace(body.SystemPrompt) ? null : body.SystemPrompt,
                         Pinned = body.Pinned ?? false,
                         Surface = ChatSurfaceEnum.Server
                     }, token).ConfigureAwait(false);

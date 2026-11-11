@@ -15,6 +15,8 @@ export default function ChatPage({ conversationId, setConversationId, setModal }
   const chat = useChatApi();
   const [conversations, setConversations] = useState([]);
   const [search, setSearch] = useState('');
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
   const [conversation, setConversation] = useState(null);
   const [catalog, setCatalog] = useState(null);
   const [input, setInput] = useState('');
@@ -395,6 +397,39 @@ export default function ChatPage({ conversationId, setConversationId, setModal }
     });
   }
 
+  function toggleSelected(id) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected(new Set());
+  }
+
+  function removeSelected() {
+    const ids = conversations.filter((item) => selected.has(item.id)).map((item) => item.id);
+    if (ids.length === 0) return;
+    setModal({
+      title: t('chatDeleteManyTitle'),
+      body: <p>{t('chatDeleteManyMessage', { count: ids.length })}</p>,
+      actions: <button className="primary-button chat-danger" onClick={async () => {
+        for (const id of ids) {
+          await chat.deleteConversation(id);
+        }
+        setModal(null);
+        if (conversation && ids.includes(conversation.id)) setConversationId(null);
+        stopSelecting();
+        loadList(search);
+      }} title={t('chatDeleteSelectedTooltip')} type="button">{t('chatDeleteSelected', { count: ids.length })}</button>,
+      size: 'small'
+    });
+  }
+
   async function togglePin(item) {
     await chat.updateConversation(item.id, { pinned: !item.pinned });
     loadList(search);
@@ -441,15 +476,28 @@ export default function ChatPage({ conversationId, setConversationId, setModal }
     <div className="chat-layout">
       <aside className="chat-sidebar" aria-label={t('chatConversations')}>
         <button className="primary-button chat-new-button" onClick={newChat} title={t('tooltipChatNew')} type="button"><MessageSquarePlus size={16} />{t('chatNew')}</button>
-        <label className="search-box chat-search" title={t('tooltipChatSearch')}>
-          <Search size={15} />
-          <input aria-label={t('search')} onChange={(event) => setSearch(event.target.value)} placeholder={t('chatSearch')} title={t('tooltipChatSearch')} value={search} />
-        </label>
+        <div className="chat-search-row">
+          <label className="search-box chat-search" title={t('tooltipChatSearch')}>
+            <Search size={15} />
+            <input aria-label={t('search')} onChange={(event) => setSearch(event.target.value)} placeholder={t('chatSearch')} title={t('tooltipChatSearch')} value={search} />
+          </label>
+          <button aria-pressed={selecting} className={`icon-button${selecting ? ' active' : ''}`} disabled={conversations.length === 0 && !selecting} onClick={() => (selecting ? stopSelecting() : setSelecting(true))} title={selecting ? t('chatSelectDone') : t('chatSelectTooltip')} type="button"><ListChecks size={16} /></button>
+        </div>
+        {selecting ? (
+          <div className="chat-select-bar">
+            <span>{t('chatSelectedCount', { count: selected.size })}</span>
+            <button className="action-button" onClick={() => setSelected(selected.size === conversations.length ? new Set() : new Set(conversations.map((item) => item.id)))} title={t('chatSelectAllTooltip')} type="button">{selected.size === conversations.length && conversations.length > 0 ? t('chatSelectNone') : t('chatSelectAll')}</button>
+            <button className="action-button chat-stop" disabled={selected.size === 0} onClick={removeSelected} title={t('chatDeleteSelectedTooltip')} type="button"><Trash2 size={14} />{t('chatDeleteSelected', { count: selected.size })}</button>
+          </div>
+        ) : null}
         <div className="chat-conversation-list">
           {conversations.length === 0 ? <p className="chat-muted">{search ? t('chatNoMatches') : t('chatNoConversations')}</p> : null}
           {conversations.map((item) => (
-            <div className={`chat-conversation-item${item.id === conversation?.id ? ' active' : ''}`} key={item.id}>
-              <button className="chat-conversation-open" onClick={() => setConversationId(item.id)} title={item.title} type="button">
+            <div className={`chat-conversation-item${item.id === conversation?.id ? ' active' : ''}${selecting && selected.has(item.id) ? ' selected' : ''}`} key={item.id}>
+              {selecting ? (
+                <input aria-label={t('chatSelectOne', { title: item.title })} checked={selected.has(item.id)} className="chat-select-check" onChange={() => toggleSelected(item.id)} title={t('chatSelectOne', { title: item.title })} type="checkbox" />
+              ) : null}
+              <button className="chat-conversation-open" onClick={() => (selecting ? toggleSelected(item.id) : setConversationId(item.id))} title={item.title} type="button">
                 <span className="chat-conversation-title">{item.pinned ? <Pin size={12} /> : null}{item.title}</span>
                 <span className="chat-conversation-meta">{item.model || t('chatNoModel')} · {relativeTime(item.updatedUtc, t)}{item.surface && item.surface !== 'Web' ? ` · ${t(`chatSurface${item.surface}`, item.surface)}` : ''}</span>
               </button>

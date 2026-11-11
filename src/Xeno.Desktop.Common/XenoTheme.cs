@@ -162,12 +162,14 @@ namespace Xeno.Desktop.Common
 
         private static void ApplyDanger(Color danger)
         {
-            // Buttons with the "danger" class (for example Stop in chat) are filled with the scheme's danger color, with
-            // black or white text, whichever reads better.
+            // Buttons with the "danger" class (for example Stop in chat) are red with white text. When the palette's red is
+            // too light for white text (the dark palettes use a light red for text), a clear standard red is used instead.
             _DangerStyles.Clear();
             XenoRgb fill = new XenoRgb(danger.R, danger.G, danger.B);
-            Color text = XenoRgb.White.Contrast(fill) >= XenoRgb.Parse("#111318").Contrast(fill) ? Colors.White : Color.Parse("#111318");
-            SolidColorBrush foreground = new SolidColorBrush(text);
+            if (XenoRgb.White.Contrast(fill) < XenoColorSchemes.TextContrast) fill = XenoRgb.Parse("#dc2626");
+            for (int step = 0; step < 12 && XenoRgb.White.Contrast(fill) < XenoColorSchemes.TextContrast; step++) fill = fill.Mix(XenoRgb.Black, 0.1);
+            danger = Color.FromRgb((byte)fill.R, (byte)fill.G, (byte)fill.B);
+            SolidColorBrush foreground = new SolidColorBrush(Colors.White);
             foreach (string state in new[] { String.Empty, ":pointerover", ":pressed" })
             {
                 double factor = state == ":pointerover" ? 0.9 : state == ":pressed" ? 0.8 : 1.0;

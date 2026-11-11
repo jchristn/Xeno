@@ -42,7 +42,7 @@ namespace Xeno.Client.Mcp
                 ChatConversation created = await _Store.CreateConversationAsync(new ChatConversation
                 {
                     Model = arguments.Model.Trim(),
-                    SystemPrompt = arguments.SystemPrompt ?? _Settings().Chat.DefaultSystemPrompt,
+                    SystemPrompt = arguments.SystemPrompt ?? _Settings().Chat.DefaultSystemPrompt ?? ChatDefaults.SystemPrompt,
                     Surface = ChatSurfaceEnum.Mcp
                 }, token).ConfigureAwait(false);
                 conversationId = created.Id;

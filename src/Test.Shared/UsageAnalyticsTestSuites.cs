@@ -119,7 +119,18 @@ namespace Test.Shared
                         week.UtcOffsetMinutes = offset;
                         analytics = UsageAnalyticsBuilder.Build(UsageDatasetEnum.Chat, new[] { record }, week);
                         cell = analytics.Heatmap!.Cells.Single(item => item.Tokens > 0);
-                        Check(analytics.Heatmap.Layout == UsageHeatmapLayoutEnum.WeekdayByHour && analytics.Heatmap.Rows == 7 && cell.Row == (int)local.DayOfWeek && cell.Column == local.Hour, "Week cell is wrong for offset " + offset);
+                        Check(analytics.Heatmap.Layout == UsageHeatmapLayoutEnum.DayByHour && analytics.Heatmap.Rows == 8 && cell.Row == (int)(local.Date - To.AddDays(-7).AddMinutes(offset).Date).TotalDays && cell.Column == local.Hour, "Week cell is wrong for offset " + offset);
+
+                        UsageAnalyticsQuery month = Query(To.AddDays(-30), 360);
+                        month.UtcOffsetMinutes = offset;
+                        analytics = UsageAnalyticsBuilder.Build(UsageDatasetEnum.Chat, new[] { record }, month);
+                        Check(analytics.Heatmap!.Layout == UsageHeatmapLayoutEnum.DayByHour && analytics.Heatmap.Rows == 31, "A month should have one row per day, got " + analytics.Heatmap.Rows + " rows of " + analytics.Heatmap.Layout + ".");
+
+                        UsageAnalyticsQuery quarter = Query(To.AddDays(-90), 1440);
+                        quarter.UtcOffsetMinutes = offset;
+                        analytics = UsageAnalyticsBuilder.Build(UsageDatasetEnum.Chat, new[] { record }, quarter);
+                        cell = analytics.Heatmap!.Cells.Single(item => item.Tokens > 0);
+                        Check(analytics.Heatmap.Layout == UsageHeatmapLayoutEnum.WeekdayByHour && analytics.Heatmap.Rows == 7 && cell.Row == (int)local.DayOfWeek && cell.Column == local.Hour, "Longer ranges should use weekday rows for offset " + offset);
                     }
 
                     return Task.CompletedTask;

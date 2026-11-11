@@ -2,6 +2,17 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- Usage: the token activity heatmap has one row per day for ranges up to a month (last day, week, or month), so a month shows a month; longer ranges keep weekday rows. The terminal app shows the newest days when the heatmap is taller than its space.
+- Usage in the web dashboards (local and cloud) and the desktop app shows one chart at a time at full width, picked from a Chart list, instead of a two-column grid or tabs. The cloud dashboard's connected clients chart is in the same list.
+- Web line charts join readings across empty buckets with a dashed segment and mark every reading, as the desktop app does.
+- Chat: new conversations start with a built-in system prompt (set your own for new chats in Settings, or change or clear it per chat); the desktop and terminal System Prompt editors fill it in for chats that have none.
+- Delete several chats at once everywhere: Select mode with checkboxes in the web dashboards, Cmd/Ctrl- or Shift-click plus Delete in the desktop app, Delete Chats in the terminal app, and `xeno chat delete <id> <id>...` (or `--all --yes`) in the CLI.
+- Desktop chat shows the working folder under the title (click it to change), and Tools... opens a window listing every tool by group with a Read-only or Asks first badge and a filter.
+- Desktop chat's Stop button is red with white text in every palette, light and dark.
+- A client running in a terminal (`run-client`, `xeno connect --foreground`) prints only connection changes, warnings, and errors; per-message lines go to the log file, and `--verbose` prints them too. Apps started by other Xeno apps (the tray agent started by `run-client`, the desktop app started by the tray) no longer write into the terminal that started them.
+- A server message the client cannot read is skipped instead of dropping the connection ("JSON could not be deserialized as WebSocketMessageEnvelope").
+- Fixed: with Apple GPU telemetry the client dropped its server connection once a minute ("JSON could not be deserialized as ClientTelemetrySnapshot"), because the shared telemetry format lacked the new GPU source. The source is now shared, and a telemetry failure is reported to the server instead of ending the connection.
+- Desktop line charts join readings across empty buckets with a dashed segment and mark each reading, instead of breaking into fragments; the Requests chart is taller; Provider telemetry offers only the metrics a provider reports (Ollama reports loaded and available model counts) and starts on one with data.
 - macOS: opening Xeno.app (Finder, Launchpad, Spotlight, or the Dock) while the Xeno Agent runs opens the desktop app; before, the agent, which shares the bundle, took the request and nothing opened.
 - GPU telemetry on Apple silicon Macs: utilization and unified memory in use, read from `ioreg` without admin rights (temperature and power still need an NVIDIA GPU).
 - Providers pages (desktop and terminal) list the models a provider reports (for example `ollama list`) next to the configured ones, with a Source column. Editing a model the provider reports but `client.json` does not list opens a form that configures it, instead of "The model no longer exists."; such models have no Delete.

@@ -184,7 +184,7 @@ namespace Xeno.Client.LocalDashboard
                 {
                     Title = String.IsNullOrWhiteSpace(request.Title) ? "New chat" : request.Title.Trim(),
                     Model = request.Model?.Trim() ?? String.Empty,
-                    SystemPrompt = request.SystemPrompt ?? _Settings.Chat.DefaultSystemPrompt,
+                    SystemPrompt = request.SystemPrompt ?? _Settings.Chat.DefaultSystemPrompt ?? ChatDefaults.SystemPrompt,
                     ToolsEnabled = request.ToolsEnabled ?? false,
                     Pinned = request.Pinned ?? false,
                     Surface = request.Surface ?? ChatSurfaceEnum.Web,
