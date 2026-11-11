@@ -5641,15 +5641,8 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 16px;
 }
 
-.usage-chart-picker {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  margin: 4px 0 12px;
-}
-
-.usage-chart-picker select {
-  min-width: 260px;
+.usage-filters .usage-chart-picker select {
+  min-width: 220px;
 }
 
 .usage-single {

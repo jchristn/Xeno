@@ -1525,7 +1525,7 @@ test('server usage page follows roles, redirects analytics, and drills into requ
   const links = await page.locator('.sidebar a').allTextContents();
   expect(links.findIndex((item) => item.includes('Usage'))).toBe(links.findIndex((item) => item.includes('Home')) + 1);
   expect(links.some((item) => item.trim() === 'Analytics')).toBe(false);
-  const groupBy = page.locator('.usage-filters select').first();
+  const groupBy = page.locator('.usage-filters label:not(.usage-chart-picker) select').first();
   await expect(groupBy.locator('option')).toHaveText(['Model', 'Provider', 'Client', 'User', 'Credential']);
   await groupBy.selectOption('User');
   await expect.poll(() => queries.at(-1)?.searchParams.get('groupBy')).toBe('User');
@@ -1551,7 +1551,7 @@ test('server usage hides groupings a member cannot use and explains a refusal', 
   await routeUsage(page, { id: 'usr_member', tenantId: 'ten_default', email: 'member@xeno.test', isAdmin: false, isTenantAdmin: false, active: true }, () => (refuse ? { status: 403, json: { Message: 'Forbidden' } } : null));
   await page.goto('/dashboard/usage');
   await expect(usageChartOptions(page)).toHaveCount(12);
-  await expect(page.locator('.usage-filters select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client']);
+  await expect(page.locator('.usage-filters label:not(.usage-chart-picker) select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client']);
   refuse = true;
   await page.locator('.usage-toolbar .icon-button').click();
   await expect(page.locator('.error-state')).toContainText('Your role cannot see usage grouped this way.');
@@ -1571,7 +1571,7 @@ test('server usage fits every width and theme, and client telemetry shows provid
       await page.screenshot({ fullPage: true, path: `test-results/usage-server-${width}-${theme}.png` });
     }
   }
-  await expect(page.locator('.usage-filters select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client', 'User', 'Credential', 'Tenant']);
+  await expect(page.locator('.usage-filters label:not(.usage-chart-picker) select').first().locator('option')).toHaveText(['Model', 'Provider', 'Client', 'User', 'Credential', 'Tenant']);
   await showChart(page, 'connected.clients');
   await expect(page.locator('[data-chart="connected.clients"] rect[data-series="connected"]')).toHaveCount(1);
   await page.setViewportSize({ width: 1280, height: 900 });

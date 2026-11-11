@@ -95,6 +95,8 @@ export default function UsagePage({ onDrill, refreshSignal }) {
         {loadedAt ? <span className="usage-loaded">{t('usageLoadedAt', { time: new Intl.DateTimeFormat(locale, { timeStyle: 'medium' }).format(loadedAt) })}</span> : null}
       </div>
       <div className="usage-filters">
+        {/* One chart at a time, chosen here, at the full width of the page. */}
+        <label className="usage-chart-picker" title={t('tooltipUsageChartPicker')}>{t('usageChartPicker')}<select aria-label={t('usageChartPicker')} disabled={chartOptions.length === 0} onChange={(event) => setChartId(event.target.value)} title={t('tooltipUsageChartPicker')} value={selectedChart}>{chartOptions.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}</select></label>
         <label>{t('usageGroupByLabel')}<select onChange={(event) => setGroupBy(event.target.value)} value={groupBy}>{groupings.map((item) => <option key={item} value={item}>{t(`usageGroupBy${item}`)}</option>)}</select></label>
         <label>{t('usageCountLabel')}<select onChange={(event) => setGroupMetric(event.target.value)} value={groupMetric}><option value="Requests">{t('usageSeriesRequests')}</option><option value="Tokens">{t('usageSeriesTokens')}</option></select></label>
         <label>{t('model')}<input onChange={(event) => setModel(event.target.value)} placeholder={t('usageAny')} value={model} /></label>
@@ -116,15 +118,6 @@ export default function UsagePage({ onDrill, refreshSignal }) {
             <Kpi icon={<Gauge size={18} />} label={t('usageChartThroughput')} subtext={t('usageSeriesMedian')} value={formatChartValue(totals.throughput?.p50, ' tok/s', locale)} />
           </div>
           {noTraffic ? <div className="usage-empty usage-empty-page">{t(filtered ? 'usageEmptyFiltered' : 'usageEmptyRange')}</div> : null}
-          {/* One chart at a time, chosen from a list, at the full width of the page. */}
-          <div className="usage-chart-picker">
-            <label className="usage-filter" title={t('tooltipUsageChartPicker')}>
-              <span>{t('usageChartPicker')}</span>
-              <select aria-label={t('usageChartPicker')} onChange={(event) => setChartId(event.target.value)} title={t('tooltipUsageChartPicker')} value={selectedChart}>
-                {chartOptions.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
-              </select>
-            </label>
-          </div>
           <div className="usage-single">
             {selectedChart === CONNECTED_CHART
               ? <ConnectedClientsCard height={USAGE_CHART_HEIGHT} load={api.getConnectedHistory} range={range} refreshSignal={`${refreshSignal}-${autoRefreshSignal}`} />

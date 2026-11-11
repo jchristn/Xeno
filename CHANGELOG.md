@@ -2,6 +2,7 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- Web dashboards: the usage Chart list sits first in the filter row, beside Group by, Count, Model, and Provider.
 - Usage: the token activity heatmap has one row per day for ranges up to a month (last day, week, or month), so a month shows a month; longer ranges keep weekday rows. The terminal app shows the newest days when the heatmap is taller than its space.
 - Usage in the web dashboards (local and cloud) and the desktop app shows one chart at a time at full width, picked from a Chart list, instead of a two-column grid or tabs. The cloud dashboard's connected clients chart is in the same list.
 - Web line charts join readings across empty buckets with a dashed segment and mark every reading, as the desktop app does.
