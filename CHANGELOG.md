@@ -2,6 +2,7 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- The terminal app uses TUIKit 1.13.0: the token heatmap's padding comes from `HeatMap.CellGap` instead of a custom surface, and its cells are colored by a `HeatMapPalette` built from the chosen terminal palette (empty cells in the muted color, then a ramp through the accent).
 - The terminal app's token heatmap leaves one column of padding between cells.
 - The terminal app has the desktop app's color palettes under Settings > Colors (chosen separately for the terminal), and Custom Colors edits the shared custom colors.
 - The terminal app's token heatmap is drawn by TUIKit's HeatMap: shading levels with a Less/More legend, theme colors, and arrow-key or mouse selection that describes the selected cell.

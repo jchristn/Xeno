@@ -14,10 +14,6 @@ namespace Xeno.Tui.Shell
         private readonly ISurface _Inner;
         private readonly int _Left;
         private readonly int _Top;
-        private int _GapLeft = -1;
-        private int _GapTop = 0;
-        private int _GapRows = 0;
-        private int _GapWidth = 0;
 
         #endregion
 
@@ -50,28 +46,10 @@ namespace Xeno.Tui.Shell
 
         #region Public-Methods
 
-        /// <summary>
-        /// Leave the last column of every cell in a grid blank, so cells drawn edge to edge get one column of padding.
-        /// </summary>
-        /// <param name="left">First column of the grid.</param>
-        /// <param name="top">First row of the grid.</param>
-        /// <param name="rows">Grid rows.</param>
-        /// <param name="cellWidth">Width of each cell, padding included; below 2 nothing is left blank.</param>
-        /// <returns>This surface.</returns>
-        public OffsetSurface WithCellGaps(int left, int top, int rows, int cellWidth)
-        {
-            _GapLeft = left;
-            _GapTop = top;
-            _GapRows = rows;
-            _GapWidth = cellWidth;
-            return this;
-        }
-
         /// <inheritdoc />
         public void Set(int x, int y, Cell cell)
         {
             if (x < 0 || y < 0 || x >= Size.Width || y >= Size.Height) return;
-            if (_GapWidth >= 2 && _GapLeft >= 0 && x >= _GapLeft && y >= _GapTop && y < _GapTop + _GapRows && (x - _GapLeft) % _GapWidth == _GapWidth - 1) return;
             _Inner.Set(_Left + x, _Top + y, cell);
         }
 

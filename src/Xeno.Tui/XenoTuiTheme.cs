@@ -4,6 +4,7 @@ namespace Xeno.Tui
     using System.Globalization;
     using TUIKit;
     using TUIKit.Theming;
+    using TUIKit.Widgets;
     using Xeno.Client.Presentation;
 
     /// <summary>
@@ -44,6 +45,33 @@ namespace Xeno.Tui
         {
             if (String.IsNullOrEmpty(hex) || hex.Length != 7 || hex[0] != '#') throw new ArgumentException("Expected a #rrggbb color.", nameof(hex));
             return Color.FromRgb(Int32.Parse(hex.Substring(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>
+        /// Heat map colors for a theme built here: empty cells in the muted color, then a ramp through the accent that
+        /// gets brighter on dark terminals and darker on light ones, so heat maps follow the chosen palette.
+        /// </summary>
+        /// <param name="theme">Theme from <see cref="For"/>, <see cref="Dark"/>, or <see cref="Light"/>.</param>
+        /// <returns>Palette; TUIKit's green preset when the theme's colors are not truecolor.</returns>
+        /// <exception cref="ArgumentNullException">theme is null.</exception>
+        public static HeatMapPalette HeatPalette(Theme theme)
+        {
+            ArgumentNullException.ThrowIfNull(theme);
+            Color accent = theme.Accent.Foreground;
+            Color muted = theme.Muted.Foreground;
+            if (accent.Kind != ColorKind.Rgb || muted.Kind != ColorKind.Rgb) return HeatMapPalette.Green;
+            bool light = theme.Name.EndsWith("Light", StringComparison.Ordinal);
+            XenoRgb strong = new XenoRgb(accent.R, accent.G, accent.B);
+            XenoRgb toward = light ? XenoRgb.White : XenoRgb.Black;
+            XenoRgb away = light ? XenoRgb.Black : XenoRgb.White;
+            Color[] ramp =
+            {
+                Rgb(strong.Mix(toward, 0.6)),
+                Rgb(strong.Mix(toward, 0.3)),
+                Rgb(strong),
+                Rgb(strong.Mix(away, 0.3))
+            };
+            return new HeatMapPalette(theme.Name, muted, ramp);
         }
 
         /// <summary>
@@ -92,6 +120,11 @@ namespace Xeno.Tui
         #endregion
 
         #region Private-Methods
+
+        private static Color Rgb(XenoRgb color)
+        {
+            return Color.FromRgb((byte)color.R, (byte)color.G, (byte)color.B);
+        }
 
         private static Theme Build(bool light)
         {

@@ -98,6 +98,11 @@ namespace Test.Shared
                         }
                     }
 
+                    TUIKit.Widgets.HeatMapPalette ocean = Xeno.Tui.XenoTuiTheme.HeatPalette(Xeno.Tui.XenoTuiTheme.For(XenoColorSchemes.Find("ocean"), false));
+                    TUIKit.Widgets.HeatMapPalette ember = Xeno.Tui.XenoTuiTheme.HeatPalette(Xeno.Tui.XenoTuiTheme.For(XenoColorSchemes.Find("ember"), false));
+                    Check(!ocean.ColorForLevel(4, 5).Equals(ember.ColorForLevel(4, 5)), "The heat map colors should follow the palette.");
+                    Check(ocean.EmptyColor.Equals(Xeno.Tui.XenoTuiTheme.ToColor(XenoColorSchemes.Resolve(XenoColorSchemes.Find("ocean"), true).Muted)), "Empty heat map cells should use the palette's muted color.");
+
                     using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Settings))
                     {
                         tui.Tui.Context.Preferences.TerminalColorScheme = "ocean";
