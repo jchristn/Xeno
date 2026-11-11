@@ -100,6 +100,21 @@ namespace Xeno.Client.Services
         }
 
         /// <summary>
+        /// Model names a provider reported the last time the running listener checked it (for example 'ollama list'),
+        /// when model discovery is on. Empty when the client is not running or discovery is off.
+        /// </summary>
+        /// <param name="providerName">Provider.</param>
+        /// <returns>Model names.</returns>
+        public IReadOnlyList<string> DiscoveredModels(string providerName)
+        {
+            ClientSettings settings = LoadSettings();
+            if (!(settings.LocalInferenceServer?.DiscoverLocalModels ?? true)) return new List<string>();
+            Routing.LocalInferenceRuntimeStatus? status = Routing.LocalInferenceRuntimeStatus.Load();
+            Routing.LocalBackendStatus? backend = status?.Backends.FirstOrDefault(item => String.Equals(item.Provider, providerName, StringComparison.OrdinalIgnoreCase));
+            return backend?.DiscoveredModels ?? new List<string>();
+        }
+
+        /// <summary>
         /// Load the current settings from client.json.
         /// </summary>
         /// <returns>Settings.</returns>
@@ -627,11 +642,25 @@ namespace Xeno.Client.Services
         /// <param name="errorLog">True to read the error log instead of the main log.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Lines, oldest first, with routine server messages rolled up (see <see cref="ClientLogRollup"/>).</returns>
-        public async Task<List<string>> ReadLogAsync(int tail, string severity, bool errorLog, CancellationToken token)
+        public Task<List<string>> ReadLogAsync(int tail, string severity, bool errorLog, CancellationToken token)
+        {
+            return ReadLogAsync(tail, severity, errorLog, null, token);
+        }
+
+        /// <summary>
+        /// Read the last lines of the worker log written at or after a time, filtered by severity.
+        /// </summary>
+        /// <param name="tail">Maximum lines.</param>
+        /// <param name="severity">Severity filter (all, info, warn, error, debug).</param>
+        /// <param name="errorLog">True to read the error log instead of the main log.</param>
+        /// <param name="sinceUtc">Earliest time to include, or null for any time.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Lines, oldest first, with routine server messages rolled up.</returns>
+        public async Task<List<string>> ReadLogAsync(int tail, string severity, bool errorLog, DateTime? sinceUtc, CancellationToken token)
         {
             if (tail <= 0) return new List<string>();
             int raw = (int)Math.Min(RolledUpLogLinesLimit, (long)tail * RolledUpLogReadFactor);
-            List<string> lines = await ClientLogReader.ReadTailAsync(errorLog ? ClientConnectionState.ErrorLogFile : ClientConnectionState.LogFile, raw, severity, token).ConfigureAwait(false);
+            List<string> lines = await ClientLogReader.ReadTailAsync(errorLog ? ClientConnectionState.ErrorLogFile : ClientConnectionState.LogFile, raw, severity, sinceUtc, token).ConfigureAwait(false);
             List<string> collapsed = ClientLogRollup.Collapse(lines);
             return collapsed.Count <= tail ? collapsed : collapsed.GetRange(collapsed.Count - tail, tail);
         }

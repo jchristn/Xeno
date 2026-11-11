@@ -122,6 +122,43 @@ namespace Xeno.Desktop.Dialogs
         }
 
         /// <summary>
+        /// Ping the Xeno server four times and show each reply in a dialog.
+        /// </summary>
+        /// <param name="owner">Owner window.</param>
+        /// <param name="session">Session.</param>
+        /// <returns>Task.</returns>
+        public static async Task TestConnectionAsync(Window? owner, DesktopSession session)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            session.Report("Testing the server connection...");
+            string message;
+            XenoToneEnum tone;
+            try
+            {
+                List<PingAttemptResult> attempts = await session.Workspace.PingServerAsync(4, CancellationToken.None).ConfigureAwait(true);
+                int replies = attempts.Count(item => item.Success);
+                List<string> lines = attempts.Select(attempt => attempt.Success
+                    ? "Reply " + attempt.Sequence + ": " + attempt.ElapsedMs + " ms, status " + DisplayFormat.OrDash(attempt.Status)
+                    : "Attempt " + attempt.Sequence + ": " + (attempt.Error ?? ("HTTP " + attempt.StatusCode + " " + attempt.ReasonPhrase))).ToList();
+                string server = ServerEndpoints.BuildRestUri(session.Workspace.LoadSettings(), "/").GetLeftPart(UriPartial.Authority);
+                string summary = replies == attempts.Count
+                    ? "The Xeno server at " + server + " answered all " + attempts.Count + " pings."
+                    : replies == 0 ? "The Xeno server at " + server + " did not answer." : "The Xeno server at " + server + " answered " + replies + " of " + attempts.Count + " pings.";
+                message = summary + Environment.NewLine + Environment.NewLine + String.Join(Environment.NewLine, lines);
+                tone = replies == attempts.Count ? XenoToneEnum.Success : replies == 0 ? XenoToneEnum.Danger : XenoToneEnum.Warning;
+                session.Report(summary);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is System.Net.Http.HttpRequestException || ex is UriFormatException || ex is TaskCanceledException)
+            {
+                message = "Could not test the connection: " + ex.Message;
+                tone = XenoToneEnum.Danger;
+                session.Report(message);
+            }
+
+            await XenoDialogs.MessageAsync(owner, "Test Connection", message, tone).ConfigureAwait(true);
+        }
+
+        /// <summary>
         /// Edit, rename, or move a model.
         /// </summary>
         /// <param name="owner">Owner window.</param>

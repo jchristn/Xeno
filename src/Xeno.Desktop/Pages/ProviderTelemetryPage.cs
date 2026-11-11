@@ -110,9 +110,9 @@ namespace Xeno.Desktop.Pages
             _Samples.Height = 300;
 
             return Ui.Stack(16,
+                Ui.Card("Provider metric over time", Ui.Stack(10, Ui.Row(_Provider, _Model, _Metric, _Range), _Chart)),
                 Ui.Card("Latest by provider", Ui.Stack(10, _Latest, _Models)),
                 Ui.Card("Provider health", _Health),
-                Ui.Card("Provider metric over time", Ui.Stack(10, Ui.Row(_Provider, _Model, _Metric, _Range), _Chart)),
                 Ui.Card("Samples", _Samples));
         }
 

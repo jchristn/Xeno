@@ -2,6 +2,7 @@ namespace Test.Shared
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using Touchstone.Core;
@@ -108,6 +109,63 @@ namespace Test.Shared
                         Check(!tui.Tui.QuitIfRequested(), "The terminal app should not quit without a request.");
                         WriteQuitRequest(DateTime.UtcNow.AddSeconds(1));
                         Check(tui.Tui.QuitIfRequested(), "The terminal app did not take the quit request.");
+                    }
+
+                    return Task.CompletedTask;
+                }),
+                new TestCaseDescriptor(suite, "AppleGpuFromIoreg", "Apple silicon GPU utilization and unified memory use are read from ioreg output", executeAsync: delegate
+                {
+                    string output = "+-o AGXAcceleratorG17X  <class AGXAcceleratorG17X, id 0x1000>\n    {\n      \"PerformanceStatistics\" = {\"In use system memory (driver)\"=0,\"Alloc system memory\"=6390398976,\"Renderer Utilization %\"=22,\"Device Utilization %\"=37,\"In use system memory\"=1812758528}\n      \"model\" = \"Apple M5 Max\"\n      \"gpu-core-count\" = 40\n    }\n";
+                    List<Xeno.Client.Telemetry.Models.ClientGpuDeviceTelemetry> devices = Xeno.Client.Telemetry.Providers.ClientGpuTelemetryProvider.ParseIoreg(output, 128L * 1024 * 1024 * 1024);
+                    Check(devices.Count == 1, "Expected one Apple GPU, got " + devices.Count + ".");
+                    Check(devices[0].Name == "Apple M5 Max (40-core GPU)" && devices[0].UtilizationPercent == 37 && devices[0].MemoryUsedBytes == 1812758528, "Parsed values are wrong: " + devices[0].Name + " " + devices[0].UtilizationPercent);
+                    Check(devices[0].MemoryUtilizationPercent > 1.3 && devices[0].MemoryUtilizationPercent < 1.4, "Memory use is wrong: " + devices[0].MemoryUtilizationPercent);
+                    Check(Xeno.Client.Telemetry.Providers.ClientGpuTelemetryProvider.ParseIoreg("+-o IOAccelerator  <class IOAccelerator>\n  {\n  }\n", null).Count == 0 && Xeno.Client.Telemetry.Providers.ClientGpuTelemetryProvider.ParseIoreg(null, null).Count == 0, "Output without statistics should give no devices.");
+                    return Task.CompletedTask;
+                }),
+                new TestCaseDescriptor(suite, "LogTimeWindow", "The log reader keeps lines written in a time window, with untimed lines following the line before them", executeAsync: async delegate
+                {
+                    string file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "xeno-log-window-" + Guid.NewGuid().ToString("N") + ".log");
+                    try
+                    {
+                        System.IO.File.WriteAllLines(file, new[]
+                        {
+                            "2026-11-10 08:00:00.000000Z [INFO] old line",
+                            "   at old stack frame",
+                            "2026-11-11 08:00:00.000000Z [ERROR] new line",
+                            "   at new stack frame",
+                            "2026-11-11 09:00:00.000000Z [INFO] newest line"
+                        });
+                        List<string> recent = await ClientLogReader.ReadTailAsync(file, 100, "all", new DateTime(2026, 11, 11, 0, 0, 0, DateTimeKind.Utc), CancellationToken.None).ConfigureAwait(false);
+                        Check(recent.Count == 3 && recent[0].Contains("new line", StringComparison.Ordinal) && recent[1].Contains("new stack", StringComparison.Ordinal), "Window filter is wrong: " + String.Join(" | ", recent));
+                        List<string> all = await ClientLogReader.ReadTailAsync(file, 100, "all", null, CancellationToken.None).ConfigureAwait(false);
+                        Check(all.Count == 5, "Without a window every line should be read.");
+                        Check(ClientLogReader.Timestamp("2026-11-11 16:55:01.690684Z [DEBUG] x") == new DateTime(2026, 11, 11, 16, 55, 1, 690, DateTimeKind.Utc).AddTicks(6840) && ClientLogReader.Timestamp("   at frame") == null, "Timestamps are not read correctly.");
+                    }
+                    finally
+                    {
+                        System.IO.File.Delete(file);
+                    }
+                }),
+                new TestCaseDescriptor(suite, "ProviderModelsIncludeDiscovered", "A provider's model list shows configured models and models the provider reported", executeAsync: delegate
+                {
+                    ClientRunnerSettings provider = new ClientRunnerSettings { Name = "local-ollama" };
+                    provider.Models.Clear();
+                    provider.Models.Add(new ClientModelSettings { Name = "llama3.2:latest", SupportsCompletions = true });
+                    List<ProviderModelRow> rows = ProviderModelRow.ForProvider(provider, new[] { "gemma4:31b", "llama3.2", "qwen3.8:latest" });
+                    Check(rows.Count == 3, "Expected the configured model plus two found ones, got " + rows.Count + ": " + String.Join(", ", rows.Select(item => item.Name)));
+                    Check(rows[0].Configured && rows[0].Source == "Configured, found on provider", "The configured model should be first and marked as found.");
+                    Check(rows.Skip(1).All(item => !item.Configured && item.Source == "Found on provider"), "Found models should be marked as not configured.");
+                    using (ClientHomeScope home = new ClientHomeScope())
+                    using (XenoWorkspace workspace = new XenoWorkspace(new XenoServerClient(new StubHttpHandler()), () => null))
+                    {
+                        ClientSettings settings = ClientSettings.Load();
+                        settings.Runners.Clear();
+                        settings.Runners.Add(provider);
+                        settings.Save();
+                        XenoFormSpec? form = XenoForms.EditModel(workspace, "local-ollama", "gemma4:31b");
+                        Check(form != null && form.Fields.First(item => item.Key == "name").Value == "gemma4:31b", "Editing a found model should offer a form to configure it.");
+                        Check(XenoForms.EditModel(workspace, "missing", "x") == null, "A missing provider should still give no form.");
                     }
 
                     return Task.CompletedTask;

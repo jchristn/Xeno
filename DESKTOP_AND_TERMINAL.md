@@ -138,7 +138,7 @@ The desktop and terminal apps draw the same charts as the local web dashboard, b
 
 Every chart has a range (last hour, day, week, or month, opening on the last day), a heading such as "Requests, last day", a legend, its
 peak value, and time labels. When there's no data, the chart says why instead of drawing an empty axis: for example,
-no requests yet, telemetry is collected only while the client runs, or GPU telemetry needs an NVIDIA GPU. In the
+no requests yet, telemetry is collected only while the client runs, or GPU telemetry needs an Apple silicon GPU (read from `ioreg`, no admin rights needed; utilization and unified memory in use, without temperature or power) or an NVIDIA GPU (`nvidia-smi` or DCGM). In the
 desktop app, hover over a column to see its values.
 
 Charts refresh on the **View > Auto Refresh** choice: off, every 15 seconds (the default), or every minute. An open

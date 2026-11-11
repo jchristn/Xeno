@@ -95,7 +95,7 @@ namespace Xeno.Client.Presentation
             List<XenoChartSeries> series = new List<XenoChartSeries>
             {
                 new XenoChartSeries("This machine", XenoChartToneEnum.Success, local.ToList()),
-                new XenoChartSeries("Xeno network", XenoChartToneEnum.Accent, network.ToList()),
+                new XenoChartSeries("Xeno network", XenoChartToneEnum.Info, network.ToList()),
                 new XenoChartSeries("Fallback", XenoChartToneEnum.Warning, fallback.ToList())
             };
             bool hasData = local.Sum() + network.Sum() + fallback.Sum() > 0;
@@ -116,7 +116,7 @@ namespace Xeno.Client.Presentation
             List<XenoChartSeries> series = new List<XenoChartSeries>
             {
                 new XenoChartSeries("This machine", XenoChartToneEnum.Success, analytics.Buckets.Select(bucket => (double)bucket.Local).ToList()),
-                new XenoChartSeries("Xeno network", XenoChartToneEnum.Accent, analytics.Buckets.Select(bucket => (double)bucket.Network).ToList()),
+                new XenoChartSeries("Xeno network", XenoChartToneEnum.Info, analytics.Buckets.Select(bucket => (double)bucket.Network).ToList()),
                 new XenoChartSeries("Errors", XenoChartToneEnum.Danger, analytics.Buckets.Select(bucket => (double)bucket.Errors).ToList())
             };
             return new XenoChart("Chat activity", HistoryRanges.Describe(range).ToLowerInvariant(), " turns", labels, series, "No chat turns in this range.", true, analytics.Turns > 0);
@@ -138,7 +138,7 @@ namespace Xeno.Client.Presentation
             bool hasData = buckets.Any(item => item.Count > 0 && item.Average != null);
             string empty = metric == ClientTelemetryMetricEnum.GpuUtilizationPercent || metric == ClientTelemetryMetricEnum.GpuMemoryUtilizationPercent
                 || metric == ClientTelemetryMetricEnum.GpuTemperatureCelsius || metric == ClientTelemetryMetricEnum.GpuPowerWatts
-                ? "No " + title + " readings in the " + rangeText + ". GPU telemetry needs an NVIDIA GPU (nvidia-smi or DCGM)."
+                ? "No " + title + " readings in the " + rangeText + ". GPU telemetry needs an Apple silicon GPU or an NVIDIA GPU (nvidia-smi or DCGM)."
                 : "No " + title + " readings in the " + rangeText + ". Host telemetry is collected while the client runs.";
             return RollupChart("telemetry.host", title, rangeText, HostMetricUnit(metric), buckets.Select(item => Label(item.StartUtc, range)).ToList(), buckets.Select(item => item.Average).ToList(), buckets.Select(item => item.Minimum).ToList(), buckets.Select(item => item.Maximum).ToList(), buckets.Select(item => new XenoChartBucket(item.StartUtc, item.EndUtc)).ToList(), empty, hasData);
         }

@@ -52,7 +52,8 @@ namespace Xeno.Desktop.Pages
         private readonly Dictionary<string, ColumnChart> _Charts = new Dictionary<string, ColumnChart>(StringComparer.Ordinal);
         private readonly WrapPanel _Metrics = new WrapPanel();
         private readonly StackPanel _Notice = new StackPanel();
-        private readonly Grid _Grid = new Grid();
+        private readonly TabControl _Tabs = new TabControl();
+        private readonly Dictionary<string, TabItem> _TabItems = new Dictionary<string, TabItem>(StringComparer.Ordinal);
         private ComboBox _Range = new ComboBox();
         private ComboBox _Dataset = new ComboBox();
         private ComboBox _GroupBy = new ComboBox();
@@ -101,12 +102,11 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<UsageGroupTotal>("95th", row => Ms(row.Latency.P95)).Fixed(90)
             }, null, "No requests in this range.");
             _Groups.Height = 220;
-            _Grid.ColumnDefinitions = new ColumnDefinitions("*,16,*");
             return Ui.Stack(16,
                 _Notice,
                 Ui.Row(_Range, _Dataset, _GroupBy, _Metric),
                 _Metrics,
-                _Grid,
+                Ui.Card(null, _Tabs),
                 Ui.Card("By group, whole range", _Groups));
         }
 
@@ -178,28 +178,35 @@ namespace Xeno.Desktop.Pages
         private void RenderCharts(UsageAnalytics analytics)
         {
             string range = HistoryRanges.Describe(HistoryRanges.FromIndex(_Range.SelectedIndex));
+            // One tab per chart, each the full width of the page. Tabs are kept across refreshes so the chosen tab stays put;
+            // they are only rebuilt when the dataset offers a different set of charts.
             List<string> ids = XenoUsageCharts.ChartsFor(SelectedDataset).ToList();
-            foreach (string stale in _Charts.Keys.Where(key => !ids.Contains(key)).ToList()) _Charts.Remove(stale);
-            _Grid.Children.Clear();
-            _Grid.RowDefinitions.Clear();
-            for (int i = 0; i < ids.Count; i++)
+            bool sameTabs = ids.SequenceEqual(_TabItems.Keys);
+            if (!sameTabs)
             {
-                string id = ids[i];
-                if (!_Charts.TryGetValue(id, out ColumnChart? chart))
+                string? selected = (_Tabs.SelectedItem as TabItem)?.Tag as string;
+                foreach (string stale in _Charts.Keys.Where(key => !ids.Contains(key)).ToList()) _Charts.Remove(stale);
+                _Tabs.Items.Clear();
+                _TabItems.Clear();
+                foreach (string id in ids)
                 {
-                    chart = new ColumnChart { Height = id == XenoChartCatalog.Heatmap ? 230 : 210 };
-                    chart.BucketActivated += (bucket, series) => DrillDown(id, bucket, series);
-                    _Charts[id] = chart;
+                    if (!_Charts.TryGetValue(id, out ColumnChart? created))
+                    {
+                        created = new ColumnChart { Height = 420 };
+                        string target = id;
+                        created.BucketActivated += (bucket, series) => DrillDown(target, bucket, series);
+                        _Charts[id] = created;
+                    }
+
+                    TabItem tab = new TabItem { Header = XenoChartCatalog.Find(id).Title, Tag = id, Content = Ui.Adopt(created), FontSize = 13 };
+                    _TabItems[id] = tab;
+                    _Tabs.Items.Add(tab);
                 }
 
-                chart.SetChart(XenoUsageCharts.Build(id, analytics, range));
-                if (i % 2 == 0) _Grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-                Border card = Ui.Card(null, chart);
-                card.Margin = new Thickness(0, 0, 0, 16);
-                Grid.SetRow(card, i / 2);
-                Grid.SetColumn(card, (i % 2) * 2);
-                _Grid.Children.Add(card);
+                _Tabs.SelectedItem = selected != null && _TabItems.TryGetValue(selected, out TabItem? keep) ? keep : _TabItems.Values.FirstOrDefault();
             }
+
+            foreach (string id in ids) _Charts[id].SetChart(XenoUsageCharts.Build(id, analytics, range));
         }
 
         private void DrillDown(string chartId, XenoChartBucket bucket, string? series)

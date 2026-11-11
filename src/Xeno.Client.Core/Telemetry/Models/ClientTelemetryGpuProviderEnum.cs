@@ -18,6 +18,11 @@ namespace Xeno.Client.Telemetry.Models
         /// <summary>
         /// NVIDIA SMI provider.
         /// </summary>
-        NvidiaSmi
+        NvidiaSmi,
+
+        /// <summary>
+        /// Apple silicon GPU statistics from the IOAccelerator registry (ioreg), on macOS.
+        /// </summary>
+        AppleIoreg
     }
 }

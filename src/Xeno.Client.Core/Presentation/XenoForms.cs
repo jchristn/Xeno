@@ -119,6 +119,19 @@ namespace Xeno.Client.Presentation
         /// <exception cref="ArgumentNullException">Workspace is null.</exception>
         public static XenoFormSpec? AddModel(XenoWorkspace workspace, string? providerName)
         {
+            return AddModel(workspace, providerName, null);
+        }
+
+        /// <summary>
+        /// Form to add a model to a provider with the name filled in, or null when there are no providers.
+        /// </summary>
+        /// <param name="workspace">Workspace.</param>
+        /// <param name="providerName">Provider to preselect, or null.</param>
+        /// <param name="modelName">Model name to fill in, or null.</param>
+        /// <returns>Form, or null when no provider exists.</returns>
+        /// <exception cref="ArgumentNullException">Workspace is null.</exception>
+        public static XenoFormSpec? AddModel(XenoWorkspace workspace, string? providerName, string? modelName)
+        {
             ArgumentNullException.ThrowIfNull(workspace);
             List<string> providers = workspace.LoadSettings().Runners.Select(item => item.Name).ToList();
             if (providers.Count == 0) return null;
@@ -130,7 +143,7 @@ namespace Xeno.Client.Presentation
                 Fields = new List<XenoFormFieldSpec>
                 {
                     new XenoFormFieldSpec { Key = "provider", Label = "Provider", Kind = XenoSettingKindEnum.Choice, Choices = providers, Value = providerName ?? providers[0] },
-                    new XenoFormFieldSpec { Key = "name", Label = "Model name", Required = true, Placeholder = "llama3.2:latest", Help = "The exact model name the provider serves, for example from 'ollama list'." },
+                    new XenoFormFieldSpec { Key = "name", Label = "Model name", Required = true, Value = modelName ?? String.Empty, Placeholder = "llama3.2:latest", Help = "The exact model name the provider serves, for example from 'ollama list'." },
                     new XenoFormFieldSpec { Key = "completions", Label = "Serves completions (chat and generate)", Kind = XenoSettingKindEnum.Toggle, Value = "true" },
                     new XenoFormFieldSpec { Key = "embeddings", Label = "Serves embeddings", Kind = XenoSettingKindEnum.Toggle, Value = "false" },
                     new XenoFormFieldSpec { Key = "maxConcurrent", Label = "Max concurrent requests", Placeholder = "(provider limit)", Help = "For this model only. Leave blank to use the provider's limit." }
@@ -171,7 +184,18 @@ namespace Xeno.Client.Presentation
             ClientSettings settings = workspace.LoadSettings();
             ClientRunnerSettings? provider = ProviderConfiguration.FindProvider(settings, providerName);
             ClientModelSettings? model = provider?.Models.FirstOrDefault(item => String.Equals(item.Name, modelName, StringComparison.OrdinalIgnoreCase));
-            if (provider == null || model == null) return null;
+            if (provider == null) return null;
+            if (model == null)
+            {
+                // A model the provider reported but client.json does not list: editing it configures it.
+                XenoFormSpec? configure = AddModel(workspace, provider.Name, modelName);
+                if (configure == null) return null;
+                configure.Title = "Edit Model";
+                configure.Intro = "'" + modelName + "' was found on " + provider.Name + " but is not configured. Saving adds it to client.json with these settings, and it is advertised to the Xeno network while the client is connected.";
+                configure.SubmitText = "Save";
+                return configure;
+            }
+
             return new XenoFormSpec
             {
                 Title = "Edit Model",

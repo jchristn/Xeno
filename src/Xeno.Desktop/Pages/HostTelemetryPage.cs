@@ -82,7 +82,7 @@ namespace Xeno.Desktop.Pages
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Metric = new ComboBox { ItemsSource = XenoCharts.HostMetrics.Select(XenoCharts.HostMetricName).ToList(), SelectedIndex = 0, MinWidth = 160 };
             _Metric.SelectionChanged += (sender, args) => _ = RefreshAsync();
-            _Chart = new ColumnChart { Height = 220 };
+            _Chart = new ColumnChart { Height = 330 };
 
             _Samples = new XenoTable<HostSampleRow>(new List<XenoTableColumn<HostSampleRow>>
             {

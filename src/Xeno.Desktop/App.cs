@@ -330,11 +330,9 @@ namespace Xeno.Desktop
             window.Closed += (sender, args) => _Menus.Release(menu);
         }
 
-        private async System.Threading.Tasks.Task TestConnectionAsync(DesktopSession session)
+        private System.Threading.Tasks.Task TestConnectionAsync(DesktopSession session)
         {
-            session.Report("Testing the server connection...");
-            string message = await XenoClientActions.PingAsync(session.Workspace, 3, CancellationToken.None).ConfigureAwait(true);
-            session.Report(message);
+            return Dialogs.ClientDialogs.TestConnectionAsync(ActiveWindow(), session);
         }
 
         private Window? ActiveWindow()

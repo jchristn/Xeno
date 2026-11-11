@@ -40,6 +40,9 @@ namespace Xeno.Desktop.Pages
         private ComboBox _File = new ComboBox();
         private ComboBox _Tail = new ComboBox();
         private ComboBox _Severity = new ComboBox();
+        private ComboBox _Since = new ComboBox();
+        private static readonly List<string> Windows = new List<string> { "Any time", "Last 15 minutes", "Last hour", "Last day", "Last week" };
+        private static readonly TimeSpan?[] WindowSpans = { null, TimeSpan.FromMinutes(15), TimeSpan.FromHours(1), TimeSpan.FromDays(1), TimeSpan.FromDays(7) };
         private CheckBox _Follow = new CheckBox();
         private TextBox _Text = new TextBox();
         private TextBlock _Path = new TextBlock();
@@ -82,6 +85,8 @@ namespace Xeno.Desktop.Pages
             _Tail.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Severity = new ComboBox { ItemsSource = ClientLogReader.SeverityFilters, SelectedIndex = 0, MinWidth = 100 };
             _Severity.SelectionChanged += (sender, args) => _ = RefreshAsync();
+            _Since = new ComboBox { ItemsSource = Windows, SelectedIndex = 0, MinWidth = 140 };
+            _Since.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Follow = new CheckBox { Content = "Follow", IsChecked = true, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
             _Follow.IsCheckedChanged += (sender, args) => UpdateTimer();
             _Path = Ui.Muted(String.Empty);
@@ -95,7 +100,7 @@ namespace Xeno.Desktop.Pages
             };
 
             DockPanel root = new DockPanel();
-            StackPanel top = Ui.Stack(6, Ui.Row(Label("Log"), _File, Label("Lines"), _Tail, Label("Severity"), _Severity, _Follow), _Path);
+            StackPanel top = Ui.Stack(6, Ui.Row(Label("Log"), _File, Label("Lines"), _Tail, Label("Severity"), _Severity, Label("Time"), _Since, _Follow), _Path);
             top.Margin = new Thickness(0, 0, 0, 10);
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
@@ -112,7 +117,9 @@ namespace Xeno.Desktop.Pages
                 bool error = _File.SelectedIndex == 1;
                 int tail = Int32.Parse(Tails[Math.Max(0, _Tail.SelectedIndex)], System.Globalization.CultureInfo.InvariantCulture);
                 string severity = _Severity.SelectedItem as string ?? "all";
-                List<string> lines = await Workspace.ReadLogAsync(tail, severity, error, None).ConfigureAwait(true);
+                TimeSpan? span = WindowSpans[Math.Clamp(_Since.SelectedIndex, 0, WindowSpans.Length - 1)];
+                DateTime? since = span.HasValue ? DateTime.UtcNow - span.Value : null;
+                List<string> lines = await Workspace.ReadLogAsync(tail, severity, error, since, None).ConfigureAwait(true);
                 string file = error ? ClientConnectionState.ErrorLogFile : ClientConnectionState.LogFile;
                 _Path.Text = file + "  (" + lines.Count + " line" + (lines.Count == 1 ? String.Empty : "s") + ")";
                 string text = lines.Count == 0 ? "(no log lines yet; start the client to create the log)" : String.Join(Environment.NewLine, lines);

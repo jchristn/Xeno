@@ -151,8 +151,8 @@ namespace Xeno.Desktop.Pages
             List<XenoRowAction<ModelRow>> actions = new List<XenoRowAction<ModelRow>>();
             if (row.Source.ServedLocally)
             {
-                actions.Add(new XenoRowAction<ModelRow>("Edit...", Edit));
-                foreach (string provider in row.Source.LocalProviders)
+                actions.Add(new XenoRowAction<ModelRow>(row.Source.Discovered ? "Configure..." : "Edit...", Edit));
+                foreach (string provider in row.Source.Discovered ? new List<string>() : row.Source.LocalProviders)
                 {
                     string target = provider;
                     actions.Add(new XenoRowAction<ModelRow>("Delete from " + provider, item => _ = ClientDialogs.DeleteModelAsync(Window, Session, target, item.Name, () => _ = RefreshAsync())) { Destructive = true });

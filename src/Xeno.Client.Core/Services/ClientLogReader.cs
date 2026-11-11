@@ -63,10 +63,26 @@ namespace Xeno.Client.Services
         /// <param name="severity">Severity filter (all, info, warn, error, debug). Null means all.</param>
         /// <param name="token">Cancellation token.</param>
         /// <returns>Matching lines, oldest first. An empty list when the file does not exist.</returns>
-        public static async Task<List<string>> ReadTailAsync(string filename, int tail, string? severity, CancellationToken token)
+        public static Task<List<string>> ReadTailAsync(string filename, int tail, string? severity, CancellationToken token)
+        {
+            return ReadTailAsync(filename, tail, severity, null, token);
+        }
+
+        /// <summary>
+        /// Read the last lines of a log file written at or after a time.
+        /// </summary>
+        /// <param name="filename">Log file.</param>
+        /// <param name="tail">Maximum lines.</param>
+        /// <param name="severity">Severity filter (all, info, warn, error, debug). Null means all.</param>
+        /// <param name="sinceUtc">Earliest time to include, or null for any time. A line without a timestamp (such as a
+        /// stack trace line) goes with the line before it.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Matching lines, oldest first. An empty list when the file does not exist.</returns>
+        public static async Task<List<string>> ReadTailAsync(string filename, int tail, string? severity, DateTime? sinceUtc, CancellationToken token)
         {
             List<string> lines = new List<string>();
             if (String.IsNullOrWhiteSpace(filename) || !File.Exists(filename) || tail <= 0) return lines;
+            bool inWindow = sinceUtc == null;
             using (FileStream stream = OpenShared(filename))
             using (StreamReader reader = new StreamReader(stream))
             {
@@ -74,6 +90,13 @@ namespace Xeno.Client.Services
                 {
                     string? line = await reader.ReadLineAsync(token).ConfigureAwait(false);
                     if (line == null) break;
+                    if (sinceUtc != null)
+                    {
+                        DateTime? stamp = Timestamp(line);
+                        if (stamp != null) inWindow = stamp.Value >= sinceUtc.Value.ToUniversalTime();
+                        if (!inWindow) continue;
+                    }
+
                     if (!Matches(line, severity)) continue;
                     lines.Add(line);
                     if (lines.Count > tail) lines.RemoveAt(0);
@@ -81,6 +104,19 @@ namespace Xeno.Client.Services
             }
 
             return lines;
+        }
+
+        /// <summary>
+        /// The UTC time at the start of a log line ("2026-11-11 16:55:01.690684Z ..."), or null when it has none.
+        /// </summary>
+        /// <param name="line">Log line.</param>
+        /// <returns>Time, or null.</returns>
+        public static DateTime? Timestamp(string? line)
+        {
+            if (String.IsNullOrEmpty(line) || line.Length < 20 || !Char.IsDigit(line[0])) return null;
+            int end = line.IndexOf('Z');
+            if (end < 19 || end > 32) return null;
+            return DateTime.TryParse(line.Substring(0, end + 1), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out DateTime parsed) ? parsed : null;
         }
 
         /// <summary>

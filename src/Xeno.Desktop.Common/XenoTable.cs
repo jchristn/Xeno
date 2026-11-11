@@ -39,6 +39,14 @@ namespace Xeno.Desktop.Common
         }
 
         /// <summary>
+        /// Select the first row when nothing is selected.
+        /// </summary>
+        public void SelectFirstIfNone()
+        {
+            if (_List.SelectedItem == null && _Rows.Count > 0) _List.SelectedItem = _Rows[0];
+        }
+
+        /// <summary>
         /// Rows currently shown, in display order.
         /// </summary>
         public IReadOnlyList<TRow> Rows

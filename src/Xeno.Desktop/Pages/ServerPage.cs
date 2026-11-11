@@ -32,7 +32,6 @@ namespace Xeno.Desktop.Pages
         private StackPanel _Connection = new StackPanel();
         private StackPanel _Account = new StackPanel();
         private StackPanel _Network = new StackPanel();
-        private StackPanel _Ping = new StackPanel();
 
         #endregion
 
@@ -63,12 +62,11 @@ namespace Xeno.Desktop.Pages
             _Connection = new StackPanel { Spacing = 10 };
             _Account = new StackPanel { Spacing = 10 };
             _Network = new StackPanel { Spacing = 8 };
-            _Ping = new StackPanel { Spacing = 4 };
             Render();
             return Ui.Stack(16,
                 Ui.Card("Connection", _Connection, Ui.Button("Edit...", () => _ = ClientDialogs.EditServerAsync(Window, Session, Render))),
                 Ui.Card("Account", _Account),
-                Ui.Card("Connectivity", _Ping, Ui.Button("Test Connection", () => _ = PingAsync())),
+                Ui.Card("Connectivity", Ui.Muted("Ping the Xeno server to check that this machine can reach it."), Ui.Button("Test Connection", () => _ = Dialogs.ClientDialogs.TestConnectionAsync(Window, Session))),
                 Ui.Card("Xeno network", _Network, Ui.Button("Check", () => _ = RefreshAsync())));
         }
 
@@ -130,26 +128,6 @@ namespace Xeno.Desktop.Pages
                 Ui.Button("Set Access Key...", () => _ = ClientDialogs.SetAccessKeyAsync(Window, Session, Render)),
                 Ui.Button("Sign Out...", () => _ = ClientDialogs.SignOutAsync(Window, Session, Render))));
             if (signedIn && status != null && status.Running) _Account.Children.Add(Ui.Muted("Credential changes take effect after the client restarts."));
-        }
-
-        private async Task PingAsync()
-        {
-            _Ping.Children.Clear();
-            _Ping.Children.Add(Ui.Muted("Pinging..."));
-            await GuardAsync("Test Connection", async () =>
-            {
-                List<PingAttemptResult> attempts = await Workspace.PingServerAsync(4, None).ConfigureAwait(true);
-                _Ping.Children.Clear();
-                foreach (PingAttemptResult attempt in attempts)
-                {
-                    string line = attempt.Success
-                        ? "Reply " + attempt.Sequence + ": " + attempt.ElapsedMs + " ms, status " + DisplayFormat.OrDash(attempt.Status)
-                        : "Attempt " + attempt.Sequence + ": " + (attempt.Error ?? ("HTTP " + attempt.StatusCode + " " + attempt.ReasonPhrase));
-                    _Ping.Children.Add(Ui.Code(line));
-                }
-
-                Report(await XenoClientActions.PingAsync(Workspace, 1, None).ConfigureAwait(true));
-            }).ConfigureAwait(true);
         }
 
         #endregion

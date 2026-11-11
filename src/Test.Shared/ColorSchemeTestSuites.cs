@@ -53,6 +53,7 @@ namespace Test.Shared
                             Need(failures, where, "warning/soft", c.Warning, c.WarningSoft, 3.0);
                             Need(failures, where, "danger/soft", c.Danger, c.DangerSoft, 3.0);
                             Need(failures, where, "info/soft", c.Info, c.InfoSoft, 3.0);
+                            if (XenoRgb.Parse(c.Info).Distance(XenoRgb.Parse(c.Success)) < 60) failures.Add(where + " info " + c.Info + " looks like success " + c.Success + " (the two chart series would match)");
                             if (c.Series.Count < 5) failures.Add(where + " has only " + c.Series.Count + " chart colors.");
                             if (scheme.Id != XenoColorSchemes.DefaultId)
                             {

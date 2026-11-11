@@ -137,7 +137,9 @@ namespace Xeno.Client.Presentation
             XenoRgb success = Given(set.Success) ?? XenoRgb.Parse(dark ? "#4ade80" : "#1a7f37");
             XenoRgb warning = Given(set.Warning) ?? XenoRgb.Parse(dark ? "#fbbf24" : "#9a6700");
             XenoRgb danger = Given(set.Danger) ?? XenoRgb.Parse(dark ? "#f87171" : "#c62828");
-            XenoRgb info = Given(set.Info) ?? accent;
+            // Information (also the Xeno network series in charts) follows the accent, unless the accent is too close to
+            // the success green that marks this machine; then it is purple.
+            XenoRgb info = Given(set.Info) ?? (accent.Distance(success) < 90 ? XenoRgb.Parse(dark ? "#c084fc" : "#7c3aed") : accent);
             double softAmount = dark ? 0.2 : 0.11;
             XenoRgb successSoft = Given(set.SuccessSoft) ?? panel.Mix(success, softAmount);
             XenoRgb warningSoft = Given(set.WarningSoft) ?? panel.Mix(warning, softAmount);

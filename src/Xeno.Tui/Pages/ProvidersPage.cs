@@ -68,6 +68,7 @@ namespace Xeno.Tui.Pages
             _Models = Table<ProviderModelRow>("This provider has no models yet. Press m to add one.", row => row.Provider + "/" + row.Name);
             Column(_Models, "Model", row => row.Name, 0);
             Column(_Models, "Capabilities", row => row.Capabilities, 26);
+            Column(_Models, "Source", row => row.Source, 30);
             _Models.RowActivated += index => EditModel();
 
             Frame(_Root, _Providers, StackSize.Weighted(3, 4), "Providers");
@@ -138,7 +139,7 @@ namespace Xeno.Tui.Pages
         private void ShowModels()
         {
             ProviderRow? row = _Providers.SelectedRow;
-            _Models.Bind(row == null ? new List<ProviderModelRow>() : row.Source.Models.Select(item => ProviderModelRow.From(row.Source, item)).ToList());
+            _Models.Bind(row == null ? new List<ProviderModelRow>() : ProviderModelRow.ForProvider(row.Source, Workspace.DiscoveredModels(row.Name)));
         }
 
         private void EditProvider()
@@ -184,6 +185,12 @@ namespace Xeno.Tui.Pages
         {
             ProviderModelRow? row = _Models.SelectedRow;
             if (row == null) return;
+            if (!row.Configured)
+            {
+                Context.Notify("'" + row.Name + "' was found on " + row.Provider + " and is not configured, so there is nothing to delete.", NotificationSeverity.Info);
+                return;
+            }
+
             bool confirmed = await Context.ConfirmAsync("Delete Model", "Stop advertising '" + row.Name + "' from '" + row.Provider + "'?", "Delete").ConfigureAwait(false);
             if (!confirmed) return;
             await Context.RunAsync(async token =>

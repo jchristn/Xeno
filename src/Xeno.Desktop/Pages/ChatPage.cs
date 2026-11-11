@@ -54,7 +54,7 @@ namespace Xeno.Desktop.Pages
         private readonly TextBlock _Title = new TextBlock { FontSize = 16, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         private readonly StackPanel _Messages = new StackPanel { Spacing = 14, Margin = new Thickness(18, 16) };
         private readonly ScrollViewer _Scroll = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        private readonly TextBox _Input = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 36, MaxHeight = 200, VerticalContentAlignment = VerticalAlignment.Center, PlaceholderText = "Message (Enter to send, Shift+Enter for a new line)" };
+        private readonly TextBox _Input = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 36, MaxHeight = 200, VerticalContentAlignment = VerticalAlignment.Center, PlaceholderText = "Message" };
         private readonly StackPanel _Notice = new StackPanel { Spacing = 6 };
         private Button? _Send;
         private List<ChatConversation> _Conversations = new List<ChatConversation>();
@@ -131,14 +131,22 @@ namespace Xeno.Desktop.Pages
             };
             ToolTip.SetTip(_Tools, "Let the model use Xeno tools (status, models, routing, history). Tools that change something ask first.");
             ToolTip.SetTip(_Model, "Models on this machine are answered here; the rest go to the Xeno network.");
-            _Input.KeyDown += (sender, args) =>
+            // The text box handles Enter itself (it inserts a new line), so listen before it does: Enter sends, and Shift+Enter
+            // or Ctrl+Enter adds a line.
+            _Input.AddHandler(InputElement.KeyDownEvent, (sender, args) =>
             {
-                if (args.Key == Key.Enter && !args.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                if (args.Key != Key.Enter && args.Key != Key.Return) return;
+                if (args.KeyModifiers.HasFlag(KeyModifiers.Control) || args.KeyModifiers.HasFlag(KeyModifiers.Meta))
                 {
                     args.Handled = true;
-                    _ = SendAsync();
+                    InsertNewLine();
+                    return;
                 }
-            };
+
+                if (args.KeyModifiers.HasFlag(KeyModifiers.Shift)) return;
+                args.Handled = true;
+                _ = SendAsync();
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
             _Scroll.Content = _Messages;
 
             DockPanel left = new DockPanel { Width = 260 };
@@ -174,7 +182,7 @@ namespace Xeno.Desktop.Pages
 
             DockPanel right = new DockPanel();
             Border headerBar = new Border { BorderBrush = palette.Border, BorderThickness = new Thickness(0, 0, 0, 1), Child = header };
-            TextBlock disclaimer = new TextBlock { Text = ChatFormat.Disclaimer, Foreground = palette.Muted, FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(14, 0, 14, 8) };
+            TextBlock disclaimer = new TextBlock { Text = ChatFormat.Disclaimer + "  Enter sends; Shift+Enter or Ctrl+Enter adds a line.", Foreground = palette.Muted, FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(14, 0, 14, 8) };
             Border composerBar = new Border { BorderBrush = palette.Border, BorderThickness = new Thickness(0, 1, 0, 0), Child = new StackPanel { Children = { composer, disclaimer } } };
             DockPanel.SetDock(headerBar, Dock.Top);
             DockPanel.SetDock(_Notice, Dock.Top);
@@ -359,8 +367,17 @@ namespace Xeno.Desktop.Pages
             DockPanel.SetDock(more, Dock.Right);
             row.Children.Add(more);
             row.Children.Add(content);
-            ListBoxItem item = new ListBoxItem { Content = row, Tag = conversation, Padding = new Thickness(10, 7, 2, 7), ContextMenu = menu() };
+            ListBoxItem item = new ListBoxItem { Content = row, Tag = conversation, Padding = new Thickness(10, 7, 16, 7), ContextMenu = menu() };
             return item;
+        }
+
+        private void InsertNewLine()
+        {
+            string text = _Input.Text ?? String.Empty;
+            int start = Math.Clamp(Math.Min(_Input.SelectionStart, _Input.SelectionEnd), 0, text.Length);
+            int end = Math.Clamp(Math.Max(_Input.SelectionStart, _Input.SelectionEnd), 0, text.Length);
+            _Input.Text = text.Substring(0, start) + Environment.NewLine + text.Substring(end);
+            _Input.CaretIndex = start + Environment.NewLine.Length;
         }
 
         private void SelectInList()

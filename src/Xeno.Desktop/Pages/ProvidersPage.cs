@@ -83,7 +83,8 @@ namespace Xeno.Desktop.Pages
             _Models = new XenoTable<ProviderModelRow>(new List<XenoTableColumn<ProviderModelRow>>
             {
                 new XenoTableColumn<ProviderModelRow>("Model", row => row.Name) { Monospace = true }.Star(3),
-                new XenoTableColumn<ProviderModelRow>("Capabilities", row => row.Capabilities).Star(2)
+                new XenoTableColumn<ProviderModelRow>("Capabilities", row => row.Capabilities).Star(2),
+                new XenoTableColumn<ProviderModelRow>("Source", row => row.Source).Star(2)
             }, ModelActions, "Select a provider to see its models.");
             _Models.RowActivated += (sender, row) => _ = ClientDialogs.EditModelAsync(Window, Session, row.Provider, row.Name, () => _ = RefreshAsync());
 
@@ -118,6 +119,7 @@ namespace Xeno.Desktop.Pages
             {
                 List<ProviderRow> rows = Workspace.GetProviders();
                 _Providers?.SetRows(rows, (left, right) => String.Equals(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+                _Providers?.SelectFirstIfNone();
                 ShowModels(_Providers?.SelectedRow);
                 return Task.CompletedTask;
             }).ConfigureAwait(true);
@@ -139,7 +141,7 @@ namespace Xeno.Desktop.Pages
 
             _ModelsTitle.Text = "Models served by " + provider.Name;
             _Models.SetEmptyText("This provider has no models yet. Add the models it serves so the Xeno network can use them.");
-            _Models.SetRows(provider.Source.Models.Select(item => ProviderModelRow.From(provider.Source, item)));
+            _Models.SetRows(ProviderModelRow.ForProvider(provider.Source, Workspace.DiscoveredModels(provider.Name)));
         }
 
         private IReadOnlyList<XenoRowAction<ProviderRow>> ProviderActions(ProviderRow row)
@@ -156,12 +158,15 @@ namespace Xeno.Desktop.Pages
 
         private IReadOnlyList<XenoRowAction<ProviderModelRow>> ModelActions(ProviderModelRow row)
         {
-            return new List<XenoRowAction<ProviderModelRow>>
+            List<XenoRowAction<ProviderModelRow>> actions = new List<XenoRowAction<ProviderModelRow>>
             {
-                new XenoRowAction<ProviderModelRow>("Edit...", item => _ = ClientDialogs.EditModelAsync(Window, Session, item.Provider, item.Name, () => _ = RefreshAsync())),
-                new XenoRowAction<ProviderModelRow>("Copy Name", item => _ = XenoClipboard.CopyAsync(Window, item.Name)),
-                new XenoRowAction<ProviderModelRow>("Delete...", item => _ = ClientDialogs.DeleteModelAsync(Window, Session, item.Provider, item.Name, () => _ = RefreshAsync())) { Destructive = true }
+                new XenoRowAction<ProviderModelRow>(row.Configured ? "Edit..." : "Configure...", item => _ = ClientDialogs.EditModelAsync(Window, Session, item.Provider, item.Name, () => _ = RefreshAsync())),
+                new XenoRowAction<ProviderModelRow>("Copy Name", item => _ = XenoClipboard.CopyAsync(Window, item.Name))
             };
+
+            // A model found on the provider but not configured has nothing in client.json to delete.
+            if (row.Configured) actions.Add(new XenoRowAction<ProviderModelRow>("Delete...", item => _ = ClientDialogs.DeleteModelAsync(Window, Session, item.Provider, item.Name, () => _ = RefreshAsync())) { Destructive = true });
+            return actions;
         }
 
         #endregion

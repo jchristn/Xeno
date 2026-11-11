@@ -80,7 +80,7 @@ namespace Xeno.Desktop.Pages
             _Metrics = new WrapPanel();
             _Connection = new StackPanel();
             _Services = new StackPanel();
-            _Chart = new ColumnChart();
+            _Chart = new ColumnChart { Height = 270 };
             _Range = new ComboBox { ItemsSource = HistoryRanges.Labels, SelectedIndex = 1, MinWidth = 140 };
             _Range.SelectionChanged += (sender, args) => _ = RefreshAsync();
             _Recent = new XenoTable<RequestRow>(new List<XenoTableColumn<RequestRow>>

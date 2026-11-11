@@ -36,6 +36,12 @@ namespace Xeno.Client.Telemetry.Providers
                 return new ClientGpuTelemetry { Status = new ClientTelemetryCollectionStatus { Status = ClientTelemetryCollectionStatusEnum.Disabled } };
             }
 
+            if (OperatingSystem.IsMacOS())
+            {
+                ClientGpuTelemetry apple = await CollectAppleAsync(settings, token).ConfigureAwait(false);
+                if (apple.Status.Status == ClientTelemetryCollectionStatusEnum.Available) return apple;
+            }
+
             if (!String.IsNullOrWhiteSpace(settings.NvidiaDcgmExporterUrl))
             {
                 ClientGpuTelemetry dcgm = await CollectDcgmAsync(settings.NvidiaDcgmExporterUrl, token).ConfigureAwait(false);
@@ -43,6 +49,73 @@ namespace Xeno.Client.Telemetry.Providers
             }
 
             return await CollectNvidiaSmiAsync(settings, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Read Apple silicon GPUs from 'ioreg -r -d 1 -c IOAccelerator' output: the chip name and GPU core count, device
+        /// utilization, and the unified memory the GPU is using. Temperature and power need root, so they stay empty.
+        /// </summary>
+        /// <param name="output">ioreg output.</param>
+        /// <param name="systemMemoryBytes">Physical memory, shared by the CPU and GPU, or null when unknown.</param>
+        /// <returns>One device per accelerator that reports statistics.</returns>
+        public static List<ClientGpuDeviceTelemetry> ParseIoreg(string? output, long? systemMemoryBytes)
+        {
+            List<ClientGpuDeviceTelemetry> devices = new List<ClientGpuDeviceTelemetry>();
+            if (String.IsNullOrWhiteSpace(output)) return devices;
+            string[] blocks = output.Split(new[] { "+-o " }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string block in blocks)
+            {
+                System.Text.RegularExpressions.Match statistics = System.Text.RegularExpressions.Regex.Match(block, "\"PerformanceStatistics\" = \\{([^}]*)\\}");
+                if (!statistics.Success) continue;
+                string stats = statistics.Groups[1].Value;
+                string model = Capture(block, "\"model\" = \"([^\"]+)\"") ?? "Apple GPU";
+                string? cores = Capture(block, "\"gpu-core-count\" = (\\d+)");
+                double? utilization = ParseDouble(Capture(stats, "\"Device Utilization %\"=(\\d+(?:\\.\\d+)?)"));
+                long? used = ParseLong(Capture(stats, "\"In use system memory\"=(\\d+)"));
+                ClientGpuDeviceTelemetry device = new ClientGpuDeviceTelemetry
+                {
+                    Uuid = "apple-gpu-" + devices.Count.ToString(CultureInfo.InvariantCulture),
+                    Name = cores != null ? model + " (" + cores + "-core GPU)" : model,
+                    UtilizationPercent = utilization,
+                    MemoryUsedBytes = used,
+                    MemoryTotalBytes = systemMemoryBytes
+                };
+                if (used.HasValue && systemMemoryBytes.HasValue && systemMemoryBytes.Value > 0)
+                {
+                    device.MemoryFreeBytes = Math.Max(0, systemMemoryBytes.Value - used.Value);
+                    device.MemoryUtilizationPercent = Math.Round((double)used.Value / systemMemoryBytes.Value * 100.0, 2);
+                }
+
+                devices.Add(device);
+            }
+
+            return devices;
+        }
+
+        private async Task<ClientGpuTelemetry> CollectAppleAsync(ClientGpuTelemetrySettings settings, CancellationToken token)
+        {
+            ClientGpuTelemetry telemetry = new ClientGpuTelemetry { Provider = ClientTelemetryGpuProviderEnum.AppleIoreg };
+            try
+            {
+                string output = await _CommandRunner.RunAsync("ioreg", "-r -d 1 -c IOAccelerator", TimeSpan.FromMilliseconds(settings.CommandTimeoutMs), token).ConfigureAwait(false);
+                long memory = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+                telemetry.Devices.AddRange(ParseIoreg(output, memory > 0 ? memory : null));
+                FinalizeGpuTelemetry(telemetry);
+                telemetry.Status.Status = telemetry.DeviceCount > 0 ? ClientTelemetryCollectionStatusEnum.Available : ClientTelemetryCollectionStatusEnum.Unavailable;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is System.ComponentModel.Win32Exception || ex is System.IO.IOException || ex is TimeoutException || ex is OperationCanceledException && !token.IsCancellationRequested)
+            {
+                telemetry.Status.Status = ClientTelemetryCollectionStatusEnum.Unavailable;
+                telemetry.Status.Message = ex.Message;
+            }
+
+            return telemetry;
+        }
+
+        private static string? Capture(string text, string pattern)
+        {
+            System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(text, pattern);
+            return match.Success ? match.Groups[1].Value : null;
         }
 
         private static async Task<ClientGpuTelemetry> CollectDcgmAsync(string url, CancellationToken token)
@@ -184,13 +257,13 @@ namespace Xeno.Client.Telemetry.Providers
             return present.Length == 0 ? null : present.Sum();
         }
 
-        private static double? ParseDouble(string value)
+        private static double? ParseDouble(string? value)
         {
             string cleaned = (value ?? string.Empty).Replace("W", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
             return Double.TryParse(cleaned, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? Math.Round(parsed, 2) : null;
         }
 
-        private static long? ParseLong(string value)
+        private static long? ParseLong(string? value)
         {
             return Int64.TryParse((value ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed) ? parsed : null;
         }

@@ -106,7 +106,7 @@ namespace Xeno.Desktop.Pages
             _Table.RowActivated += (sender, row) => _ = ShowDetailAsync(row);
 
             DockPanel root = new DockPanel();
-            StackPanel top = Ui.Stack(10, Ui.Card(null, _Chart), Ui.Row(_Range, _Outcome, _Search), _Summary);
+            StackPanel top = Ui.Stack(10, Ui.Row(_Range, _Outcome, _Search), Ui.Card(null, _Chart), _Summary);
             top.Margin = new Thickness(0, 0, 0, 10);
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
