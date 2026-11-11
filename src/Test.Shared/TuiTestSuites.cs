@@ -637,11 +637,10 @@ namespace Test.Shared
                         WaitFor(() => tui.Tui.Context.Message.Contains("Sign in", StringComparison.Ordinal), tui, "The status bar should explain sign-in. It said: " + tui.Tui.Context.Message);
                     }
                 }),
-                Case(suite, "ChatPagesAreInTheCatalog", "Chat, Chat history, and Feedback are pages in every front end, and the tray opens Chat", () =>
+                Case(suite, "ChatPagesAreInTheCatalog", "Chat, Chat history, and Feedback are pages in every front end", () =>
                 {
                     Check(String.Join(",", XenoNavigationCatalog.Sections) == "Client,Models,Chat,Activity,Telemetry,Configuration", "Sections are out of order: " + String.Join(",", XenoNavigationCatalog.Sections));
                     Check(XenoNavigationCatalog.PageFor(XenoCommandEnum.GoChat) == XenoPageEnum.Chat && XenoNavigationCatalog.PageFor(XenoCommandEnum.GoChatHistory) == XenoPageEnum.ChatHistory && XenoNavigationCatalog.PageFor(XenoCommandEnum.GoChatFeedback) == XenoPageEnum.ChatFeedback, "Chat commands do not map to pages.");
-                    Check(XenoMenuLayout.Commands(XenoMenuLayout.TrayMenu()).Contains(XenoCommandEnum.GoChat), "The tray menu has no Chat item.");
                     Check(XenoLaunchOptions.Parse(new[] { "--page", "chat" }).StartPage == XenoPageEnum.Chat, "--page chat was not accepted.");
                 }),
                 Case(suite, "ChatSaysWhenTheClientIsNotRunning", "The terminal Chat page explains that chat needs the client", () =>

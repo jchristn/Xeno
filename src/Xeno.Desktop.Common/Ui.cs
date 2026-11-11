@@ -89,14 +89,14 @@ namespace Xeno.Desktop.Common
             {
                 DockPanel header = new DockPanel { LastChildFill = true };
                 StackPanel actionPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-                foreach (Control action in actions) actionPanel.Children.Add(action);
+                foreach (Control action in actions) actionPanel.Children.Add(Adopt(action));
                 DockPanel.SetDock(actionPanel, Dock.Right);
                 header.Children.Add(actionPanel);
                 header.Children.Add(Heading(title ?? String.Empty));
                 content.Children.Add(header);
             }
 
-            content.Children.Add(body);
+            content.Children.Add(Adopt(body));
             return new Border
             {
                 Background = palette.Panel,
@@ -207,6 +207,76 @@ namespace Xeno.Desktop.Common
         }
 
         /// <summary>
+        /// Take a control out of its current parent so it can be placed again. Pages keep some controls (charts, lists,
+        /// inputs) across rebuilds, and a page is rebuilt each time it is shown and when the theme changes; a control
+        /// still attached to the previous layout cannot be added to the new one.
+        /// </summary>
+        /// <typeparam name="T">Control type.</typeparam>
+        /// <param name="control">Control.</param>
+        /// <returns>The same control, without a parent.</returns>
+        public static T Adopt<T>(T control) where T : Control
+        {
+            ArgumentNullException.ThrowIfNull(control);
+            switch (control.Parent)
+            {
+                case Panel panel:
+                    panel.Children.Remove(control);
+                    break;
+                case Decorator decorator when Object.ReferenceEquals(decorator.Child, control):
+                    decorator.Child = null;
+                    break;
+                case ContentControl content when Object.ReferenceEquals(content.Content, control):
+                    content.Content = null;
+                    break;
+            }
+
+            return control;
+        }
+
+        /// <summary>
+        /// Outline of the copy icon: two overlapping rounded rectangles, drawn in a 24 x 24 box.
+        /// </summary>
+        public const string CopyIconPath = "M9 9 H19 A2 2 0 0 1 21 11 V19 A2 2 0 0 1 19 21 H11 A2 2 0 0 1 9 19 Z M15 9 V5 A2 2 0 0 0 13 3 H5 A2 2 0 0 0 3 5 V13 A2 2 0 0 0 5 15 H9";
+
+        /// <summary>
+        /// A button that shows only an outline icon. The tooltip doubles as the accessible name.
+        /// </summary>
+        /// <param name="pathData">Icon outline in a 24 x 24 box, as path markup.</param>
+        /// <param name="tip">Tooltip and accessible name, for example "Copy answer".</param>
+        /// <param name="onClick">Click handler.</param>
+        /// <returns>Button.</returns>
+        public static Button IconButton(string pathData, string tip, Action onClick)
+        {
+            Avalonia.Controls.Shapes.Path icon = new Avalonia.Controls.Shapes.Path
+            {
+                Data = Geometry.Parse(pathData),
+                Stroke = XenoTheme.Current.Text,
+                StrokeThickness = 1.8,
+                StrokeLineCap = PenLineCap.Round,
+                StrokeJoin = PenLineJoin.Round,
+                Stretch = Stretch.Uniform,
+                Width = 15,
+                Height = 15
+            };
+            Button button = new Button { Content = icon, Padding = new Thickness(8, 6), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+            button.Click += (sender, args) => onClick();
+            ToolTip.SetTip(button, tip);
+            Avalonia.Automation.AutomationProperties.SetName(button, tip);
+            return button;
+        }
+
+        /// <summary>
+        /// A copy button: the copy icon only, with a tooltip saying what it copies.
+        /// </summary>
+        /// <param name="tip">Tooltip and accessible name, for example "Copy answer".</param>
+        /// <param name="onClick">Click handler.</param>
+        /// <returns>Button.</returns>
+        public static Button CopyButton(string tip, Action onClick)
+        {
+            return IconButton(CopyIconPath, tip, onClick);
+        }
+
+        /// <summary>
         /// A primary (accent) button.
         /// </summary>
         /// <param name="text">Text.</param>
@@ -228,7 +298,7 @@ namespace Xeno.Desktop.Common
         public static StackPanel Row(params Control[] controls)
         {
             StackPanel panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            foreach (Control control in controls) panel.Children.Add(control);
+            foreach (Control control in controls) panel.Children.Add(Adopt(control));
             return panel;
         }
 
@@ -243,7 +313,7 @@ namespace Xeno.Desktop.Common
             foreach (Control control in controls)
             {
                 control.Margin = new Thickness(0, 0, 12, 12);
-                panel.Children.Add(control);
+                panel.Children.Add(Adopt(control));
             }
 
             return panel;
@@ -258,7 +328,7 @@ namespace Xeno.Desktop.Common
         public static StackPanel Stack(double spacing, params Control[] controls)
         {
             StackPanel panel = new StackPanel { Spacing = spacing };
-            foreach (Control control in controls) panel.Children.Add(control);
+            foreach (Control control in controls) panel.Children.Add(Adopt(control));
             return panel;
         }
 
@@ -273,7 +343,7 @@ namespace Xeno.Desktop.Common
         {
             StackPanel panel = new StackPanel { Spacing = 4 };
             panel.Children.Add(new TextBlock { Text = label, FontWeight = FontWeight.SemiBold, Foreground = XenoTheme.Current.Text, FontSize = 12.5 });
-            panel.Children.Add(input);
+            panel.Children.Add(Adopt(input));
             if (!String.IsNullOrWhiteSpace(help)) panel.Children.Add(Muted(help));
             return panel;
         }

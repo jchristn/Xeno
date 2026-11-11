@@ -36,7 +36,7 @@ namespace Xeno.Desktop.Dialogs
             tabs.Items.Add(new TabItem { Header = "Request body", Content = Body(entry.RequestBody) });
             tabs.Items.Add(new TabItem { Header = "Response body", Content = Body(entry.ResponseBody) });
 
-            Button copy = Ui.Button("Copy as Text", () => _ = XenoClipboard.CopyAsync(this, RequestDetailFormatter.ToText(entry, true)));
+            Button copy = Ui.CopyButton("Copy the request as text", () => _ = XenoClipboard.CopyAsync(this, RequestDetailFormatter.ToText(entry, true)));
             Button close = Ui.Primary("Close", () => CloseWith(null));
             close.IsCancel = true;
             StackPanel buttons = Ui.Row(copy, close);

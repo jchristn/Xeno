@@ -353,12 +353,11 @@ namespace Test.Shared
                         Check(edited.Target == LocalInferenceRouteTargetEnum.Network && !edited.FallbackToNetwork, "A network rule kept its fallback.");
                     }
                 }),
-                Case(suite, "NavigationIncludesLocalEndpoint", "The Local endpoint page is in the shared navigation, the tray menu, and desktop launch options", () =>
+                Case(suite, "NavigationIncludesLocalEndpoint", "The Local endpoint page is in the shared navigation and desktop launch options", () =>
                 {
                     XenoPageDefinition page = XenoNavigationCatalog.Get(XenoPageEnum.LocalEndpoint);
                     Check(page.Command == XenoCommandEnum.GoLocalEndpoint && page.Section == "Models", "Navigation entry is wrong.");
                     Check(XenoNavigationCatalog.PageFor(XenoCommandEnum.GoLocalEndpoint) == XenoPageEnum.LocalEndpoint, "Go command does not map to the page.");
-                    Check(XenoMenuLayout.Commands(XenoMenuLayout.TrayMenu()).Contains(XenoCommandEnum.GoLocalEndpoint), "The tray menu has no Open Local Endpoint item.");
                     Xeno.Client.Hosting.XenoLaunchOptions options = Xeno.Client.Hosting.XenoLaunchOptions.Parse(new[] { "--page", "localendpoint" });
                     Check(options.StartPage == XenoPageEnum.LocalEndpoint, "--page localendpoint was not accepted.");
                     return Task.CompletedTask;

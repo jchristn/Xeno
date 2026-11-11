@@ -98,16 +98,16 @@ namespace Xeno.Desktop.Pages
 
             Grid grid = new Grid { RowDefinitions = new RowDefinitions("3*,Auto,2*") };
             Grid.SetRow(_Providers, 0);
-            grid.Children.Add(_Providers);
+            grid.Children.Add(Ui.Adopt(_Providers));
             DockPanel modelsHeader = new DockPanel { Margin = new Thickness(0, 16, 0, 8) };
             StackPanel buttons = Ui.Row(test, addModel);
             DockPanel.SetDock(buttons, Dock.Right);
             modelsHeader.Children.Add(buttons);
-            modelsHeader.Children.Add(_ModelsTitle);
+            modelsHeader.Children.Add(Ui.Adopt(_ModelsTitle));
             Grid.SetRow(modelsHeader, 1);
             grid.Children.Add(modelsHeader);
             Grid.SetRow(_Models, 2);
-            grid.Children.Add(_Models);
+            grid.Children.Add(Ui.Adopt(_Models));
             return grid;
         }
 

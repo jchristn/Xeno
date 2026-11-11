@@ -72,7 +72,7 @@ namespace Xeno.Desktop.Pages
             _Editor = new SettingsEditor(Session);
             _Result = new StackPanel { Spacing = 8 };
             StackPanel stack = new StackPanel { Spacing = 16 };
-            stack.Children.Add(_Result);
+            stack.Children.Add(Ui.Adopt(_Result));
             foreach (string section in _Editor.Sections)
             {
                 stack.Children.Add(Ui.Card(section, Ui.Stack(12, Ui.Muted(SettingsEditor.Describe(section)), _Editor.Section(section))));

@@ -67,7 +67,7 @@ namespace Xeno.Desktop.Pages
             return new List<Control>
             {
                 Ui.Button("Refresh", () => _ = RefreshAsync()),
-                Ui.Button("Copy URL", () => _ = XenoClipboard.CopyAsync(Window, _View?.Url ?? String.Empty)),
+                Ui.CopyButton("Copy the endpoint URL", () => _ = XenoClipboard.CopyAsync(Window, _View?.Url ?? String.Empty)),
                 Ui.Button("Test a Route...", () => _ = ClientDialogs.TestRouteAsync(Window, Session, String.Empty)),
                 Ui.Button("Check Providers", () => _ = CheckAsync()),
                 Ui.Primary("Add Rule...", () => _ = ClientDialogs.RouteRuleAsync(Window, Session, null, null, () => _ = RefreshAsync()))

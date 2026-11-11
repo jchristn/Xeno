@@ -43,6 +43,7 @@ namespace Xeno.Desktop.Common
 
         private static Application? _Application = null;
         private static readonly Styles _AccentStyles = new Styles();
+        private static readonly Styles _DangerStyles = new Styles();
         private static bool _ForceChanged = false;
 
         #endregion
@@ -62,6 +63,7 @@ namespace Xeno.Desktop.Common
             {
                 _Application = application;
                 application.Styles.Add(_AccentStyles);
+                application.Styles.Add(_DangerStyles);
                 application.ActualThemeVariantChanged += (sender, args) => Refresh();
             }
 
@@ -131,6 +133,7 @@ namespace Xeno.Desktop.Common
             application.Resources["ControlCornerRadius"] = new CornerRadius(6);
             application.Resources["OverlayCornerRadius"] = new CornerRadius(8);
             ApplyAccentText(palette.AccentTextColor);
+            ApplyDanger(((ISolidColorBrush)palette.Danger).Color);
             bool changed = _ForceChanged || Current.IsDark != palette.IsDark || Current.Series.Length == 0;
             _ForceChanged = false;
             Current = palette;
@@ -154,6 +157,30 @@ namespace Xeno.Desktop.Common
                 });
                 style.Setters.Add(new Setter(ContentPresenter.ForegroundProperty, brush));
                 _AccentStyles.Add(style);
+            }
+        }
+
+        private static void ApplyDanger(Color danger)
+        {
+            // Buttons with the "danger" class (for example Stop in chat) are filled with the scheme's danger color, with
+            // black or white text, whichever reads better.
+            _DangerStyles.Clear();
+            XenoRgb fill = new XenoRgb(danger.R, danger.G, danger.B);
+            Color text = XenoRgb.White.Contrast(fill) >= XenoRgb.Parse("#111318").Contrast(fill) ? Colors.White : Color.Parse("#111318");
+            SolidColorBrush foreground = new SolidColorBrush(text);
+            foreach (string state in new[] { String.Empty, ":pointerover", ":pressed" })
+            {
+                double factor = state == ":pointerover" ? 0.9 : state == ":pressed" ? 0.8 : 1.0;
+                Style style = new Style(selector =>
+                {
+                    Selector button = selector.OfType<Button>().Class("danger");
+                    if (state.Length > 0) button = button.Class(state);
+                    return button.Template().OfType<ContentPresenter>().Name("PART_ContentPresenter");
+                });
+                style.Setters.Add(new Setter(ContentPresenter.BackgroundProperty, new SolidColorBrush(Shade(danger, factor))));
+                style.Setters.Add(new Setter(ContentPresenter.ForegroundProperty, foreground));
+                style.Setters.Add(new Setter(ContentPresenter.BorderBrushProperty, new SolidColorBrush(Shade(danger, factor))));
+                _DangerStyles.Add(style);
             }
         }
 

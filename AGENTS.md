@@ -48,7 +48,7 @@ Shared test descriptors live in `src/Test.Shared` and run through Touchstone:
 - Prompt, chat, and embedding input content must not be logged unless an explicit existing diagnostic setting permits it.
 - Network and local requests to the same provider share `ProviderConcurrencyGate.Shared`; never call a provider for a routed request without a lease. Heartbeats report `networkCapacity` (shared provider limits minus local in-flight), and a full provider answers network requests with `ClientResponseMessage.Busy`, which the server retries once on another client.
 - The running listener publishes provider health and counters to `LocalInferenceRuntimeStatus` and metadata-only request records to `LocalInferenceRequestLog`; other processes (CLI, desktop, terminal, tray, local dashboard) read those through `LocalInferenceRoutingService` and `XenoWorkspace`, never by talking to the listener.
-- The Local endpoint page (`XenoPageEnum.LocalEndpoint`) exists in the local web dashboard, the desktop app, and the terminal app, and the tray opens it. Keep them in step with `LocalInferenceRoutingView`.
+- The Local endpoint page (`XenoPageEnum.LocalEndpoint`) exists in the local web dashboard, the desktop app, and the terminal app. Keep them in step with `LocalInferenceRoutingView`.
 - Keep `xeno status`, `xeno inference`, client state, local dashboard settings, the Local endpoint page, the local dashboard API Explorer, Postman, and markdown documentation in sync with local inference behavior.
 - Cover local inference changes in `src/Test.Shared` whenever behavior is product-facing so the automated, Xunit, and NUnit harnesses all exercise it.
 

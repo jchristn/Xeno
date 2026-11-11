@@ -110,7 +110,7 @@ namespace Xeno.Desktop.Pages
             top.Margin = new Thickness(0, 0, 0, 10);
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
-            root.Children.Add(_Table);
+            root.Children.Add(Ui.Adopt(_Table));
             return root;
         }
 

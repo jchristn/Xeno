@@ -45,6 +45,8 @@ namespace Xeno.Desktop.Pages
 
         #region Private-Members
 
+        private Button _RenameButton = new Button();
+        private Button _DeleteButton = new Button();
         private readonly ListBox _List = new ListBox { Background = Avalonia.Media.Brushes.Transparent };
         private readonly TextBox _Search = new TextBox { PlaceholderText = "Search chats" };
         private readonly ComboBox _Model = new ComboBox { MinWidth = 240 };
@@ -100,7 +102,23 @@ namespace Xeno.Desktop.Pages
                 if (_Loading || _List.SelectedItem is not ListBoxItem item || item.Tag is not ChatConversation conversation) return;
                 _ = OpenAsync(conversation.Id);
             };
+            _RenameButton = Ui.Button("Rename...", () => _ = RenameAsync(), "Rename this chat.");
+            _DeleteButton = Ui.Button("Delete...", () => _ = DeleteAsync(), "Delete this chat and its messages.");
             _Search.TextChanged += (sender, args) => _ = LoadListAsync();
+            _List.KeyDown += (sender, args) =>
+            {
+                if (_List.SelectedItem is not ListBoxItem selected || selected.Tag is not ChatConversation conversation) return;
+                if (args.Key == Key.F2)
+                {
+                    args.Handled = true;
+                    _ = RenameAsync(conversation);
+                }
+                else if (args.Key == Key.Delete || (args.Key == Key.Back && args.KeyModifiers.HasFlag(KeyModifiers.Meta)))
+                {
+                    args.Handled = true;
+                    _ = DeleteAsync(conversation);
+                }
+            };
             _Model.SelectionChanged += (sender, args) =>
             {
                 if (_Loading || _Model.SelectedItem is not ComboBoxItem item || item.Tag is not string model) return;
@@ -130,7 +148,7 @@ namespace Xeno.Desktop.Pages
             leftTop.Margin = new Thickness(10);
             DockPanel.SetDock(leftTop, Dock.Top);
             left.Children.Add(leftTop);
-            left.Children.Add(_List);
+            left.Children.Add(Ui.Adopt(_List));
 
             _Send = Ui.Primary("Send", () => _ = SendOrStopAsync());
             _Send.MinWidth = 90;
@@ -140,20 +158,19 @@ namespace Xeno.Desktop.Pages
             _Send.VerticalContentAlignment = VerticalAlignment.Center;
             DockPanel composer = new DockPanel { Margin = new Thickness(14, 10, 14, 4) };
             DockPanel.SetDock(_Send, Dock.Right);
-            composer.Children.Add(_Send);
+            composer.Children.Add(Ui.Adopt(_Send));
             _Input.Margin = new Thickness(0, 0, 10, 0);
-            composer.Children.Add(_Input);
+            composer.Children.Add(Ui.Adopt(_Input));
 
-            DockPanel header = new DockPanel { Margin = new Thickness(14, 10) };
-            StackPanel headerActions = Ui.Row(_Model, _Tools,
+            StackPanel header = new StackPanel { Margin = new Thickness(14, 10), Spacing = 8 };
+            WrapPanel headerActions = Ui.Wrap(_Model, _Tools,
                 Ui.Button("Tools...", () => _ = ShowToolsAsync(), "The Xeno tools the model can use."),
                 Ui.Button("System Prompt...", () => _ = EditSystemPromptAsync(), "Instructions sent before every message in this conversation."),
                 Ui.Button("Folder...", () => _ = EditWorkingDirectoryAsync(), "The folder this chat's file and process tools work in. They cannot reach outside it."),
-                Ui.Button("Rename...", () => _ = RenameAsync()),
-                Ui.Button("Delete...", () => _ = DeleteAsync()));
-            DockPanel.SetDock(headerActions, Dock.Right);
+                _RenameButton,
+                _DeleteButton);
+            header.Children.Add(Ui.Adopt(_Title));
             header.Children.Add(headerActions);
-            header.Children.Add(_Title);
 
             DockPanel right = new DockPanel();
             Border headerBar = new Border { BorderBrush = palette.Border, BorderThickness = new Thickness(0, 0, 0, 1), Child = header };
@@ -164,9 +181,9 @@ namespace Xeno.Desktop.Pages
             DockPanel.SetDock(composerBar, Dock.Bottom);
             _Notice.Margin = new Thickness(14, 8, 14, 0);
             right.Children.Add(headerBar);
-            right.Children.Add(_Notice);
+            right.Children.Add(Ui.Adopt(_Notice));
             right.Children.Add(composerBar);
-            right.Children.Add(_Scroll);
+            right.Children.Add(Ui.Adopt(_Scroll));
 
             Grid grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
             Border leftBorder = new Border { Background = palette.PanelSoft, BorderBrush = palette.Border, BorderThickness = new Thickness(0, 0, 1, 0), Child = left };
@@ -307,7 +324,7 @@ namespace Xeno.Desktop.Pages
                     StackPanel content = Ui.Stack(2,
                         new TextBlock { Text = (conversation.Pinned ? "📌 " : String.Empty) + conversation.Title, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis },
                         new TextBlock { Text = conversation.Model + " · " + ChatFormat.When(conversation.UpdatedUtc) + (conversation.Surface == ChatSurfaceEnum.Desktop ? String.Empty : " · " + ChatFormat.Surface(conversation.Surface)), FontSize = 11.5, Foreground = XenoTheme.Current.Muted, TextTrimming = TextTrimming.CharacterEllipsis });
-                    _List.Items.Add(new ListBoxItem { Content = content, Tag = conversation, Padding = new Thickness(10, 7) });
+                    _List.Items.Add(ConversationItem(conversation, content));
                 }
 
                 SelectInList();
@@ -316,6 +333,34 @@ namespace Xeno.Desktop.Pages
             {
                 _Loading = false;
             }
+        }
+
+        private ListBoxItem ConversationItem(ChatConversation conversation, Control content)
+        {
+            // Each conversation has a ... button and a right-click menu to rename or delete it, whether or not it is open.
+            Func<ContextMenu> menu = () =>
+            {
+                MenuItem rename = new MenuItem { Header = "Rename..." };
+                rename.Click += (sender, args) => _ = RenameAsync(conversation);
+                MenuItem delete = new MenuItem { Header = "Delete..." };
+                delete.Click += (sender, args) => _ = DeleteAsync(conversation);
+                return new ContextMenu { ItemsSource = new List<MenuItem> { rename, delete } };
+            };
+            Button more = new Button { Content = "\u22ef", Padding = new Thickness(8, 0), MinHeight = 0, VerticalAlignment = VerticalAlignment.Center, Background = Avalonia.Media.Brushes.Transparent, BorderThickness = new Thickness(0) };
+            ToolTip.SetTip(more, "Rename or delete this chat");
+            Avalonia.Automation.AutomationProperties.SetName(more, "Chat actions for " + conversation.Title);
+            more.Click += (sender, args) =>
+            {
+                ContextMenu popup = menu();
+                popup.PlacementTarget = more;
+                popup.Open(more);
+            };
+            DockPanel row = new DockPanel();
+            DockPanel.SetDock(more, Dock.Right);
+            row.Children.Add(more);
+            row.Children.Add(content);
+            ListBoxItem item = new ListBoxItem { Content = row, Tag = conversation, Padding = new Thickness(10, 7, 2, 7), ContextMenu = menu() };
+            return item;
         }
 
         private void SelectInList()
@@ -370,16 +415,23 @@ namespace Xeno.Desktop.Pages
             }).ConfigureAwait(true);
         }
 
-        private async Task RenameAsync()
+        private async Task RenameAsync(ChatConversation? target = null)
         {
-            if (_Conversation == null) return;
-            string? title = await XenoDialogs.PromptAsync(Window, "Rename chat", "Title", _Conversation.Title, false).ConfigureAwait(true);
-            if (title == null) return;
+            ChatConversation? conversation = target ?? _Conversation;
+            if (conversation == null) return;
+            string? title = await XenoDialogs.PromptAsync(Window, "Rename chat", "Title", conversation.Title, false).ConfigureAwait(true);
+            if (title == null || String.IsNullOrWhiteSpace(title)) return;
             await GuardAsync("Rename chat", async () =>
             {
-                _Conversation = await Workspace.Chat.UpdateConversationAsync(_Conversation.Id, new ChatConversationRequest { Title = title }, None).ConfigureAwait(true);
-                _Title.Text = _Conversation.Title;
+                ChatConversation updated = await Workspace.Chat.UpdateConversationAsync(conversation.Id, new ChatConversationRequest { Title = title.Trim() }, None).ConfigureAwait(true);
+                if (_Conversation != null && _Conversation.Id == updated.Id)
+                {
+                    _Conversation = updated;
+                    _Title.Text = updated.Title;
+                }
+
                 await LoadListAsync().ConfigureAwait(true);
+                Report("Renamed the chat to \"" + updated.Title + "\".");
             }).ConfigureAwait(true);
         }
 
@@ -418,17 +470,23 @@ namespace Xeno.Desktop.Pages
             }).ConfigureAwait(true);
         }
 
-        private async Task DeleteAsync()
+        private async Task DeleteAsync(ChatConversation? target = null)
         {
-            if (_Conversation == null) return;
-            bool confirmed = await XenoDialogs.ConfirmAsync(Window, "Delete chat", "Delete \"" + _Conversation.Title + "\" and its messages and ratings? Chat history keeps the timing records.", "Delete").ConfigureAwait(true);
+            ChatConversation? conversation = target ?? _Conversation;
+            if (conversation == null) return;
+            bool confirmed = await XenoDialogs.ConfirmAsync(Window, "Delete chat", "Delete \"" + conversation.Title + "\" and its messages and ratings? Chat history keeps the timing records.", "Delete").ConfigureAwait(true);
             if (!confirmed) return;
             await GuardAsync("Delete chat", async () =>
             {
-                await Workspace.Chat.DeleteConversationAsync(_Conversation.Id, None).ConfigureAwait(true);
-                _Conversation = null;
-                RenderConversation();
+                await Workspace.Chat.DeleteConversationAsync(conversation.Id, None).ConfigureAwait(true);
+                if (_Conversation != null && _Conversation.Id == conversation.Id)
+                {
+                    _Conversation = null;
+                    RenderConversation();
+                }
+
                 await LoadListAsync().ConfigureAwait(true);
+                Report("Deleted \"" + conversation.Title + "\".");
             }).ConfigureAwait(true);
         }
 
@@ -520,6 +578,8 @@ namespace Xeno.Desktop.Pages
         {
             if (_Send == null) return;
             _Send.Content = sending ? "Stop" : "Send";
+            _Send.Classes.Set("accent", !sending);
+            _Send.Classes.Set("danger", sending);
             _Input.IsEnabled = !sending;
             _Model.IsEnabled = !sending;
         }
@@ -530,6 +590,8 @@ namespace Xeno.Desktop.Pages
             try
             {
                 _Title.Text = _Conversation?.Title ?? "New chat";
+                _RenameButton.IsEnabled = _Conversation != null;
+                _DeleteButton.IsEnabled = _Conversation != null;
                 _Tools.IsChecked = _Conversation?.ToolsEnabled == true;
                 if (_Conversation != null) SelectModel(_Conversation.Model);
             }
@@ -604,7 +666,7 @@ namespace Xeno.Desktop.Pages
             footer.Children.Add(new TextBlock { Text = ChatFormat.AnswerMeta(message), FontSize = 11.5, Foreground = palette.Muted, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
             if (!String.IsNullOrEmpty(message.Content))
             {
-                footer.Children.Add(Ui.Button("Copy", () => _ = XenoClipboard.CopyAsync(Window, message.Content)));
+                footer.Children.Add(Ui.CopyButton("Copy answer", () => _ = XenoClipboard.CopyAsync(Window, message.Content)));
                 Button up = Ui.Button(message.Feedback?.Rating == 1 ? "👍 Rated" : "👍", () => _ = RateAsync(message, 1), "Good answer");
                 Button down = Ui.Button(message.Feedback?.Rating == -1 ? "👎 Rated" : "👎", () => _ = RateAsync(message, -1), "Bad answer");
                 footer.Children.Add(up);

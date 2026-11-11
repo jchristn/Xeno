@@ -137,6 +137,19 @@ namespace Xeno.Desktop.Controls
         /// <param name="context">Drawing context.</param>
         public override void Render(DrawingContext context)
         {
+            // An error while drawing happens outside any event handler and would end the app, so log it and skip the frame.
+            try
+            {
+                RenderChart(context);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is NullReferenceException || ex is IndexOutOfRangeException || ex is OverflowException)
+            {
+                XenoErrorLog.Write("Render", ex);
+            }
+        }
+
+        private void RenderChart(DrawingContext context)
+        {
             XenoPalette palette = XenoTheme.Current;
             Rect bounds = new Rect(Bounds.Size);
             XenoChart? chart = _Chart;
@@ -435,7 +448,8 @@ namespace Xeno.Desktop.Controls
             {
                 FormattedText label = Format(chart.Labels[index], palette.Muted, 11, FontWeight.Normal);
                 double center = plot.Left + index * slot + slot / 2;
-                double x = Math.Clamp(center - label.Width / 2, plot.Left, plot.Right - label.Width);
+                // A label wider than the plot starts at the left edge; Math.Clamp would throw when the bounds cross.
+                double x = Math.Max(plot.Left, Math.Min(center - label.Width / 2, plot.Right - label.Width));
                 context.DrawText(label, new Point(x, plot.Bottom + 4));
             }
         }

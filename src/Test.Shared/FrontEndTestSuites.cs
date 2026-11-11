@@ -544,6 +544,9 @@ namespace Test.Shared
                     }
 
                     Check(XenoMenuLayout.TrayMenu()[0].Kind == XenoMenuEntryKindEnum.StatusLine, "Tray menu should start with the status line.");
+                    List<string> headers = XenoMenuLayout.TrayMenu().Select(item => item.Header).ToList();
+                    Check(headers.Contains("Open Xeno Desktop") && headers.Contains("Settings") && !headers.Contains("Settings...") && !headers.Contains("Open Xeno"), "Tray menu labels are wrong: " + String.Join(", ", headers));
+                    Check(!commands.Contains(XenoCommandEnum.GoChat) && !commands.Contains(XenoCommandEnum.GoLocalEndpoint), "The tray menu should not offer Chat or the Local endpoint page.");
                     Check(XenoMenuLayout.ApplicationMenu(XenoSurfaceEnum.Tray)[0].Header == "About Xeno Agent", "macOS application menu should name the agent.");
                 }),
                 Case(suite, "TrayMenuOpensSettings", "Tray menus offer Settings, which is always available", () =>

@@ -93,7 +93,7 @@ namespace Xeno.Desktop.Pages
             top.Margin = new Avalonia.Thickness(0, 0, 0, 12);
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
-            root.Children.Add(_Table);
+            root.Children.Add(Ui.Adopt(_Table));
             Apply();
             return root;
         }

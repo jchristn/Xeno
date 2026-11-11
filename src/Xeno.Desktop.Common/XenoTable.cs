@@ -94,7 +94,7 @@ namespace Xeno.Desktop.Common
             };
 
             _List.Background = Brushes.Transparent;
-            _List.ItemTemplate = new FuncDataTemplate<TRow>((row, scope) => BuildRow(row));
+            _List.ItemTemplate = new FuncDataTemplate<TRow>((row, scope) => row is null ? new Panel() : BuildRow(row));
             _List.SelectionChanged += (sender, args) => SelectionChanged?.Invoke(this, SelectedRow);
             _List.DoubleTapped += (sender, args) => ActivateSelected();
             _List.KeyDown += (sender, args) =>
@@ -303,8 +303,10 @@ namespace Xeno.Desktop.Common
             }
         }
 
-        private static string SafeText(XenoTableColumn<TRow> column, TRow row)
+        private static string SafeText(XenoTableColumn<TRow> column, TRow? row)
         {
+            // The list can build a row container before its item arrives.
+            if (row is null) return String.Empty;
             return column.Text(row) ?? String.Empty;
         }
 

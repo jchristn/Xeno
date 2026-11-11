@@ -259,12 +259,10 @@ The tray agent (`xeno-tray`, shown as **Xeno Agent**) lives in the macOS menu ba
 notification area. Its menu offers:
 
 - The status line, which also shows the local endpoint address when the local inference server is enabled, for example `Xeno: Connected - local endpoint 127.0.0.1:11435, 2 of 2 providers healthy`
-- Open Xeno (the desktop app)
+- Open Xeno Desktop (the desktop app)
 - Open Xeno Terminal (the terminal app, in a new terminal window)
 - Open Web Dashboard
-- Chat... (the desktop app's Chat page)
-- Open Local Endpoint (the desktop app's Local endpoint page)
-- Settings... (the desktop app's Xeno Settings window)
+- Settings (the desktop app's Xeno Settings window)
 - Start Client, Stop Client, and Restart Client
 - About Xeno Agent, and Quit Xeno, which quits all of Xeno: it stops the client (in the background or in a terminal from `run-client`), closes the desktop app and any terminal apps, then quits the agent
 

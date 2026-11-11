@@ -68,7 +68,7 @@ namespace Xeno.Desktop.Pages
             return new List<Control>
             {
                 Ui.Button("Refresh", () => _ = RefreshAsync()),
-                Ui.Button("Copy", () => _ = XenoClipboard.CopyAsync(Window, _Text.Text)),
+                Ui.CopyButton("Copy the log", () => _ = XenoClipboard.CopyAsync(Window, _Text.Text)),
                 Ui.Button("Show Log Folder", () => Report(XenoAppLauncher.OpenUrl(ClientConnectionState.LogDirectory).Message))
             };
         }
@@ -99,7 +99,7 @@ namespace Xeno.Desktop.Pages
             top.Margin = new Thickness(0, 0, 0, 10);
             DockPanel.SetDock(top, Dock.Top);
             root.Children.Add(top);
-            root.Children.Add(_Text);
+            root.Children.Add(Ui.Adopt(_Text));
             UpdateTimer();
             return root;
         }

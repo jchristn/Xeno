@@ -2,6 +2,10 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- Tray menu: **Open Xeno Desktop** (was Open Xeno) and **Settings** (was Settings...); Chat... and Open Local Endpoint are gone, since the desktop app has both.
+- Desktop chat: Stop is red while an answer is running; every conversation in the list has a ... menu and a right-click menu to rename or delete it (also F2 and Delete); the chat's own Rename and Delete buttons wrap instead of being cut off and are disabled until a chat is open.
+- Desktop copy buttons show only a copy icon, with a tooltip saying what they copy.
+- Fixed desktop crashes and errors: pages that are opened again or redrawn for a theme change no longer fail with "already has a visual parent" (which also left Chat history's range picker disconnected from its chart), a chart narrower than its time labels no longer crashes the app, and the Feedback table no longer errors on a row that has not loaded.
 - Quitting the Xeno Agent (now **Quit Xeno** in its menu) quits all of Xeno: it stops the client, including one running in a terminal from `run-client`, and closes the desktop app and any terminal apps.
 - Fixed: the desktop app crashed when a palette or light/dark was chosen in the Settings window. The desktop app and the tray agent now log unexpected errors to `logs/xeno-desktop-errors.log` and `logs/xeno-tray-errors.log` in the client home and keep running.
 - Fixed: the access key a computer gets when you sign in had no permissions, so the apps' network model list failed with "403 OpenAI-compatible API permission denied". Sign-in now gives the key your roles in the tenant, and the TenantAdmin role for administrators. Sign in again on each computer to get a key with permissions.

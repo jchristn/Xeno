@@ -66,7 +66,7 @@ namespace Xeno.Desktop.Common
                 Ui.Button("Community", () => XenoAppLauncher.OpenUrl(XenoProduct.CommunityUrl)));
             stack.Children.Add(links);
 
-            Button copy = Ui.Button("Copy Diagnostics", () => _ = XenoClipboard.CopyAsync(this, diagnostics));
+            Button copy = Ui.CopyButton("Copy diagnostics", () => _ = XenoClipboard.CopyAsync(this, diagnostics));
             Button close = Ui.Primary("Close", () => CloseWith(null));
             close.IsDefault = true;
             close.IsCancel = true;
