@@ -40,6 +40,7 @@ namespace Xeno.Desktop
         private XenoNativeMenuBuilder? _Menus;
         private SettingsWindow? _Settings;
         private DispatcherTimer? _ActivationTimer;
+        private readonly DateTime _StartedUtc = DateTime.UtcNow;
 
         #endregion
 
@@ -71,6 +72,7 @@ namespace Xeno.Desktop
             // from the menu bar after this window closes. Opt out with XENO_AGENT_AUTOSTART=0.
             XenoAppLauncher.EnsureTrayRunning();
             _Session = new DesktopSession();
+            XenoErrorLog.Install("xeno-desktop", message => _Session?.Report(message));
             XenoTheme.Apply(this, _Session.Preferences.DesktopAppearance, XenoColorSchemes.Selected(_Session.Preferences));
             if (OperatingSystem.IsMacOS() && !MacPlatform.IsRunningFromBundle())
             {
@@ -303,6 +305,14 @@ namespace Xeno.Desktop
 
         private void TakeActivationRequest()
         {
+            if (XenoQuitBroadcast.IsRequestedSince(_StartedUtc) && ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
+            {
+                // Quitting the Xeno Agent quits every Xeno app.
+                _ActivationTimer?.Stop();
+                lifetime.Shutdown();
+                return;
+            }
+
             DesktopActivationRequest? request = DesktopActivation.Take();
             if (request == null || _Main == null) return;
             if (!_Main.IsVisible) _Main.Show();

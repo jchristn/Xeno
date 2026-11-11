@@ -160,6 +160,9 @@ namespace Xeno.Desktop.Dialogs
             footer.Children.Add(openFile);
             Border footerBar = new Border { BorderBrush = palette.Border, BorderThickness = new Thickness(0, 1, 0, 0), Background = palette.Panel, Child = footer };
 
+            // The content area is kept across rebuilds (a theme change rebuilds the window), so take it out of the old
+            // layout before adding it to the new one.
+            if (_Content.Parent is Panel previous) previous.Children.Remove(_Content);
             DockPanel main = new DockPanel();
             DockPanel.SetDock(footerBar, Dock.Bottom);
             main.Children.Add(footerBar);

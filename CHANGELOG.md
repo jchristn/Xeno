@@ -2,6 +2,8 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- Quitting the Xeno Agent (now **Quit Xeno** in its menu) quits all of Xeno: it stops the client, including one running in a terminal from `run-client`, and closes the desktop app and any terminal apps.
+- Fixed: the desktop app crashed when a palette or light/dark was chosen in the Settings window. The desktop app and the tray agent now log unexpected errors to `logs/xeno-desktop-errors.log` and `logs/xeno-tray-errors.log` in the client home and keep running.
 - Fixed: the access key a computer gets when you sign in had no permissions, so the apps' network model list failed with "403 OpenAI-compatible API permission denied". Sign-in now gives the key your roles in the tenant, and the TenantAdmin role for administrators. Sign in again on each computer to get a key with permissions.
 - Chat in the desktop and terminal apps puts the Send button on the same row and at the same height as the message box, with "AI can make mistakes. Please check all work." beneath, as the web dashboards do. `xeno chat` prints the same reminder.
 - The desktop app has thirteen color palettes and a custom palette under **Settings > Appearance**, each with light and dark versions; the tray agent follows the choice. The original purple and green stays the default.

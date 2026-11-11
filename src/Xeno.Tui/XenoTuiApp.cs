@@ -106,6 +106,7 @@ namespace Xeno.Tui
         private readonly Dictionary<XenoCommandEnum, MenuItem> _MenuItems = new Dictionary<XenoCommandEnum, MenuItem>();
         private readonly List<Command> _Commands = new List<Command>();
         private readonly CancellationTokenSource _Stop = new CancellationTokenSource();
+        private readonly DateTime _StartedUtc = DateTime.UtcNow;
         private bool _Disposed = false;
 
         #endregion
@@ -175,7 +176,19 @@ namespace Xeno.Tui
                 _ = RefreshLoopAsync(_Stop.Token);
                 _ = AutoRefreshLoopAsync(_Stop.Token);
                 _ = SpinnerLoopAsync(_Stop.Token);
+                _ = QuitWatchLoopAsync(_Stop.Token);
             }
+        }
+
+        /// <summary>
+        /// Quit when the Xeno Agent asked every Xeno app to quit after this app started.
+        /// </summary>
+        /// <returns>True when a quit was requested and the app is quitting.</returns>
+        public bool QuitIfRequested()
+        {
+            if (!XenoQuitBroadcast.IsRequestedSince(_StartedUtc)) return false;
+            _App.Post(() => _App.Quit());
+            return true;
         }
 
         /// <summary>
@@ -738,6 +751,23 @@ namespace Xeno.Tui
                 });
                 await RefreshStatusAndPageAsync(true).ConfigureAwait(false);
             });
+        }
+
+        private async Task QuitWatchLoopAsync(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(1000, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (QuitIfRequested()) return;
+            }
         }
 
         private async Task SpinnerLoopAsync(CancellationToken token)

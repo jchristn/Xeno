@@ -153,7 +153,7 @@ namespace Xeno.Client.Presentation
                 XenoMenuEntry.Item("Restart Client", XenoCommandEnum.RestartClient),
                 XenoMenuEntry.Separator(),
                 XenoMenuEntry.Item("About Xeno Agent", XenoCommandEnum.About),
-                XenoMenuEntry.Item("Quit Xeno Agent", XenoCommandEnum.Quit)
+                XenoMenuEntry.Item("Quit Xeno", XenoCommandEnum.Quit)
             };
         }
 

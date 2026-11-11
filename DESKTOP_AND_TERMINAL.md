@@ -266,7 +266,7 @@ notification area. Its menu offers:
 - Open Local Endpoint (the desktop app's Local endpoint page)
 - Settings... (the desktop app's Xeno Settings window)
 - Start Client, Stop Client, and Restart Client
-- About Xeno Agent and Quit Xeno Agent
+- About Xeno Agent, and Quit Xeno, which quits all of Xeno: it stops the client (in the background or in a terminal from `run-client`), closes the desktop app and any terminal apps, then quits the agent
 
 On Windows and Linux, clicking the icon opens the desktop app. On macOS, the agent has its own application menu and
 shows in the Dock only while one of its windows is open. Only one agent runs per client home directory. Quitting the

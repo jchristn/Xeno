@@ -40,6 +40,8 @@ namespace Xeno.Tray
         private DispatcherTimer? _Timer;
         private ClientStatusSnapshot? _Status;
         private bool _Busy = false;
+        private bool _Quitting = false;
+        private bool _QuitDone = false;
 
         #endregion
 
@@ -64,12 +66,28 @@ namespace Xeno.Tray
         /// </summary>
         public override void OnFrameworkInitializationCompleted()
         {
+            XenoErrorLog.Install("xeno-tray", message =>
+            {
+                if (_Tray != null) _Tray.ToolTipText = XenoProduct.TrayName + " - " + message;
+            });
             XenoFrontEndPreferences preferences = XenoFrontEndPreferences.Load();
             XenoTheme.Apply(this, preferences.DesktopAppearance, XenoColorSchemes.Selected(preferences));
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
             {
                 desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-                desktop.ShutdownRequested += (sender, args) => _Workspace.Dispose();
+                desktop.ShutdownRequested += (sender, args) =>
+                {
+                    // Quitting the agent quits Xeno: the client and the other apps go with it. The first request is held
+                    // until they have been told and the client has stopped.
+                    if (!_QuitDone)
+                    {
+                        args.Cancel = true;
+                        Quit();
+                        return;
+                    }
+
+                    _Workspace.Dispose();
+                };
             }
 
             InstallTray();
@@ -237,7 +255,34 @@ namespace Xeno.Tray
 
         private void Quit()
         {
+            if (_Quitting) return;
+            _Quitting = true;
+            _ = QuitEverythingAsync();
+        }
+
+        private async Task QuitEverythingAsync()
+        {
             _Timer?.Stop();
+            if (_Tray != null) _Tray.ToolTipText = XenoProduct.TrayName + " - Quitting Xeno...";
+            try
+            {
+                XenoQuitBroadcast.Post();
+            }
+            catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException)
+            {
+                XenoErrorLog.Write("Quit", ex);
+            }
+
+            try
+            {
+                await _Workspace.StopClientAsync(true, CancellationToken.None).ConfigureAwait(true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is System.IO.IOException || ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception)
+            {
+                XenoErrorLog.Write("Quit", ex);
+            }
+
+            _QuitDone = true;
             if (_Tray != null) _Tray.IsVisible = false;
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
         }

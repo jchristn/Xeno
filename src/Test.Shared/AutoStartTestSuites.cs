@@ -83,8 +83,41 @@ namespace Test.Shared
                         string message = await XenoAutoConnect.ConnectAsync(workspace, CancellationToken.None).ConfigureAwait(false);
                         Check(message == "The client is running and still connecting.", "A running worker should not be started again: " + message);
                     }
+                }),
+                new TestCaseDescriptor(suite, "QuitReachesOtherApps", "A quit request from another process reaches apps started before it, not later ones or the asker", executeAsync: delegate
+                {
+                    using (ClientHomeScope home = new ClientHomeScope())
+                    {
+                        DateTime before = DateTime.UtcNow.AddSeconds(-5);
+                        Check(!XenoQuitBroadcast.IsRequestedSince(before), "No request should mean no quit.");
+                        XenoQuitBroadcast.Post();
+                        Check(!XenoQuitBroadcast.IsRequestedSince(before), "The process that asked should not quit itself through the request.");
+                        WriteQuitRequest(DateTime.UtcNow);
+                        Check(XenoQuitBroadcast.IsRequestedSince(before), "An app started before the request should quit.");
+                        Check(!XenoQuitBroadcast.IsRequestedSince(DateTime.UtcNow.AddSeconds(5)), "An app started after the request should keep running.");
+                        System.IO.File.WriteAllText(XenoQuitBroadcast.FilePath, "not json");
+                        Check(!XenoQuitBroadcast.IsRequestedSince(before), "A damaged request should be ignored.");
+                    }
+
+                    return Task.CompletedTask;
+                }),
+                new TestCaseDescriptor(suite, "TerminalAppQuitsOnRequest", "The terminal app quits when the Xeno Agent asks every app to quit", executeAsync: delegate
+                {
+                    using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Overview))
+                    {
+                        Check(!tui.Tui.QuitIfRequested(), "The terminal app should not quit without a request.");
+                        WriteQuitRequest(DateTime.UtcNow.AddSeconds(1));
+                        Check(tui.Tui.QuitIfRequested(), "The terminal app did not take the quit request.");
+                    }
+
+                    return Task.CompletedTask;
                 })
             });
+        }
+
+        private static void WriteQuitRequest(DateTime requestedUtc)
+        {
+            System.IO.File.WriteAllText(XenoQuitBroadcast.FilePath, Xeno.Core.Serialization.JsonUtil.Serialize(new XenoQuitRequest { RequestedUtc = requestedUtc, ProcessId = Environment.ProcessId + 100000 }, true));
         }
 
         private static Func<string, string?> Env(params string[] pairs)
