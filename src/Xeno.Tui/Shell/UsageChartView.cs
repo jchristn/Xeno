@@ -518,10 +518,15 @@ namespace Xeno.Tui.Shell
                 _HeatSkip = skip;
             }
 
+            // Each cell is at least two columns, the last left blank as padding between columns (TUIKit's HeatMap fills
+            // the whole cell width). The gutter and header match HeatMap's own layout.
             int labelWidth = chart.RowLabels.Count == 0 ? 0 : chart.RowLabels.Max(item => item.Length) + 1;
-            _HeatMap.CellWidth = Math.Clamp((width - labelWidth) / columns, 1, 4);
+            int cellWidth = Math.Clamp((width - labelWidth) / columns, 1, 4);
+            _HeatMap.CellWidth = cellWidth;
             _HeatTop = top;
-            _HeatMap.Render(new OffsetSurface(surface, 0, top, width, available));
+            int header = chart.Labels.Count > 0 ? 1 : 0;
+            int shownRows = Math.Max(0, chart.RowLabels.Count - skip);
+            _HeatMap.Render(new OffsetSurface(surface, 0, top, width, available).WithCellGaps(labelWidth, header, shownRows, cellWidth));
         }
 
         private void RenderGrid(ISurface surface, XenoChart chart, int top, int available, int width, bool status)
