@@ -92,6 +92,11 @@ namespace Xeno.Tui
         public Action<XenoPageEnum> Navigate { get; set; } = page => { };
 
         /// <summary>
+        /// Apply the appearance and colors in <see cref="Preferences"/> again, after either changes.
+        /// </summary>
+        public Action Restyle { get; set; } = () => { };
+
+        /// <summary>
         /// Background work in flight, for tests that wait for quiet.
         /// </summary>
         public int Pending

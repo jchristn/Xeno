@@ -131,6 +131,7 @@ namespace Xeno.Tui
                 Execute = Execute,
                 Navigate = Navigate
             };
+            Context.Restyle = () => ApplyAppearance(Context.Preferences.TerminalAppearance);
 
             _MessageBar = new MessageBar(Context);
             _StatusHost = new StatusBarHost(_StatusBar);
@@ -592,7 +593,7 @@ namespace Xeno.Tui
 
         private void ApplyAppearance(XenoAppearanceEnum appearance)
         {
-            Theme theme = appearance == XenoAppearanceEnum.Light ? XenoTuiTheme.Light : XenoTuiTheme.Dark;
+            Theme theme = XenoTuiTheme.For(XenoColorSchemes.SelectedForTerminal(Context.Preferences), appearance == XenoAppearanceEnum.Light);
             _App.Theme = theme;
             _Header.ApplyTheme(theme);
             _Sidebar.ApplyTheme(theme);

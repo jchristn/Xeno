@@ -191,7 +191,12 @@ Paper (a light sidebar), and High Contrast. Each has a light and a dark version.
 for light and six for dark (background, panels, text, accent, sidebar, and sidebar highlight) with a swatch grid or a
 hex value, starting from any palette. Secondary text, borders, button text, and status colors are worked out from
 those so they stay readable, and the editor warns when a pair you chose is hard to read. Changes apply right away
-and also color the tray agent the next time it starts. The palettes are defined once in `XenoColorSchemes`
+and also color the tray agent the next time it starts.
+
+The terminal app has the same palettes under **Settings > Colors**, chosen separately from the desktop app (as its
+light or dark appearance is), and **Custom Colors** edits the same custom colors as hex values. The terminal keeps its
+own background; a palette sets the text, accent, status, border, selection, and menu bar colors. The Xeno palette
+keeps the terminal app's original look. The palettes are defined once in `XenoColorSchemes`
 (`Xeno.Client.Core`), and a test checks every one against WCAG contrast minimums.
 
 ### Starting up

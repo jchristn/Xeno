@@ -62,6 +62,11 @@ namespace Test.Shared
                             tui.Settle();
                             XenoChart drawn = page.ChartWidget.Chart ?? throw new InvalidOperationException("No chart for " + page.ChartPicker.Items[i]);
                             kinds.Add(drawn.Kind);
+                            if (drawn.Kind == XenoChartKindEnum.Heatmap)
+                            {
+                                // TUIKit's HeatMap draws the grid and its Less/More legend.
+                                Check(tui.Screen().Contains("Less", StringComparison.Ordinal) && tui.Screen().Contains("More", StringComparison.Ordinal), "The heatmap is not drawn by TUIKit's HeatMap:" + Environment.NewLine + tui.Screen());
+                            }
                             Check(tui.Screen().Contains(drawn.Title, StringComparison.Ordinal), "The " + page.ChartPicker.Items[i] + " chart heading is not on screen:" + Environment.NewLine + tui.Screen());
                         }
 

@@ -2,6 +2,8 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- The terminal app has the desktop app's color palettes under Settings > Colors (chosen separately for the terminal), and Custom Colors edits the shared custom colors.
+- The terminal app's token heatmap is drawn by TUIKit's HeatMap: shading levels with a Less/More legend, theme colors, and arrow-key or mouse selection that describes the selected cell.
 - Web dashboards: the usage Chart list sits first in the filter row, beside Group by, Count, Model, and Provider.
 - Usage: the token activity heatmap has one row per day for ranges up to a month (last day, week, or month), so a month shows a month; longer ranges keep weekday rows. The terminal app shows the newest days when the heatmap is taller than its space.
 - Usage in the web dashboards (local and cloud) and the desktop app shows one chart at a time at full width, picked from a Chart list, instead of a two-column grid or tabs. The cloud dashboard's connected clients chart is in the same list.

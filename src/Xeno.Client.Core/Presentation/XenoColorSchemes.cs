@@ -61,7 +61,25 @@ namespace Xeno.Client.Presentation
         public static XenoColorScheme Selected(XenoFrontEndPreferences preferences)
         {
             ArgumentNullException.ThrowIfNull(preferences);
-            if (String.Equals(preferences.DesktopColorScheme, CustomId, StringComparison.OrdinalIgnoreCase))
+            return Selected(preferences, preferences.DesktopColorScheme);
+        }
+
+        /// <summary>
+        /// The scheme the terminal app's preference selects: the custom scheme when chosen and valid, otherwise a
+        /// built-in scheme.
+        /// </summary>
+        /// <param name="preferences">Preferences.</param>
+        /// <returns>Scheme.</returns>
+        /// <exception cref="ArgumentNullException">preferences is null.</exception>
+        public static XenoColorScheme SelectedForTerminal(XenoFrontEndPreferences preferences)
+        {
+            ArgumentNullException.ThrowIfNull(preferences);
+            return Selected(preferences, preferences.TerminalColorScheme);
+        }
+
+        private static XenoColorScheme Selected(XenoFrontEndPreferences preferences, string? id)
+        {
+            if (String.Equals(id, CustomId, StringComparison.OrdinalIgnoreCase))
             {
                 XenoColorScheme? custom = preferences.DesktopCustomColors;
                 if (custom != null && IsValid(custom.Light) && IsValid(custom.Dark))
@@ -72,7 +90,7 @@ namespace Xeno.Client.Presentation
                 }
             }
 
-            return Find(preferences.DesktopColorScheme);
+            return Find(id);
         }
 
         /// <summary>

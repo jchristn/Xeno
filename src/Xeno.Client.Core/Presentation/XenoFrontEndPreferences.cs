@@ -42,7 +42,14 @@ namespace Xeno.Client.Presentation
         public string DesktopColorScheme { get; set; } = XenoColorSchemes.DefaultId;
 
         /// <summary>
-        /// The user's own colors, used when <see cref="DesktopColorScheme"/> is "custom". Null until the user makes one.
+        /// Color scheme for the terminal app: a <see cref="XenoColorSchemes.BuiltIn"/> identifier, or
+        /// <see cref="XenoColorSchemes.CustomId"/> for <see cref="DesktopCustomColors"/>. Default "xeno".
+        /// </summary>
+        public string TerminalColorScheme { get; set; } = XenoColorSchemes.DefaultId;
+
+        /// <summary>
+        /// The user's own colors, used when <see cref="DesktopColorScheme"/> or <see cref="TerminalColorScheme"/> is
+        /// "custom". Shared by the desktop and terminal apps. Null until the user makes one.
         /// </summary>
         public XenoColorScheme? DesktopCustomColors { get; set; } = null;
 

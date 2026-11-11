@@ -83,6 +83,30 @@ namespace Test.Shared
                     Check(!XenoColorSchemes.IsValid(set) && XenoColorSchemes.Check(set, false).Count == 1, "An invalid color should be the only problem reported.");
                     Check(XenoRgb.TryParse("#abc")?.ToHex() == "#aabbcc" && XenoRgb.TryParse(" 4A2054 ")?.ToHex() == "#4a2054" && XenoRgb.TryParse("#12345") == null, "Hex parsing is wrong.");
                 }),
+                Case(suite, "TerminalAppUsesTheChosenScheme", "The terminal app keeps its original theme for Xeno and follows another palette when one is chosen", () =>
+                {
+                    Check(Object.ReferenceEquals(Xeno.Tui.XenoTuiTheme.For(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), false), Xeno.Tui.XenoTuiTheme.Dark), "The Xeno palette should keep the original dark theme.");
+                    Check(Object.ReferenceEquals(Xeno.Tui.XenoTuiTheme.For(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), true), Xeno.Tui.XenoTuiTheme.Light), "The Xeno palette should keep the original light theme.");
+                    foreach (XenoColorScheme scheme in XenoColorSchemes.BuiltIn)
+                    {
+                        foreach (bool light in new[] { false, true })
+                        {
+                            TUIKit.Theming.Theme theme = Xeno.Tui.XenoTuiTheme.For(scheme, light);
+                            if (scheme.Id == XenoColorSchemes.DefaultId) continue;
+                            XenoResolvedColors colors = XenoColorSchemes.Resolve(scheme, !light);
+                            Check(theme.Accent.Foreground.Equals(Xeno.Tui.XenoTuiTheme.ToColor(colors.Accent)), scheme.Id + (light ? " light" : " dark") + " did not use the palette's accent.");
+                        }
+                    }
+
+                    using (TuiHarness tui = new TuiHarness(120, 36, XenoPageEnum.Settings))
+                    {
+                        tui.Tui.Context.Preferences.TerminalColorScheme = "ocean";
+                        tui.Tui.Context.Restyle();
+                        tui.Settle();
+                        Check(tui.App.Theme.Name.StartsWith("Ocean", StringComparison.Ordinal), "The running app did not switch to Ocean: " + tui.App.Theme.Name);
+                        Check(tui.Screen().Contains("Colors", StringComparison.Ordinal), "The Settings page has no Colors choice:" + Environment.NewLine + tui.Screen());
+                    }
+                }),
                 Case(suite, "SchemeChoiceRoundTrips", "The chosen and custom schemes save to frontend.json and load back, and a broken custom scheme falls back", () =>
                 {
                     string file = Path.Combine(Path.GetTempPath(), "xeno-colors-" + Guid.NewGuid().ToString("N") + ".json");

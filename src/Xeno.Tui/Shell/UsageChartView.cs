@@ -78,6 +78,18 @@ namespace Xeno.Tui.Shell
         private int _PlotTop = 1;
         private int _PlotHeight = 0;
         private int _ColumnWidth = 1;
+        private readonly HeatMap _HeatMap = new HeatMap
+        {
+            IsSelectable = true,
+            LevelCount = 5,
+            LevelGlyphs = new List<string> { "·", "░", "▒", "▓", "█" },
+            ShowLegend = true,
+            ShowSelectionDescription = true,
+            UseThemeStyles = true
+        };
+        private XenoChart? _HeatSource = null;
+        private int _HeatSkip = -1;
+        private int _HeatTop = 1;
         private readonly List<List<KeyValuePair<string, int>>> _Segments = new List<List<KeyValuePair<string, int>>>();
 
         #endregion
@@ -137,7 +149,7 @@ namespace Xeno.Tui.Shell
                     RenderBars(surface, fitted, row, available, width);
                     break;
                 case XenoChartKindEnum.Heatmap:
-                    RenderGrid(surface, fitted, row, available, width, false);
+                    RenderHeatMap(surface, fitted, row, available, width);
                     break;
                 case XenoChartKindEnum.StatusStrip:
                     RenderGrid(surface, fitted, row, available, width, true);
@@ -184,6 +196,7 @@ namespace Xeno.Tui.Shell
         /// <returns>True when handled.</returns>
         public bool HandleKey(KeyEvent key)
         {
+            if (IsHeatMap()) return _HeatMap.HandleKey(key);
             XenoChart? chart = _Fitted ?? _Chart;
             if (chart == null || !IsTimeChart(chart) || chart.BucketCount == 0) return false;
             int last = chart.BucketCount - 1;
@@ -218,6 +231,12 @@ namespace Xeno.Tui.Shell
         /// <returns>True when handled.</returns>
         public bool HandleMouse(MouseEvent mouse)
         {
+            if (IsHeatMap())
+            {
+                if (mouse.Y < _HeatTop) return false;
+                return _HeatMap.HandleMouse(new MouseEvent(mouse.Kind, mouse.Button, mouse.X, mouse.Y - _HeatTop, mouse.Modifiers, mouse.ClickCount));
+            }
+
             if (mouse.Kind != MouseEventKind.Press || mouse.Button != MouseButton.Left) return false;
             XenoChart? chart = _Fitted;
             if (chart == null || !IsTimeChart(chart) || mouse.X < _PlotLeft) return false;
@@ -236,6 +255,7 @@ namespace Xeno.Tui.Shell
         public void OnFocusChanged(bool focused)
         {
             _Focused = focused;
+            _HeatMap.OnFocusChanged(focused);
         }
 
         /// <summary>
@@ -244,6 +264,7 @@ namespace Xeno.Tui.Shell
         /// <returns>Hints.</returns>
         public IReadOnlyList<KeyHint>? GetKeyHints()
         {
+            if (IsHeatMap()) return _HeatMap.GetKeyHints();
             XenoChart? chart = _Fitted ?? _Chart;
             if (chart == null || !IsTimeChart(chart)) return null;
             return new List<KeyHint> { new KeyHint("←→", "Bucket"), new KeyHint("Enter", "Show requests") };
@@ -256,6 +277,7 @@ namespace Xeno.Tui.Shell
         public void ApplyTheme(Theme theme)
         {
             _Theme = theme ?? XenoTuiTheme.Dark;
+            _HeatMap.ApplyTheme(_Theme);
         }
 
         /// <summary>
@@ -455,6 +477,51 @@ namespace Xeno.Tui.Shell
                     surface.DrawText(labelWidth + barWidth + 1, y, Fit(values, valueWidth - 1), _Theme.Muted);
                 }
             }
+        }
+
+        private bool IsHeatMap()
+        {
+            return (_Fitted ?? _Chart)?.Kind == XenoChartKindEnum.Heatmap;
+        }
+
+        private void RenderHeatMap(ISurface surface, XenoChart chart, int top, int available, int width)
+        {
+            // TUIKit's HeatMap draws the cells, labels, legend, and the selected cell's description. Leave a row each for
+            // the column labels, the legend, and the description; a taller grid shows its most recent rows.
+            int columns = Math.Max(1, chart.Labels.Count);
+            int fit = Math.Max(1, available - 3);
+            int skip = Math.Max(0, chart.RowLabels.Count - fit);
+            if (!Object.ReferenceEquals(chart, _HeatSource) || skip != _HeatSkip)
+            {
+                int rows = Math.Max(0, chart.RowLabels.Count - skip);
+                double[,] cells = new double[rows, columns];
+                for (int r = 0; r < rows; r++)
+                {
+                    IReadOnlyList<double> source = skip + r < chart.Grid.Count ? chart.Grid[skip + r] : new List<double>();
+                    for (int c = 0; c < columns; c++)
+                    {
+                        double value = c < source.Count ? source[c] : 0;
+                        cells[r, c] = Double.IsNaN(value) || value < 0 ? 0 : value;
+                    }
+                }
+
+                _HeatMap.SetCells(cells);
+                _HeatMap.SetRowLabels(chart.RowLabels.Skip(skip));
+                _HeatMap.SetColumnLabels(chart.Labels);
+                _HeatMap.CellDescription = (row, column) =>
+                {
+                    string rowLabel = skip + row < chart.RowLabels.Count ? chart.RowLabels[skip + row] : String.Empty;
+                    string columnLabel = column < chart.Labels.Count ? chart.Labels[column] : String.Empty;
+                    return (rowLabel + " " + columnLabel).Trim() + ": " + chart.FormatValue(cells[row, column]);
+                };
+                _HeatSource = chart;
+                _HeatSkip = skip;
+            }
+
+            int labelWidth = chart.RowLabels.Count == 0 ? 0 : chart.RowLabels.Max(item => item.Length) + 1;
+            _HeatMap.CellWidth = Math.Clamp((width - labelWidth) / columns, 1, 4);
+            _HeatTop = top;
+            _HeatMap.Render(new OffsetSurface(surface, 0, top, width, available));
         }
 
         private void RenderGrid(ISurface surface, XenoChart chart, int top, int available, int width, bool status)
