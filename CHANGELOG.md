@@ -2,6 +2,7 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- macOS: opening Xeno.app (Finder, Launchpad, Spotlight, or the Dock) while the Xeno Agent runs opens the desktop app; before, the agent, which shares the bundle, took the request and nothing opened.
 - GPU telemetry on Apple silicon Macs: utilization and unified memory in use, read from `ioreg` without admin rights (temperature and power still need an NVIDIA GPU).
 - Providers pages (desktop and terminal) list the models a provider reports (for example `ollama list`) next to the configured ones, with a Source column. Editing a model the provider reports but `client.json` does not list opens a form that configures it, instead of "The model no longer exists."; such models have no Delete.
 - Desktop: Enter sends a chat message, Shift+Enter or Ctrl+Enter adds a line, and the hint sits under the message box; the chat list's ... buttons clear the scrollbar; Usage shows one full-width chart per tab; Requests puts its filters above the chart; Logs has a time filter (also `ReadLogAsync`); Test Connection shows its result in a dialog; the Overview and Host charts are taller; Provider telemetry puts the metric chart first; Providers selects the first provider.

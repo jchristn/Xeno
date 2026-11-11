@@ -91,6 +91,16 @@ namespace Xeno.Tray
             }
 
             InstallTray();
+
+            // The tray agent and the desktop app share Xeno.app on macOS, so opening Xeno from Finder, Launchpad, or the Dock
+            // while the agent runs reaches the agent instead of starting the desktop app. Treat that as "open Xeno Desktop".
+            if (TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime activatable)
+            {
+                activatable.Activated += (sender, args) =>
+                {
+                    if (args.Kind == ActivationKind.Reopen) _ = ReportAsync(XenoAppLauncher.LaunchDesktop());
+                };
+            }
             _Timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
             _Timer.Tick += (sender, args) => _ = RefreshAsync();
             _Timer.Start();
