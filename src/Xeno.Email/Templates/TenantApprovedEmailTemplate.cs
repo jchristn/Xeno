@@ -42,7 +42,7 @@ namespace Xeno.Email.Templates
             };
             string bodyHtml =
                 RenderHeading("Your account is approved") +
-                RenderParagraph("Hi " + EmailHtmlEncoder.Encode(greetingName) + ", your Xeno Cloud account for " + EmailHtmlEncoder.Encode(context.Organization) + " has been approved and is now active.") +
+                RenderParagraph("Hi " + greetingName + ", your Xeno Cloud account for " + context.Organization + " has been approved and is now active.") +
                 RenderParagraph("You can sign in and start connecting machines, advertising models, and routing inference across your fleet.") +
                 RenderKeyValueTable(fields);
             string bodyText =

@@ -37,10 +37,10 @@ namespace Xeno.Email.Templates
             string greetingName = String.IsNullOrWhiteSpace(context.ContactName) ? "there" : context.ContactName;
             string bodyHtml =
                 RenderHeading("Verify your email") +
-                RenderParagraph("Hi " + EmailHtmlEncoder.Encode(greetingName) + ", thanks for requesting early access to Xeno Cloud for " + EmailHtmlEncoder.Encode(context.Organization) + ".") +
+                RenderParagraph("Hi " + greetingName + ", thanks for requesting early access to Xeno Cloud for " + context.Organization + ".") +
                 RenderParagraph("Please confirm your email address to continue. After you verify, our team will review your request and email you when your account is approved.") +
                 RenderParagraph("If the button does not work, copy and paste this link into your browser:") +
-                RenderParagraph(EmailHtmlEncoder.Encode(context.VerificationUrl));
+                RenderParagraph(context.VerificationUrl);
             string bodyText =
                 "Verify your email" + Environment.NewLine + Environment.NewLine +
                 "Hi " + greetingName + ", thanks for requesting early access to Xeno Cloud for " + context.Organization + "." + Environment.NewLine +

@@ -987,6 +987,36 @@ namespace Test.Shared
                         }),
                     new TestCaseDescriptor(
                         suiteId: "Settings",
+                        caseId: "EmailTemplatesEncodeValuesOnce",
+                        displayName: "Email templates encode names and links exactly once",
+                        executeAsync: async delegate
+                        {
+                            EmailSettings emailSettings = new EmailSettings();
+                            EmailTemplateRenderResult approved = await new TenantApprovedEmailTemplate(emailSettings).RenderAsync(new TenantApprovedEmailContext
+                            {
+                                Organization = "O'Brien & Sons",
+                                ContactName = "Pat <O'Brien>",
+                                Email = "pat@example.com",
+                                SignInUrl = "https://app.xenocloud.ai/login?a=1&b=2"
+                            }, CancellationToken.None).ConfigureAwait(false);
+                            EmailTemplateRenderResult verification = await new OnboardingVerificationEmailTemplate(emailSettings).RenderAsync(new OnboardingVerificationEmailContext
+                            {
+                                Organization = "O'Brien & Sons",
+                                ContactName = "Pat <O'Brien>",
+                                VerificationUrl = "https://app.xenocloud.ai/verify?token=abc&email=pat%40example.com"
+                            }, CancellationToken.None).ConfigureAwait(false);
+                            foreach (EmailTemplateRenderResult rendered in new[] { approved, verification })
+                            {
+                                if (rendered.HtmlBody.Contains("&amp;amp;", StringComparison.Ordinal) || rendered.HtmlBody.Contains("&amp;#", StringComparison.Ordinal) || rendered.HtmlBody.Contains("&amp;lt;", StringComparison.Ordinal))
+                                    throw new InvalidOperationException(rendered.TemplateId + " encoded a value twice.");
+                                if (!rendered.HtmlBody.Contains("Sons", StringComparison.Ordinal) || rendered.HtmlBody.Contains("<O'Brien>", StringComparison.Ordinal))
+                                    throw new InvalidOperationException(rendered.TemplateId + " did not encode the contact name.");
+                            }
+                            if (!verification.HtmlBody.Contains("token=abc&amp;email=", StringComparison.Ordinal)) throw new InvalidOperationException("Verification link was not encoded once.");
+                            if (!approved.HtmlBody.Contains("href=\"https://app.xenocloud.ai/login?a=1&amp;b=2\"", StringComparison.Ordinal)) throw new InvalidOperationException("Sign-in button link was not encoded once.");
+                        }),
+                    new TestCaseDescriptor(
+                        suiteId: "Settings",
                         caseId: "AdministrativeTestEmailTemplateUsesStandardLayout",
                         displayName: "Administrative test email template uses standard layout",
                         executeAsync: async delegate

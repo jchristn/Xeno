@@ -48,7 +48,9 @@ namespace Xeno.Email.Templates
         public abstract Task<EmailTemplateRenderResult> RenderAsync(TContext context, CancellationToken token = default);
 
         /// <summary>
-        /// Render the shared email layout.
+        /// Render the shared email layout. Pass plain text, never pre-encoded values: HtmlPageBuilder's text methods
+        /// (title, H1Text, Link, Image) encode their arguments, and Div and Paragraph content is encoded here first, so
+        /// every value is encoded exactly once.
         /// </summary>
         /// <param name="title">Email title.</param>
         /// <param name="subject">Subject.</param>
@@ -64,22 +66,19 @@ namespace Xeno.Email.Templates
 
             string finalSubject = String.IsNullOrWhiteSpace(Settings.SubjectPrefix) ? subject : Settings.SubjectPrefix.Trim() + " " + subject;
             string supportAddress = String.IsNullOrWhiteSpace(Settings.SupportAddress) ? Settings.ReplyToAddress : Settings.SupportAddress;
-            string encodedSupportAddress = EmailHtmlEncoder.Encode(supportAddress);
-            string supportHref = "mailto:" + EmailHtmlEncoder.Attribute(supportAddress);
+            string supportHref = "mailto:" + supportAddress;
             HtmlBody emailBody = new HtmlBody();
             HtmlPage page = new HtmlPage();
-            page.Head.Title = EmailHtmlEncoder.Encode(finalSubject);
+            page.Head.Title = finalSubject;
             page.Head.AdditionalElements.Add("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             string ctaTextBlock = String.Empty;
             string contentHtml = bodyHtml;
             if (!String.IsNullOrWhiteSpace(ctaText) && !String.IsNullOrWhiteSpace(ctaUrl))
             {
-                string encodedCtaText = EmailHtmlEncoder.Encode(ctaText);
-                string encodedCtaUrl = EmailHtmlEncoder.Attribute(ctaUrl);
                 contentHtml += emailBody.Paragraph(
                     emailBody.Link(
-                        encodedCtaText,
-                        encodedCtaUrl,
+                        ctaText,
+                        ctaUrl,
                         false,
                         null,
                         null,
@@ -92,19 +91,19 @@ namespace Xeno.Email.Templates
 
             string headerHtml =
                 emailBody.Image(
-                    EmailHtmlEncoder.Attribute(Theme.BrandName + " logo"),
-                    EmailHtmlEncoder.Attribute(Theme.LogoUrl),
+                    Theme.BrandName + " logo",
+                    Theme.LogoUrl,
                     null,
                     null,
                     "display:block;width:64px;height:64px;max-width:96px;max-height:96px;margin:0 auto 12px;") +
                 emailBody.Div(EmailHtmlEncoder.Encode(title), null, null, "font-size:22px;line-height:1.25;font-weight:700;text-align:center;color:" + Theme.TextColor + ";");
             string footerLinks =
-                emailBody.Link("Home", EmailHtmlEncoder.Attribute(Theme.HomeUrl), false, null, null, "color:" + Theme.AccentColor + ";") +
+                emailBody.Link("Home", Theme.HomeUrl, false, null, null, "color:" + Theme.AccentColor + ";") +
                 " &nbsp;|&nbsp; " +
-                emailBody.Link("Dashboard", EmailHtmlEncoder.Attribute(Theme.DashboardUrl), false, null, null, "color:" + Theme.AccentColor + ";") +
+                emailBody.Link("Dashboard", Theme.DashboardUrl, false, null, null, "color:" + Theme.AccentColor + ";") +
                 " &nbsp;|&nbsp; " +
-                emailBody.Link("GitHub", EmailHtmlEncoder.Attribute(Theme.GitHubUrl), false, null, null, "color:" + Theme.AccentColor + ";");
-            string footerHtml = footerLinks + emailBody.Div("Questions? Email " + emailBody.Link(encodedSupportAddress, supportHref, false, null, null, "color:" + Theme.AccentColor + ";") + ".", null, null, "margin-top:10px;");
+                emailBody.Link("GitHub", Theme.GitHubUrl, false, null, null, "color:" + Theme.AccentColor + ";");
+            string footerHtml = footerLinks + emailBody.Div("Questions? Email " + emailBody.Link(supportAddress, supportHref, false, null, null, "color:" + Theme.AccentColor + ";") + ".", null, null, "margin-top:10px;");
             page.Body.Content =
                 emailBody.Div(EmailHtmlEncoder.Encode(preheader), null, null, "display:none!important;color:transparent;height:0;max-height:0;max-width:0;opacity:0;overflow:hidden;") +
                 emailBody.Div(
@@ -146,18 +145,18 @@ namespace Xeno.Email.Templates
         /// <summary>
         /// Render an HTML heading.
         /// </summary>
-        /// <param name="text">Heading text.</param>
+        /// <param name="text">Heading text (plain text; encoded here, so do not encode it first).</param>
         /// <returns>HTML heading.</returns>
         protected static string RenderHeading(string text)
         {
             HtmlBody body = new HtmlBody();
-            return body.H1Text(EmailHtmlEncoder.Encode(text), null, null, "font-size:20px;line-height:1.3;margin:0 0 12px;");
+            return body.H1Text(text, null, null, "font-size:20px;line-height:1.3;margin:0 0 12px;");
         }
 
         /// <summary>
         /// Render an HTML paragraph.
         /// </summary>
-        /// <param name="text">Paragraph text.</param>
+        /// <param name="text">Paragraph text (plain text; encoded here, so do not encode it first).</param>
         /// <returns>HTML paragraph.</returns>
         protected static string RenderParagraph(string text)
         {

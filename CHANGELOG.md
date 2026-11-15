@@ -2,6 +2,7 @@
 
 ## 0.2.0 (alpha, in progress)
 
+- Email: names, organizations, and links are HTML-encoded exactly once. The tenant approved and verification emails no longer show values like `O'Brien & Sons` as `O&amp;#39;Brien &amp;amp; Sons`, and button, logo, and footer links with more than one query parameter (`?a=1&b=2`) are no longer broken by a doubled `&amp;amp;`. Headings and the subject title are encoded once too.
 - The terminal app uses TUIKit 1.13.0: the token heatmap's padding comes from `HeatMap.CellGap` instead of a custom surface, and its cells are colored by a `HeatMapPalette` built from the chosen terminal palette (empty cells in the muted color, then a ramp through the accent).
 - The terminal app's token heatmap leaves one column of padding between cells.
 - The terminal app has the desktop app's color palettes under Settings > Colors (chosen separately for the terminal), and Custom Colors edits the shared custom colors.
