@@ -120,6 +120,7 @@ namespace Test.Shared
 
                     Check(InnoScript.Render(new InnoScriptInput { AppId = "A", Project = manifest.Project, Artifact = Client(manifest), Target = RuntimeTarget.Parse("win-x64") }).Contains("ArchitecturesAllowed=x64compatible", StringComparison.Ordinal), "x64 builds must allow x64compatible.");
                     Check(InnoScript.NumericVersion("0.2.0") == "0.2.0.0" && InnoScript.NumericVersion("1.4.0-alpha.2") == "1.4.0.0", "Numeric versions are wrong.");
+                    Check(InnoChannel.WinePath("/Users/me/installers/0.2.0/.staging") == "Z:\\Users\\me\\installers\\0.2.0\\.staging", "Wine paths are wrong.");
                     return Task.CompletedTask;
                 }),
                 new TestCaseDescriptor(suite, "MacPackageFiles", "The .pkg shows a welcome page, license, and background, links xeno into /usr/local/bin, and installs the agent", executeAsync: delegate

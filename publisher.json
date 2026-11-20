@@ -12,7 +12,7 @@
     "logo": "assets/logo.png",
     "windowsIcon": "assets/logo.ico",
     "publisher": "Joel Christner",
-    "maintainer": "Joel Christner",
+    "maintainer": "Joel Christner <joel.christner@gmail.com>",
     "repo": "https://github.com/jchristn/Xeno",
     "homepage": "https://github.com/jchristn/Xeno"
   },

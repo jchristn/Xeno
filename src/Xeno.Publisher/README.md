@@ -43,6 +43,16 @@ The package-manager channels read installers another channel already built, so r
 installer artifacts into the output folder. In CI they run only on a tag when the repository variable
 `ENABLE_PACKAGE_MANAGERS` is `true`.
 
+## Building a release without CI
+
+When GitHub Actions is unavailable, every asset can still be built from one Mac with Docker:
+
+- **macOS:** `./build-installers.sh`.
+- **Windows:** the `inno` channel normally runs only on Windows. Set `XENO_ISCC` to `src/Xeno.Publisher/iscc-docker.sh`, which runs Inno Setup's compiler under Wine in the `amake/innosetup` image; the script's paths are then written as Wine `Z:` paths. Build the `.zip` archives with `--channel archive --rid win-x64` (and `win-arm64`).
+- **Linux:** run the Publisher with `--channel debrpm,appimage,archive` in a `mcr.microsoft.com/dotnet/sdk:10.0` container with `fpm`, `rpm`, and `appimagetool` installed. Copy the repository into the container's own filesystem first; MSBuild stalls on a macOS bind mount.
+
+Put every file in one folder, run `--sums --output <folder>` (with no channel) to write `SHA256SUMS`, and create the release from the tagged commit.
+
 ## Signing
 
 Xeno is not code-signed, by policy. Every target in `publisher.json`'s `signing` block has `isConfigured: false`:

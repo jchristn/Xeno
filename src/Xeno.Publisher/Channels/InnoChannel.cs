@@ -6,7 +6,9 @@ namespace Xeno.Publisher.Channels
     using System.Text;
 
     /// <summary>
-    /// Windows installers: one Inno Setup .exe per architecture. Runs on Windows with Inno Setup 6.
+    /// Windows installers: one Inno Setup .exe per architecture. Runs on Windows with Inno Setup 6. When CI is not
+    /// available it can also run on macOS or Linux: set XENO_ISCC to a command that runs Inno Setup's compiler
+    /// under Wine (src/Xeno.Publisher/iscc-docker.sh runs it in Docker), and the script's paths are written as Wine Z: paths.
     /// </summary>
     public sealed class InnoChannel : IChannel
     {
@@ -18,8 +20,13 @@ namespace Xeno.Publisher.Channels
         /// <inheritdoc/>
         public string DisplayName => "Windows installer (Inno Setup)";
 
+        /// <summary>
+        /// Environment variable naming an Inno Setup compiler command to use instead of a Windows install.
+        /// </summary>
+        public const string CompilerVariable = "XENO_ISCC";
+
         /// <inheritdoc/>
-        public OsFamilyEnum RequiredHost => OsFamilyEnum.Windows;
+        public OsFamilyEnum RequiredHost => String.IsNullOrEmpty(Environment.GetEnvironmentVariable(CompilerVariable)) ? OsFamilyEnum.Windows : OsFamilyEnum.Any;
 
         /// <inheritdoc/>
         public OsFamilyEnum TargetOs => OsFamilyEnum.Windows;
@@ -47,8 +54,8 @@ namespace Xeno.Publisher.Channels
                     Artifact = context.Artifact,
                     Version = context.Version,
                     Target = target,
-                    PayloadDir = payload,
-                    OutputDir = context.OutputDir,
+                    PayloadDir = ScriptPath(payload),
+                    OutputDir = ScriptPath(context.OutputDir),
                     OutputBaseName = Path.GetFileNameWithoutExtension(AssetNames.WindowsSetup(context.Project.Name, context.Version, target))
                 };
 
@@ -78,8 +85,32 @@ namespace Xeno.Publisher.Channels
             return outputs;
         }
 
+        /// <summary>
+        /// A path as the Inno Setup compiler sees it: unchanged on Windows, and a Wine Z: path elsewhere.
+        /// </summary>
+        /// <param name="path">Absolute host path.</param>
+        /// <returns>The path to write into the script.</returns>
+        public static string ScriptPath(string path)
+        {
+            if (RuntimeTarget.HostOs() == OsFamilyEnum.Windows) return path;
+            return WinePath(path);
+        }
+
+        /// <summary>
+        /// The Wine path of a Unix path: "/a/b" becomes "Z:\a\b".
+        /// </summary>
+        /// <param name="path">Absolute Unix path.</param>
+        /// <returns>Wine path.</returns>
+        public static string WinePath(string path)
+        {
+            return "Z:" + (path ?? "").Replace('/', '\\');
+        }
+
         private static string ResolveIscc()
         {
+            string? configured = Environment.GetEnvironmentVariable(CompilerVariable);
+            if (!String.IsNullOrEmpty(configured)) return configured;
+
             string[] candidates = new[]
             {
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Inno Setup 6", "ISCC.exe"),
