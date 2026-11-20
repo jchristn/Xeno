@@ -371,6 +371,9 @@ namespace Test.Shared
                     XenoChart provider = XenoCharts.ProviderMetric(Xeno.Client.Telemetry.Models.ClientProviderTelemetryMetricEnum.TotalTokensPerSecond, "lab-vllm", new List<Xeno.Client.Telemetry.Models.ClientProviderTelemetryRollupBucket>(), HistoryRangeEnum.Hour);
                     Check(provider.Title == "Total tokens per second (lab-vllm)" && provider.Unit == "/s" && !provider.HasData, "Provider chart is wrong: " + provider.Title);
 
+                    Check(XenoCharts.LabelLeft(50, 20, 0, 100) == 40 && XenoCharts.LabelLeft(2, 20, 0, 100) == 0 && XenoCharts.LabelLeft(98, 20, 0, 100) == 80, "Time labels should center under their bucket and stay inside the plot.");
+                    Check(XenoCharts.LabelLeft(17, 52, 0, 34.47) == 0, "A time label wider than the plot must start at its left edge, not throw (desktop crash 2026-11-11).");
+
                     Check(HistoryRanges.Labels.Count == 4 && HistoryRanges.Describe(HistoryRangeEnum.Month) == "last month", "Range labels are wrong.");
                     Check(HistoryRanges.FromIndex(2) == HistoryRangeEnum.Week && HistoryRanges.FromIndex(-1) == HistoryRangeEnum.Hour && HistoryRanges.FromIndex(9) == HistoryRangeEnum.Hour, "Range indexes are wrong.");
                 }),

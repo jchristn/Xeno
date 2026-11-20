@@ -182,6 +182,20 @@ namespace Xeno.Client.Presentation
         }
 
         /// <summary>
+        /// Left edge of an axis label centered under a point and kept inside the plot. A label wider than the plot starts at
+        /// the plot's left edge. Never throws, unlike Math.Clamp, whose bounds cross when the label is wider than the plot.
+        /// </summary>
+        /// <param name="center">Horizontal center the label belongs under.</param>
+        /// <param name="labelWidth">Label width.</param>
+        /// <param name="plotLeft">Left edge of the plot.</param>
+        /// <param name="plotRight">Right edge of the plot.</param>
+        /// <returns>Left edge for the label.</returns>
+        public static double LabelLeft(double center, double labelWidth, double plotLeft, double plotRight)
+        {
+            return Math.Max(plotLeft, Math.Min(center - labelWidth / 2, plotRight - labelWidth));
+        }
+
+        /// <summary>
         /// Display name of a metric identifier: "ActiveRequests" becomes "Active requests".
         /// </summary>
         /// <param name="identifier">Identifier in PascalCase.</param>

@@ -137,12 +137,13 @@ namespace Xeno.Desktop.Controls
         /// <param name="context">Drawing context.</param>
         public override void Render(DrawingContext context)
         {
-            // An error while drawing happens outside any event handler and would end the app, so log it and skip the frame.
+            // Drawing runs inside the native paint callback, where Dispatcher.UnhandledException never sees an error: Avalonia
+            // stops the run loop and rethrows from Main, which aborts the process. Any error here is logged and the frame skipped.
             try
             {
                 RenderChart(context);
             }
-            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is NullReferenceException || ex is IndexOutOfRangeException || ex is OverflowException)
+            catch (Exception ex)
             {
                 XenoErrorLog.Write("Render", ex);
             }
@@ -451,8 +452,7 @@ namespace Xeno.Desktop.Controls
             {
                 FormattedText label = Format(chart.Labels[index], palette.Muted, 11, FontWeight.Normal);
                 double center = plot.Left + index * slot + slot / 2;
-                // A label wider than the plot starts at the left edge; Math.Clamp would throw when the bounds cross.
-                double x = Math.Max(plot.Left, Math.Min(center - label.Width / 2, plot.Right - label.Width));
+                double x = XenoCharts.LabelLeft(center, label.Width, plot.Left, plot.Right);
                 context.DrawText(label, new Point(x, plot.Bottom + 4));
             }
         }
