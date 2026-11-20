@@ -1255,7 +1255,7 @@
                     }
                   ]
                 },
-                "description": "Usage analytics for network requests this machine answered. See USAGE_ANALYTICS.md."
+                "description": "Usage analytics for network requests this machine answered. See archive/USAGE_ANALYTICS.md."
               },
               "response": [
                 {
@@ -2446,7 +2446,7 @@
         },
         {
           "name": "Local Chat",
-          "description": "Chat with local and Xeno network models through the running client (see CHAT.md). Every request needs X-Xeno-Local-Token; the client writes the token to ~/.xeno/local-api.json while it runs.",
+          "description": "Chat with local and Xeno network models through the running client (see archive/CHAT.md). Every request needs X-Xeno-Local-Token; the client writes the token to ~/.xeno/local-api.json while it runs.",
           "item": [
             {
               "name": "Chat Models",
@@ -6796,7 +6796,7 @@
                     }
                   ]
                 },
-                "description": "Usage analytics for inference requests in the tenant. Needs RequestHistory read. Returns 400 for an invalid range, grouping, or section, and 403 for a grouping the caller may not use. See USAGE_ANALYTICS.md."
+                "description": "Usage analytics for inference requests in the tenant. Needs RequestHistory read. Returns 400 for an invalid range, grouping, or section, and 403 for a grouping the caller may not use. See archive/USAGE_ANALYTICS.md."
               },
               "response": [
                 {
@@ -7415,7 +7415,7 @@
         },
         {
           "name": "Chat",
-          "description": "Server chat (see CHAT.md and REST_API.md). Turns go through the network relay and charge credits.",
+          "description": "Server chat (see archive/CHAT.md and REST_API.md). Turns go through the network relay and charge credits.",
           "item": [
             {
               "name": "Chat Models",

@@ -177,7 +177,7 @@ change it on the **General** page. To try everything against a throwaway local s
 
 The tray icon needs a desktop environment with a notification area (StatusNotifierItem). Its menu opens the desktop
 app, opens the terminal app in your terminal emulator, opens the web dashboard, and starts or stops the client. See
-[DESKTOP_AND_TERMINAL.md](../DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
+[DESKTOP_AND_TERMINAL.md](../archive/DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
 
 ## Start On Login
 

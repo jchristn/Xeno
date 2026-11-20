@@ -65,7 +65,7 @@ With tools on for a conversation, the model can call:
 
 | Group | Tools | Asks first |
 |---|---|---|
-| Xeno | Xeno's status, model, routing, provider, history, and feedback tools (see [MCP.md](MCP.md)) | route rules, start and stop the client |
+| Xeno | Xeno's status, model, routing, provider, history, and feedback tools (see [MCP.md](../MCP.md)) | route rules, start and stop the client |
 | Files | `read_file`, `write_file`, `edit_file`, `multi_edit`, `delete_file`, `file_metadata`, `list_directory`, `manage_directory`, `glob`, `grep` | writing, editing, deleting, and folder changes |
 | Processes | `run_process`, `process_start`, `process_output`, `process_list`, `process_stop` | running, starting, and stopping commands |
 | Web | `web_retrieve`, and `web_search` when a provider is set | never |

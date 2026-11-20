@@ -305,7 +305,7 @@ Global administrator email conflict:
 
 The clients response includes connection state, capacity fields, authenticated owner context, each client's advertised `models` inventory, and advertised `providers`. Provider entries include `name`, `apiType`, `modelManagementAllowed`, and `lastAdvertisedUtc`. Model entries include `modelManagementAllowed` when the backing provider is an Ollama provider that permits server-initiated model management. Owner fields are set when a WebSocket client registers: `ownerUserId`, `ownerCredentialId`, and `ownerPrincipalType`.
 
-The clients list also includes foreign clients that are shared into the caller's tenant, subject to the caller tenant's `consumeShared` setting (see [MODEL_ROUTING.md](MODEL_ROUTING.md)). Own-tenant clients are returned in full. A client owned by a different tenant is returned as a redacted `ClientView` projection: the owning tenant's `tenantId`, owner user/credential fields, `weight`, `inFlightRequests`, and `maxParallelRequests` are omitted; advertised models are reduced to model name plus capability flags. Each client carries an `origin` field describing its provenance: `tenant` for the caller's own clients, `operator` for platform-operator infrastructure, and `third-party` for a client owned by another customer tenant.
+The clients list also includes foreign clients that are shared into the caller's tenant, subject to the caller tenant's `consumeShared` setting (see [MODEL_ROUTING.md](archive/MODEL_ROUTING.md)). Own-tenant clients are returned in full. A client owned by a different tenant is returned as a redacted `ClientView` projection: the owning tenant's `tenantId`, owner user/credential fields, `weight`, `inFlightRequests`, and `maxParallelRequests` are omitted; advertised models are reduced to model name plus capability flags. Each client carries an `origin` field describing its provenance: `tenant` for the caller's own clients, `operator` for platform-operator infrastructure, and `third-party` for a client owned by another customer tenant.
 
 `POST /api/v1/clients/{id}/sharing`
 
@@ -773,7 +773,7 @@ The request history detail response includes routing metadata, selected client m
 
 ## Usage Analytics
 
-Finished charts data for every Xeno surface. [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md) explains the datasets, stages, percentiles, and truncation.
+Finished charts data for every Xeno surface. [USAGE_ANALYTICS.md](archive/USAGE_ANALYTICS.md) explains the datasets, stages, percentiles, and truncation.
 
 | Method | Path | Authorization |
 |---|---|---|
@@ -836,7 +836,7 @@ network request. Conversations, ratings, and chat history are stored per tenant 
 permission (Read, Write, Delete, Execute; the built-in TenantMember role has all four, TenantAdmin holds the
 wildcard). `scope=tenant` on the feedback, history, and analytics routes shows every user in the tenant and needs
 `ChatAdmin` Read. Answers stream as server-sent events with the same events as the local chat API (see
-[CHAT.md](CHAT.md)).
+[CHAT.md](archive/CHAT.md)).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -971,7 +971,7 @@ Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `
 ### Local chat
 
 Chat with local and Xeno network models through the running client. Routes are under `/api/v1/chat/`, need the same
-`X-Xeno-Local-Token` header, and stream answers as server-sent events. [CHAT.md](CHAT.md) lists every route, its
+`X-Xeno-Local-Token` header, and stream answers as server-sent events. [CHAT.md](archive/CHAT.md) lists every route, its
 filters, and the stream events. The client also serves Xeno's tools over MCP; see [MCP.md](MCP.md).
 
 | Method | Path | Purpose |

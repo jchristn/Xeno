@@ -187,7 +187,7 @@ scripts\windows\run-tray.bat
 
 The apps use the server in `%USERPROFILE%\.xeno\client.json`, which is the Xeno cloud unless you changed it. To point them at another server, pass `--server`, for example `scripts\windows\run-desktop.bat --server http://localhost:9000`. You can also change it on the **General** page. To try everything against a throwaway local server without touching `%USERPROFILE%\.xeno`, run `scripts\windows\run-local.bat`.
 
-Click the Xeno Agent icon to open the desktop app. Right-click it for **Open Xeno Terminal**, **Open Web Dashboard**, **Start Client**, **Stop Client**, **Restart Client**, and **Quit Xeno Agent**. Quitting the agent leaves the client running. If you rebuild while the apps or a client they started are running from the build folder, stop them first so the build can replace `xeno-desktop.exe`, `xeno-tray.exe`, `xeno.exe`, and their assemblies. See [DESKTOP_AND_TERMINAL.md](../DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
+Click the Xeno Agent icon to open the desktop app. Right-click it for **Open Xeno Terminal**, **Open Web Dashboard**, **Start Client**, **Stop Client**, **Restart Client**, and **Quit Xeno Agent**. Quitting the agent leaves the client running. If you rebuild while the apps or a client they started are running from the build folder, stop them first so the build can replace `xeno-desktop.exe`, `xeno-tray.exe`, `xeno.exe`, and their assemblies. See [DESKTOP_AND_TERMINAL.md](../archive/DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
 
 ## Start On Login
 

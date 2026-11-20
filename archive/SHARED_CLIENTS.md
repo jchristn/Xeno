@@ -1,7 +1,7 @@
 # Cross-Tenant Shared Clients & Models
 
 **Status:** MVP implemented on branch `feature/shared_clients` (see §16.3 for per-task status)
-**Related:** [MODEL_ROUTING.md](MODEL_ROUTING.md), [SECURITY_BEST_PRACTICES.md](SECURITY_BEST_PRACTICES.md), [REST_API.md](REST_API.md), [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
+**Related:** [MODEL_ROUTING.md](MODEL_ROUTING.md), [SECURITY_BEST_PRACTICES.md](../SECURITY_BEST_PRACTICES.md), [REST_API.md](../REST_API.md), [WEBSOCKETS_API.md](../WEBSOCKETS_API.md)
 
 ## 1. Overview & goal
 
@@ -23,7 +23,7 @@ Shared nodes in this deployment may be operated by **either the SaaS operator or
 
 A shared client is a compute node that processes inference requests **in plaintext**. There is no technical mechanism that prevents the node's operator from logging prompts and completions it serves. So cross-tenant sharing carries a real data-exposure fact that no amount of authorization logic removes. The design's stance is deliberately lightweight rather than a heavyweight consent workflow: the owner makes a single decision to share; the exposure is made **visible** to consumers through provenance labels; and a consumer that cannot tolerate foreign processing has a blunt **off switch** (`ConsumeShared`). That is the whole trust surface — no operator approval gate, no per-node consumer opt-in.
 
-This is a documented, deliberate exception to the core invariant in [SECURITY_BEST_PRACTICES.md](SECURITY_BEST_PRACTICES.md) that "every operation is bound to a tenant." That doc must be updated to describe the boundary precisely.
+This is a documented, deliberate exception to the core invariant in [SECURITY_BEST_PRACTICES.md](../SECURITY_BEST_PRACTICES.md) that "every operation is bound to a tenant." That doc must be updated to describe the boundary precisely.
 
 ### 2.2 Single owner-side control
 
@@ -297,9 +297,9 @@ Safe rollout order:
 ## 15. Docs to update
 
 - [MODEL_ROUTING.md](MODEL_ROUTING.md) — shared eligibility, FCFS/owner-contention limitations.
-- [SECURITY_BEST_PRACTICES.md](SECURITY_BEST_PRACTICES.md) — the new cross-tenant trust boundary and its exception to "every operation bound to a tenant."
-- [REST_API.md](REST_API.md) — sharing endpoints, widened lists, `ClientView` schema.
-- [WEBSOCKETS_API.md](WEBSOCKETS_API.md) — note that sharing is **not** client-declared.
+- [SECURITY_BEST_PRACTICES.md](../SECURITY_BEST_PRACTICES.md) — the new cross-tenant trust boundary and its exception to "every operation bound to a tenant."
+- [REST_API.md](../REST_API.md) — sharing endpoints, widened lists, `ClientView` schema.
+- [WEBSOCKETS_API.md](../WEBSOCKETS_API.md) — note that sharing is **not** client-declared.
 - All three SDK READMEs, `README.md` / `DOCKERHUB_README.md` positioning, `CHANGELOG.md`.
 
 ---

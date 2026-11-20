@@ -18,7 +18,7 @@ for you.
 
 ## Running from source
 
-The scripts in [scripts/](scripts/README.md) build and run each app. Use `scripts/linux/` on Linux and
+The scripts in [scripts/](../scripts/README.md) build and run each app. Use `scripts/linux/` on Linux and
 `scripts\windows\*.bat` on Windows:
 
 ```bash
@@ -44,9 +44,10 @@ The desktop app and the terminal app accept the same options:
 
 | Option | Meaning |
 |---|---|
-| `--page <page>` | Open a page: `overview`, `models`, `providers`, `requests`, `logs`, `hosttelemetry`, `providertelemetry`, `server`, or `settings`. |
+| `--page <page>` | Open a page: `overview`, `models`, `providers`, `localendpoint`, `chat`, `chathistory`, `chatfeedback`, `usage`, `requests`, `logs`, `hosttelemetry`, `providertelemetry`, `server` (General), or `settings`. |
 | `--server <cloud\|url\|host[:port]>` | Point this client at a Xeno server and save it. See [Choosing the Xeno server](#choosing-the-xeno-server). |
 | `--home <dir>` | Use a different client home directory instead of `~/.xeno` (the same as setting `XENO_CLIENT_HOME`). |
+| `--settings` | Open the Xeno Settings window at startup (desktop app only; the tray agent's **Settings** uses it). |
 
 ## Choosing the Xeno server
 
@@ -169,7 +170,8 @@ Menus:
 
 | Shortcut (Cmd on macOS, Ctrl elsewhere) | Action |
 |---|---|
-| 1 to 9 | Go to a page (Overview through Settings). |
+| 1 to 9 | Go to a page: Overview, Models, Providers, Requests, Logs, Host Telemetry, Provider Telemetry, General, Settings. |
+| 0 | Go to the Local endpoint page. |
 | N / Shift+N | Add a provider / add a model. |
 | K | Command palette. |
 | R | Refresh. |
@@ -236,7 +238,7 @@ Arrow keys, Page Up/Down, Home, End, and the mouse wheel scroll; Esc closes.
 | F10 | Open the menu bar (arrow keys to move, Enter to choose, Esc to close). |
 | Ctrl+K | Command palette. |
 | F1 | Keyboard shortcuts, including each page's single-key actions. |
-| Alt+1 to Alt+9 | Go to a page. |
+| Alt+1 to Alt+9, Alt+0 | Go to a page (the same numbers as the desktop app; Alt+0 is Local endpoint). Chat, Chat history, Feedback, and Usage have no number; use the sidebar, the menu, or Ctrl+K. |
 | Tab / Shift+Tab | Move between the page's controls and the sidebar. |
 | Enter | Open the selected row or page. |
 | F5 | Refresh. |

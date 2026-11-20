@@ -178,7 +178,7 @@ also change it on the **General** page. To try everything against a throwaway lo
 On macOS the desktop app appears as **Xeno** in the menu bar, with an application menu (About Xeno, Settings), plus
 File, Edit, View, Client, Window, and Help menus. The Xeno Agent's menu bar icon opens the desktop app, opens the
 terminal app in a new Terminal window, opens the web dashboard, and starts or stops the client. See
-[DESKTOP_AND_TERMINAL.md](../DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
+[DESKTOP_AND_TERMINAL.md](../archive/DESKTOP_AND_TERMINAL.md) for pages and keyboard shortcuts.
 
 ## Start On Login
 

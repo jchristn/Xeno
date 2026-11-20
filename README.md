@@ -23,7 +23,7 @@ Xeno gives teams one place to manage and use distributed AI capacity.
 - Supports opt-in cross-tenant shared clients so a node owned by one tenant can be an eligible routing target for others, with owner-set sharing, provenance labels, redacted foreign views, and a per-tenant consume switch.
 - Supports Ollama, OpenAI, Gemini, and OpenAI-compatible endpoints such as vLLM from the client configuration.
 - Hosts an optional local client dashboard from the background `xeno` process for connection state, provider/model management, client-side request history, and machine telemetry.
-- Gives apps on a machine one localhost-only OpenAI-compatible and Ollama-compatible endpoint (`http://127.0.0.1:11435`) for both the models that machine runs and the models the Xeno network offers. Local models go straight to the local provider; everything else goes through the authenticated WebSocket tunnel. Per-model rules can pin a model to local or network, with optional fallback. Disabled by default. See [HYBRID_MODELS.md](HYBRID_MODELS.md).
+- Gives apps on a machine one localhost-only OpenAI-compatible and Ollama-compatible endpoint (`http://127.0.0.1:11435`) for both the models that machine runs and the models the Xeno network offers. Local models go straight to the local provider; everything else goes through the authenticated WebSocket tunnel. Per-model rules can pin a model to local or network, with optional fallback. Disabled by default. See [HYBRID_MODELS.md](archive/HYBRID_MODELS.md).
 - Persists local client request history in SQLite for the machine running `xeno`, including request/response headers, bounded bodies, timing, token metadata, and stream counters.
 - Collects local CPU, memory, disk, and GPU telemetry (Apple silicon through `ioreg`, NVIDIA through `nvidia-smi` or DCGM) on the client at a configurable interval, persists it in SQLite, and exposes live and historical telemetry dashboard pages.
 - Can collect fleet-level client telemetry from the server. When `TelemetryCollection.Enabled` is true, the server requests host and provider telemetry over the authenticated client WebSocket, persists server-collected samples, and shows them under `CONTROL > Client Telemetry`.
@@ -88,7 +88,7 @@ In these modes, Xeno is not just a proxy. It is a coordination layer for resourc
 
 ## Local Client Inference Listener
 
-The Xeno client can expose one API for local applications that expect either OpenAI-compatible or Ollama-compatible endpoints, covering both the models this machine runs and the models the Xeno network offers. For a short setup guide, see [HYBRID_MODELS.md](HYBRID_MODELS.md). The listener is disabled by default and is loopback-only; it accepts `localhost`, `127.0.0.1`, `::1`, or `[::1]` and rejects public or wildcard hosts.
+The Xeno client can expose one API for local applications that expect either OpenAI-compatible or Ollama-compatible endpoints, covering both the models this machine runs and the models the Xeno network offers. For a short setup guide, see [HYBRID_MODELS.md](archive/HYBRID_MODELS.md). The listener is disabled by default and is loopback-only; it accepts `localhost`, `127.0.0.1`, `::1`, or `[::1]` and rejects public or wildcard hosts.
 
 Add or edit this section in `~/.xeno/client.json`:
 
@@ -356,7 +356,7 @@ configuration and history, so you can use whichever fits:
   terminal app, or the web dashboard.
 
 Every front end shows the models this machine serves and the models the Xeno network offers it in one Models view.
-See [DESKTOP_AND_TERMINAL.md](DESKTOP_AND_TERMINAL.md) for pages, menus, keyboard shortcuts, and how the apps find
+See [DESKTOP_AND_TERMINAL.md](archive/DESKTOP_AND_TERMINAL.md) for pages, menus, keyboard shortcuts, and how the apps find
 each other.
 
 ```bash
@@ -397,7 +397,7 @@ port 9000 when the port is left out.
 Restart the client after switching so the worker reconnects. Sign in again, because credentials belong to one server.
 To keep separate sign-ins for several servers, give each one its own client home with `--home <dir>` or
 `XENO_CLIENT_HOME`. See
-[Choosing the Xeno server](DESKTOP_AND_TERMINAL.md#choosing-the-xeno-server) for details.
+[Choosing the Xeno server](archive/DESKTOP_AND_TERMINAL.md#choosing-the-xeno-server) for details.
 
 ### Local Client Dashboard
 
@@ -574,7 +574,7 @@ The dashboard is the primary administration surface for Xeno. It includes:
 - Request history with telemetry, headers, bodies, streaming details, and routing decisions.
 - Tenant, user, credential, role, and permission create/edit/delete workflows.
 - Settings management for server configuration, including email provider setup and global-admin test email sends.
-- Usage charts for latency, time to first token, throughput, tokens, a token heatmap, time by stage, and totals by model, provider, client, user, credential, or tenant, with drill-down into request history. See [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md).
+- Usage charts for latency, time to first token, throughput, tokens, a token heatmap, time by stage, and totals by model, provider, client, user, credential, or tenant, with drill-down into request history. See [USAGE_ANALYTICS.md](archive/USAGE_ANALYTICS.md).
 - Integrated API Explorer with editable JSON request bodies, response headers, streaming previews, and copy-to-clipboard controls.
 
 ### Dashboard Screenshot Carousel
@@ -693,16 +693,16 @@ Developer documentation:
 
 - [REST_API.md](REST_API.md)
 - [WEBSOCKETS_API.md](WEBSOCKETS_API.md)
-- [MODEL_ROUTING.md](MODEL_ROUTING.md)
-- [HYBRID_MODELS.md](HYBRID_MODELS.md) (local and Xeno network models through one local endpoint)
-- [CHAT.md](CHAT.md) (chat with any local or network model in every Xeno app, with feedback and history)
+- [MODEL_ROUTING.md](archive/MODEL_ROUTING.md)
+- [HYBRID_MODELS.md](archive/HYBRID_MODELS.md) (local and Xeno network models through one local endpoint)
+- [CHAT.md](archive/CHAT.md) (chat with any local or network model in every Xeno app, with feedback and history)
 - [MCP.md](MCP.md) (Xeno's tools for Claude Code and other MCP clients)
-- [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md) (usage charts, `xeno usage`, and how to read them)
+- [USAGE_ANALYTICS.md](archive/USAGE_ANALYTICS.md) (usage charts, `xeno usage`, and how to read them)
 - [getting-started/](getting-started/)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
-- [DESKTOP_AND_TERMINAL.md](DESKTOP_AND_TERMINAL.md)
+- [DESKTOP_AND_TERMINAL.md](archive/DESKTOP_AND_TERMINAL.md)
 - [scripts/README.md](scripts/README.md)
-- [CLIENT_TELEMETRY.md](CLIENT_TELEMETRY.md)
+- [CLIENT_TELEMETRY.md](archive/CLIENT_TELEMETRY.md)
 - [OBSERVABILITY.md](OBSERVABILITY.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [AGENTS.md](AGENTS.md)
@@ -719,8 +719,6 @@ Archived planning and audit documents are in [archive](archive).
   REST_API.md
   WEBSOCKETS_API.md
   CLIENT_GETTING_STARTED.md
-  CLIENT_TELEMETRY.md
-  DESKTOP_AND_TERMINAL.md
   Xeno.postman_collection.json
   getting-started/
   scripts/

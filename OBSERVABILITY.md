@@ -144,7 +144,7 @@ The `AddRuntimeInstrumentation()` package adds the standard `process_runtime_dot
 
 ### Usage analytics
 
-Usage analytics queries emit `xeno.analytics.query.duration` (histogram) and `xeno.analytics.records.scanned` (histogram), with an `analytics usage` span around each query. Use them to spot ranges that read close to `Analytics.MaxRecordsPerQuery`. The charts themselves are described in [USAGE_ANALYTICS.md](USAGE_ANALYTICS.md).
+Usage analytics queries emit `xeno.analytics.query.duration` (histogram) and `xeno.analytics.records.scanned` (histogram), with an `analytics usage` span around each query. Use them to spot ranges that read close to `Analytics.MaxRecordsPerQuery`. The charts themselves are described in [USAGE_ANALYTICS.md](archive/USAGE_ANALYTICS.md).
 
 ## Troubleshooting
 

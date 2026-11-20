@@ -51,7 +51,7 @@ Each `run-*` script builds what it needs first, so you don't need to build the s
 - `--home <dir>`: uses a different client home directory.
 - `--page <page>`: opens a specific page.
 
-See [Choosing the Xeno server](../DESKTOP_AND_TERMINAL.md#choosing-the-xeno-server).
+See [Choosing the Xeno server](../archive/DESKTOP_AND_TERMINAL.md#choosing-the-xeno-server).
 
 ```bash
 scripts/macos/run-desktop.sh                                  # the Xeno cloud (default)

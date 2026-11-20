@@ -11,9 +11,9 @@ Usage analytics answers how much traffic Xeno handled, how fast it was, how many
 | Desktop app | **Usage**, first under Activity |
 | Terminal app | **Usage**, first under Activity. One chart at a time, picked with the Chart dropdown |
 | CLI | `xeno usage [--dataset served\|endpoint\|chat] [--range hour\|day\|week\|month] [--group-by model\|provider\|route] [--metric requests\|tokens] [--model <name>] [--json]` |
-| MCP | `xeno_usage` (see [MCP.md](MCP.md)) |
+| MCP | `xeno_usage` (see [MCP.md](../MCP.md)) |
 | SDKs | C#, JavaScript, and Python clients under `src/sdk` |
-| REST | See [REST_API.md](REST_API.md) |
+| REST | See [REST_API.md](../REST_API.md) |
 
 The client surfaces need the Xeno client running, because they read its local API.
 

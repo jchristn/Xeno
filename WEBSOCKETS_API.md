@@ -583,7 +583,7 @@ and on every reconnect or inventory update it preserves the existing per-client
 value. The only way to change a client's sharing is the owner-tenant REST route
 `POST /api/v1/clients/{id}/sharing` (see [REST_API.md](REST_API.md)). This
 prevents a node from self-promoting into the shared pool. See
-[MODEL_ROUTING.md](MODEL_ROUTING.md) for the routing eligibility rule.
+[MODEL_ROUTING.md](archive/MODEL_ROUTING.md) for the routing eligibility rule.
 
 ### `client.heartbeat`
 

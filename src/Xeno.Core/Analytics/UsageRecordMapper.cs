@@ -7,7 +7,7 @@ namespace Xeno.Core.Analytics
 
     /// <summary>
     /// Maps server request history entries and chat turns to usage records, deriving their stages. Stage formulas are
-    /// documented in USAGE_ANALYTICS.md. A stage with a missing input is left out; a negative result is clamped and
+    /// documented in archive/USAGE_ANALYTICS.md. A stage with a missing input is left out; a negative result is clamped and
     /// counted. Thread safe (stateless).
     /// </summary>
     public static class UsageRecordMapper
