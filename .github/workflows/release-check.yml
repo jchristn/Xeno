@@ -1,0 +1,33 @@
+name: Release check
+
+# Packaging breaks from changes nobody thinks of as release changes. This runs the whole installer matrix (without
+# publishing anything) on every push to main that touches the Publisher, its manifest, the artwork, the license, the
+# version, or the workflows, so a broken installer shows up on the push instead of on release day.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/Xeno.Publisher/**"
+      - "src/Directory.Build.props"
+      - "src/Xeno.Desktop/**"
+      - "src/Xeno.Tray/**"
+      - "publisher.json"
+      - "assets/**"
+      - "LICENSE.md"
+      - "build-installers.*"
+      - ".github/release-install-notes.md"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-check.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: release-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  installers:
+    uses: ./.github/workflows/release.yml

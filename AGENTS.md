@@ -9,7 +9,17 @@ dotnet build src/Xeno.sln
 dotnet run --project src/Test.Automated -- --results results.json
 dotnet test src/Test.Xunit
 dotnet test src/Test.Nunit
+./build-installers.sh          # this OS's installers into installers/<version>/ (build-installers.bat on Windows)
 ```
+
+## Installers
+
+- Installers are built by `src/Xeno.Publisher` from `publisher.json`, to the standard in `~/Code/Agents/requirements/INSTALLERS.md`. Packaging behavior belongs in the manifest or the Publisher, not in a per-platform script.
+- One client installer per OS bundles `xeno`, `xeno-desktop`, and `xeno-tray` as a self-contained publish of `src/Xeno.Desktop` (one shared runtime, not single-file). The server is not packaged; it ships in Docker.
+- `build-installers.sh` (macOS, Linux) and `build-installers.bat` (Windows) build the host's installers into the git-ignored `installers/<version>/`. `.github/workflows/release.yml` builds all three OSes and publishes a GitHub Release on a `v<version>` tag; `release-check.yml` runs the same matrix without publishing on packaging changes.
+- The version lives only in `src/Directory.Build.props` (and `Xeno.Core.Constants.Version`, which a `Publisher` test keeps equal). Agents never change it without the owner's explicit approval (`VERSIONING.md`). A release needs a non-empty `## [<version>]` section in `CHANGELOG.md`.
+- Xeno is not code-signed by policy. Keep the unsigned-build notice and bypass steps the same in `.github/release-install-notes.md`, `INSTALL.md`, the README's install section, and `InstallerText.GatekeeperNote` (the `.dmg` note).
+- Cover Publisher changes in `src/Test.Shared/PublisherTestSuites.cs`.
 
 ## Style
 

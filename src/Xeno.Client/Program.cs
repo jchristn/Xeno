@@ -33,7 +33,7 @@ namespace Xeno.Client
     /// </summary>
     public static partial class Program
     {
-        private const string ClientVersion = "0.2.0";
+        private const string ClientVersion = Xeno.Core.Constants.Version;
         private const int DefaultConnectTimeoutMs = 30000;
         private const int DefaultStopTimeoutMs = 10000;
         private const int DefaultPingCount = 5;
@@ -164,6 +164,7 @@ namespace Xeno.Client
                     switch (command)
                     {
                         case "version":
+                        case "--version":
                             if (_UseJson) WriteJson(new { version = ClientVersion });
                             else WriteInfo("xeno " + ClientVersion);
                             return 0;

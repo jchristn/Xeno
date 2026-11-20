@@ -160,6 +160,31 @@ Collected data includes normalized host metrics for CPU, memory, disk, and GPU, 
 
 The server dashboard exposes the fleet view at `CONTROL > Client Telemetry`. REST clients can use `/v1.0/api/client-telemetry/status`, `/latest`, `/collect`, host/provider history search, details, deletes, collection attempts, and `/metrics`.
 
+## Installing The Xeno Client
+
+Download the installer for your machine from the **[latest release](https://github.com/jchristn/Xeno/releases/latest)**:
+a setup `.exe` for Windows, a `.pkg` for macOS, or a `.deb`, `.rpm`, or AppImage for Linux, each for x64 and ARM64.
+Every installer puts the `xeno` command on your PATH and installs the desktop app and Xeno Agent, the tray agent,
+which starts when you sign in. .NET is included. Open a new terminal afterwards and run `xeno --version`.
+
+> **Xeno is free, open-source software and is not code-signed** (signing certificates are an ongoing cost we choose
+> not to pass on). Your operating system may warn that the developer is unidentified. That warning doesn't mean the
+> download is damaged; to confirm a file is the one published, check it against `SHA256SUMS`.
+
+- **macOS: "Xeno" Not Opened.** Click **Done** (not Move to Trash), open **System Settings > Privacy & Security**,
+  scroll down to **Security**, click **Open Anyway** next to *"Xeno" was blocked to protect your Mac*, then click
+  **Open Anyway** again and enter your password. Control-click > **Open** no longer bypasses this prompt on macOS 15
+  and later.
+- **Windows: "Windows protected your PC".** Click **More info**, then **Run anyway**.
+- **Linux:** no prompt. Use `sudo apt install ./xeno_<version>_amd64.deb` (with the `./`) or
+  `sudo dnf install ./xeno-<version>-1.x86_64.rpm`.
+
+[INSTALL.md](INSTALL.md) has every format, the full steps for each prompt, uninstalling, and checksum verification.
+The server is not in the installers; run it with Docker as below. To build the client from source, see
+[Getting Started From Source](#getting-started-from-source).
+
+Package-manager installs (`winget`, `brew`, `scoop`, `apt`, `dnf`, `dotnet tool`) are planned and not available yet.
+
 ## Getting Started With Docker
 
 The default Docker deployment uses PostgreSQL and starts a one-shot initialization container before the server starts.
@@ -698,6 +723,7 @@ Developer documentation:
 - [CHAT.md](archive/CHAT.md) (chat with any local or network model in every Xeno app, with feedback and history)
 - [MCP.md](MCP.md) (Xeno's tools for Claude Code and other MCP clients)
 - [USAGE_ANALYTICS.md](archive/USAGE_ANALYTICS.md) (usage charts, `xeno usage`, and how to read them)
+- [INSTALL.md](INSTALL.md) (installers for Windows, macOS, and Linux, the unsigned-build prompts, and uninstalling)
 - [getting-started/](getting-started/)
 - [CLIENT_GETTING_STARTED.md](CLIENT_GETTING_STARTED.md) (deprecated pointer)
 - [DESKTOP_AND_TERMINAL.md](archive/DESKTOP_AND_TERMINAL.md)
@@ -716,6 +742,10 @@ Archived planning and audit documents are in [archive](archive).
 /
   README.md
   CHANGELOG.md
+  INSTALL.md
+  publisher.json
+  build-installers.sh
+  build-installers.bat
   REST_API.md
   WEBSOCKETS_API.md
   CLIENT_GETTING_STARTED.md

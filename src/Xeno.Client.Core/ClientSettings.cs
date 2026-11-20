@@ -212,7 +212,7 @@ namespace Xeno.Client
                 machineName = Environment.MachineName,
                 processorCount = Environment.ProcessorCount,
                 totalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
-                clientVersion = "0.2.0",
+                clientVersion = Xeno.Core.Constants.Version,
                 providers = Runners.FindAll(runner => runner != null && runner.ShareWithNetwork).ConvertAll(runner => new
                 {
                     name = runner.Name,

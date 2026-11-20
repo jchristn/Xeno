@@ -37,7 +37,7 @@ case "$(uname -m)" in
     *) RID="osx-x64" ;;
 esac
 
-VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "${XENO_DESKTOP_PROJECT}" | head -1)"
+VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "${XENO_REPO_ROOT}/src/Directory.Build.props" | head -1)"
 VERSION="${VERSION:-0.0.0}"
 APP="${OUTPUT}/Xeno.app"
 

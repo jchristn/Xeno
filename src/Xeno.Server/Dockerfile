@@ -1,5 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+# The version is set once, in src/Directory.Build.props, which every project under src/ inherits.
+COPY src/Directory.Build.props ./
 COPY src/Xeno.Core/Xeno.Core.csproj Xeno.Core/
 COPY src/Xeno.Email/Xeno.Email.csproj Xeno.Email/
 COPY src/Xeno.Server/Xeno.Server.csproj Xeno.Server/

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "xeno",
+    "displayName": "Xeno",
+    "packageId": "JoelChristner.Xeno",
+    "bundleId": "ai.xenocloud.xeno",
+    "tagline": "Xeno is an AI control plane for turning distributed computers into a shared model-serving network.",
+    "description": "The Xeno client connects this computer to a Xeno server, advertises the providers and models it can serve, and gives apps on this machine one local endpoint for local and network models. It includes the xeno command (the client worker, the local web dashboard, and the terminal app), the Xeno desktop app, and Xeno Agent, the tray agent.",
+    "license": "MIT",
+    "licenseFile": "LICENSE.md",
+    "logo": "assets/logo.png",
+    "windowsIcon": "assets/logo.ico",
+    "publisher": "Joel Christner",
+    "maintainer": "Joel Christner",
+    "repo": "https://github.com/jchristn/Xeno",
+    "homepage": "https://github.com/jchristn/Xeno"
+  },
+  "build": {
+    "framework": "net10.0",
+    "runtimes": ["win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64"],
+    "artifacts": [
+      {
+        "id": "client",
+        "csproj": "src/Xeno.Desktop/Xeno.Desktop.csproj",
+        "singleFile": false,
+        "mainExecutable": "xeno-desktop",
+        "executables": ["xeno-desktop", "xeno", "xeno-tray"],
+        "pathCommands": ["xeno"],
+        "loginItem": {
+          "executable": "xeno-tray",
+          "displayName": "Xeno Agent",
+          "comment": "Xeno client status, start and stop, and launchers",
+          "labelSuffix": "agent"
+        },
+        "shortcuts": [
+          { "displayName": "Xeno", "executable": "xeno-desktop", "comment": "Manage this machine on the Xeno network", "desktopId": "xeno" },
+          { "displayName": "Xeno Agent", "executable": "xeno-tray", "comment": "Xeno client status, start and stop, and launchers", "desktopId": "xeno-agent" },
+          { "displayName": "Xeno Terminal", "executable": "xeno", "arguments": "tui", "comment": "The Xeno terminal app", "terminal": true, "desktopId": "xeno-terminal" }
+        ],
+        "stopCommand": { "executable": "xeno", "arguments": ["stop"] },
+        "processes": ["xeno-tray", "xeno-desktop"],
+        "preBuild": [
+          {
+            "description": "Install the dashboard's npm packages",
+            "workingDirectory": "dashboard",
+            "command": "npm",
+            "arguments": ["ci", "--no-audit", "--no-fund"],
+            "skipIfExists": "dashboard/node_modules"
+          },
+          {
+            "description": "Build the local web dashboard that xeno embeds",
+            "workingDirectory": "dashboard",
+            "command": "npm",
+            "arguments": ["run", "build:local"],
+            "skipIfExists": "dashboard/dist-local/index-local.html"
+          }
+        ],
+        "linuxDependencies": {
+          "deb": [
+            "libicu78 | libicu77 | libicu76 | libicu75 | libicu74 | libicu72 | libicu71 | libicu70 | libicu67 | libicu66",
+            "libx11-6", "libice6", "libsm6", "libxext6", "libxrandr2", "libxi6", "libxcursor1", "libxfixes3", "libfontconfig1"
+          ],
+          "debRecommends": ["xclip"],
+          "rpm": ["libicu", "libX11", "libICE", "libSM", "libXext", "libXrandr", "libXi", "libXcursor", "libXfixes", "fontconfig"]
+        }
+      }
+    ]
+  },
+  "destinations": {
+    "githubRepo": "jchristn/Xeno",
+    "githubPagesUrl": "https://jchristn.github.io/Xeno",
+    "homebrewTapRepo": "",
+    "scoopBucketRepo": "jchristn/Xeno",
+    "wingetPkgsRepo": "microsoft/winget-pkgs",
+    "nugetSource": "https://api.nuget.org/v3/index.json"
+  },
+  "channels": {
+    "inno": { "enabled": true, "artifact": "client", "options": { "appId": "BE41E4A0-12E0-47E5-8E09-58180D33B7CC" } },
+    "macos": { "enabled": true, "artifact": "client" },
+    "debrpm": { "enabled": true, "artifact": "client" },
+    "appimage": { "enabled": true, "artifact": "client", "options": { "commands": "xeno=xeno;cli=xeno;tui=xeno tui;tray=xeno-tray;agent=xeno-tray" } },
+    "archive": { "enabled": true, "artifact": "client" },
+    "winget": { "enabled": true, "artifact": "client", "options": { "identifier": "JoelChristner.Xeno" } },
+    "choco": { "enabled": true, "artifact": "client", "options": { "packageName": "xeno" } },
+    "scoop": { "enabled": true, "artifact": "client", "options": { "manifestName": "xeno" } },
+    "brewcask": { "enabled": true, "artifact": "client", "options": { "caskName": "xeno" } },
+    "aptyum": { "enabled": true, "artifact": "client" },
+    "dotnettool": { "enabled": true, "artifact": "client", "options": { "csproj": "src/Xeno.Client/Xeno.Client.csproj", "packageId": "xeno" } },
+    "snap": { "enabled": false, "artifact": "client" },
+    "flatpak": { "enabled": false, "artifact": "client" }
+  },
+  "signing": {
+    "macOs": { "vaultRef": "APPLE_DEVELOPER_ID", "notarizeProfileRef": "APPLE_NOTARY_PROFILE", "notarize": true, "isConfigured": false },
+    "windows": { "vaultRef": "WINDOWS_CERT_PFX", "passwordRef": "WINDOWS_CERT_PASSWORD", "isConfigured": false },
+    "linux": { "vaultRef": "GPG_PRIVATE_KEY", "passwordRef": "GPG_PASSPHRASE", "isConfigured": false }
+  },
+  "releaseNotes": {
+    "source": "CHANGELOG.md",
+    "heading": "## [{version}]"
+  }
+}

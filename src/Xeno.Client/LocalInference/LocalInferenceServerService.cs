@@ -1007,7 +1007,7 @@ namespace Xeno.Client.LocalInference
             return new
             {
                 openapi = "3.0.3",
-                info = new { title = "Xeno Local Inference Server", version = "0.2.0" },
+                info = new { title = "Xeno Local Inference Server", version = Xeno.Core.Constants.Version },
                 paths = new Dictionary<string, object>
                 {
                     ["/v1/chat/completions"] = new { post = new { summary = "OpenAI-compatible chat completions" } },

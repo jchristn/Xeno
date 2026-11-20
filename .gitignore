@@ -23,3 +23,6 @@ docker/data/*
 docker/logs/*
 !docker/logs/.gitkeep
 results.json
+
+# Installers built by build-installers.sh / build-installers.bat (src/Xeno.Publisher).
+installers/

@@ -1,6 +1,8 @@
 # Xeno Scripts
 
-These scripts build, run, install, and reset Xeno from a source checkout. Each platform has its own folder:
+These scripts build, run, install, and reset Xeno from a source checkout. To install a released version instead, use
+the installers described in [INSTALL.md](../INSTALL.md); to build those installers, run `build-installers.sh` or
+`build-installers.bat` at the repository root. Each platform has its own folder:
 
 - `scripts/macos/` and `scripts/linux/`: check the OS, then run the shared bash scripts in `scripts/common/`.
 - `scripts/windows/`: `.bat` equivalents.

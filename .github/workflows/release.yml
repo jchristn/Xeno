@@ -1,0 +1,296 @@
+name: Release
+
+# Builds the Xeno installers on each operating system's own runner and, on a v<version> tag, publishes them together
+# as one GitHub Release. publisher.json is the source of truth and src/Xeno.Publisher does the packaging; the same
+# Publisher commands run locally through build-installers.sh and build-installers.bat.
+#
+#   Tag push (v0.2.0):    build every installer, then the release job checks the tag and CHANGELOG.md and publishes.
+#   Manual run:           build every installer and upload them as workflow artifacts; nothing is published.
+#   release-check.yml:    calls this workflow on pushes to main that touch packaging, also without publishing.
+#
+# Fan out, then fan in: nothing is published until all three operating systems have built, and a failure on one
+# publishes nothing. The package-manager jobs run after the release, only on a tag, and only when the repository
+# variable ENABLE_PACKAGE_MANAGERS is "true".
+#
+# Xeno is not code-signed, by policy (see INSTALL.md). macOS bundles are ad-hoc signed by the Publisher.
+# The first releases are created as drafts; set the repository variable RELEASE_DRAFT to "false" to publish directly.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  windows:
+    name: Windows installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build the setup .exe and .zip files
+        run: dotnet run --project src/Xeno.Publisher -c Release -- --channel inno,archive --output artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-windows
+          path: |
+            artifacts/*.exe
+            artifacts/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS installers
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the .pkg, .dmg, and .tar.gz files
+        run: dotnet run --project src/Xeno.Publisher -c Release -- --channel macos,archive --output artifacts
+      - name: Check the ad-hoc signatures
+        run: |
+          for dmg in artifacts/*.dmg; do
+            mount="$(hdiutil attach -nobrowse -readonly "$dmg" | tail -1 | awk -F'\t' '{print $NF}')"
+            codesign --verify --deep --strict --verbose=2 "$mount/Xeno.app"
+            hdiutil detach -quiet "$mount"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-macos
+          path: |
+            artifacts/*.pkg
+            artifacts/*.dmg
+            artifacts/*.tar.gz
+          if-no-files-found: error
+
+  linux:
+    name: Linux installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install packaging tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ruby ruby-dev rpm
+          sudo gem install --no-document fpm
+          sudo curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
+      - name: Build the .deb, .rpm, AppImage, and .tar.gz files
+        run: dotnet run --project src/Xeno.Publisher -c Release -- --channel debrpm,appimage,archive --output artifacts
+      - name: Check the packages
+        run: |
+          for deb in artifacts/*.deb; do dpkg-deb --info "$deb" | grep -E 'Package|Version|Architecture|Depends'; dpkg-deb --contents "$deb" | grep -E 'usr/bin/xeno|autostart|hicolor/256'; done
+          for rpm in artifacts/*.rpm; do rpm -qip "$rpm" | grep -E 'Name|Version|Architecture'; done
+          chmod +x artifacts/*-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 XENO_CLIENT_HOME="$RUNNER_TEMP/xeno-home" ./artifacts/xeno-*-x86_64.AppImage xeno --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-linux
+          path: |
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.AppImage
+            artifacts/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: [windows, macos, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the version
+        id: version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          props_version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Directory.Build.props | head -n 1)"
+          if [ "$tag_version" != "$props_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$props_version</Version> in src/Directory.Build.props."
+            exit 1
+          fi
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+          case "$tag_version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+      - name: Build the release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > changes.md
+          if ! grep -q '[^[:space:]]' changes.md; then
+            echo "::error::CHANGELOG.md has no non-empty '## [$VERSION]' section. Add one before tagging."
+            exit 1
+          fi
+          { sed "s/{version}/$VERSION/g" .github/release-install-notes.md; echo; echo "## What's changed"; echo; cat changes.md; } > release-notes.md
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloads
+          pattern: installers-*
+          merge-multiple: true
+      - name: Stage the assets and write SHA256SUMS
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p assets
+          find downloads -type f -exec cp {} assets/ \;
+          cd assets
+          expected="xeno-$VERSION-win-x64-setup.exe xeno-$VERSION-win-arm64-setup.exe xeno-$VERSION-win-x64.zip xeno-$VERSION-win-arm64.zip
+          xeno-$VERSION-osx-x64.pkg xeno-$VERSION-osx-arm64.pkg xeno-$VERSION-osx-x64.dmg xeno-$VERSION-osx-arm64.dmg xeno-$VERSION-osx-x64.tar.gz xeno-$VERSION-osx-arm64.tar.gz
+          xeno_${VERSION}_amd64.deb xeno_${VERSION}_arm64.deb xeno-$VERSION-1.x86_64.rpm xeno-$VERSION-1.aarch64.rpm
+          xeno-$VERSION-x86_64.AppImage xeno-$VERSION-aarch64.AppImage xeno-$VERSION-linux-x64.tar.gz xeno-$VERSION-linux-arm64.tar.gz"
+          missing=0
+          for file in $expected; do [ -f "$file" ] || { echo "::error::Missing $file"; missing=1; }; done
+          [ "$missing" = 0 ] || exit 1
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Xeno ${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          files: assets/*
+          fail_on_unmatched_files: true
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          draft: ${{ vars.RELEASE_DRAFT != 'false' }}
+
+  linux-repos:
+    name: apt and yum repositories
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_PACKAGE_MANAGERS == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install repository tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo apt-get update -y && sudo apt-get install -y dpkg-dev apt-utils createrepo-c gnupg
+      - uses: actions/download-artifact@v4
+        with:
+          name: installers-linux
+          path: artifacts
+      - name: Import the GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then echo "::warning::GPG_PRIVATE_KEY is not set; the repository metadata will be unsigned and apt and dnf will refuse it."; exit 0; fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+      - name: Build the repository metadata
+        run: dotnet run --project src/Xeno.Publisher -c Release -- --channel aptyum --output artifacts
+      - name: Publish the repositories to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: artifacts/repo
+          keep_files: true
+
+  package-managers:
+    name: Package-manager manifests
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_PACKAGE_MANAGERS == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: installers-*
+          merge-multiple: true
+      - name: Generate the winget, Scoop, and Homebrew manifests
+        run: dotnet run --project src/Xeno.Publisher -c Release -- --channel winget,scoop,brewcask --output artifacts
+      - name: Commit the Scoop bucket and Homebrew cask to this repository
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p bucket Casks
+          cp artifacts/manifests/scoop/xeno.json bucket/xeno.json
+          cp artifacts/manifests/brewcask/xeno.rb Casks/xeno.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/xeno.json Casks/xeno.rb
+          git diff --cached --quiet || { git commit -m "Package manifests for $VERSION" && git push origin HEAD:main; }
+      - name: Pack and push the .NET tool
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet run --project src/Xeno.Publisher -c Release -- --channel dotnettool --output artifacts
+          if [ -z "$NUGET_API_KEY" ]; then echo "::warning::NUGET_API_KEY is not set; the .nupkg was built but not pushed (pending)."; exit 0; fi
+          dotnet nuget push "artifacts/xeno.*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-manager-manifests
+          path: artifacts/manifests/**
+      - name: Report what still needs a person
+        run: |
+          echo "::notice::winget: submit artifacts/manifests/winget to microsoft/winget-pkgs (WINGET_TOKEN); the pull request needs a merge."
+          echo "::notice::Scoop and Homebrew: committed to bucket/ and Casks/ in this repository."
+
+  chocolatey:
+    name: Chocolatey package
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_PACKAGE_MANAGERS == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: installers-windows
+          path: artifacts
+      - name: Generate the package sources
+        run: dotnet run --project src/Xeno.Publisher -c Release -- --channel choco --output artifacts
+      - name: Pack and push
+        shell: pwsh
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          choco pack artifacts/manifests/choco/xeno.nuspec --outputdirectory artifacts
+          if (-not $env:CHOCO_API_KEY) { Write-Host "::warning::CHOCO_API_KEY is not set; the package was packed but not pushed (pending)."; exit 0 }
+          choco push (Get-ChildItem artifacts -Filter 'xeno.*.nupkg' | Select-Object -First 1).FullName --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY

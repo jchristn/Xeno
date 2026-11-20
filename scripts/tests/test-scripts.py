@@ -165,7 +165,8 @@ def make_repo(temp):
     for project in ['Xeno.Desktop', 'Xeno.Client', 'Xeno.Server']:
         csproj = repo / 'src' / project / f'{project}.csproj'
         csproj.parent.mkdir(parents=True)
-        csproj.write_text('<Project><PropertyGroup><Version>0.1.1</Version></PropertyGroup></Project>')
+        csproj.write_text('<Project></Project>')
+    (repo / 'src/Directory.Build.props').write_text('<Project><PropertyGroup><Version>0.1.1</Version></PropertyGroup></Project>')
     (repo / 'src/Test.Automated').mkdir(parents=True)
     (repo / 'src/Xeno.sln').write_text('')
     (repo / 'assets').mkdir()

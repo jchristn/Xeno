@@ -105,7 +105,8 @@ namespace Test.Shared
                     ColorSchemeTestSuites.ColorSchemeSuite(),
                     AutoStartTestSuites.AutoStartSuite(),
                     UsageChartTestSuites.ChartSuite(),
-                    UsageTuiTestSuites.TuiUsageSuite()
+                    UsageTuiTestSuites.TuiUsageSuite(),
+                    PublisherTestSuites.PublisherSuite()
                 };
             }
         }

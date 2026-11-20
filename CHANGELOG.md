@@ -1,7 +1,11 @@
 # Changelog
 
-## 0.2.0 (alpha, in progress)
+## [Unreleased]
 
+## [0.2.0] - 2026-11-19 (alpha)
+
+- Installers for Windows, macOS, and Linux on x64 and ARM64, published on GitHub Releases: a Windows setup `.exe`, a macOS `.pkg` and `.dmg`, Linux `.deb`, `.rpm`, and AppImage, and portable `.zip`/`.tar.gz` archives, with one `SHA256SUMS`. Each installs the `xeno` command (on PATH), the desktop app, and Xeno Agent (started at sign-in), self-contained with no .NET runtime needed. They are built by `src/Xeno.Publisher` from `publisher.json`, locally with `build-installers.sh` or `build-installers.bat` and in CI by `.github/workflows/release.yml` on a `v*` tag. See [INSTALL.md](INSTALL.md).
+- The version is set once, in `src/Directory.Build.props`. `xeno --version` prints it.
 - Desktop charts log any drawing error to `logs/xeno-desktop-errors.log` and skip the frame, not only the five exception types guarded before; an error while drawing is raised outside every handler and would otherwise end the app. Time-label placement is shared as `XenoCharts.LabelLeft` and covered by tests.
 - Email: names, organizations, and links are HTML-encoded exactly once. The tenant approved and verification emails no longer show values like `O'Brien & Sons` as `O&amp;#39;Brien &amp;amp; Sons`, and button, logo, and footer links with more than one query parameter (`?a=1&b=2`) are no longer broken by a doubled `&amp;amp;`. Headings and the subject title are encoded once too.
 - The terminal app uses TUIKit 1.13.0: the token heatmap's padding comes from `HeatMap.CellGap` instead of a custom surface, and its cells are colored by a `HeatMapPalette` built from the chosen terminal palette (empty cells in the muted color, then a ramp through the accent).
@@ -139,7 +143,7 @@
 - Fixed macOS memory telemetry: it recorded only total memory, so memory utilization was always empty. It now counts active, wired, and compressed pages from `vm_stat`.
 - Fixed signing in to a different server: the desktop and terminal Sign In form and `xeno login --server` changed only the REST URL, so the worker kept connecting its WebSocket to the old server. They now point the whole connection at the new server.
 
-## 0.1.1
+## [0.1.1] - 2026-10-03
 
 - Updated NuGet dependencies: Caching 5.1.2, Microsoft.Data.SqlClient 7.1.1, SyslogLogging 2.3.1, Watson 7.2.2, SendWithMailgun 1.2.0, Touchstone 0.2.0 (Core, Cli, Xunit and NUnit adapters), NUnit 5.0.0, and coverlet.collector 10.1.0.
 - Added Touchstone coverage for the `Caching`-backed `EntityCache` (read-through hits, invalidate/clear reloads, least-recently-used eviction, argument validation, and null-load handling).
@@ -158,7 +162,7 @@
 - Added server-requested client telemetry settings, WebSocket frame contracts, SQLite-backed server telemetry persistence, authenticated REST telemetry routes, dashboard `CONTROL > Client Telemetry`, telemetry route wrappers in C#, JavaScript, and Python SDKs, and telemetry routing policy fields.
 - Expanded documentation around Xeno's broader platform vision: a controller-agent model for federating contributor GPUs, private data center accelerators, hybrid provider capacity, and agentic application access through one OpenAI-compatible control plane.
 
-## 0.1.0
+## [0.1.0] - 2026-06-23
 
 - Added initial Xeno server, client, dashboard, Docker, documentation, and Touchstone test surfaces.
 - Added multitenant seeded state and OpenAI-compatible routing.
