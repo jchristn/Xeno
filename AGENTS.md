@@ -19,6 +19,7 @@ dotnet test src/Test.Nunit
 - `build-installers.sh` (macOS, Linux) and `build-installers.bat` (Windows) build the host's installers into the git-ignored `installers/<version>/`. `.github/workflows/release.yml` builds all three OSes and publishes a GitHub Release on a `v<version>` tag; `release-check.yml` runs the same matrix without publishing on packaging changes.
 - The version lives only in `src/Directory.Build.props` (and `Xeno.Core.Constants.Version`, which a `Publisher` test keeps equal). Agents never change it without the owner's explicit approval (`VERSIONING.md`). A release needs a non-empty `## [<version>]` section in `CHANGELOG.md`.
 - Xeno is not code-signed by policy. Keep the unsigned-build notice and bypass steps the same in `.github/release-install-notes.md`, `INSTALL.md`, the README's install section, and `InstallerText.GatekeeperNote` (the `.dmg` note).
+- Release notes are `.github/release-install-notes.md`, then `.github/highlights/<version>.md` when it exists, then the version's CHANGELOG section with relative links pointed at the tag.
 - Cover Publisher changes in `src/Test.Shared/PublisherTestSuites.cs`.
 
 ## Style

@@ -152,7 +152,14 @@ jobs:
             echo "::error::CHANGELOG.md has no non-empty '## [$VERSION]' section. Add one before tagging."
             exit 1
           fi
-          { sed "s/{version}/$VERSION/g" .github/release-install-notes.md; echo; echo "## What's changed"; echo; cat changes.md; } > release-notes.md
+          # Relative links in CHANGELOG.md point at repository files; on the release page they must point at the tag.
+          sed -E "s|\]\(([^)h#][^):]*)\)|](https://github.com/${GITHUB_REPOSITORY}/blob/v${VERSION}/\1)|g" changes.md > changes-linked.md
+          # An optional .github/highlights/<version>.md (a "## Highlights" section) goes above the changelog.
+          {
+            sed "s/{version}/$VERSION/g" .github/release-install-notes.md
+            if [ -f ".github/highlights/$VERSION.md" ]; then echo; cat ".github/highlights/$VERSION.md"; fi
+            echo; echo "## What's changed"; echo; cat changes-linked.md
+          } > release-notes.md
       - uses: actions/download-artifact@v4
         with:
           path: downloads
