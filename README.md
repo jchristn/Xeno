@@ -2,11 +2,11 @@
 
 <img src="assets/logo.png" alt="Xeno logo" width="192" height="192">
 
-**Version:** v0.2.0
+**Version:** v0.3.0
 
 **Status:** ALPHA
 
-Xeno v0.2.0 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, SDKs, and client commands may change before a stable release.
+Xeno v0.3.0 is an alpha release. APIs, configuration files, dashboard workflows, Docker deployment details, SDKs, and client commands may change before a stable release.
 
 Xeno is an AI control plane for turning distributed computers into a shared model-serving network. A lightweight client runs on laptops, desktops, workstations, and servers, advertises the machine's available providers and models, and maintains a persistent WebSocket connection to the Xeno server. The server exposes OpenAI-compatible APIs and routes requests to connected clients that can service the selected model.
 
@@ -221,8 +221,8 @@ Seeded alpha credentials:
 
 The Docker images are:
 
-- `jchristn77/xeno-server:v0.2.0`
-- `jchristn77/xeno-dashboard:v0.2.0`
+- `jchristn77/xeno-server:v0.3.0`
+- `jchristn77/xeno-dashboard:v0.3.0`
 - `jchristn77/netledger:v4.0.0`
 - `jchristn77/netledger-archive:v4.0.0`
 - `jchristn77/netledger-ui:v4.0.0`
@@ -239,18 +239,18 @@ To rebuild and push images on Windows:
 
 ```powershell
 docker login
-build-server.bat v0.2.0
-build-dashboard.bat v0.2.0
-build-all.bat v0.2.0
+build-server.bat v0.3.0
+build-dashboard.bat v0.3.0
+build-all.bat v0.3.0
 ```
 
 On macOS or Linux:
 
 ```bash
 docker login
-./build-server.sh v0.2.0
-./build-dashboard.sh v0.2.0
-./build-all.sh v0.2.0
+./build-server.sh v0.3.0
+./build-dashboard.sh v0.3.0
+./build-all.sh v0.3.0
 ```
 
 `build-all.bat` and `build-all.sh` delegate to the server and dashboard build scripts and pass the requested image tag through to both. Every build script tags the image with both the requested tag and `latest`. The `.sh` scripts use `docker buildx` to build and push multi-architecture (`linux/amd64`, `linux/arm64`) images. `build-local-dashboard.bat` / `build-local-dashboard.sh` build the local client dashboard bundle embedded in the `xeno` tool.

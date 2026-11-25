@@ -46,7 +46,7 @@ Telemetry payloads must not contain prompts, responses, provider credentials, au
 The current protocol version is the Xeno application version:
 
 ```text
-0.2.0
+0.3.0
 ```
 
 ## Authentication

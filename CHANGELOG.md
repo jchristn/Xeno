@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25 (alpha)
+
 - Manage a provider's models from every client front end: see what the provider has on disk right now (size, parameters, quantization, modified time, and whether each is advertised), pull a model with a progress bar, cancel a pull, and delete a model, which also stops advertising it. Open it from **Manage models** on a provider's row menu or its Local endpoint row in the web dashboard, the provider row menu or Providers button in the desktop app, or `p` on Providers or Local endpoint in the terminal app. Pull and delete work with Ollama providers; vLLM and OpenAI-compatible providers are listed only.
 - Pulls run in the Xeno client, so every app sees the same pulls and a pull keeps going after the app that started it closes. The web dashboard's top bar, the desktop status bar, and the terminal header show pulls in flight. Without a running client, a pull runs in the app that started it.
 - New CLI commands: `xeno provider models <provider>`, `xeno provider pull <provider> <model> [--advertise] [--detach]` (Ctrl+C cancels), `xeno provider pulls [--clear]`, and `xeno provider delete-model <provider> <model> [--yes]` (aliases `remove-model` and `rm-model`).
