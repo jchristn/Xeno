@@ -24,6 +24,11 @@ namespace Xeno.Tui.Shell
         /// </summary>
         public bool Busy { get; set; } = false;
 
+        /// <summary>
+        /// Background work to show at the right end on every page, such as "Pulling llama3.2 42%", or null.
+        /// </summary>
+        public string? Activity { get; set; } = null;
+
         #endregion
 
         #region Private-Members
@@ -54,6 +59,19 @@ namespace Xeno.Tui.Shell
             if (width <= 0 || surface.Size.Height <= 0) return;
             surface.Fill(new Rect(0, 0, width, 1), Cell.Blank(_Theme.Selection));
             int x = surface.DrawText(1, 0, " " + XenoProduct.Name + " ", _Theme.Selection.WithAttribute(CellAttributes.Bold, true)) + 1;
+            if (!String.IsNullOrWhiteSpace(Activity))
+            {
+                string activity = "⇣ " + Activity + " ";
+                int max = Math.Max(0, width / 3);
+                if (activity.Length > max) activity = max <= 1 ? String.Empty : activity.Substring(0, max - 1) + "…";
+                int start = width - activity.Length;
+                if (activity.Length > 0 && start > x + 8)
+                {
+                    surface.DrawText(start, 0, activity, _Theme.Selection.WithAttribute(CellAttributes.Bold, true));
+                    width = start - 1;
+                }
+            }
+
             if (Status == null)
             {
                 surface.DrawText(x + 1, 0, "checking...", _Theme.Selection);

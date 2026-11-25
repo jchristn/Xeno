@@ -36,6 +36,29 @@ namespace Xeno.Tui.Shell
         public System.Func<KeyEvent, bool>? Fallback { get; set; } = null;
 
         /// <summary>
+        /// Tables on the page that get a Columns button on their frame, or null.
+        /// </summary>
+        public IReadOnlyList<Pages.ITuiTableColumns>? ColumnTables { get; set; } = null;
+
+        /// <summary>
+        /// Opens the column chooser for a table, or null.
+        /// </summary>
+        public System.Action<Pages.ITuiTableColumns>? OpenColumns { get; set; } = null;
+
+        /// <summary>
+        /// Where each table's Columns button was drawn in the last render, in this widget's coordinates.
+        /// </summary>
+        public IReadOnlyList<KeyValuePair<Pages.ITuiTableColumns, Rect>> ColumnButtons
+        {
+            get { return _Buttons; }
+        }
+
+        /// <summary>
+        /// Label of the Columns button drawn on a table's frame.
+        /// </summary>
+        public const string ColumnsButtonText = "[" + Xeno.Client.Presentation.XenoTableColumns.ControlText + "]";
+
+        /// <summary>
         /// Extra key hints contributed by the current page.
         /// </summary>
         public IReadOnlyList<KeyHint>? Hints { get; set; } = null;
@@ -71,6 +94,7 @@ namespace Xeno.Tui.Shell
         private IWidget? _Content = null;
         private bool _Focused = false;
         private Theme? _Theme = null;
+        private readonly List<KeyValuePair<Pages.ITuiTableColumns, Rect>> _Buttons = new List<KeyValuePair<Pages.ITuiTableColumns, Rect>>();
 
         #endregion
 
@@ -93,6 +117,24 @@ namespace Xeno.Tui.Shell
         public void Render(ISurface surface)
         {
             _Content?.Render(surface);
+            _Buttons.Clear();
+            if (_Content == null || ColumnTables == null) return;
+
+            // Each table's Columns button sits on the right of the top border of its pane.
+            Rect area = new Rect(0, 0, surface.Size.Width, surface.Size.Height);
+            CellStyle style = _Theme == null ? CellStyle.Default : _Theme.Accent;
+            foreach (Pages.ITuiTableColumns table in ColumnTables)
+            {
+                Rect? found = WidgetLocator.Locate(_Content, area, table.Widget);
+                if (found == null) continue;
+                Rect rect = found.Value;
+                int y = rect.Y - 1;
+                int x = rect.X + rect.Width - ColumnsButtonText.Length;
+                int title = table.Title == null ? 0 : table.Title.Length + 4;
+                if (y < 0 || x < rect.X + title) continue;
+                surface.DrawText(x, y, ColumnsButtonText, style);
+                _Buttons.Add(new KeyValuePair<Pages.ITuiTableColumns, Rect>(table, new Rect(x, y, ColumnsButtonText.Length, 1)));
+            }
         }
 
         /// <summary>
@@ -142,7 +184,17 @@ namespace Xeno.Tui.Shell
         /// <returns>True when handled.</returns>
         public bool HandleMouse(MouseEvent mouse)
         {
-            return _Content is IMouseAware aware && aware.HandleMouse(mouse);
+            if (mouse != null && mouse.Kind == MouseEventKind.Press && mouse.Button == MouseButton.Left && OpenColumns != null)
+            {
+                foreach (KeyValuePair<Pages.ITuiTableColumns, Rect> button in _Buttons)
+                {
+                    if (!button.Value.Contains(new Point(mouse.X, mouse.Y))) continue;
+                    OpenColumns(button.Key);
+                    return true;
+                }
+            }
+
+            return _Content is IMouseAware aware && aware.HandleMouse(mouse!);
         }
 
         /// <summary>

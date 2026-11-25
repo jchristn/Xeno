@@ -77,7 +77,7 @@ namespace Xeno.Tui.Pages
             Column(_Samples, "Disk", row => row.Disk, 8);
             Column(_Samples, "GPU", row => row.Gpu, 8);
             Column(_Samples, "GPU mem", row => row.GpuMemory, 8);
-            Column(_Samples, "GPU temp", row => row.GpuTemperature, 0);
+            Column(_Samples, "GPU temp", row => row.GpuTemperature, 0, false);
             FramedStack filters = new FramedStack(SplitOrientation.Horizontal);
             Frame(filters, _Range, StackSize.Weighted(1, 14), "Chart range");
             Frame(filters, _Metric, StackSize.Weighted(1, 18), "Metric");

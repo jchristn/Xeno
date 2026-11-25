@@ -122,7 +122,7 @@ namespace Xeno.Tui.Pages
             Column(_Groups, "Group", row => row.Name, 0);
             Column(_Groups, "Requests", row => row.Requests, 10);
             Column(_Groups, "Failed", row => row.Failed, 8);
-            Column(_Groups, "Tokens in", row => row.Prompt, 11);
+            Column(_Groups, "Tokens in", row => row.Prompt, 11, false);
             Column(_Groups, "Tokens out", row => row.Completion, 11);
             Column(_Groups, "Median", row => row.Median, 9);
             Column(_Groups, "95th", row => row.P95, 9);

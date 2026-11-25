@@ -24,6 +24,27 @@ namespace Xeno.Desktop.Common
         /// </summary>
         public string? ProgressText { get; set; } = null;
 
+        /// <summary>
+        /// Values for the next entry after "save and add another" succeeds, built from the submitted values, or null to
+        /// keep every value.
+        /// </summary>
+        public Func<Dictionary<string, string>, Dictionary<string, string>>? NextValues { get; set; } = null;
+
+        /// <summary>
+        /// Confirmation shown after "save and add another" succeeds, built from the submitted values, or null for "Saved.".
+        /// </summary>
+        public Func<Dictionary<string, string>, string>? AddedMessage { get; set; } = null;
+
+        /// <summary>
+        /// Raised on the UI thread with the confirmation after each "save and add another" succeeds.
+        /// </summary>
+        public event EventHandler<string>? AddedAnother;
+
+        /// <summary>
+        /// How many entries "save and add another" saved while the dialog was open.
+        /// </summary>
+        public int AddedCount { get; private set; } = 0;
+
         #endregion
 
         #region Private-Members
@@ -32,7 +53,9 @@ namespace Xeno.Desktop.Common
         private readonly Dictionary<string, Control> _Inputs = new Dictionary<string, Control>(StringComparer.Ordinal);
         private readonly Func<Dictionary<string, string>, Task<string?>>? _Validator;
         private readonly Border _Error;
+        private readonly Border _Added;
         private readonly Button _Submit;
+        private readonly Button? _AddAnother;
 
         #endregion
 
@@ -46,8 +69,9 @@ namespace Xeno.Desktop.Common
         /// <param name="fields">Fields.</param>
         /// <param name="submitText">Submit button text.</param>
         /// <param name="validator">Optional validator; return an error message to keep the dialog open, or null to accept. Runs on the UI thread.</param>
+        /// <param name="addAnotherText">Text of a second button that saves and keeps the dialog open for another entry, or null for none.</param>
         /// <exception cref="ArgumentNullException">Fields is null.</exception>
-        public XenoFormDialog(string title, string? intro, IEnumerable<XenoFormField> fields, string submitText, Func<Dictionary<string, string>, Task<string?>>? validator = null)
+        public XenoFormDialog(string title, string? intro, IEnumerable<XenoFormField> fields, string submitText, Func<Dictionary<string, string>, Task<string?>>? validator = null, string? addAnotherText = null)
         {
             ArgumentNullException.ThrowIfNull(fields);
             _Fields = fields.ToList();
@@ -81,12 +105,22 @@ namespace Xeno.Desktop.Common
             _Error = Ui.Notice(String.Empty, XenoToneEnum.Danger);
             _Error.IsVisible = false;
             stack.Children.Add(_Error);
+            _Added = Ui.Notice(String.Empty, XenoToneEnum.Success);
+            _Added.IsVisible = false;
+            stack.Children.Add(_Added);
 
             Button cancel = Ui.Button("Cancel", () => CloseWith(null));
-            _Submit = Ui.Primary(submitText, () => _ = SubmitAsync());
+            _Submit = Ui.Primary(submitText, () => _ = SubmitAsync(false));
             _Submit.IsDefault = true;
             cancel.IsCancel = true;
-            StackPanel buttons = Ui.Row(cancel, _Submit);
+            StackPanel buttons = Ui.Row(cancel);
+            if (!String.IsNullOrWhiteSpace(addAnotherText))
+            {
+                _AddAnother = Ui.Button(addAnotherText, () => _ = SubmitAsync(true));
+                buttons.Children.Add(_AddAnother);
+            }
+
+            buttons.Children.Add(_Submit);
             buttons.HorizontalAlignment = HorizontalAlignment.Right;
             stack.Children.Add(buttons);
 
@@ -126,12 +160,33 @@ namespace Xeno.Desktop.Common
         /// <param name="spec">Form.</param>
         /// <returns>Success message, or null when cancelled.</returns>
         /// <exception cref="ArgumentNullException">Spec is null.</exception>
-        public static async Task<string?> ShowSpecAsync(Window? owner, XenoFormSpec spec)
+        public static Task<string?> ShowSpecAsync(Window? owner, XenoFormSpec spec)
+        {
+            return ShowSpecAsync(owner, spec, null);
+        }
+
+        /// <summary>
+        /// Show a shared <see cref="XenoFormSpec"/> and run its submit action, keeping the dialog open on errors. Create
+        /// forms also offer "save and add another", which saves, clears the entry fields, and keeps the dialog open.
+        /// </summary>
+        /// <param name="owner">Owner window, or null.</param>
+        /// <param name="spec">Form.</param>
+        /// <param name="added">Called on the UI thread with the confirmation after each "save and add another", or null.</param>
+        /// <returns>Success message after "Save", or null when the dialog was closed without it.</returns>
+        /// <exception cref="ArgumentNullException">Spec is null.</exception>
+        public static async Task<string?> ShowSpecAsync(Window? owner, XenoFormSpec spec, Action<string>? added)
         {
             ArgumentNullException.ThrowIfNull(spec);
             List<XenoFormField> fields = spec.Fields.Select(ToField).ToList();
-            Dictionary<string, string>? values = await ShowAsync(owner, spec.Title, String.IsNullOrWhiteSpace(spec.Intro) ? null : spec.Intro, fields, spec.SubmitText,
-                form => spec.SubmitAsync(form, System.Threading.CancellationToken.None), spec.ProgressText).ConfigureAwait(true);
+            XenoFormDialog dialog = new XenoFormDialog(spec.Title, String.IsNullOrWhiteSpace(spec.Intro) ? null : spec.Intro, fields, spec.SubmitText,
+                form => spec.SubmitAsync(form, System.Threading.CancellationToken.None), spec.CanAddAnother ? spec.AddAnotherText : null)
+            {
+                ProgressText = spec.ProgressText,
+                NextValues = form => spec.NextValues(form),
+                AddedMessage = spec.SuccessMessage
+            };
+            if (added != null) dialog.AddedAnother += (sender, message) => added(message);
+            Dictionary<string, string>? values = await XenoDialogs.ShowModalAsync<Dictionary<string, string>?>(dialog, owner).ConfigureAwait(true);
             return values == null ? null : spec.SuccessMessage(values);
         }
 
@@ -201,8 +256,9 @@ namespace Xeno.Desktop.Common
             return values;
         }
 
-        private async Task SubmitAsync()
+        private async Task SubmitAsync(bool another)
         {
+            _Added.IsVisible = false;
             Dictionary<string, string> values = Collect();
             foreach (XenoFormField field in _Fields)
             {
@@ -222,9 +278,11 @@ namespace Xeno.Desktop.Common
 
             if (_Validator != null)
             {
-                object? submitContent = _Submit.Content;
+                Button pressed = another && _AddAnother != null ? _AddAnother : _Submit;
+                object? submitContent = pressed.Content;
                 _Submit.IsEnabled = false;
-                if (!String.IsNullOrWhiteSpace(ProgressText)) _Submit.Content = ProgressText;
+                if (_AddAnother != null) _AddAnother.IsEnabled = false;
+                if (!String.IsNullOrWhiteSpace(ProgressText)) pressed.Content = ProgressText;
                 _Error.IsVisible = false;
                 try
                 {
@@ -237,12 +295,43 @@ namespace Xeno.Desktop.Common
                 }
                 finally
                 {
-                    _Submit.Content = submitContent;
+                    pressed.Content = submitContent;
                     _Submit.IsEnabled = true;
+                    if (_AddAnother != null) _AddAnother.IsEnabled = true;
                 }
             }
 
-            CloseWith(values);
+            if (!another)
+            {
+                CloseWith(values);
+                return;
+            }
+
+            AddedCount++;
+            string message = AddedMessage == null ? "Saved." : AddedMessage(values);
+            ApplyValues(NextValues == null ? values : NextValues(values));
+            if (_Added.Child is SelectableTextBlock added) added.Text = message;
+            _Added.IsVisible = true;
+            AddedAnother?.Invoke(this, message);
+        }
+
+        private void ApplyValues(Dictionary<string, string> values)
+        {
+            Control? focus = null;
+            foreach (XenoFormField field in _Fields)
+            {
+                if (!values.TryGetValue(field.Key, out string? value)) continue;
+                Control input = _Inputs[field.Key];
+                if (input is TextBox box && !String.Equals(box.Text ?? String.Empty, value, StringComparison.Ordinal))
+                {
+                    box.Text = value;
+                    if (focus == null && value.Length == 0) focus = box;
+                }
+                else if (input is CheckBox check) check.IsChecked = String.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+                else if (input is ComboBox combo) combo.SelectedItem = field.Choices.FirstOrDefault(item => String.Equals(item, value, StringComparison.OrdinalIgnoreCase)) ?? combo.SelectedItem;
+            }
+
+            focus?.Focus();
         }
 
         private void ShowError(string message)

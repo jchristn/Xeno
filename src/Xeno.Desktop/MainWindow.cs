@@ -41,6 +41,7 @@ namespace Xeno.Desktop
         private TextBlock _StatusDetail = new TextBlock();
         private Button _StatusAction = new Button();
         private TextBlock _StatusBar = new TextBlock();
+        private TextBlock _PullIndicator = new TextBlock();
 
         #endregion
 
@@ -74,6 +75,8 @@ namespace Xeno.Desktop
             _AutoRefresh.Tick += (sender, args) => AutoRefreshTick();
             Opened += (sender, args) => _AutoRefresh.Start();
             Closed += (sender, args) => _AutoRefresh.Stop();
+            _Session.Workspace.ModelPulls.JobChanged += OnPullChanged;
+            Closed += (sender, args) => _Session.Workspace.ModelPulls.JobChanged -= OnPullChanged;
         }
 
         #endregion
@@ -174,13 +177,19 @@ namespace Xeno.Desktop
             }
 
             _StatusBar = new TextBlock { Foreground = palette.Muted, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            _PullIndicator = new TextBlock { Foreground = palette.Accent, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 0, 0, 0) };
+            DockPanel statusRow = new DockPanel();
+            DockPanel.SetDock(_PullIndicator, Dock.Right);
+            statusRow.Children.Add(_PullIndicator);
+            statusRow.Children.Add(_StatusBar);
+            UpdatePullIndicator();
             Border statusBar = new Border
             {
                 Background = palette.Panel,
                 BorderBrush = palette.Border,
                 BorderThickness = new Thickness(0, 1, 0, 0),
                 Padding = new Thickness(14, 5),
-                Child = _StatusBar
+                Child = statusRow
             };
             DockPanel.SetDock(statusBar, Dock.Bottom);
             root.Children.Add(statusBar);
@@ -290,6 +299,29 @@ namespace Xeno.Desktop
             if (status.Status == ClientStatusEnum.NotSignedIn) _App.Execute(XenoCommandEnum.SignIn);
             else if (status.Running) _App.Execute(XenoCommandEnum.StopClient);
             else _App.Execute(XenoCommandEnum.StartClient);
+        }
+
+        private void OnPullChanged(object? sender, ModelPullJob job)
+        {
+            // Raised on a background thread; pulls keep running while their dialog is closed, so the window tracks them.
+            Dispatcher.UIThread.Post(() =>
+            {
+                UpdatePullIndicator();
+                if (job.Active) return;
+                _Session.Report(XenoModelManagement.FinishedMessage(job));
+                if (_Current == XenoPageEnum.Models || _Current == XenoPageEnum.Providers || _Current == XenoPageEnum.LocalEndpoint)
+                {
+                    DesktopPage? page = CurrentPage;
+                    if (page != null) _ = page.RefreshAsync();
+                }
+            });
+        }
+
+        private void UpdatePullIndicator()
+        {
+            string? indicator = XenoModelManagement.ActiveIndicator(_Session.Workspace.ListModelPulls());
+            _PullIndicator.Text = indicator ?? String.Empty;
+            _PullIndicator.IsVisible = indicator != null;
         }
 
         private void AutoRefreshTick()

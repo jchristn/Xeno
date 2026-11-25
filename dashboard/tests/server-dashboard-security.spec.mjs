@@ -1063,6 +1063,13 @@ test('advertised models model-name filters exclude non-matching model rows', asy
 
   await page.goto('/dashboard/clients/advertised-models');
   await expect(page.getByText('llama3.2:latest')).toBeVisible();
+  // Client ID and Connected are off by default to keep the table narrow; show every column to filter on them.
+  await expect(page.getByRole('columnheader', { name: 'Client ID', exact: true })).toHaveCount(0);
+  await page.locator('.column-picker-trigger').first().click();
+  await page.locator('.column-picker-popover').getByRole('button', { name: 'Show all' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('columnheader', { name: 'Client ID', exact: true })).toHaveCount(1);
+
   await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Include inactive clients' }).check();
   await expect(page.getByRole('row', { name: /xcl_mre39er7_pncsizhl3alh69CTFdK/ })).toBeVisible();

@@ -72,6 +72,8 @@ namespace Xeno.Desktop
             // from the menu bar after this window closes. Opt out with XENO_AGENT_AUTOSTART=0.
             XenoAppLauncher.EnsureTrayRunning();
             _Session = new DesktopSession();
+            XenoTableColumnStore.Preferences = _Session.Preferences;
+            XenoTableColumnStore.Save = _Session.SavePreferences;
             XenoErrorLog.Install("xeno-desktop", message => _Session?.Report(message));
             XenoTheme.Apply(this, _Session.Preferences.DesktopAppearance, XenoColorSchemes.Selected(_Session.Preferences));
             if (OperatingSystem.IsMacOS() && !MacPlatform.IsRunningFromBundle())
@@ -214,6 +216,9 @@ namespace Xeno.Desktop
                     break;
                 case XenoCommandEnum.NewModel:
                     _ = ClientDialogs.AddModelAsync(main, session, null, main.RefreshCurrent);
+                    break;
+                case XenoCommandEnum.ImportModels:
+                    _ = ClientDialogs.ImportModelsAsync(main, session, main.RefreshCurrent);
                     break;
                 case XenoCommandEnum.OpenSettingsFile:
                     session.Report(XenoAppLauncher.OpenUrl(ClientSettings.SettingsFile).Message);

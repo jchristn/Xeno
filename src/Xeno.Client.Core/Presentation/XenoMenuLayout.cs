@@ -57,6 +57,7 @@ namespace Xeno.Client.Presentation
             menus.Add(XenoMenuEntry.Submenu("File",
                 XenoMenuEntry.Item("Add Provider...", XenoCommandEnum.NewProvider, "N"),
                 XenoMenuEntry.Item("Add Model...", XenoCommandEnum.NewModel, "N", true),
+                XenoMenuEntry.Item("Import Models...", XenoCommandEnum.ImportModels),
                 XenoMenuEntry.Separator(),
                 XenoMenuEntry.Item("Open client.json", XenoCommandEnum.OpenSettingsFile),
                 XenoMenuEntry.Item(isMacOS ? "Show Data Folder in Finder" : "Show Data Folder", XenoCommandEnum.RevealDataFolder),

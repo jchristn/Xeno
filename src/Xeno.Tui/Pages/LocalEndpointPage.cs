@@ -43,7 +43,7 @@ namespace Xeno.Tui.Pages
         /// <inheritdoc />
         public override IReadOnlyList<KeyHint> Hints
         {
-            get { return new List<KeyHint> { new KeyHint("a", "Add rule"), new KeyHint("e", "Edit"), new KeyHint("d", "Delete"), new KeyHint("t", "Test route"), new KeyHint("c", "Check providers") }; }
+            get { return new List<KeyHint> { new KeyHint("a", "Add rule"), new KeyHint("e", "Edit"), new KeyHint("d", "Delete"), new KeyHint("t", "Test route"), new KeyHint("c", "Check providers"), new KeyHint("p", "Manage models") }; }
         }
 
         #endregion
@@ -96,6 +96,7 @@ namespace Xeno.Tui.Pages
             _Actions.Add("Add Rule", () => _ = AddRuleAsync());
             _Actions.Add("Test a Route", () => _ = TestRouteAsync(null));
             _Actions.Add("Check Providers", () => _ = CheckAsync());
+            _Actions.Add(XenoModelManagement.ActionText, ManageModels);
             _Actions.Add("Refresh", () => _ = RefreshAsync());
 
             Frame(_Root, _Summary, StackSize.Fixed(4), "Local endpoint");
@@ -170,6 +171,12 @@ namespace Xeno.Tui.Pages
                 return true;
             }
 
+            if (PageKeys.Is(key, 'p'))
+            {
+                ManageModels();
+                return true;
+            }
+
             return false;
         }
 
@@ -186,6 +193,13 @@ namespace Xeno.Tui.Pages
                 ? view.HealthyBackends.ToString(CultureInfo.InvariantCulture) + " of " + view.RoutableBackends.ToString(CultureInfo.InvariantCulture) + " healthy, default limit " + view.DefaultMaxConcurrentRequests.ToString(CultureInfo.InvariantCulture) + " each"
                 : view.RoutableBackends.ToString(CultureInfo.InvariantCulture) + " used for local requests, default limit " + view.DefaultMaxConcurrentRequests.ToString(CultureInfo.InvariantCulture) + " each");
             _Summary.Set("Since start", DisplayFormat.Number(view.LocalRequests) + " here, " + DisplayFormat.Number(view.NetworkRequests) + " network, " + DisplayFormat.Number(view.Fallbacks) + " fallbacks, " + DisplayFormat.Number(view.Errors) + " errors");
+        }
+
+        private void ManageModels()
+        {
+            LocalBackendRow? row = _Backends.SelectedRow;
+            if (row == null) Context.Notify("Select a provider on this machine to manage its models.", NotificationSeverity.Info);
+            else _ = Context.ManageModelsAsync(row.Provider, () => _ = RefreshAsync());
         }
 
         private Task AddRuleAsync()

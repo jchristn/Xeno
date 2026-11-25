@@ -65,6 +65,7 @@ namespace Xeno.Desktop.Pages
             return new List<Control>
             {
                 Ui.Button("Refresh", () => _ = RefreshAsync()),
+                Ui.Button("Import...", () => _ = ClientDialogs.ImportModelsAsync(Window, Session, () => _ = RefreshAsync()), "Pick models from your providers' live inventories to advertise."),
                 Ui.Primary("Add Model...", () => _ = ClientDialogs.AddModelAsync(Window, Session, null, () => _ = RefreshAsync()))
             };
         }

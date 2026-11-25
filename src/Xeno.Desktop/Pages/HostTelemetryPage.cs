@@ -92,7 +92,7 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<HostSampleRow>("Disk", row => row.Disk).Star(1),
                 new XenoTableColumn<HostSampleRow>("GPU", row => row.Gpu).Star(1),
                 new XenoTableColumn<HostSampleRow>("GPU memory", row => row.GpuMemory).Star(1),
-                new XenoTableColumn<HostSampleRow>("GPU temp", row => row.GpuTemperature).Star(1)
+                new XenoTableColumn<HostSampleRow>("GPU temp", row => row.GpuTemperature).Star(1).Hidden()
             }, null, "No samples in this range. Telemetry is collected while the client runs, or use Collect Now.");
             _Samples.Height = 320;
 

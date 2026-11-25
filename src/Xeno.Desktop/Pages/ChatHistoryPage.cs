@@ -90,7 +90,7 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<ChatModelBreakdown>("Median time", row => ChatFormat.Duration(row.P50Ms)).Fixed(110),
                 new XenoTableColumn<ChatModelBreakdown>("Thumbs up", row => row.ThumbsUp.ToString(CultureInfo.InvariantCulture)).Fixed(100),
                 new XenoTableColumn<ChatModelBreakdown>("Thumbs down", row => row.ThumbsDown.ToString(CultureInfo.InvariantCulture)).Fixed(110),
-                new XenoTableColumn<ChatModelBreakdown>("Tokens", row => row.CompletionTokens.ToString("N0", CultureInfo.CurrentCulture)).Fixed(100)
+                new XenoTableColumn<ChatModelBreakdown>("Tokens", row => row.CompletionTokens.ToString("N0", CultureInfo.CurrentCulture)).Fixed(100).Hidden()
             }, null, "No chat turns in this range.");
             _Models.Height = 160;
             _Turns = new XenoTable<ChatTurnRow>(new List<XenoTableColumn<ChatTurnRow>>
@@ -101,8 +101,8 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<ChatTurnRow>("Went to", row => row.Route).Star(2),
                 new XenoTableColumn<ChatTurnRow>("Outcome", row => row.Outcome).Fixed(90),
                 new XenoTableColumn<ChatTurnRow>("Time", row => row.Time) { SortKey = row => row.Turn.TotalMs }.Fixed(80),
-                new XenoTableColumn<ChatTurnRow>("Rating", row => row.Rating).Fixed(110),
-                new XenoTableColumn<ChatTurnRow>("Source", row => row.Source).Fixed(80)
+                new XenoTableColumn<ChatTurnRow>("Rating", row => row.Rating).Fixed(110).Hidden(),
+                new XenoTableColumn<ChatTurnRow>("Source", row => row.Source).Fixed(80).Hidden()
             }, TurnActions, "No chat turns match.");
             _Turns.Height = 340;
             _Turns.RowActivated += (sender, row) => _ = ShowTurnAsync(row.Turn.Id);

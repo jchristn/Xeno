@@ -83,16 +83,16 @@ namespace Xeno.Desktop.Pages
             {
                 new XenoTableColumn<ProviderSampleRow>("Collected", row => row.Collected) { SortKey = row => row.CollectedUtc }.Fixed(160),
                 new XenoTableColumn<ProviderSampleRow>("Provider", row => row.Provider).Star(2),
-                new XenoTableColumn<ProviderSampleRow>("Kind", row => row.Kind).Fixed(110),
+                new XenoTableColumn<ProviderSampleRow>("Kind", row => row.Kind).Fixed(110).Hidden(),
                 new XenoTableColumn<ProviderSampleRow>("Health", row => row.Health) { Cell = HealthCell }.Fixed(100),
                 new XenoTableColumn<ProviderSampleRow>("Loaded / available", row => row.Models).Fixed(130),
                 new XenoTableColumn<ProviderSampleRow>("Active", row => row.Active).Fixed(70),
-                new XenoTableColumn<ProviderSampleRow>("Queued", row => row.Queued).Fixed(70),
-                new XenoTableColumn<ProviderSampleRow>("Tokens/s", row => row.TokensPerSecond).Fixed(80),
+                new XenoTableColumn<ProviderSampleRow>("Queued", row => row.Queued).Fixed(70).Hidden(),
+                new XenoTableColumn<ProviderSampleRow>("Tokens/s", row => row.TokensPerSecond).Fixed(80).Hidden(),
                 new XenoTableColumn<ProviderSampleRow>("Error", row => row.Error).Star(2)
             };
 
-            _Latest = new XenoTable<ProviderSampleRow>(columns, null, "No provider telemetry yet. Click Collect Now, or start the client to collect it automatically.");
+            _Latest = new XenoTable<ProviderSampleRow>(columns, null, "No provider telemetry yet. Click Collect Now, or start the client to collect it automatically.", "ProviderTelemetry.Latest");
             _Latest.Height = 200;
             _Latest.SelectionChanged += (sender, row) => _ = ShowModelsAsync(row);
             _Models = new StackPanel { Spacing = 4 };
@@ -110,7 +110,7 @@ namespace Xeno.Desktop.Pages
             _Chart = new ColumnChart { Height = 190 };
             _Health = new ColumnChart { Height = 150 };
             _Health.SetLoadingText("Provider health needs the Xeno client running.");
-            _Samples = new XenoTable<ProviderSampleRow>(columns, null, "No samples in this range.");
+            _Samples = new XenoTable<ProviderSampleRow>(columns, null, "No samples in this range.", "ProviderTelemetry.Samples");
             _Samples.Height = 300;
 
             return Ui.Stack(16,

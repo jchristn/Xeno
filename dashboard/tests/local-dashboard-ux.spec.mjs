@@ -151,6 +151,7 @@ test.beforeEach(async ({ page }) => {
       }
     });
   });
+  await page.route('**/api/v1/model-pulls', async (route) => route.fulfill({ json: { jobs: [], active: 0 } }));
   await page.route('**/api/v1/database', async (route) => route.fulfill({ json: { status: 'Ready', filename: '~/.xeno/local-dashboard.db', resolvedFilename: 'C:\\Users\\test\\.xeno\\local-dashboard.db', exists: true, sizeBytes: 4096, requests: 12, oldestRequestUtc: '2026-06-26T08:00:00Z', newestRequestUtc: '2026-06-26T09:00:00Z' } }));
 });
 
@@ -200,7 +201,8 @@ test('local dashboard renders and follows interaction expectations', async ({ pa
 
   await page.getByRole('button', { name: 'Request History', exact: true }).click();
   await expect(page.locator('h1', { hasText: 'Request History' })).toBeVisible();
-  await page.getByText('req_local_1').click();
+  // The id column is off by default to keep the table narrow; open the row itself.
+  await page.locator('.data-panel', { hasText: 'Request History' }).locator('tbody tr').first().locator('td').first().click();
   await expect(page.getByRole('heading', { name: 'Request Details' })).toBeVisible();
   await expect(page.locator('.modal-panel.request-details')).toBeVisible();
   const requestDetailsBox = await page.locator('.modal-panel.request-details').boundingBox();
@@ -353,7 +355,7 @@ test('local endpoint page shows routing, edits rules, and tests routes', async (
   await dialog.locator('input[name="model"]').fill('llama3.1:8b');
   await dialog.locator('select[name="target"]').selectOption('local-ollama');
   await dialog.locator('input[name="fallbackToNetwork"]').check();
-  await dialog.getByRole('button', { name: 'Save' }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => savedRule).not.toBeNull();
   expect(savedRule.model).toBe('llama3.1:8b');
   expect(savedRule.target).toBe('Local');
@@ -760,4 +762,136 @@ test('provider telemetry shows the health strip, and request details show timing
   await expect(page.getByText('Where the time went')).toBeVisible();
   await expect(page.locator('.usage-timing .usage-bar-row')).toHaveCount(3);
   await expect(page.locator('.usage-timing')).toContainText('Provider to headers');
+});
+
+test('advertised models: Save closes the form, Save and add another keeps it open', async ({ page }) => {
+  const posted = [];
+  await page.route('**/api/v1/models', async (route) => {
+    if (route.request().method() === 'POST') {
+      posted.push(route.request().postDataJSON());
+      await route.fulfill({ json: { provider: 'local-ollama', name: posted[posted.length - 1].name } });
+      return;
+    }
+    await route.fulfill({ json: modelsResponse });
+  });
+  await page.goto('/index-local.html');
+  await page.locator('.sidebar-link', { hasText: 'Advertised Models' }).click();
+  await page.getByRole('button', { name: 'Create Model' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[name="name"]').fill('qwen2.5:7b');
+  await dialog.getByRole('button', { name: 'Save and add another' }).click();
+  await expect(dialog.getByRole('status')).toContainText('Saved qwen2.5:7b');
+  await expect(dialog.locator('input[name="name"]')).toHaveValue('');
+  await expect(dialog.locator('select[name="provider"]')).toHaveValue('local-ollama');
+  await dialog.locator('input[name="name"]').fill('phi4:14b');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(posted.map((item) => item.name)).toEqual(['qwen2.5:7b', 'phi4:14b']);
+});
+
+test('advertised models: a failed save keeps the form open with the error', async ({ page }) => {
+  await page.route('**/api/v1/models', async (route) => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({ status: 400, body: 'Model already exists in provider endpoint' });
+      return;
+    }
+    await route.fulfill({ json: modelsResponse });
+  });
+  await page.goto('/index-local.html');
+  await page.locator('.sidebar-link', { hasText: 'Advertised Models' }).click();
+  await page.getByRole('button', { name: 'Create Model' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[name="name"]').fill('llama3.2:latest');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('already exists');
+  await expect(dialog.locator('input[name="name"]')).toHaveValue('llama3.2:latest');
+});
+
+test('advertised models: Import reads providers and advertises the checked models', async ({ page }) => {
+  let imported = null;
+  await page.route('**/api/v1/providers/local-ollama/models', async (route) => route.fulfill({
+    json: {
+      provider: 'local-ollama', apiType: 'Ollama', reachable: true, canPull: true, canDelete: true,
+      models: [
+        { name: 'llama3.2:latest', sizeBytes: 2019393189, advertised: true, looksLikeEmbeddings: false },
+        { name: 'nomic-embed-text:latest', sizeBytes: 274302450, advertised: false, looksLikeEmbeddings: true },
+        { name: 'qwen2.5:7b', sizeBytes: 4683087332, advertised: false, looksLikeEmbeddings: false }
+      ]
+    }
+  }));
+  await page.route('**/api/v1/models/import', async (route) => {
+    imported = route.request().postDataJSON();
+    await route.fulfill({ json: { added: imported.models.map((item) => `${item.provider}/${item.name}`), skipped: [], failed: [] } });
+  });
+  await page.goto('/index-local.html');
+  await page.locator('.sidebar-link', { hasText: 'Advertised Models' }).click();
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('2 of 2 selected')).toBeVisible();
+  await expect(dialog.getByLabel('Import llama3.2:latest')).toBeDisabled();
+  await dialog.getByLabel('Import qwen2.5:7b').uncheck();
+  await dialog.getByRole('button', { name: 'Import selected' }).click();
+  await expect(dialog.getByRole('status')).toContainText('Advertised 1');
+  expect(imported.models).toEqual([{ provider: 'local-ollama', name: 'nomic-embed-text:latest', supportsCompletions: false, supportsEmbeddings: true }]);
+});
+
+test('local endpoint: manage models pulls with progress in the background and deletes', async ({ page }) => {
+  let jobs = [];
+  let deleted = null;
+  let pullBody = null;
+  await page.route('**/api/v1/providers/local-ollama/models', async (route) => route.fulfill({
+    json: { provider: 'local-ollama', apiType: 'Ollama', reachable: true, canPull: true, canDelete: true, models: [{ name: 'llama3.2:latest', sizeBytes: 2019393189, parameterSize: '3.2B', quantization: 'Q4_K_M', advertised: true }] }
+  }));
+  await page.route('**/api/v1/providers/local-ollama/pulls', async (route) => {
+    pullBody = route.request().postDataJSON();
+    jobs = [{ id: 'job1', provider: 'local-ollama', model: pullBody.model, state: 'Running', status: 'pulling 6a0746a1ec1a', completedBytes: 1073741824, totalBytes: 4294967296, percent: 25, startedUtc: new Date().toISOString() }];
+    await route.fulfill({ status: 202, json: jobs[0] });
+  });
+  await page.route('**/api/v1/model-pulls', async (route) => route.fulfill({ json: { jobs, active: jobs.filter((job) => job.state === 'Running').length } }));
+  await page.route('**/api/v1/providers/local-ollama/models/*', async (route) => {
+    deleted = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop());
+    await route.fulfill({ json: { provider: 'local-ollama', model: deleted, advertisementsRemoved: 1 } });
+  });
+  await page.goto('/index-local.html');
+  await page.locator('.sidebar-link', { hasText: 'Local endpoint' }).click();
+  const providerTable = page.locator('.data-panel', { hasText: 'Providers on this machine' });
+  await providerTable.locator('tbody tr').first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Models on local-ollama' })).toBeVisible();
+  await expect(dialog.locator('tbody')).toContainText('llama3.2:latest');
+  await dialog.getByLabel('Pull Model').fill('qwen2.5:7b');
+  await dialog.getByRole('button', { name: 'Pull', exact: true }).click();
+  expect(pullBody).toEqual({ model: 'qwen2.5:7b', advertise: false });
+  await expect(dialog.locator('.model-pull-row')).toContainText('qwen2.5:7b');
+  await expect(dialog.locator('.model-pull-row')).toContainText('25.0%');
+  await dialog.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(page.locator('.topbar-pulls')).toContainText('Pulling qwen2.5:7b 25%');
+  await page.locator('.topbar-pulls').click();
+  await expect(page.getByRole('dialog').locator('.model-pull-row')).toContainText('1.0 GB / 4.0 GB');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close dialog' }).click();
+  await providerTable.locator('tbody tr').first().click();
+  const again = page.getByRole('dialog');
+  await again.locator('tbody tr', { hasText: 'llama3.2:latest' }).getByRole('button').click();
+  await again.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(again.getByRole('status').first()).toContainText('removed its advertisement');
+  expect(deleted).toBe('llama3.2:latest');
+});
+
+test('tables have a Columns control with narrow defaults that remembers choices', async ({ page }) => {
+  await page.goto('/index-local.html');
+  await page.locator('.sidebar-link', { hasText: 'Providers' }).first().click();
+  const table = page.locator('.data-panel').first();
+  await expect(table.locator('thead tr').first().locator('th')).toHaveCount(7);
+  await table.locator('.column-picker-trigger').click();
+  const picker = page.locator('.column-picker-popover');
+  await expect(picker).toContainText('6 of 9 shown');
+  await picker.getByText('Timeout Ms', { exact: false }).click();
+  await expect(table.locator('thead tr').first().locator('th')).toHaveCount(8);
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await page.locator('.sidebar-link', { hasText: 'Providers' }).first().click();
+  await expect(page.locator('.data-panel').first().locator('thead tr').first().locator('th')).toHaveCount(8);
+  await page.locator('.data-panel').first().locator('.column-picker-trigger').click();
+  await page.locator('.column-picker-popover').getByRole('button', { name: 'Reset' }).click();
+  await expect(page.locator('.data-panel').first().locator('thead tr').first().locator('th')).toHaveCount(7);
 });

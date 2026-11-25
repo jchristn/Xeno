@@ -1,11 +1,13 @@
 namespace Xeno.Client
 {
     using System;
+    using System.Collections.Generic;
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using Voltaic.Mcp;
     using Xeno.Client.Chat;
+    using Xeno.Client.Presentation;
     using Xeno.Core.Chat;
     using Xeno.Client.Services;
     using Xeno.Client.Tools;
@@ -23,7 +25,16 @@ namespace Xeno.Client
                 case "stdio":
                     return await RunMcpStdioAsync().ConfigureAwait(false);
                 case "tools":
-                    return PrintMcpTools();
+                    try
+                    {
+                        ApplyGlobalOptions(args, null);
+                        return PrintMcpTools();
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        Console.Error.WriteLine("Error: " + ex.Message);
+                        return 1;
+                    }
                 case "token":
                     return PrintMcpToken(args.Skip(2).Any(arg => String.Equals(arg, "--rotate", StringComparison.OrdinalIgnoreCase)));
                 case "config":
@@ -91,12 +102,19 @@ namespace Xeno.Client
             using (XenoChatClient chat = new XenoChatClient())
             {
                 XenoToolCatalog catalog = new XenoToolCatalog(workspace, token => throw new InvalidOperationException("Listing only."), new XenoApiChatGateway(chat));
-                Console.WriteLine("Xeno MCP tools (read-only tools run without asking in Xeno chat; the others ask first):");
-                Console.WriteLine();
+                CliTable table = new CliTable()
+                    .AddColumn("name", "NAME", 32)
+                    .AddColumn("access", "ACCESS")
+                    .AddColumn("description", "DESCRIPTION", 70);
                 foreach (XenoTool tool in catalog.Tools)
                 {
-                    Console.WriteLine("  " + tool.Name.PadRight(28) + (tool.Mutating ? "changes things  " : "read-only       ") + tool.Description);
+                    table.AddRow(tool.Name, tool.Mutating ? "changes things" : "read-only", tool.Description);
                 }
+
+                List<string> lines = table.Render(_Columns);
+                Console.WriteLine("Xeno MCP tools (read-only tools run without asking in Xeno chat; the others ask first):");
+                Console.WriteLine();
+                foreach (string line in lines) Console.WriteLine(line);
 
                 return 0;
             }
@@ -144,7 +162,7 @@ namespace Xeno.Client
             Console.WriteLine("and on the Xeno network, routing, providers, request and chat history, feedback, and xeno_chat.");
             Console.WriteLine();
             Console.WriteLine("  xeno mcp           Serve over stdio. Add it to an MCP client as the command \"xeno mcp\".");
-            Console.WriteLine("  xeno mcp tools     List the tools.");
+            Console.WriteLine("  xeno mcp tools     List the tools (--columns name,access,description).");
             Console.WriteLine("  xeno mcp config    Show how to add Xeno to Claude Code (stdio and HTTP).");
             Console.WriteLine("  xeno mcp token     Show the token for the HTTP server (port 11436 when enabled); --rotate replaces it.");
         }

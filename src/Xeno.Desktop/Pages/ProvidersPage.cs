@@ -73,7 +73,7 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<ProviderRow>("API type", row => row.ApiType).Fixed(140),
                 new XenoTableColumn<ProviderRow>("Endpoint", row => row.Endpoint) { Monospace = true }.Star(3),
                 new XenoTableColumn<ProviderRow>("Models", row => row.ModelCount.ToString(System.Globalization.CultureInfo.InvariantCulture)) { SortKey = row => row.ModelCount }.Fixed(80),
-                new XenoTableColumn<ProviderRow>("Timeout", row => row.Timeout).Fixed(90),
+                new XenoTableColumn<ProviderRow>("Timeout", row => row.Timeout).Fixed(90).Hidden(),
                 new XenoTableColumn<ProviderRow>("Managed", row => row.ModelManagement).Fixed(90),
                 new XenoTableColumn<ProviderRow>("Credential", row => row.Credential).Fixed(170)
             }, ProviderActions, "No providers yet. Add the Ollama, vLLM, or OpenAI-compatible endpoint that runs your models.");
@@ -90,6 +90,12 @@ namespace Xeno.Desktop.Pages
 
             _ModelsTitle = Ui.Heading("Models");
             Button addModel = Ui.Button("Add Model...", () => _ = ClientDialogs.AddModelAsync(Window, Session, _Providers?.SelectedRow?.Name, () => _ = RefreshAsync()));
+            Button manage = Ui.Button(XenoModelManagement.ActionText + "...", () =>
+            {
+                ProviderRow? selected = _Providers?.SelectedRow;
+                if (selected == null) Report("Select a provider to manage its models.");
+                else _ = ClientDialogs.ManageModelsAsync(Window, Session, selected.Name, () => _ = RefreshAsync());
+            }, "See the provider's live models, pull new ones, and delete ones you no longer need.");
             Button test = Ui.Button("Test Provider", () =>
             {
                 ProviderRow? selected = _Providers?.SelectedRow;
@@ -101,7 +107,7 @@ namespace Xeno.Desktop.Pages
             Grid.SetRow(_Providers, 0);
             grid.Children.Add(Ui.Adopt(_Providers));
             DockPanel modelsHeader = new DockPanel { Margin = new Thickness(0, 16, 0, 8) };
-            StackPanel buttons = Ui.Row(test, addModel);
+            StackPanel buttons = Ui.Row(test, manage, addModel);
             DockPanel.SetDock(buttons, Dock.Right);
             modelsHeader.Children.Add(buttons);
             modelsHeader.Children.Add(Ui.Adopt(_ModelsTitle));
@@ -150,6 +156,7 @@ namespace Xeno.Desktop.Pages
             {
                 new XenoRowAction<ProviderRow>("Edit...", item => _ = ClientDialogs.EditProviderAsync(Window, Session, item.Source, () => _ = RefreshAsync())),
                 new XenoRowAction<ProviderRow>("Test", item => _ = ClientDialogs.TestProviderAsync(Window, Session, item.Name)),
+                new XenoRowAction<ProviderRow>(XenoModelManagement.ActionText + "...", item => _ = ClientDialogs.ManageModelsAsync(Window, Session, item.Name, () => _ = RefreshAsync())),
                 new XenoRowAction<ProviderRow>("Add Model...", item => _ = ClientDialogs.AddModelAsync(Window, Session, item.Name, () => _ = RefreshAsync())),
                 new XenoRowAction<ProviderRow>("Copy Endpoint", item => _ = XenoClipboard.CopyAsync(Window, item.Endpoint)),
                 new XenoRowAction<ProviderRow>("Delete...", item => _ = ClientDialogs.DeleteProviderAsync(Window, Session, item.Name, () => _ = RefreshAsync())) { Destructive = true }

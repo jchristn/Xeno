@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CircleAlert,
   Cpu,
+  Download,
   FileJson,
   Gauge,
   HardDrive,
@@ -38,7 +39,9 @@ import EmptyState from '../components/EmptyState.jsx';
 import LanguageSelector from '../components/LanguageSelector.jsx';
 import Modal from '../components/Modal.jsx';
 import Pagination from '../components/Pagination.jsx';
+import ColumnPicker, { useColumnVisibility } from '../components/ColumnPicker.jsx';
 import { jsonBody, localApi } from './localApi.js';
+import { ImportModelsDialog, ManagedForm, ModelPullsIndicator, ModelPullsPanel, ProviderModelsDialog, SaveActions, useModelPullsFinished } from './ProviderModels.jsx';
 import ChatPage from '../chat/ChatPage.jsx';
 import { ChatApiContext } from '../chat/ChatApiContext.js';
 import * as localChatApi from './chat/chatApi.js';
@@ -174,6 +177,10 @@ export default function LocalDashboardApp() {
     return () => window.clearTimeout(timeout);
   }, [page, t, providers, models, requests, telemetrySamples, providerTelemetrySamples, logs, modal]);
 
+  useModelPullsFinished(() => {
+    if (page === 'models' || page === 'providers' || page === 'localEndpoint') refresh();
+  });
+
   async function refresh() {
     try {
       setError('');
@@ -198,8 +205,12 @@ export default function LocalDashboardApp() {
         const response = await localApi('/api/v1/providers');
         setProviders(response.providers || []);
       } else if (page === 'models') {
-        const response = await localApi('/api/v1/models');
+        const [response, providerResponse] = await Promise.all([
+          localApi('/api/v1/models'),
+          localApi('/api/v1/providers')
+        ]);
         setModels(response.models || []);
+        setProviders(providerResponse.providers || []);
       } else if (page === 'requests') {
         const [historyResponse, summaryResponse] = await Promise.all([
           localApi(drill?.page === 'requests' ? '/api/v1/requests?limit=5000' : '/api/v1/requests'),
@@ -322,6 +333,7 @@ export default function LocalDashboardApp() {
                 <CopyButton label={t('copyServerUrl')} tooltip={t('tooltipCopyServerUrl')} value={state.dashboardUrl} />
               </span>
             ) : null}
+            <ModelPullsIndicator onOpen={() => setModal({ title: t('modelPulls'), body: <ModelPullsPanel /> })} />
             <LanguageSelector />
             <a aria-label={t('github')} className="icon-button" href="https://github.com/jchristn/Xeno" rel="noreferrer" target="_blank" title={t('tooltipGitHub')}>
               <GitHubMark size={17} />
@@ -471,13 +483,16 @@ function Providers({ providers, refresh, setModal }) {
     <DataTable
       actions={(row) => [
         { icon: <Play size={14} />, key: 'test', label: t('test'), onSelect: () => test(row), tooltip: t('tooltipTestLocalProvider') },
+        { icon: <HardDrive size={14} />, key: 'models', label: t('manageModels'), onSelect: () => setModal(providerModelsModal(t, row, refresh)), tooltip: t('tooltipManageProviderModels') },
         { divider: true, key: 'divider-delete' },
         { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalProvider') }
       ]}
       columns={['name', 'apiType', 'endpoint', 'timeoutMs', 'credential', 'allowModelManagement', 'shareWithNetwork', 'routeLocalRequests', 'maxConcurrentRequests']}
-      headerActions={<button className="primary-button" onClick={() => setModal(providerModal(t, null, refresh))} title={t('tooltipCreateLocalProvider')} type="button"><Plus size={16} />{t('createProvider')}</button>}
+      defaultColumns={['name', 'apiType', 'endpoint', 'shareWithNetwork', 'routeLocalRequests', 'maxConcurrentRequests']}
+      tableId="local.providers"
+      headerActions={<button className="primary-button" onClick={() => setModal(providerModal(t, null, refresh, setModal))} title={t('tooltipCreateLocalProvider')} type="button"><Plus size={16} />{t('createProvider')}</button>}
       onRefresh={refresh}
-      onRowClick={(row) => setModal(providerModal(t, row, refresh))}
+      onRowClick={(row) => setModal(providerModal(t, row, refresh, setModal))}
       rowActionLabel={t('edit')}
       rows={providers}
       title={t('providerEndpoints')}
@@ -509,6 +524,8 @@ function Models({ models, providerFilter, providers, refresh, setModal, setProvi
         { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalModel') }
       ]}
       columns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings', 'modelManagementAllowed', 'maxConcurrentRequests', 'effectiveMaxConcurrentRequests']}
+      defaultColumns={['name', 'provider', 'apiType', 'supportsCompletions', 'supportsEmbeddings', 'effectiveMaxConcurrentRequests']}
+      tableId="local.models"
       headerActions={(
         <>
           <label className="form-field inline compact-field" title={t('tooltipLocalModelProviderFilter')}>
@@ -518,11 +535,12 @@ function Models({ models, providerFilter, providers, refresh, setModal, setProvi
               {providerNames.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </label>
-          <button className="primary-button" onClick={() => setModal(modelModal(t, null, providers, refresh))} title={t('tooltipCreateLocalModel')} type="button"><Plus size={16} />{t('createModel')}</button>
+          <button className="action-button" disabled={providers.length === 0} onClick={() => setModal(importModelsModal(t, providers, refresh))} title={t('tooltipImportModels')} type="button"><Download size={16} />{t('import')}</button>
+          <button className="primary-button" onClick={() => setModal(modelModal(t, null, providers, refresh, setModal))} title={t('tooltipCreateLocalModel')} type="button"><Plus size={16} />{t('createModel')}</button>
         </>
       )}
       onRefresh={refresh}
-      onRowClick={(row) => setModal(modelModal(t, row, providers, refresh))}
+      onRowClick={(row) => setModal(modelModal(t, row, providers, refresh, setModal))}
       rowActionLabel={t('edit')}
       rows={rows}
       title={t('advertisedModels')}
@@ -574,6 +592,8 @@ function Requests({ range, refresh, requests, setModal, setRange, summary }) {
           { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteLocalRequest') }
         ]}
         columns={['id', 'receivedUtc', 'method', 'path', 'modelName', 'requestorPrincipalId', 'providerName', 'statusCode', 'outcome']}
+        defaultColumns={['receivedUtc', 'path', 'modelName', 'providerName', 'statusCode', 'outcome']}
+        tableId="local.requests"
         headerActions={<button className="action-button danger icon-only" onClick={clear} title={t('tooltipClearLocalHistory')} type="button"><Trash2 size={16} /><span className="sr-only">{t('clear')}</span></button>}
         onRefresh={refresh}
         onRowClick={details}
@@ -648,6 +668,8 @@ function Telemetry({ hostRollups, latest, metric, range, refresh, samples, setMe
           { destructive: true, icon: <Trash2 size={14} />, key: 'delete', label: t('delete'), onSelect: () => remove(row), tooltip: t('tooltipDeleteTelemetrySample') }
         ]}
         columns={['id', 'collectedUtc', 'cpuUtilizationPercent', 'memoryUtilizationPercent', 'diskUtilizationPercent', 'gpuAverageUtilizationPercent', 'gpuAverageTemperatureCelsius']}
+        defaultColumns={['collectedUtc', 'cpuUtilizationPercent', 'memoryUtilizationPercent', 'diskUtilizationPercent', 'gpuAverageUtilizationPercent', 'gpuAverageTemperatureCelsius']}
+        tableId="local.telemetry.host"
         onRefresh={refresh}
         onRowClick={details}
         rows={samples}
@@ -985,9 +1007,14 @@ function LocalEndpoint({ modalOpen, refresh, requests, routing, setModal }) {
       </Panel>
       <DataTable
         actions={(row) => [
+          { icon: <HardDrive size={14} />, key: 'models', label: t('manageModels'), onSelect: () => setModal(providerModelsModal(t, { name: row.provider, apiType: row.apiType, endpoint: row.endpoint || '' }, refresh)), tooltip: t('tooltipManageProviderModels') },
           { icon: <Play size={14} />, key: 'resolve', label: t('testRoute'), onSelect: () => setModal(resolveModal(t, '')), tooltip: t('tooltipTestRoute') }
         ]}
         columns={['provider', 'apiType', 'health', 'latencyMs', 'inFlight', 'queued', 'usedFor', 'lastError']}
+        defaultColumns={['provider', 'health', 'latencyMs', 'inFlight', 'usedFor', 'lastError']}
+        onRowClick={(row) => setModal(providerModelsModal(t, { name: row.provider, apiType: row.apiType, endpoint: row.endpoint || '' }, refresh))}
+        rowActionLabel={t('manageModels')}
+        tableId="local.endpoint.providers"
         headerActions={<button className="action-button" onClick={check} title={t('tooltipCheckProviders')} type="button"><RefreshCw size={16} />{t('checkProviders')}</button>}
         onRefresh={refresh}
         rows={backends.map((item) => ({
@@ -1025,6 +1052,8 @@ function LocalEndpoint({ modalOpen, refresh, requests, routing, setModal }) {
           { icon: <Plus size={14} />, key: 'rule', label: t('addRouteRule'), onSelect: () => setModal(ruleModal(t, { model: row.model, target: 'Local', provider: providerNames[0] || null, fallbackToNetwork: false, isNew: true }, providerNames, refresh, setModal)), tooltip: t('tooltipAddRouteRule') }
         ]}
         columns={['received', 'model', 'route', 'statusCode', 'latencyMs', 'queuedMs', 'promptTokens', 'completionTokens', 'fallback']}
+        defaultColumns={['received', 'model', 'route', 'statusCode', 'latencyMs', 'fallback']}
+        tableId="local.endpoint.requests"
         onRefresh={refresh}
         rows={records.map((item) => ({ ...item, received: formatLocalTime(item.receivedUtc), latencyMs: Math.round(item.latencyMs || 0), queuedMs: Math.round(item.queuedMs || 0), model: item.model || `${item.method} ${item.path}` }))}
         title={t('recentLocalEndpointRequests')}
@@ -1097,37 +1126,36 @@ function ruleModal(t, rule, providerNames, refresh, setModal) {
   const networkValue = '__network__';
   const current = rule ? (rule.target === 'Network' ? networkValue : (rule.provider || providerNames[0] || networkValue)) : (providerNames[0] || networkValue);
 
-  async function save(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  async function save(form) {
     const target = form.get('target');
     const network = target === networkValue;
+    const model = form.get('model');
     await localApi('/api/v1/local-inference/routes', {
       method: 'PUT',
       body: jsonBody({
-        model: form.get('model'),
+        model,
         target: network ? 'Network' : 'Local',
         provider: network ? null : target,
         fallbackToNetwork: !network && form.get('fallbackToNetwork') === 'on',
         originalModel: editing ? rule.model : null
       })
     });
-    setModal(null);
     refresh();
+    return model;
   }
 
   return {
     title: editing ? t('editRouteRule') : t('addRouteRule'),
     json: rule || {},
     body: (
-      <form className="form-grid" id="route-rule-form" onSubmit={save}>
+      <ManagedForm clearOnAnother={['model']} id="route-rule-form" onClose={() => setModal(null)} onSave={save}>
         <div className="empty-state span-full">{t('routeRuleIntro')}</div>
         <Field defaultValue={rule?.model || ''} label={t('model')} name="model" tooltip={t('tooltipRouteRuleModel')} />
         <SelectField defaultValue={current} label={t('sendTo')} name="target" options={[...providerNames.map((name) => ({ value: name, label: name })), { value: networkValue, label: t('xenoNetwork') }]} tooltip={t('tooltipRouteRuleTarget')} />
         <Toggle checked={rule?.fallbackToNetwork} label={t('fallbackToNetworkLabel')} name="fallbackToNetwork" tooltip={t('tooltipRouteRuleFallback')} />
-      </form>
+      </ManagedForm>
     ),
-    actions: <button className="primary-button" form="route-rule-form" title={t('tooltipSaveRouteRule')} type="submit">{t('save')}</button>
+    actions: <SaveActions allowAnother={!editing} formId="route-rule-form" tooltip={t('tooltipSaveRouteRule')} />
   };
 }
 
@@ -1629,14 +1657,13 @@ function Settings({ database, refresh, state }) {
   );
 }
 
-function providerModal(t, provider, refresh) {
-  async function save(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+function providerModal(t, provider, refresh, setModal) {
+  async function save(form) {
+    const name = form.get('name');
     await localApi(provider ? `/api/v1/providers/${encodeURIComponent(provider.name)}` : '/api/v1/providers', {
       method: provider ? 'PUT' : 'POST',
       body: jsonBody({
-        name: form.get('name'),
+        name,
         apiType: form.get('apiType'),
         endpoint: form.get('endpoint'),
         timeoutMs: Number(form.get('timeoutMs')),
@@ -1649,51 +1676,52 @@ function providerModal(t, provider, refresh) {
       })
     });
     refresh();
+    return name;
   }
 
   return {
     title: provider ? t('editProvider') : t('createProvider'),
     json: provider || {},
     body: (
-      <form className="form-grid" id="provider-form" onSubmit={save}>
+      <ManagedForm clearOnAnother={['name', 'endpoint', 'credential']} id="provider-form" onClose={() => setModal(null)} onSave={save}>
         <Field defaultValue={provider?.name || ''} label={t('name')} name="name" tooltip={t('tooltipLocalProviderName')} />
         <SelectField defaultValue={provider?.apiType || 'Ollama'} label={t('apiType')} name="apiType" options={localProviderApiTypeOptions} tooltip={t('tooltipLocalProviderApiType')} />
         <Field defaultValue={provider?.endpoint || ''} label={t('endpoint')} name="endpoint" tooltip={t('tooltipLocalProviderEndpoint')} />
         <Field defaultValue={provider?.timeoutMs || 300000} label={t('timeoutMs')} name="timeoutMs" tooltip={t('tooltipLocalProviderTimeout')} type="number" />
         <Field defaultValue="" label={t('credential')} name="credential" tooltip={t('tooltipLocalProviderCredential')} />
         <Toggle checked={false} label={t('clearCredential')} name="clearCredential" tooltip={t('tooltipLocalProviderClearCredential')} />
-        <Toggle checked={provider?.allowModelManagement} label={t('modelManagement')} name="allowModelManagement" tooltip={t('tooltipLocalProviderModelManagement')} />
+        <Toggle checked={provider?.allowModelManagement} label={t('serverCanManageModels')} name="allowModelManagement" tooltip={t('tooltipLocalProviderModelManagement')} />
         <Toggle checked={provider ? provider.shareWithNetwork !== false : true} label={t('shareWithNetwork')} name="shareWithNetwork" tooltip={t('tooltipShareWithNetwork')} />
         <Toggle checked={provider ? provider.routeLocalRequests !== false : true} label={t('routeLocalRequests')} name="routeLocalRequests" tooltip={t('tooltipRouteLocalRequests')} />
         <Field defaultValue={provider?.maxConcurrentRequests ?? ''} label={t('maxConcurrentRequests')} name="maxConcurrentRequests" tooltip={t('tooltipProviderMaxConcurrentRequests')} type="number" />
-      </form>
+      </ManagedForm>
     ),
-    actions: <button className="primary-button" form="provider-form" title={t('tooltipSaveLocalProvider')} type="submit">{t('save')}</button>
+    actions: <SaveActions allowAnother={!provider} formId="provider-form" tooltip={t('tooltipSaveLocalProvider')} />
   };
 }
 
-function modelModal(t, model, providers, refresh) {
-  async function save(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+function modelModal(t, model, providers, refresh, setModal) {
+  async function save(form) {
+    const name = form.get('name');
     await localApi(model ? `/api/v1/models/${encodeURIComponent(model.provider)}/${encodeURIComponent(model.name)}` : '/api/v1/models', {
       method: model ? 'PUT' : 'POST',
       body: jsonBody({
-        provider: form.get('provider'),
-        name: form.get('name'),
+        provider: model ? model.provider : form.get('provider'),
+        name,
         supportsCompletions: form.get('supportsCompletions') === 'on',
         supportsEmbeddings: form.get('supportsEmbeddings') === 'on',
         maxConcurrentRequests: form.get('maxConcurrentRequests') ? Number(form.get('maxConcurrentRequests')) : null
       })
     });
     refresh();
+    return name;
   }
 
   return {
     title: model ? t('editModel') : t('createModel'),
     json: model || {},
     body: (
-      <form className="form-grid" id="model-form" onSubmit={save}>
+      <ManagedForm clearOnAnother={['name', 'maxConcurrentRequests']} id="model-form" onClose={() => setModal(null)} onSave={save}>
         <label className="form-field" title={t('tooltipLocalModelProvider')}>
           <span>{t('provider')}</span>
           <select defaultValue={model?.provider || providers[0]?.name || ''} disabled={!!model} name="provider" title={t('tooltipLocalModelProvider')}>
@@ -1704,9 +1732,24 @@ function modelModal(t, model, providers, refresh) {
         <Toggle checked={model ? model.supportsCompletions : true} label={t('supportsCompletions')} name="supportsCompletions" tooltip={t('tooltipLocalModelCompletions')} />
         <Toggle checked={model ? model.supportsEmbeddings : false} label={t('supportsEmbeddings')} name="supportsEmbeddings" tooltip={t('tooltipLocalModelEmbeddings')} />
         <Field defaultValue={model?.maxConcurrentRequests ?? ''} label={t('maxConcurrentRequests')} name="maxConcurrentRequests" tooltip={t('tooltipModelMaxConcurrentRequests')} type="number" />
-      </form>
+      </ManagedForm>
     ),
-    actions: <button className="primary-button" form="model-form" title={t('tooltipSaveLocalModel')} type="submit">{t('save')}</button>
+    actions: <SaveActions allowAnother={!model} formId="model-form" tooltip={t('tooltipSaveLocalModel')} />
+  };
+}
+
+function importModelsModal(t, providers, refresh) {
+  return {
+    title: t('importModels'),
+    body: <ImportModelsDialog formId="import-models-form" onImported={() => refresh()} providers={providers} />,
+    actions: <button className="primary-button" form="import-models-form" title={t('tooltipImportSelectedModels')} type="submit"><Download size={16} />{t('importSelected')}</button>
+  };
+}
+
+function providerModelsModal(t, provider, refresh) {
+  return {
+    title: t('manageModelsTitle', { name: provider.name }),
+    body: <ProviderModelsDialog onChanged={refresh} provider={provider} />
   };
 }
 
@@ -1730,7 +1773,7 @@ function messageModal(t, titleText, message, json) {
   };
 }
 
-export function DataTable({ actions, columns, compact = false, headerActions, onRefresh, onRowClick, rowActionLabel, rows, title: tableTitle }) {
+export function DataTable({ actions, columns, compact = false, defaultColumns, headerActions, onRefresh, onRowClick, rowActionLabel, rows, tableId, title: tableTitle }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [draftFilters, setDraftFilters] = useState({});
@@ -1752,6 +1795,8 @@ export function DataTable({ actions, columns, compact = false, headerActions, on
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const safePage = Math.min(page, pageCount);
   const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const columnVisibility = useColumnVisibility(columns, compact ? columns : defaultColumns, tableId);
+  const shownColumns = compact ? columns : columns.filter((column) => columnVisibility.visibleKeys.includes(column));
 
   function applyFilter(column) {
     setFilters({ ...filters, [column]: draftFilters[column] || '' });
@@ -1802,14 +1847,14 @@ export function DataTable({ actions, columns, compact = false, headerActions, on
 
   const table = (
     <>
-      {!compact ? <Pagination currentPage={safePage} onPageChange={setPage} onPageSizeChange={setPageSize} onRefresh={onRefresh} pageSize={pageSize} totalItems={filteredRows.length} /> : null}
+      {!compact ? <Pagination columnControl={<ColumnPicker columns={columns.map((column) => ({ key: column, label: title(column, t) }))} onChange={columnVisibility.setVisibleKeys} onReset={columnVisibility.resetVisibleKeys} visibleKeys={columnVisibility.visibleKeys} />} currentPage={safePage} onPageChange={setPage} onPageSizeChange={setPageSize} onRefresh={onRefresh} pageSize={pageSize} totalItems={filteredRows.length} /> : null}
       <div className="table-scroll">
         <table className="data-table">
           <thead>
-            <tr>{columns.map((column) => <th className={columnClass(column)} key={column}>{title(column, t)}</th>)}{!compact ? <th className="actions-cell">{t('actions')}</th> : null}</tr>
+            <tr>{shownColumns.map((column) => <th className={columnClass(column)} key={column}>{title(column, t)}</th>)}{!compact ? <th className="actions-cell">{t('actions')}</th> : null}</tr>
             {!compact ? (
               <tr className="table-filter-row">
-                {columns.map((column) => (
+                {shownColumns.map((column) => (
                   <th className={columnClass(column)} key={column}>
                     <input
                       onBlur={() => applyFilter(column)}
@@ -1831,13 +1876,13 @@ export function DataTable({ actions, columns, compact = false, headerActions, on
           <tbody>
             {pageRows.length === 0 ? (
               <tr>
-                <td className="empty-cell" colSpan={columns.length + (compact ? 0 : 1)}>
+                <td className="empty-cell" colSpan={shownColumns.length + (compact ? 0 : 1)}>
                   <EmptyState message={t('emptyTableMessage')} title={t('noData')} />
                 </td>
               </tr>
             ) : pageRows.map((row) => (
               <tr className={onRowClick ? 'clickable-row' : ''} key={row.id || `${row.provider || ''}:${row.name || row.modelName || row.endpoint}`} onClick={(event) => handleRowClick(event, row)}>
-                {columns.map((column) => <td className={columnClass(column)} key={column}>{copyColumn(column, row[column]) ? <CopyableValue label={t('copyValue')} value={String(row[column] || '')} /> : display(row[column], t)}</td>)}
+                {shownColumns.map((column) => <td className={columnClass(column)} key={column}>{copyColumn(column, row[column]) ? <CopyableValue label={t('copyValue')} value={String(row[column] || '')} /> : display(row[column], t)}</td>)}
                 {!compact ? <td className="actions-cell"><ActionMenu items={rowActions(row)} /></td> : null}
               </tr>
             ))}
