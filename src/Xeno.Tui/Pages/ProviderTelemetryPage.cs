@@ -180,8 +180,8 @@ namespace Xeno.Tui.Pages
             Column(table, "Health", row => row.Health, 10);
             Column(table, "Loaded/avail", row => row.Models, 12);
             Column(table, "Active", row => row.Active, 7);
-            Column(table, "Queued", row => row.Queued, 7);
-            Column(table, "Tok/s", row => row.TokensPerSecond, 7);
+            Column(table, "Queued", row => row.Queued, 7, false);
+            Column(table, "Tok/s", row => row.TokensPerSecond, 7, false);
             Column(table, "Error", row => row.Error, 0);
             return table;
         }

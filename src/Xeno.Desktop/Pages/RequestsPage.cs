@@ -93,15 +93,15 @@ namespace Xeno.Desktop.Pages
             _Table = new XenoTable<RequestRow>(new List<XenoTableColumn<RequestRow>>
             {
                 new XenoTableColumn<RequestRow>("Received", row => row.Received) { SortKey = row => row.ReceivedUtc }.Fixed(160),
-                new XenoTableColumn<RequestRow>("Method", row => row.Method).Fixed(70),
+                new XenoTableColumn<RequestRow>("Method", row => row.Method).Fixed(70).Hidden(),
                 new XenoTableColumn<RequestRow>("Path", row => row.Path).Star(2),
                 new XenoTableColumn<RequestRow>("Model", row => row.Model).Star(2),
-                new XenoTableColumn<RequestRow>("Provider", row => row.Provider).Star(1),
+                new XenoTableColumn<RequestRow>("Provider", row => row.Provider).Star(1).Hidden(),
                 new XenoTableColumn<RequestRow>("Status", row => row.Status).Fixed(65),
                 new XenoTableColumn<RequestRow>("Outcome", row => row.Outcome) { Cell = OutcomeCell }.Fixed(100),
                 new XenoTableColumn<RequestRow>("Duration", row => row.Duration) { SortKey = row => row.DurationMs }.Fixed(85),
-                new XenoTableColumn<RequestRow>("Tokens", row => row.Tokens).Fixed(70),
-                new XenoTableColumn<RequestRow>("Streamed", row => row.Streamed).Fixed(80)
+                new XenoTableColumn<RequestRow>("Tokens", row => row.Tokens).Fixed(70).Hidden(),
+                new XenoTableColumn<RequestRow>("Streamed", row => row.Streamed).Fixed(80).Hidden()
             }, RowActions, "No requests in history.");
             _Table.RowActivated += (sender, row) => _ = ShowDetailAsync(row);
 

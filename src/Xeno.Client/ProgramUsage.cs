@@ -61,6 +61,8 @@ namespace Xeno.Client
         private static void PrintUsage(UsageAnalytics analytics, HistoryRangeEnum range)
         {
             UsageTotals totals = analytics.Totals;
+            List<string> groupLines = BuildUsageGroupTable(analytics).Render(_Columns);
+            List<string> stageLines = BuildUsageStageTable(analytics).Render(null);
             WriteInfoHeading(XenoUsageCharts.DatasetLabel(analytics.Dataset) + ", " + HistoryRanges.Describe(range));
             if (analytics.Truncated && analytics.TruncatedReason != null) Console.Error.WriteLine("Note: " + analytics.TruncatedReason);
             Console.WriteLine("  " + (analytics.Dataset == UsageDatasetEnum.Chat ? "Turns" : "Requests") + ":       " + totals.Requests.ToString("N0", CultureInfo.CurrentCulture) + " (" + totals.Failed.ToString("N0", CultureInfo.CurrentCulture) + " failed" + (totals.ErrorRate.HasValue ? ", " + Math.Round(totals.ErrorRate.Value * 100, 1).ToString(CultureInfo.CurrentCulture) + "%" : String.Empty) + (totals.Fallbacks.HasValue ? ", " + totals.Fallbacks.Value.ToString("N0", CultureInfo.CurrentCulture) + " network fallbacks" : String.Empty) + ")");
@@ -78,21 +80,57 @@ namespace Xeno.Client
             Console.WriteLine();
             WriteInfoHeading("By " + XenoUsageCharts.GroupByLabel(analytics.GroupBy).ToLowerInvariant());
             if (analytics.GroupTotals.Count == 0) Console.WriteLine("  (none)");
-            int width = Math.Max(10, analytics.GroupTotals.Select(item => XenoUsageCharts.KeyLabel(item.Key).Length).DefaultIfEmpty(10).Max() + 2);
-            foreach (UsageGroupTotal group in analytics.GroupTotals)
-            {
-                Console.WriteLine("  " + XenoUsageCharts.KeyLabel(group.Key).PadRight(width) + group.Requests.ToString("N0", CultureInfo.CurrentCulture).PadLeft(8) + " req  " + group.Failed.ToString("N0", CultureInfo.CurrentCulture).PadLeft(6) + " failed  " + (group.PromptTokens + group.CompletionTokens).ToString("N0", CultureInfo.CurrentCulture).PadLeft(10) + " tok  median " + Ms(group.Latency.P50));
-            }
+            else foreach (string line in groupLines) Console.WriteLine(line);
 
             if (analytics.StageAverages.Count > 0)
             {
                 Console.WriteLine();
                 WriteInfoHeading("Average time by stage");
-                foreach (UsageStageAverage stage in analytics.StageAverages)
-                {
-                    Console.WriteLine("  " + XenoUsageCharts.StageLabel(stage.Stage).PadRight(24) + Ms(stage.AverageMs).PadLeft(9) + "   95th " + Ms(stage.P95Ms));
-                }
+                foreach (string line in stageLines) Console.WriteLine(line);
             }
+        }
+
+        private static CliTable BuildUsageGroupTable(UsageAnalytics analytics)
+        {
+            // --columns picks this table's columns; the stage table below always shows its own columns.
+            CliTable table = new CliTable()
+                .AddColumn("name", XenoUsageCharts.GroupByLabel(analytics.GroupBy).ToUpperInvariant(), 40)
+                .AddColumn("requests", "REQUESTS", 0, true)
+                .AddColumn("failed", "FAILED", 0, true)
+                .AddColumn("tokens", "TOKENS", 0, true)
+                .AddColumn("median", "MEDIAN", 0, true)
+                .AddColumn("p95", "95TH", 0, true)
+                .AddColumn("p99", "99TH", 0, true, false)
+                .AddColumn("average", "AVERAGE", 0, true, false);
+            foreach (UsageGroupTotal group in analytics.GroupTotals)
+            {
+                table.AddRow(
+                    XenoUsageCharts.KeyLabel(group.Key),
+                    group.Requests.ToString("N0", CultureInfo.CurrentCulture),
+                    group.Failed.ToString("N0", CultureInfo.CurrentCulture),
+                    (group.PromptTokens + group.CompletionTokens).ToString("N0", CultureInfo.CurrentCulture),
+                    Ms(group.Latency.P50),
+                    Ms(group.Latency.P95),
+                    Ms(group.Latency.P99),
+                    Ms(group.Latency.Average));
+            }
+
+            return table;
+        }
+
+        private static CliTable BuildUsageStageTable(UsageAnalytics analytics)
+        {
+            CliTable table = new CliTable()
+                .AddColumn("stage", "STAGE", 30)
+                .AddColumn("average", "AVERAGE", 0, true)
+                .AddColumn("p95", "95TH", 0, true)
+                .AddColumn("count", "COUNT", 0, true);
+            foreach (UsageStageAverage stage in analytics.StageAverages)
+            {
+                table.AddRow(XenoUsageCharts.StageLabel(stage.Stage), Ms(stage.AverageMs), Ms(stage.P95Ms), stage.Count.ToString("N0", CultureInfo.CurrentCulture));
+            }
+
+            return table;
         }
 
         private static string Distribution(UsageDistribution distribution)
@@ -144,7 +182,7 @@ namespace Xeno.Client
 
         private static void PrintUsageHelp()
         {
-            Console.WriteLine("xeno usage [--dataset served|endpoint|chat] [--range hour|day|week|month] [--group-by model|provider|route] [--metric requests|tokens] [--model <name>] [--json]");
+            Console.WriteLine("xeno usage [--dataset served|endpoint|chat] [--range hour|day|week|month] [--group-by model|provider|route] [--metric requests|tokens] [--model <name>] [--columns <names>] [--json]");
             Console.WriteLine();
             Console.WriteLine("  Usage for this machine: requests, failures, latency, time to first token, streaming, throughput, tokens,");
             Console.WriteLine("  totals by group, and average time by stage. Needs the client running. --json prints the full analytics,");
@@ -153,6 +191,8 @@ namespace Xeno.Client
             Console.WriteLine("  served     Network requests this machine answered (default)");
             Console.WriteLine("  endpoint   Requests to the local inference endpoint");
             Console.WriteLine("  chat       Chat turns");
+            Console.WriteLine();
+            Console.WriteLine("  --columns picks the group table's columns: name, requests, failed, tokens, median, p95, p99, average (or all).");
         }
 
         #endregion

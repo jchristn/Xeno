@@ -110,8 +110,8 @@ Things to know:
 | Chat history | Every chat turn from every Xeno app on this machine (web, desktop, terminal, CLI, MCP): totals, median and 95th percentile time, time to first token, the thumbs down share, a chart of turns by where they ran, a per-model table (desktop), and the turns themselves, filtered by range, route, and outcome. Open a turn for its details and tool calls. |
 | Feedback | Thumbs up and down counts, the share of answers rated, and every rating with its comment, model, and conversation, filtered by range and rating. |
 | Overview | Client status with Start, Stop, Restart, and Sign In; the local inference URL and routing mode (and, once, a notice when an upgrade moved the listener from port 11434 to 11435); requests served, failures, and latency; a requests-over-time chart with a range (last hour, day, week, or month); how many models are served here and offered by the network; local services; recent requests. |
-| Models | One catalog of the models this machine serves and the models the Xeno network offers it, with where each is available (this machine, the network, or both). Add, edit, rename, move, and delete local models. |
-| Providers | Local inference endpoints (Ollama, vLLM, OpenAI-compatible), their models, and a connection test. Add, edit, and delete providers. Each provider can be shared with the Xeno network or kept local-only (for example your own Ollama Cloud account), used for this machine's local endpoint requests, and given a concurrency limit; each model can have its own limit. |
+| Models | One catalog of the models this machine serves and the models the Xeno network offers it, with where each is available (this machine, the network, or both). Add, edit, rename, move, and delete local models. **Import** (File > Import Models, or `i` in the terminal app) reads the live models of the provider endpoints you choose, lists each with a checkbox (models already advertised are marked and cannot be picked), lets you choose completions or embeddings per model (prefilled from the model's name), and advertises the picked ones; a provider that cannot be read shows its error in place. |
+| Providers | Local inference endpoints (Ollama, vLLM, OpenAI-compatible), their models, and a connection test. Add, edit, and delete providers. **Manage Models** (the row menu or button in the desktop app, `p` in the terminal app; also on Local endpoint) shows a provider's live models with size, parameters, quantization, modified time, and whether each is advertised; pulls a model by name with a progress bar (optionally advertising it when it finishes), cancels a pull, and deletes a model from disk after confirming, which also removes its advertisement. Pulls keep running when the dialog closes and show in the status bar (desktop) or header (terminal) until they finish. Pull and delete work with Ollama providers; others are listed only. They work whether or not the provider lets the Xeno server manage models: that toggle on the provider form only decides whether the server may pull and delete models on this machine remotely. Each provider can be shared with the Xeno network or kept local-only (for example your own Ollama Cloud account), used for this machine's local endpoint requests, and given a concurrency limit; each model can have its own limit. |
 | Local endpoint | The URL apps on this machine call, its routing mode, a traffic chart (answered here, sent to the network, fallbacks), each provider's health, latency, and load against its concurrency limit, the route rules, and recent local endpoint requests. Add, edit, and delete rules, test where a model would go, and check every provider now. In the terminal app: a add, e edit, d delete, t test a route, c check providers. |
 | Usage | Requests, failures, latency, time to first token, streaming, throughput, tokens, a heatmap, and time by stage, for served requests, the local endpoint, or chat. Click a bucket to open the matching list. |
 | Requests | Requests this machine served for the network, with a requests-over-time chart, range, outcome, and text filters, and full request details (timeline, headers, and stored bodies). Delete one request or clear the history. |
@@ -120,6 +120,12 @@ Things to know:
 | Provider (Telemetry) | Health, loaded and available models, queue depth, and throughput per provider; a chart of the chosen metric over a range; and stored samples. |
 | General (Configuration) | The server connection, sign-in (username and password, or an access key), sign-out, connectivity checks, and what the network offers this tenant. |
 | Settings | Appearance and every local setting: the web dashboard, the local inference server (port, routing mode, model discovery, provider health checks, and how long a local request waits for a free slot), the default concurrency limit per provider, request history retention, and telemetry. Saved to `client.json`; listener host and port changes apply after a restart, routing and concurrency changes apply right away. |
+
+Create forms (Add Provider, Add Model, Add Route Rule) have **Save**, which saves and closes, and **Save and Add
+Another**, which saves, confirms, clears the name, and keeps the provider and options for the next entry (Ctrl+N in
+the terminal app). Every table has a **Columns** control (a button in the desktop table header; `[Columns]` on the
+terminal table's frame, or `v`) to choose which columns it shows. Wide tables start with at most six columns, and each
+table remembers its choice in `frontend.json`.
 
 The sidebar groups pages under section headings (Client, Models, Chat, Activity, Telemetry, Configuration), so the
 telemetry pages are just **Host** and **Provider** there. Menus, the command palette, and page headers use the full
@@ -251,8 +257,10 @@ page dropdown (such as a chart range) to pick from a popup, click buttons in con
 palette, and the key hints in the status bar, and scroll lists, logs, and viewers with the wheel.
 
 Each page also has single-letter actions that work when a text field isn't focused. For example, on Providers: `a`
-add, `e` edit, `t` test, `m` add model, `d` delete. On Overview: `s` start or stop, `r` restart, `w` web dashboard.
-Forms move between fields with Tab, save with Ctrl+S, and cancel with Esc. Each field's help is shown under it, a
+add, `e` edit, `t` test, `m` add model, `p` manage models, `d` delete. On Models: `i` import. On Overview: `s` start or
+stop, `r` restart, `w` web dashboard.
+Forms move between fields with Tab, save with Ctrl+S (or the Save button), save and add another with Ctrl+N on
+create forms, and cancel with Esc. Each field's help is shown under it, a
 missing or malformed value is explained under its field, Ctrl+R shows a secret as typed, and Ctrl+A, Ctrl+E,
 Ctrl+U, Ctrl+K, and Ctrl+W edit the line. A paste goes into the focused field, in a form or a page's filter box. The
 Settings page groups its fields under the same section headings as the desktop app. A table says "Loading..." until

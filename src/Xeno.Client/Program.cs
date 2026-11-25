@@ -190,6 +190,7 @@ namespace Xeno.Client
                         case "runner":
                             return await HandleRunnerAsync(args, settings).ConfigureAwait(false);
                         case "model":
+                            if (args.Length >= 2 && String.Equals(args[1], "import", StringComparison.OrdinalIgnoreCase)) return await HandleModelImportAsync(args).ConfigureAwait(false);
                             return HandleModel(args, settings);
                         case "inference":
                             return await HandleInferenceAsync(args, settings).ConfigureAwait(false);
@@ -1066,6 +1067,11 @@ namespace Xeno.Client
                 return 0;
             }
 
+            if (args.Length >= 2 && IsProviderModelCommand(args[1]))
+            {
+                return await HandleProviderModelCommandAsync(args).ConfigureAwait(false);
+            }
+
             if (args.Length >= 2 && args[1] == "test")
             {
                 string runnerName = String.Empty;
@@ -1545,13 +1551,23 @@ namespace Xeno.Client
                     return 0;
                 }
 
-                WriteInfoHeading("Recent local endpoint requests");
-                if (records.Count == 0) Console.WriteLine("  None yet.");
+                CliTable table = new CliTable()
+                    .AddColumn("when", "WHEN")
+                    .AddColumn("status", "STATUS")
+                    .AddColumn("latency", "LATENCY", 0, true)
+                    .AddColumn("route", "ROUTE", 24)
+                    .AddColumn("model", "MODEL", 40)
+                    .AddColumn("tokens", "TOKENS", 0, true, false);
                 foreach (LocalInferenceRequestRecord record in records)
                 {
                     LocalInferenceRequestRow row = LocalInferenceRequestRow.From(record);
-                    Console.WriteLine("  " + row.When + "  " + row.Status + "  " + row.Latency.PadLeft(8) + "  " + row.Route.PadRight(24) + "  " + row.Model);
+                    table.AddRow(row.When, row.Status, row.Latency, row.Route, row.Model, row.Tokens);
                 }
+
+                List<string> lines = table.Render(_Columns);
+                WriteInfoHeading("Recent local endpoint requests");
+                if (records.Count == 0) Console.WriteLine("  None yet.");
+                else foreach (string line in lines) Console.WriteLine(line);
 
                 Console.WriteLine();
                 return 0;
@@ -1577,7 +1593,7 @@ namespace Xeno.Client
             Console.WriteLine("      Provider health and load. --check probes every provider now.");
             Console.WriteLine("  xeno inference concurrency <1-256>");
             Console.WriteLine("      Set the default max concurrent requests per provider.");
-            Console.WriteLine("  xeno inference requests [--limit <n>]");
+            Console.WriteLine("  xeno inference requests [--limit <n>] [--columns <names>]");
             Console.WriteLine("      Recent requests apps on this machine sent to the local endpoint (metadata only).");
             Console.WriteLine();
         }
@@ -4256,9 +4272,17 @@ namespace Xeno.Client
         {
             _UseColors = settings?.UseColors ?? true;
             _UseJson = false;
+            _Columns = null;
             List<string> normalized = new List<string>();
-            foreach (string arg in args)
+            for (int i = 0; i < args.Length; i++)
             {
+                string arg = args[i];
+                if (String.Equals(arg, "--columns", StringComparison.OrdinalIgnoreCase) || arg.StartsWith("--columns=", StringComparison.OrdinalIgnoreCase))
+                {
+                    _Columns = ReadColumnsOption(args, ref i);
+                    continue;
+                }
+
                 if (String.Equals(arg, "--no-color", StringComparison.OrdinalIgnoreCase))
                 {
                     _UseColors = false;
@@ -5046,12 +5070,24 @@ namespace Xeno.Client
             Console.WriteLine("      Show configured provider endpoints.");
             Console.WriteLine("  xeno provider test --name <name>");
             Console.WriteLine("      Test connectivity to one configured provider endpoint.");
+            Console.WriteLine("  xeno provider models <provider> [--columns <names>] [--json]");
+            Console.WriteLine("      List the models the provider has now (name, size, params, quant, modified, advertised).");
+            Console.WriteLine("      More columns: family, kind, remote, digest (or --columns all).");
+            Console.WriteLine("  xeno provider pull <provider> <model> [--advertise] [--detach]");
+            Console.WriteLine("      Pull a model onto an Ollama provider with live progress. Ctrl+C cancels the pull.");
+            Console.WriteLine("      The running Xeno client does the pull, so every app sees it; --detach returns at once and leaves it running.");
+            Console.WriteLine("      --advertise offers the model to the Xeno network once the pull succeeds.");
+            Console.WriteLine("  xeno provider pulls [--clear]");
+            Console.WriteLine("      List model pulls running or finished in the Xeno client; --clear forgets finished ones.");
+            Console.WriteLine("  xeno provider delete-model <provider> <model> [--yes]");
+            Console.WriteLine("      Aliases: remove-model, rm-model.");
+            Console.WriteLine("      Delete a model from an Ollama provider's disk and stop advertising it. Asks first unless --yes.");
             Console.WriteLine("  xeno provider delete --name <name>");
             Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete one configured provider endpoint.");
             Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>] [--allow-model-management]");
             Console.WriteLine("      Add an Ollama, OpenAI, Gemini, or compatible endpoint.");
-            Console.WriteLine("      --allow-model-management permits dashboard pull/delete commands for Ollama providers.");
+            Console.WriteLine("      --allow-model-management lets the Xeno server pull and delete models on this Ollama provider. Local management (xeno provider pull/delete-model) always works.");
             Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential] [--allow-model-management|--no-model-management]");
             Console.WriteLine("      Update a configured provider endpoint and request inventory re-advertisement when connected.");
             Console.WriteLine("  Routing and concurrency options (add and update):");
@@ -5078,6 +5114,10 @@ namespace Xeno.Client
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]");
             Console.WriteLine("      Aliases: remove, remote, rm.");
             Console.WriteLine("      Delete a model from one provider, or from all providers when omitted.");
+            Console.WriteLine("  xeno model import <provider>[,<provider>...] [--all | --model <name> ...] [--embeddings <name> ...]");
+            Console.WriteLine("      Advertise models found on providers. Without --all or --model, lists the models found and imports nothing.");
+            Console.WriteLine("      Models that look like embedding models, and those named with --embeddings, are imported as embedding models.");
+            Console.WriteLine("      Already-advertised models are skipped.");
             Console.WriteLine();
         }
 
@@ -5312,6 +5352,10 @@ namespace Xeno.Client
             Console.WriteLine("  xeno provider list");
             Console.WriteLine("  xeno provider ls");
             Console.WriteLine("  xeno provider test --name <name>");
+            Console.WriteLine("  xeno provider models <provider>");
+            Console.WriteLine("  xeno provider pull <provider> <model> [--advertise] [--detach]");
+            Console.WriteLine("  xeno provider pulls [--clear]");
+            Console.WriteLine("  xeno provider delete-model <provider> <model> [--yes]  (aliases: remove-model, rm-model)");
             Console.WriteLine("  xeno provider delete --name <name>  (aliases: remove, remote, rm)");
             Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>] [--allow-model-management]");
             Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential] [--allow-model-management|--no-model-management]");
@@ -5321,6 +5365,7 @@ namespace Xeno.Client
             Console.WriteLine("  xeno model add --provider <provider-name> --name <model-name> [--type completion|embedding|both]");
             Console.WriteLine("  xeno model update --name <model-name> [--provider <provider-name>] [--new-name <model-name>] [--new-provider <provider-name>] [--type completion|embedding|both]");
             Console.WriteLine("  xeno model delete --name <model-name> [--provider <provider-name>]  (aliases: remove, remote, rm)");
+            Console.WriteLine("  xeno model import <provider>[,<provider>...] [--all | --model <name> ...] [--embeddings <name> ...]");
             Console.WriteLine();
             Console.WriteLine("  xeno inference routes | resolve <model> | route set|remove <model> | backends [--check] | concurrency <n> | requests");
             Console.WriteLine("      Local endpoint routing: where each model goes, provider health and load, and recent requests.");
@@ -5349,6 +5394,8 @@ namespace Xeno.Client
             Console.WriteLine("  --no-color    Disable colored output for this command.");
             Console.WriteLine("  --color       Enable colored output for this command.");
             Console.WriteLine("  --json        Emit machine-readable JSON for supported commands.");
+            Console.WriteLine("  --columns <a,b,c>  Pick table columns by name (case-insensitive; 'all' shows every column).");
+            Console.WriteLine("                An unknown name lists the valid ones.");
             WritePlainHeading("Reset:");
             Console.WriteLine("  xeno reset");
             Console.WriteLine("  xeno reset --force");

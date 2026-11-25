@@ -34,7 +34,7 @@ namespace Xeno.Tui.Pages
         /// <inheritdoc />
         public override IReadOnlyList<KeyHint> Hints
         {
-            get { return new List<KeyHint> { new KeyHint("a", "Add"), new KeyHint("e", "Edit"), new KeyHint("d", "Delete") }; }
+            get { return new List<KeyHint> { new KeyHint("a", "Add"), new KeyHint("i", "Import"), new KeyHint("e", "Edit"), new KeyHint("d", "Delete") }; }
         }
 
         #endregion
@@ -97,6 +97,12 @@ namespace Xeno.Tui.Pages
             if (PageKeys.Is(key, 'a'))
             {
                 _ = Context.FormAsync(XenoForms.AddModel(Workspace, null) ?? ProviderFirst(), () => _ = RefreshAsync());
+                return true;
+            }
+
+            if (PageKeys.Is(key, 'i'))
+            {
+                _ = Context.ImportModelsAsync(() => _ = RefreshAsync());
                 return true;
             }
 

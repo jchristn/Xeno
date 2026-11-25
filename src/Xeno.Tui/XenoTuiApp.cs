@@ -201,8 +201,10 @@ namespace Xeno.Tui
             CurrentPage = page;
             TuiPage view = GetPage(page);
             _PageHost.Content = view.Root;
-            _PageHost.Fallback = view.HandleKey;
-            _PageHost.Hints = view.Hints;
+            _PageHost.Fallback = key => view.HandleKey(key) || view.HandleSharedKey(key);
+            _PageHost.Hints = view.AllHints;
+            _PageHost.ColumnTables = view.ColumnTables;
+            _PageHost.OpenColumns = table => _ = view.ChooseColumnsAsync(table);
             _Sidebar.Current = page;
             _Sidebar.Highlight(page);
             Context.Preferences.TerminalLastPage = page;
@@ -286,6 +288,9 @@ namespace Xeno.Tui
                     if (model == null) Context.Notify("Add a provider first. Models are served by a provider endpoint on this machine.", NotificationSeverity.Warning);
                     else _ = Context.FormAsync(model, RefreshCurrent);
                     break;
+                case XenoCommandEnum.ImportModels:
+                    _ = Context.ImportModelsAsync(RefreshCurrent);
+                    break;
                 case XenoCommandEnum.OpenSettingsFile:
                     _ = EditSettingsFileAsync();
                     break;
@@ -338,6 +343,7 @@ namespace Xeno.Tui
             _Disposed = true;
             _Stop.Cancel();
             _Stop.Dispose();
+            Context.Workspace.ModelPulls.JobChanged -= OnPullChanged;
             if (_OwnsWorkspace) Context.Workspace.Dispose();
         }
 
@@ -367,6 +373,7 @@ namespace Xeno.Tui
                 default: created = new OverviewPage(Context); break;
             }
 
+            created.ApplyColumnPreferences();
             _Pages[page] = created;
             return created;
         }
@@ -402,6 +409,8 @@ namespace Xeno.Tui
             hints.AddAppHint("F1", "Help");
             hints.AddAppHint("Ctrl+Q", "Quit");
             _StatusBar.RightText = String.Empty;
+            Context.Workspace.ModelPulls.JobChanged += OnPullChanged;
+            UpdatePullIndicator();
 
             _App.KeyFilter = key =>
             {
@@ -422,6 +431,27 @@ namespace Xeno.Tui
                 _Header.Status = Context.Status;
                 _Header.Busy = Context.Busy;
             };
+        }
+
+        private void OnPullChanged(object? sender, ModelPullJob job)
+        {
+            // Raised on a background thread. Pulls keep running while their dialog is closed, so the status bar shows
+            // them on every page and the page refreshes when one finishes.
+            _App.Post(() =>
+            {
+                if (_Disposed) return;
+                UpdatePullIndicator();
+                if (job.Active) return;
+                string message = XenoModelManagement.FinishedMessage(job);
+                Context.Notify(message, job.State == ModelPullStateEnum.Succeeded ? NotificationSeverity.Success : job.State == ModelPullStateEnum.Failed ? NotificationSeverity.Error : NotificationSeverity.Info);
+                if (CurrentPage == XenoPageEnum.Models || CurrentPage == XenoPageEnum.Providers || CurrentPage == XenoPageEnum.LocalEndpoint) RefreshCurrent();
+            });
+        }
+
+        private void UpdatePullIndicator()
+        {
+            _Header.Activity = XenoModelManagement.ActiveIndicator(Context.Workspace.ListModelPulls());
+            _App.RequestRender();
         }
 
         private void RunHint(KeyHint hint)
@@ -488,28 +518,7 @@ namespace Xeno.Tui
         {
             Rect? bounds = _App.GetRegionContentBounds(MainRegion);
             if (bounds == null) return null;
-            return Locate(CurrentView.Root, bounds.Value, target);
-        }
-
-        private static Rect? Locate(IWidget node, Rect rect, IWidget target)
-        {
-            if (ReferenceEquals(node, target)) return rect;
-            if (node is FramedStack stack)
-            {
-                foreach (IWidget child in stack.Children)
-                {
-                    Rect content = stack.ContentRectOf(child);
-                    if (content.Width <= 0 || content.Height <= 0) continue;
-                    Rect? found = Locate(child, new Rect(rect.X + content.X, rect.Y + content.Y, content.Width, content.Height), target);
-                    if (found != null) return found;
-                }
-
-                return null;
-            }
-
-            IWidget? inner = node is Inset inset ? inset.Child : node is FocusInset focusInset ? focusInset.Child : null;
-            if (inner == null) return null;
-            return Locate(inner, new Rect(rect.X + Inset.Columns, rect.Y, Math.Max(0, rect.Width - Inset.Columns * 2), rect.Height), target);
+            return WidgetLocator.Locate(CurrentView.Root, bounds.Value, target);
         }
 
         private void BuildCommands()
@@ -801,6 +810,7 @@ namespace Xeno.Tui
             help.Add("Navigation", "Tab / Shift+Tab", "Move between the page, its fields, and the sidebar");
             help.Add("Navigation", "F10", "Open the menu bar");
             help.Add("Navigation", "Enter", "Open the selected row or page");
+            help.Add("Navigation", TuiPage.ColumnsKey.ToString(), "Choose the focused table's columns (or click [Columns] on its frame)");
             foreach (XenoPageEnum page in Enum.GetValues<XenoPageEnum>())
             {
                 foreach (KeyHint hint in GetPage(page).Hints)

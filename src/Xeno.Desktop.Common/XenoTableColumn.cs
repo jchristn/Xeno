@@ -30,6 +30,12 @@ namespace Xeno.Desktop.Common
         public bool IsStar { get; set; } = true;
 
         /// <summary>
+        /// True when the column is shown until the user chooses otherwise with the table's Columns control. Wide tables
+        /// hide their less essential columns by default so the table fits without scrolling.
+        /// </summary>
+        public bool DefaultVisible { get; set; } = true;
+
+        /// <summary>
         /// Sort key, or null to sort by the cell text.
         /// </summary>
         public Func<TRow, IComparable?>? SortKey { get; set; } = null;
@@ -77,6 +83,16 @@ namespace Xeno.Desktop.Common
         {
             Width = weight;
             IsStar = true;
+            return this;
+        }
+
+        /// <summary>
+        /// Hide the column by default; users can show it with the table's Columns control.
+        /// </summary>
+        /// <returns>This column.</returns>
+        public XenoTableColumn<TRow> Hidden()
+        {
+            DefaultVisible = false;
             return this;
         }
     }

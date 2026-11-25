@@ -98,7 +98,7 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<UsageGroupTotal>("Group", row => XenoUsageCharts.KeyLabel(row.Key)) { Monospace = true }.Star(3),
                 new XenoTableColumn<UsageGroupTotal>("Requests", row => row.Requests.ToString("N0", CultureInfo.CurrentCulture)) { SortKey = row => row.Requests }.Fixed(100),
                 new XenoTableColumn<UsageGroupTotal>("Failed", row => row.Failed.ToString("N0", CultureInfo.CurrentCulture)).Fixed(80),
-                new XenoTableColumn<UsageGroupTotal>("Tokens in", row => row.PromptTokens.ToString("N0", CultureInfo.CurrentCulture)).Fixed(110),
+                new XenoTableColumn<UsageGroupTotal>("Tokens in", row => row.PromptTokens.ToString("N0", CultureInfo.CurrentCulture)).Fixed(110).Hidden(),
                 new XenoTableColumn<UsageGroupTotal>("Tokens out", row => row.CompletionTokens.ToString("N0", CultureInfo.CurrentCulture)).Fixed(110),
                 new XenoTableColumn<UsageGroupTotal>("Median", row => Ms(row.Latency.P50)).Fixed(90),
                 new XenoTableColumn<UsageGroupTotal>("95th", row => Ms(row.Latency.P95)).Fixed(90)

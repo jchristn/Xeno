@@ -1,6 +1,7 @@
 namespace Xeno.Client.Presentation
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using Xeno.Core.Serialization;
 
@@ -77,12 +78,24 @@ namespace Xeno.Client.Presentation
             set { _RefreshSeconds = Math.Clamp(value, 2, 300); }
         }
 
+        /// <summary>
+        /// Visible columns per table, keyed by a table id such as "terminal:Providers:0" or "desktop:ProviderRow:...",
+        /// each listing the visible column headers in display order. A table without an entry shows its default
+        /// columns. Read and change it through <see cref="XenoTableColumns"/>.
+        /// </summary>
+        public Dictionary<string, List<string>> TableColumns
+        {
+            get { return _TableColumns; }
+            set { _TableColumns = value ?? new Dictionary<string, List<string>>(StringComparer.Ordinal); }
+        }
+
         #endregion
 
         #region Private-Members
 
         private int _RefreshSeconds = 5;
         private int _AutoRefreshSeconds = 15;
+        private Dictionary<string, List<string>> _TableColumns = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
         #endregion
 

@@ -84,7 +84,7 @@ namespace Xeno.Desktop.Pages
                 new XenoTableColumn<LocalBackendRow>("Health", row => row.Health).Fixed(130),
                 new XenoTableColumn<LocalBackendRow>("Latency", row => row.Latency).Fixed(90),
                 new XenoTableColumn<LocalBackendRow>("In use", row => row.Load).Star(2),
-                new XenoTableColumn<LocalBackendRow>("Shared", row => row.Shared).Fixed(100),
+                new XenoTableColumn<LocalBackendRow>("Shared", row => row.Shared).Fixed(100).Hidden(),
                 new XenoTableColumn<LocalBackendRow>("Last error", row => row.LastError).Star(3)
             }, BackendActions, "No providers. Add one on the Providers page; its models are then answered on this machine.");
             _Backends.Height = 200;
@@ -114,7 +114,12 @@ namespace Xeno.Desktop.Pages
             return Ui.Stack(16,
                 Ui.Card("Local endpoint", _Summary),
                 Ui.Card("Traffic", _Chart),
-                Ui.Card("Providers on this machine", _Backends),
+                Ui.Card("Providers on this machine", _Backends, Ui.Button(XenoModelManagement.ActionText + "...", () =>
+                {
+                    LocalBackendRow? selected = _Backends?.SelectedRow;
+                    if (selected == null) Report("Select a provider to manage its models.");
+                    else _ = ClientDialogs.ManageModelsAsync(Window, Session, selected.Provider, () => _ = RefreshAsync());
+                }, "See the selected provider's live models, pull new ones, and delete ones you no longer need.")),
                 Ui.Card("Route rules", _Rules, Ui.Button("Add Rule...", () => _ = ClientDialogs.RouteRuleAsync(Window, Session, null, null, () => _ = RefreshAsync()))),
                 Ui.Card("Recent requests", _Requests));
         }
@@ -180,6 +185,7 @@ namespace Xeno.Desktop.Pages
         {
             return new List<XenoRowAction<LocalBackendRow>>
             {
+                new XenoRowAction<LocalBackendRow>(XenoModelManagement.ActionText + "...", item => _ = ClientDialogs.ManageModelsAsync(Window, Session, item.Provider, () => _ = RefreshAsync())),
                 new XenoRowAction<LocalBackendRow>("Open Providers", item => Window.Navigate(XenoPageEnum.Providers)),
                 new XenoRowAction<LocalBackendRow>("Copy Endpoint", item => _ = XenoClipboard.CopyAsync(Window, item.Source.Endpoint))
             };

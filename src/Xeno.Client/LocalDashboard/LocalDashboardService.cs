@@ -27,6 +27,7 @@ namespace Xeno.Client.LocalDashboard
     public sealed partial class LocalDashboardService : IDisposable
     {
         private readonly ClientSettings _Settings;
+        private readonly object _InventoryLock = new object();
         private readonly ILocalRequestHistoryMethods _History;
         private readonly IClientTelemetryHistoryMethods _TelemetryHistory;
         private readonly ClientTelemetryPersistenceService? _TelemetryService;
@@ -201,6 +202,11 @@ namespace Xeno.Client.LocalDashboard
                 await SendJsonAsync(context, new LocalDashboardErrorResponse { Error = "Unauthorized", Message = ex.Message }).ConfigureAwait(false);
             }
             catch (ArgumentException ex)
+            {
+                context.Response.StatusCode = 400;
+                await SendJsonAsync(context, new LocalDashboardErrorResponse { Error = "BadRequest", Message = ex.Message }).ConfigureAwait(false);
+            }
+            catch (NotSupportedException ex)
             {
                 context.Response.StatusCode = 400;
                 await SendJsonAsync(context, new LocalDashboardErrorResponse { Error = "BadRequest", Message = ex.Message }).ConfigureAwait(false);
@@ -386,6 +392,8 @@ namespace Xeno.Client.LocalDashboard
                 await SendJsonAsync(context, LocalSecretRedactor.RedactProvider(provider)).ConfigureAwait(false);
                 return;
             }
+
+            if (await TryHandleProviderModelsAsync(context, method, path, token).ConfigureAwait(false)) return;
 
             if ((method == "PUT" || method == "DELETE") && path.StartsWith("/api/v1/providers/", StringComparison.OrdinalIgnoreCase))
             {
@@ -728,6 +736,109 @@ namespace Xeno.Client.LocalDashboard
                 OldestRequestUtc = statistics.OldestRequestUtc,
                 NewestRequestUtc = statistics.NewestRequestUtc
             };
+        }
+
+        private async Task<bool> TryHandleProviderModelsAsync(HttpContextBase context, string method, string path, CancellationToken token)
+        {
+            if (method == "GET" && String.Equals(path, "/api/v1/model-pulls", StringComparison.OrdinalIgnoreCase))
+            {
+                List<ModelPullJob> jobs = ModelPullCoordinator.Shared.List();
+                await SendJsonAsync(context, new ModelPullJobListResponse { Jobs = jobs, Active = jobs.Count(item => item.Active) }).ConfigureAwait(false);
+                return true;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/model-pulls/clear", StringComparison.OrdinalIgnoreCase))
+            {
+                int removed = ModelPullCoordinator.Shared.ClearFinished();
+                await SendJsonAsync(context, new LocalDashboardMutationResponse { Removed = removed, RemovedOne = removed > 0 }).ConfigureAwait(false);
+                return true;
+            }
+
+            if ((method == "GET" || method == "DELETE") && path.StartsWith("/api/v1/model-pulls/", StringComparison.OrdinalIgnoreCase))
+            {
+                string id = DecodePathSegment(path.Substring("/api/v1/model-pulls/".Length));
+                if (method == "DELETE")
+                {
+                    bool cancelled = ModelPullCoordinator.Shared.Cancel(id);
+                    if (!cancelled && ModelPullCoordinator.Shared.Get(id) == null) throw new KeyNotFoundException("Model pull not found: " + id);
+                }
+
+                ModelPullJob job = ModelPullCoordinator.Shared.Get(id) ?? throw new KeyNotFoundException("Model pull not found: " + id);
+                await SendJsonAsync(context, job).ConfigureAwait(false);
+                return true;
+            }
+
+            if (method == "POST" && String.Equals(path, "/api/v1/models/import", StringComparison.OrdinalIgnoreCase))
+            {
+                ModelImportRequest request = ReadJson<ModelImportRequest>(context);
+                ModelImportResult result = await ImportModelsAsync(request.Models, token).ConfigureAwait(false);
+                await SendJsonAsync(context, result).ConfigureAwait(false);
+                return true;
+            }
+
+            if (!path.StartsWith("/api/v1/providers/", StringComparison.OrdinalIgnoreCase)) return false;
+            string rest = path.Substring("/api/v1/providers/".Length);
+            int marker = rest.IndexOf("/", StringComparison.Ordinal);
+            if (marker <= 0) return false;
+            string providerName = DecodePathSegment(rest.Substring(0, marker));
+            string tail = rest.Substring(marker);
+
+            if (method == "GET" && String.Equals(tail, "/models", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientRunnerSettings provider = ProviderConfiguration.FindProvider(_Settings, providerName) ?? throw new KeyNotFoundException("Provider endpoint not found: " + providerName);
+                await SendJsonAsync(context, await ProviderModelManager.GetInventoryAsync(provider, token).ConfigureAwait(false)).ConfigureAwait(false);
+                return true;
+            }
+
+            if (method == "POST" && String.Equals(tail, "/pulls", StringComparison.OrdinalIgnoreCase))
+            {
+                ClientRunnerSettings provider = ProviderConfiguration.FindProvider(_Settings, providerName) ?? throw new KeyNotFoundException("Provider endpoint not found: " + providerName);
+                ModelPullRequest request = ReadJson<ModelPullRequest>(context);
+                Func<ModelPullJob, CancellationToken, Task>? onSucceeded = null;
+                if (request.Advertise)
+                {
+                    onSucceeded = async (job, callbackToken) =>
+                    {
+                        bool embeddings = ProviderModelManager.LooksLikeEmbeddingModel(job.Model, null);
+                        await ImportModelsAsync(new List<ModelImportItem> { new ModelImportItem { Provider = job.Provider, Name = job.Model, SupportsCompletions = !embeddings, SupportsEmbeddings = embeddings } }, callbackToken).ConfigureAwait(false);
+                    };
+                }
+
+                ModelPullJob job = ModelPullCoordinator.Shared.Start(provider, request.Model, request.Advertise, onSucceeded);
+                context.Response.StatusCode = 202;
+                await SendJsonAsync(context, job).ConfigureAwait(false);
+                return true;
+            }
+
+            if (method == "DELETE" && tail.StartsWith("/models/", StringComparison.OrdinalIgnoreCase))
+            {
+                string modelName = DecodePathSegment(tail.Substring("/models/".Length));
+                ClientRunnerSettings provider = ProviderConfiguration.FindProvider(_Settings, providerName) ?? throw new KeyNotFoundException("Provider endpoint not found: " + providerName);
+                await ProviderModelManager.DeleteModelAsync(provider, modelName, token).ConfigureAwait(false);
+                int removed;
+                lock (_InventoryLock)
+                {
+                    removed = ProviderModelManager.RemoveAdvertisement(_Settings, providerName, modelName);
+                }
+
+                if (removed > 0) await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
+                await SendJsonAsync(context, new ProviderModelDeleteResult { Provider = provider.Name, Model = modelName, AdvertisementsRemoved = removed }).ConfigureAwait(false);
+                return true;
+            }
+
+            return false;
+        }
+
+        private async Task<ModelImportResult> ImportModelsAsync(IEnumerable<ModelImportItem> items, CancellationToken token)
+        {
+            ModelImportResult result;
+            lock (_InventoryLock)
+            {
+                result = ProviderModelManager.ImportModels(_Settings, items ?? new List<ModelImportItem>());
+            }
+
+            if (result.Added.Count > 0) await SaveInventoryConfigurationAsync(token).ConfigureAwait(false);
+            return result;
         }
 
         private async Task SaveInventoryConfigurationAsync(CancellationToken token)

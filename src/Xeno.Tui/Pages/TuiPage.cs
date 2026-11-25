@@ -2,6 +2,7 @@ namespace Xeno.Tui.Pages
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using TUIKit.Input;
@@ -9,6 +10,7 @@ namespace Xeno.Tui.Pages
     using TUIKit.Widgets;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
+    using Xeno.Tui.Modals;
     using Xeno.Tui.Shell;
 
     /// <summary>
@@ -36,6 +38,32 @@ namespace Xeno.Tui.Pages
         {
             get { return new List<KeyHint>(); }
         }
+
+        /// <summary>
+        /// Page key hints plus the Columns hint when the page has tables.
+        /// </summary>
+        public IReadOnlyList<KeyHint> AllHints
+        {
+            get
+            {
+                List<KeyHint> hints = new List<KeyHint>(Hints);
+                if (_Tables.Count > 0) hints.Add(new KeyHint(ColumnsKey.ToString(), XenoTableColumns.ControlText));
+                return hints;
+            }
+        }
+
+        /// <summary>
+        /// Tables on the page whose columns the user can choose.
+        /// </summary>
+        public IReadOnlyList<ITuiTableColumns> ColumnTables
+        {
+            get { return _Tables; }
+        }
+
+        /// <summary>
+        /// Key that opens the column chooser for the focused table.
+        /// </summary>
+        public const char ColumnsKey = 'v';
 
         /// <summary>
         /// True when the page's charts follow the auto-refresh choice right now.
@@ -75,6 +103,8 @@ namespace Xeno.Tui.Pages
         #region Private-Members
 
         private readonly List<Action<string>> _LoadFailed = new List<Action<string>>();
+        private readonly List<ITuiTableColumns> _Tables = new List<ITuiTableColumns>();
+        private bool _ColumnsApplied = false;
 
         #endregion
 
@@ -110,6 +140,42 @@ namespace Xeno.Tui.Pages
         }
 
         /// <summary>
+        /// Show each table's stored column choice, or its defaults. Called once after the page is built.
+        /// </summary>
+        public void ApplyColumnPreferences()
+        {
+            if (_ColumnsApplied) return;
+            _ColumnsApplied = true;
+            foreach (ITuiTableColumns table in _Tables)
+            {
+                IReadOnlyList<string> defaults = table.Defaults;
+                table.Apply(XenoTableColumns.Visible(Context.Preferences, table.Id, table.Columns, defaults.ToList()));
+            }
+        }
+
+        /// <summary>
+        /// Handle the page keys every page shares: the Columns key opens the chooser for the focused table.
+        /// </summary>
+        /// <param name="key">Key.</param>
+        /// <returns>True when handled.</returns>
+        public bool HandleSharedKey(KeyEvent key)
+        {
+            if (_Tables.Count == 0 || !PageKeys.Is(key, ColumnsKey)) return false;
+            _ = ChooseColumnsAsync(FocusedTable() ?? _Tables[0]);
+            return true;
+        }
+
+        /// <summary>
+        /// Let the user choose a table's columns in a checklist, then show and remember the choice.
+        /// </summary>
+        /// <param name="table">Table.</param>
+        /// <returns>Task that completes when the chooser closes.</returns>
+        public Task ChooseColumnsAsync(ITuiTableColumns table)
+        {
+            return Context.ChooseColumnsAsync(table);
+        }
+
+        /// <summary>
         /// Called on the loop thread when the client status changes.
         /// </summary>
         /// <param name="status">Status.</param>
@@ -134,6 +200,8 @@ namespace Xeno.Tui.Pages
         {
             ArgumentNullException.ThrowIfNull(stack);
             ArgumentNullException.ThrowIfNull(child);
+            ITuiTableColumns? columns = _Tables.FirstOrDefault(item => ReferenceEquals(item.Widget, child));
+            if (columns != null && title != null) columns.Title = title;
             if (child is Dropdown<string> dropdown)
             {
                 DropdownPicker picker = new DropdownPicker(dropdown);
@@ -173,6 +241,7 @@ namespace Xeno.Tui.Pages
         {
             DataTable<T> table = new DataTable<T> { EmptyText = emptyText, KeySelector = key, StretchLastColumn = true };
             table.SetLoading();
+            _Tables.Add(new TuiTableColumns<T>(table, "terminal:" + GetType().Name + ":" + _Tables.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             _LoadFailed.Add(message =>
             {
                 if (table.State == DataTableState.Loading) table.SetError(message);
@@ -188,12 +257,24 @@ namespace Xeno.Tui.Pages
         /// <param name="name">Header.</param>
         /// <param name="value">Cell text.</param>
         /// <param name="width">Width in columns, or 0 to share the remaining width.</param>
+        /// <param name="visible">False to hide the column by default; users can show it with the Columns control.</param>
         /// <returns>The table.</returns>
-        protected static DataTable<T> Column<T>(DataTable<T> table, string name, Func<T, string> value, int width)
+        protected static DataTable<T> Column<T>(DataTable<T> table, string name, Func<T, string> value, int width, bool visible = true)
         {
             DataColumn<T> column = new DataColumn<T>(name, value, true);
             if (width > 0) column.Width = width;
+            column.Visible = visible;
             return table.Column(column);
+        }
+
+        #endregion
+
+        #region Private-Methods
+
+        private ITuiTableColumns? FocusedTable()
+        {
+            IFocusable? leaf = Root is IFocusContainer container ? container.FocusedLeaf : Root as IFocusable;
+            return _Tables.FirstOrDefault(item => ReferenceEquals(item.Widget, leaf));
         }
 
         #endregion

@@ -2301,6 +2301,91 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel);
 }
 
+.pagination-button.column-picker-trigger {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.column-picker-count {
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.column-picker-popover {
+  position: fixed;
+  z-index: 2100;
+  width: 240px;
+  max-height: min(420px, calc(100vh - 24px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.column-picker-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.column-picker-heading span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.column-picker-list {
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+.column-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  border-radius: 6px;
+  padding: 0 8px;
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.column-picker-option:hover {
+  background: var(--color-panel-soft);
+}
+
+.column-picker-option.locked {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.column-picker-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--color-border);
+  padding: 8px;
+}
+
+.column-picker-actions .action-button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .pagination-page {
   color: var(--color-muted);
   font-size: 12px;
@@ -5903,5 +5988,244 @@ html[data-theme='dark'] .primitive-list-item {
 @media (max-width: 560px) {
   .metric-grid.kpi-grid.usage-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Provider model management, imports, and background pulls (local dashboard). */
+.muted-text {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.modal-toolbar,
+.provider-models-summary,
+.provider-models-toolbar,
+.import-models-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.provider-models-summary {
+  justify-content: flex-start;
+}
+
+.provider-models-summary code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-muted);
+}
+
+.provider-models-summary .icon-button {
+  margin-left: auto;
+}
+
+.provider-models-dialog,
+.import-models-dialog,
+.model-pulls-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.provider-pull-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel-soft);
+  padding: 12px;
+}
+
+.provider-pull-form .toggle-field {
+  min-height: 38px;
+}
+
+.provider-pull-list {
+  display: grid;
+  gap: 8px;
+}
+
+.model-pull-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+  padding: 10px 12px;
+}
+
+.model-pull-row-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.model-pull-row-heading > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-pull-row-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-pull-row-heading > div span,
+.model-pull-row-meta {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.model-pull-row-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-pull-row-meta span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-pull-row.danger .model-pull-row-meta span:first-child {
+  color: var(--color-danger);
+  white-space: normal;
+}
+
+.model-pull-row.success .model-pull-meter span {
+  background: var(--color-success);
+}
+
+.model-pull-row.danger .model-pull-meter span {
+  background: var(--color-danger);
+}
+
+.model-pull-meter.indeterminate span {
+  animation: model-pull-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes model-pull-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(340%); }
+}
+
+.model-pull-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-success);
+}
+
+.topbar-pulls {
+  min-height: 32px;
+  max-width: 300px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.topbar-pulls span:not(.topbar-pulls-meter) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-pulls.failed {
+  background: var(--color-panel);
+  color: var(--color-danger);
+}
+
+.topbar-pulls-meter {
+  flex: 0 0 56px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.topbar-pulls-meter span {
+  display: block;
+  height: 100%;
+  background: var(--color-info);
+}
+
+.inline-chip {
+  margin-left: 8px;
+}
+
+.inline-confirm {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.muted-row td {
+  color: var(--color-muted);
+}
+
+.checkbox-cell {
+  width: 36px;
+  text-align: center;
+}
+
+.import-provider-picker {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.import-provider-picker legend {
+  padding: 0 4px;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.import-provider-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  cursor: pointer;
+}
+
+.import-models-scroll {
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.import-models-dialog td select {
+  min-height: 30px;
+  padding: 4px 26px 4px 8px;
+}
+
+@media (max-width: 760px) {
+  .provider-pull-form {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-pulls {
+    max-width: 160px;
   }
 }

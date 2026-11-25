@@ -64,6 +64,7 @@ import ActivityChart from './components/ActivityChart.jsx';
 import Modal from './components/Modal.jsx';
 import { ToastContainer, showToast } from './components/Toast.jsx';
 import Pagination from './components/Pagination.jsx';
+import ColumnPicker, { useColumnVisibility } from './components/ColumnPicker.jsx';
 import { ServerChatReviewView, ServerChatView } from './chat/ServerChatViews.jsx';
 import UsagePage from './usage/UsagePage.jsx';
 import ProviderHealthPanel from './usage/ProviderHealthPanel.jsx';
@@ -2463,6 +2464,8 @@ function AdvertisedModelsView() {
           { key: 'supportsCompletions', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsCompletions')), searchable: false },
           { key: 'supportsEmbeddings', searchValue: (row) => advertisedBooleanFilterValue(value(row, 'supportsEmbeddings')), searchable: false }
         ]}
+        defaultColumns={['clientName', 'name', 'apiType', 'source', 'supportsCompletions', 'supportsEmbeddings']}
+        tableId="server.advertisedModels"
         canDelete={(row) => canDeleteManagedAdvertisedModel(row)}
         deleteMessage={(row) => t('deleteManagedClientModelMessage', {
           client: value(row, 'clientName') || value(row, 'clientId') || t('client'),
@@ -5001,7 +5004,7 @@ function IconButton({ disabled = false, icon, iconOnly = false, label, onClick, 
   );
 }
 
-function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, getRowActions, loading = false, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, title }) {
+function DataTable({ actions, canDelete, columns, defaultColumns, deleteMessage, deleteTitle, getRowActions, loading = false, onDelete, onRefresh, onRowClick, rowActionLabel, rows, subtitle, tableId, title }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [columnFilters, setColumnFilters] = useState({});
@@ -5048,6 +5051,8 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
   const displayPage = Math.min(currentPage, totalPages);
   const pagedRows = sortedRows.slice((displayPage - 1) * pageSize, displayPage * pageSize);
   const hasColumnFilters = normalizedColumns.some((column) => column.filterable !== false);
+  const columnVisibility = useColumnVisibility(normalizedColumns.map((column) => column.key), defaultColumns, tableId);
+  const shownColumns = normalizedColumns.filter((column) => columnVisibility.visibleKeys.includes(column.key));
 
   useEffect(() => {
     setCurrentPage(1);
@@ -5197,6 +5202,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
       <Pagination
         currentPage={displayPage}
         onPageChange={setCurrentPage}
+        columnControl={<ColumnPicker columns={normalizedColumns.map((column) => ({ key: column.key, label: columnLabel(column) }))} onChange={columnVisibility.setVisibleKeys} onReset={columnVisibility.resetVisibleKeys} visibleKeys={columnVisibility.visibleKeys} />}
         onPageSizeChange={setPageSize}
         onRefresh={onRefresh}
         pageSize={pageSize}
@@ -5206,7 +5212,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
         <table className="data-table">
           <thead>
             <tr>
-              {normalizedColumns.map((column) => (
+              {shownColumns.map((column) => (
                 <th className={[column.sortable === false ? '' : 'sortable', column.className || ''].filter(Boolean).join(' ')} key={column.key} onClick={() => handleSort(column)} title={column.sortable === false ? undefined : t('tooltipSortColumn')}>
                   <span className="th-content">
                     <span>{columnLabel(column)}</span>
@@ -5218,7 +5224,7 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
             </tr>
             {hasColumnFilters ? (
               <tr className="table-filter-row">
-                {normalizedColumns.map((column) => (
+                {shownColumns.map((column) => (
                   <th className={column.className || undefined} key={`${column.key}-filter`}>
                     {column.filterable === false ? <span /> : (
                       <input
@@ -5241,14 +5247,14 @@ function DataTable({ actions, canDelete, columns, deleteMessage, deleteTitle, ge
           <tbody>
             {pagedRows.length === 0 && (
               <tr>
-                <td className="empty-cell" colSpan={normalizedColumns.length + 1}>
+                <td className="empty-cell" colSpan={shownColumns.length + 1}>
                   {loading ? <TableLoadingState /> : <EmptyState message={t('emptyTableMessage')} title={t('noData')} />}
                 </td>
               </tr>
             )}
             {pagedRows.map((row, index) => (
               <tr className={onRowClick ? 'clickable-row' : ''} key={value(row, 'id') || value(row, 'guid') || index} onClick={(event) => handleRowClick(event, row)}>
-                {normalizedColumns.map((column) => (
+                {shownColumns.map((column) => (
                   <td className={column.className || undefined} key={column.key}>
                     <CellValue columnKey={column.key} value={column.render ? column.render(row) : value(row, column.key)} />
                   </td>

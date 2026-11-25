@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 const pageSizes = [10, 25, 50, 100];
 const refreshIntervals = [0, 15, 30, 60, 180, 300];
 
-export default function Pagination({ currentPage, onPageChange, onPageSizeChange, onRefresh, pageSize, totalItems }) {
+export default function Pagination({ columnControl, currentPage, onPageChange, onPageSizeChange, onRefresh, pageSize, totalItems }) {
   const { t } = useTranslation();
   const [autoRefreshSeconds, setAutoRefreshSeconds] = useState(15);
   const refreshRef = useRef(onRefresh);
@@ -41,6 +41,7 @@ export default function Pagination({ currentPage, onPageChange, onPageSizeChange
         </label>
       </div>
       <div className="pagination-controls">
+        {columnControl || null}
         <label className="pagination-refresh" title={t('tooltipAutoRefresh')}>
           <span>{t('autoRefresh')}</span>
           <select

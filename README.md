@@ -326,9 +326,18 @@ xeno connect
 registers with the server. Use `xeno connect --foreground` when you want the
 WebSocket loop to stay attached to the current terminal.
 
-`--allow-model-management` is only valid for Ollama providers. When enabled, the
-client advertises `modelManagementAllowed` to the server and the dashboard can
-pull or delete Ollama models on that client through the authenticated WebSocket.
+`--allow-model-management` is only valid for Ollama providers. It decides one
+thing: whether the Xeno server may pull or delete models on this machine. When it
+is on, the client advertises `modelManagementAllowed` and the server dashboard can
+send pull and delete commands through the authenticated WebSocket. The local web
+dashboard's provider form calls it **Server can manage models**. You can
+always manage a provider's models yourself from this machine, with or without it.
+
+If the provider already has models, you don't have to add them one at a time.
+`xeno model import local-ollama` lists what the provider has, and
+`xeno model import local-ollama --all` advertises every model that isn't
+advertised yet (embedding models are recognized by name; force one with
+`--embeddings <name>`).
 
 Useful client commands:
 
@@ -355,6 +364,12 @@ xeno model add --provider local-ollama --name all-minilm --type embedding
 xeno model update --provider local-ollama --name llama3.2:latest --type both
 xeno model delete --name llama3.2:latest
 xeno model rm --name llama3.2:latest
+xeno model import local-ollama --model qwen2.5-coder:14b --embeddings nomic-embed-text:latest
+xeno provider models local-ollama
+xeno provider pull local-ollama gemma3:27b --advertise
+xeno provider pulls
+xeno provider delete-model local-ollama gemma3:27b
+xeno provider models local-ollama --columns name,size,advertised
 xeno reset
 xeno reset --force
 ```
@@ -365,8 +380,22 @@ Provider endpoint URLs and upstream API types are configured with
 and model CLI mutations are written to `~/.xeno/client.json` and request an
 inventory update when a client worker is already connected. If you edit
 `~/.xeno/client.json` directly, run `xeno reload` to re-read the file and
-re-advertise updated provider/model inventory on the next heartbeat. For the
-full walkthrough, see the platform-specific guides in
+re-advertise updated provider/model inventory on the next heartbeat.
+
+`xeno provider models <provider>` reads the provider's models live (size,
+parameters, quantization, modified time, and whether each is advertised).
+`xeno provider pull` downloads a model onto an Ollama provider and shows
+progress; Ctrl+C cancels it, and `--detach` leaves it running and returns.
+The pull runs inside the Xeno client when it is running, so the desktop app,
+terminal app, and web dashboard see it too, and it keeps going after the
+command exits. `xeno provider delete-model` removes a model from the
+provider's disk and stops advertising it (it asks first unless you pass
+`--yes`). Pull and delete work with Ollama providers only; other provider
+types can be listed. Every command that prints a table takes
+`--columns a,b,c` (or `--columns all`) to choose what it shows; an unknown
+name lists the valid ones.
+
+For the full walkthrough, see the platform-specific guides in
 [getting-started/](getting-started/).
 
 ### Desktop, Terminal, and Tray Apps
@@ -434,7 +463,9 @@ telemetry, provider runtime telemetry from Ollama, vLLM, and compatible
 endpoints, telemetry analytics, client logs, configured provider endpoints,
 advertised models, and request details for work processed by that machine.
 Providers and advertised models can be created, edited, and deleted from the
-browser without hand-editing `client.json`. Dashboard provider/model changes
+browser without hand-editing `client.json`. Create forms have **Save**, which
+saves and closes, and **Save and add another**, which keeps the form open for
+the next entry. Dashboard provider/model changes
 also request a server inventory update while connected. If you do hand-edit
 `client.json`, use the Settings page's reload action or run `xeno reload`.
 
@@ -479,6 +510,40 @@ history, request summaries, logs, settings, and local database status under
 best-effort: local runtimes such as Ollama and vLLM expose richer operational
 metrics, while cloud providers generally expose only reachability, model
 inventory, and safe response-header metadata.
+
+#### Managing provider models
+
+Open a provider's row menu on **Providers** (or its row on **Local endpoint**)
+and choose **Manage models** to see what the provider has on disk right now.
+Type a model name to pull it. The progress bar keeps moving after you close the
+dialog, and a download indicator in the top bar follows every pull in flight.
+Check **Advertise to the network when finished** to offer the model to the Xeno
+network as soon as the pull succeeds. Deleting a model removes it from the
+provider's disk and removes its advertisement. Pull and delete need an Ollama
+provider; vLLM and OpenAI-compatible providers are listed only.
+
+<p align="center">
+  <a href="assets/local-dashboard-manage-models.png"><img src="assets/local-dashboard-manage-models.png" alt="Manage models dialog with a pull in progress" width="760"></a>
+</p>
+
+**Import** on **Advertised Models** reads the providers you pick and lists
+their models with a checkbox each. Models that are already advertised are
+marked and can't be picked twice, and each model can be set to serve
+completions or embeddings before you import it. A provider that doesn't answer
+shows its error in the dialog instead of blocking the others.
+
+<p align="center">
+  <a href="assets/local-dashboard-import-models.png"><img src="assets/local-dashboard-import-models.png" alt="Import models dialog" width="760"></a>
+</p>
+
+Every table starts with a narrow set of columns. **Columns** in the pagination
+bar picks which ones show, and the browser remembers the choice per table. The
+desktop and terminal apps have the same control (see
+[DESKTOP_AND_TERMINAL.md](archive/DESKTOP_AND_TERMINAL.md)).
+
+<p align="center">
+  <a href="assets/local-dashboard-columns.png"><img src="assets/local-dashboard-columns.png" alt="Columns picker on the Advertised Models table" width="760"></a>
+</p>
 
 ## Calling The API
 

@@ -100,6 +100,15 @@ xeno provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1:
 xeno model add --provider local-ollama --name llama3.2:latest --type completion
 ```
 
+If Ollama already has the models you want to share, import them instead of adding each one. The first command lists what the provider has; the second advertises every model that is not advertised yet.
+
+```powershell
+xeno model import local-ollama
+xeno model import local-ollama --all
+```
+
+The `--allow-model-management` flag from the previous step only lets the Xeno server pull and delete models on this provider remotely. You can always pull and delete models yourself, from the CLI or from **Manage models** in any client app.
+
 8. Review the client configuration.
 
 ```powershell
@@ -296,6 +305,10 @@ xeno provider list
 xeno provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000
 xeno model list
 xeno model update --provider local-ollama --name llama3.2:latest --type completion
+xeno provider models local-ollama
+xeno provider pull local-ollama qwen2.5-coder:14b --advertise
+xeno provider pulls
+xeno provider delete-model local-ollama qwen2.5-coder:14b
 xeno reload
 xeno dashboard
 xeno dashboard open
@@ -307,4 +320,4 @@ xeno reset
 
 If you registered a scheduled task from **Start On Login** or **Start On Boot**, do not use `xeno restart` to cycle it. `xeno restart` stops the worker the task launched and then starts its own detached client, which the task does not supervise, so you can end up with two workers under one client ID and a task that reports itself idle while a client is still connected. Use `Stop-ScheduledTask` and `Start-ScheduledTask` instead. `xeno stop` is the graceful shutdown — it asks the worker to exit and lets it clean up — but the task will not run again until its next trigger or a manual `Start-ScheduledTask`, while `Stop-ScheduledTask` terminates the worker outright and can leave `%USERPROFILE%\.xeno\state.json` describing a connection that no longer exists. The remaining commands are safe under a task: the read-only ones above, and `xeno reload`, which flags the running worker to re-advertise its inventory without touching the process.
 
-Use the local dashboard to create, update, and delete provider endpoints and advertised models, inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `%USERPROFILE%\.xeno\client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `xeno reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory.
+Use the local dashboard to create, update, and delete provider endpoints and advertised models, import models a provider already has, pull and delete a provider's models (**Manage models** on Providers), inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `%USERPROFILE%\.xeno\client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `xeno reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory. A pull started with `xeno provider pull` runs in the client, so the dashboard and the desktop and terminal apps show its progress too; press Ctrl+C to cancel it, or pass `--detach` to leave it running.

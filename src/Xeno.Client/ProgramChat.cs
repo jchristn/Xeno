@@ -346,10 +346,17 @@ namespace Xeno.Client
                 return 0;
             }
 
+            CliTable table = new CliTable()
+                .AddColumn("name", "NAME", 48)
+                .AddColumn("availability", "AVAILABILITY", 50)
+                .AddColumn("route", "ROUTE", 24, false, false)
+                .AddColumn("providers", "PROVIDERS", 32, false, false);
             foreach (ModelCatalogEntry entry in catalog.Entries.Where(entry => entry.SupportsCompletions || !entry.SupportsEmbeddings))
             {
-                Console.WriteLine("  " + entry.Name.PadRight(40) + entry.AvailabilityText);
+                table.AddRow(entry.Name, entry.AvailabilityText, DisplayFormat.OrDash(entry.RouteTarget), entry.LocalProviders.Count == 0 ? "-" : String.Join(", ", entry.LocalProviders));
             }
+
+            PrintTable(table);
 
             if (!String.IsNullOrWhiteSpace(catalog.NetworkMessage)) WriteMuted("  Xeno network models are unavailable: " + catalog.NetworkMessage + Environment.NewLine);
             return 0;
@@ -370,10 +377,20 @@ namespace Xeno.Client
                 return 0;
             }
 
+            CliTable table = new CliTable()
+                .AddColumn("id", "ID")
+                .AddColumn("title", "TITLE", 30)
+                .AddColumn("model", "MODEL", 24)
+                .AddColumn("messages", "MSGS", 0, true)
+                .AddColumn("updated", "UPDATED")
+                .AddColumn("surface", "SURFACE", 0, false, false)
+                .AddColumn("created", "CREATED", 0, false, false);
             foreach (ChatConversation item in conversations)
             {
-                Console.WriteLine(item.Id + "  " + Clip(item.Title, 40).PadRight(40) + "  " + Clip(item.Model, 24).PadRight(24) + "  " + item.MessageCount.ToString(CultureInfo.InvariantCulture).PadLeft(4) + " msgs  " + item.UpdatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
+                table.AddRow(item.Id, item.Title, item.Model, item.MessageCount.ToString(CultureInfo.InvariantCulture), item.UpdatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture), item.Surface.ToString(), item.CreatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
             }
+
+            PrintTable(table);
 
             return 0;
         }
@@ -467,12 +484,26 @@ namespace Xeno.Client
                 return 0;
             }
 
-            Console.WriteLine(page.Total.ToString(CultureInfo.InvariantCulture) + " chat turns" + (page.Total > page.Items.Count ? " (showing " + page.Items.Count + ")" : String.Empty) + ".");
+            CliTable table = new CliTable()
+                .AddColumn("when", "WHEN")
+                .AddColumn("model", "MODEL", 24)
+                .AddColumn("route", "ROUTE", 16)
+                .AddColumn("status", "STATUS")
+                .AddColumn("latency", "LATENCY", 0, true)
+                .AddColumn("rating", "RATING")
+                .AddColumn("conversation", "CONVERSATION", 24)
+                .AddColumn("surface", "SURFACE", 0, false, false)
+                .AddColumn("tokens", "TOKENS", 0, true, false)
+                .AddColumn("id", "ID", 0, false, false);
             foreach (ChatTurn turn in page.Items)
             {
                 string rated = turn.FeedbackRating == 1 ? "up" : turn.FeedbackRating == -1 ? "down" : "-";
-                Console.WriteLine(turn.CreatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture).PadRight(20) + Clip(turn.Model, 24).PadRight(26) + Clip(turn.Route, 22).PadRight(24) + turn.Status.ToString().PadRight(11) + FormatMs(turn.TotalMs).PadLeft(9) + "  " + rated.PadRight(5) + Clip(turn.ConversationTitle ?? "(deleted)", 40));
+                table.AddRow(turn.CreatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture), turn.Model, turn.Route, turn.Status.ToString(), FormatMs(turn.TotalMs), rated, turn.ConversationTitle ?? "(deleted)", turn.Surface.ToString(), turn.CompletionTokens.HasValue ? turn.CompletionTokens.Value.ToString(CultureInfo.InvariantCulture) : "-", turn.Id);
             }
+
+            List<string> lines = table.Render(_Columns);
+            Console.WriteLine(page.Total.ToString(CultureInfo.InvariantCulture) + " chat turns" + (page.Total > page.Items.Count ? " (showing " + page.Items.Count + ")" : String.Empty) + ".");
+            if (page.Items.Count > 0) foreach (string line in lines) Console.WriteLine(line);
 
             return 0;
         }
@@ -494,11 +525,22 @@ namespace Xeno.Client
                 return 0;
             }
 
-            Console.WriteLine(page.Total.ToString(CultureInfo.InvariantCulture) + " ratings.");
+            CliTable table = new CliTable()
+                .AddColumn("when", "WHEN")
+                .AddColumn("rating", "RATING")
+                .AddColumn("model", "MODEL", 24)
+                .AddColumn("conversation", "CONVERSATION", 28)
+                .AddColumn("comment", "COMMENT", 32)
+                .AddColumn("route", "ROUTE", 24, false, false)
+                .AddColumn("message", "MESSAGE", 0, false, false);
             foreach (ChatFeedback item in page.Items)
             {
-                Console.WriteLine(item.UpdatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture).PadRight(20) + (item.Rating > 0 ? "up  " : "down") + "  " + Clip(item.Model ?? "-", 24).PadRight(26) + Clip(item.ConversationTitle ?? "(deleted)", 30).PadRight(32) + (item.Comment ?? String.Empty));
+                table.AddRow(item.UpdatedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture), item.Rating > 0 ? "up" : "down", item.Model ?? "-", item.ConversationTitle ?? "(deleted)", item.Comment ?? String.Empty, DisplayFormat.OrDash(item.Route), item.MessageId);
             }
+
+            List<string> lines = table.Render(_Columns);
+            Console.WriteLine(page.Total.ToString(CultureInfo.InvariantCulture) + " ratings.");
+            if (page.Items.Count > 0) foreach (string line in lines) Console.WriteLine(line);
 
             return 0;
         }
@@ -612,6 +654,8 @@ namespace Xeno.Client
             Console.WriteLine("                    [--surface Web|Desktop|Terminal|Cli|Mcp] [--rating up|down|none] [--search <text>] [--limit <n>]");
             Console.WriteLine("  xeno chat feedback [--rating up|down] [--model <m>] [--comments] [--search <text>] [--limit <n>]");
             Console.WriteLine();
+            Console.WriteLine("Tables (models, list, history, feedback) take --columns <a,b,c> to pick columns; '--columns all' shows every");
+            Console.WriteLine("column, and an unknown name lists the valid ones.");
             Console.WriteLine("Add --json for machine-readable output. Chat needs the client running ('xeno start'). Models served on");
             Console.WriteLine("this machine answer here; the rest go to the Xeno network. --tools lets the model use Xeno's tools;");
             Console.WriteLine("tools that change something ask first (--yes allows them in one-shot mode).");

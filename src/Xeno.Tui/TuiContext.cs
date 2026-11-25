@@ -2,6 +2,7 @@ namespace Xeno.Tui
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using TUIKit;
@@ -258,10 +259,23 @@ namespace Xeno.Tui
         public async Task FormAsync(XenoFormSpec? spec, Action? after = null)
         {
             if (spec == null) return;
-            Dictionary<string, string>? values = await FormAsync(spec.Title, spec.Intro, spec.Fields, form => spec.SubmitAsync(form, CancellationToken.None), spec.SubmitText, spec.ProgressText).ConfigureAwait(false);
+            FormDialog dialog = new FormDialog(spec.Title, spec.Intro, spec.Fields, form => spec.SubmitAsync(form, CancellationToken.None), Post, spec.SubmitText, spec.ProgressText, spec.CanAddAnother ? spec.AddAnotherText : null)
+            {
+                NextValues = form => spec.NextValues(form),
+                AddedMessage = spec.SuccessMessage,
+                Added = message =>
+                {
+                    // "Save and add another" keeps the form open: confirm on the message line and refresh the page underneath.
+                    Notify(message, NotificationSeverity.Success);
+                    after?.Invoke();
+                }
+            };
+            dialog.ApplyTheme(Theme);
+            object? result = await App.ShowAsync(dialog).ConfigureAwait(false);
+            Dictionary<string, string>? values = result as Dictionary<string, string>;
             if (values == null)
             {
-                Post(() => Report(spec.Title + ": cancelled, nothing changed."));
+                if (dialog.AddedCount == 0) Post(() => Report(spec.Title + ": cancelled, nothing changed."));
                 return;
             }
 
@@ -384,6 +398,120 @@ namespace Xeno.Tui
         }
 
         /// <summary>
+        /// Let the user choose a table's columns in a checklist, then show and remember the choice.
+        /// </summary>
+        /// <param name="table">Table.</param>
+        /// <returns>Task that completes when the chooser closes.</returns>
+        public async Task ChooseColumnsAsync(Pages.ITuiTableColumns table)
+        {
+            ArgumentNullException.ThrowIfNull(table);
+            IReadOnlyList<string> visible = table.Visible;
+            List<CheckListItem> items = table.Columns.Select(column => new CheckListItem { Label = column, Checked = visible.Contains(column, StringComparer.Ordinal) }).ToList();
+            string title = String.IsNullOrWhiteSpace(table.Title) ? "Columns" : "Columns: " + table.Title;
+            CheckListDialog dialog = new CheckListDialog(title, "Choose the columns this table shows. Your choice is remembered.", items, new List<string> { "Apply", "Defaults", "Cancel" }) { MinimumChecked = 1 };
+            dialog.ApplyTheme(Theme);
+            object? result = await App.ShowAsync(dialog).ConfigureAwait(false);
+            if (!(result is CheckListResult chosen) || chosen.Button == 2) return;
+            Post(() =>
+            {
+                List<string> shown;
+                if (chosen.Button == 1)
+                {
+                    XenoTableColumns.Reset(Preferences, table.Id);
+                    shown = table.Defaults.ToList();
+                }
+                else
+                {
+                    shown = table.Columns.Where((column, index) => index < chosen.Checked.Count && chosen.Checked[index]).ToList();
+                    if (shown.Count == 0) return;
+                    XenoTableColumns.Save(Preferences, table.Id, shown);
+                }
+
+                SavePreferences();
+                table.Apply(shown);
+                Notify("Showing " + table.Visible.Count + " of " + table.Columns.Count + " columns" + (String.IsNullOrWhiteSpace(table.Title) ? "." : " in " + table.Title + "."), NotificationSeverity.Info);
+            });
+        }
+
+        /// <summary>
+        /// Import Models: choose the provider endpoints to read, pick models from their live inventories, and advertise
+        /// the picked ones. Reports the outcome on the message line.
+        /// </summary>
+        /// <param name="after">Optional follow-up on the loop thread after models were imported.</param>
+        /// <returns>Task that completes when the flow ends.</returns>
+        public async Task ImportModelsAsync(Action? after = null)
+        {
+            List<string> providers = XenoModelImport.Providers(Workspace);
+            if (providers.Count == 0)
+            {
+                Post(() => Notify("Add a provider first. Import reads the models a provider endpoint on this machine has.", NotificationSeverity.Warning));
+                return;
+            }
+
+            CheckListDialog pick = new CheckListDialog(XenoModelImport.Title, XenoModelImport.ProvidersIntro, providers.Select(name => new CheckListItem { Label = name, Checked = true }), new List<string> { "Load Models", "Cancel" }) { MinimumChecked = 1 };
+            pick.ApplyTheme(Theme);
+            object? picked = await ShowPostedAsync(pick).ConfigureAwait(false);
+            if (!(picked is CheckListResult choice) || choice.Button != 0)
+            {
+                Post(() => Report(XenoModelImport.Title + ": cancelled, nothing changed."));
+                return;
+            }
+
+            List<string> chosen = providers.Where((name, index) => index < choice.Checked.Count && choice.Checked[index]).ToList();
+            Post(() => Progress("Reading models from " + String.Join(", ", chosen) + "..."));
+            TaskCompletionSource<List<ModelImportSource>?> loaded = new TaskCompletionSource<List<ModelImportSource>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await LoadAsync(token => XenoModelImport.LoadAsync(Workspace, chosen, token), sources => loaded.TrySetResult(sources), message => loaded.TrySetResult(null)).ConfigureAwait(false);
+            List<ModelImportSource>? sections = await loaded.Task.ConfigureAwait(false);
+            if (sections == null) return;
+            Post(() => Report("Read " + sections.Count + " provider" + (sections.Count == 1 ? String.Empty : "s") + "."));
+
+            ModelImportModal modal = new ModelImportModal(sections);
+            modal.ApplyTheme(Theme);
+            object? result = await ShowPostedAsync(modal).ConfigureAwait(false);
+            if (!(result is List<ModelImportItem> items))
+            {
+                Post(() => Report(XenoModelImport.Title + ": cancelled, nothing changed."));
+                return;
+            }
+
+            if (items.Count == 0)
+            {
+                Post(() => Report(XenoModelImport.Title + ": no models selected, nothing changed."));
+                return;
+            }
+
+            Post(() => Progress("Importing " + items.Count + " model" + (items.Count == 1 ? String.Empty : "s") + "..."));
+            await LoadAsync(token => Workspace.ImportModelsAsync(items, token), imported =>
+            {
+                Notify(XenoModelImport.Describe(imported), imported.Failed.Count > 0 ? NotificationSeverity.Warning : NotificationSeverity.Success);
+                after?.Invoke();
+            }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Open Manage Models for a provider. Pulls started there keep running after it closes.
+        /// </summary>
+        /// <param name="provider">Provider name.</param>
+        /// <param name="after">Optional follow-up on the loop thread after changes and when the dialog closes.</param>
+        /// <returns>Task that completes when the dialog closes.</returns>
+        public async Task ManageModelsAsync(string provider, Action? after = null)
+        {
+            ArgumentNullException.ThrowIfNull(provider);
+            ManageModelsModal modal = new ManageModelsModal(this, provider, () => after?.Invoke());
+            modal.ApplyTheme(Theme);
+            try
+            {
+                await ShowPostedAsync(modal).ConfigureAwait(false);
+            }
+            finally
+            {
+                modal.Detach();
+            }
+
+            Post(() => after?.Invoke());
+        }
+
+        /// <summary>
         /// Save preferences.
         /// </summary>
         public void SavePreferences()
@@ -394,6 +522,14 @@ namespace Xeno.Tui
         #endregion
 
         #region Private-Methods
+
+        private Task<object?> ShowPostedAsync(Modal modal)
+        {
+            // Modals are pushed on the loop thread, whichever thread the flow continues on.
+            TaskCompletionSource<Task<object?>> shown = new TaskCompletionSource<Task<object?>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(() => shown.TrySetResult(App.ShowAsync(modal)));
+            return shown.Task.Unwrap();
+        }
 
         private void SetMessage(string message, NotificationSeverity severity, bool working)
         {

@@ -141,6 +141,7 @@ namespace Xeno.Client.Presentation
             {
                 case XenoCommandEnum.NewProvider: return "Add Provider";
                 case XenoCommandEnum.NewModel: return "Add Model";
+                case XenoCommandEnum.ImportModels: return XenoModelImport.Title;
                 case XenoCommandEnum.OpenSettingsFile: return "Open client.json";
                 case XenoCommandEnum.RevealDataFolder: return "Show Data Folder";
                 case XenoCommandEnum.StartClient: return "Start Client";

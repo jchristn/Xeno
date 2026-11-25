@@ -81,11 +81,11 @@ namespace Xeno.Tui.Pages
             Column(_Table, "Received", row => row.Received, 20);
             Column(_Table, "Path", row => row.Path, 0);
             Column(_Table, "Model", row => row.Model, 22);
-            Column(_Table, "Provider", row => row.Provider, 14);
+            Column(_Table, "Provider", row => row.Provider, 14, false);
             Column(_Table, "Status", row => row.Status, 7);
             Column(_Table, "Outcome", row => row.Outcome, 10);
             Column(_Table, "Duration", row => row.Duration, 9);
-            Column(_Table, "Tokens", row => row.Tokens, 7);
+            Column(_Table, "Tokens", row => row.Tokens, 7, false);
             _Table.RowStyle = row => row.Failed ? Context.Theme.Error : (CellStyle?)null;
             _Table.RowActivated += index => _ = ShowDetailAsync();
             FramedStack filters = new FramedStack(SplitOrientation.Horizontal);

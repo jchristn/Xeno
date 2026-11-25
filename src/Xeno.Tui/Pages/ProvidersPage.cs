@@ -33,7 +33,7 @@ namespace Xeno.Tui.Pages
         /// <inheritdoc />
         public override IReadOnlyList<KeyHint> Hints
         {
-            get { return new List<KeyHint> { new KeyHint("a", "Add"), new KeyHint("e", "Edit"), new KeyHint("t", "Test"), new KeyHint("m", "Add model"), new KeyHint("d", "Delete") }; }
+            get { return new List<KeyHint> { new KeyHint("a", "Add"), new KeyHint("e", "Edit"), new KeyHint("t", "Test"), new KeyHint("m", "Add model"), new KeyHint("p", "Manage models"), new KeyHint("d", "Delete") }; }
         }
 
         #endregion
@@ -115,6 +115,14 @@ namespace Xeno.Tui.Pages
             if (PageKeys.Is(key, 't'))
             {
                 _ = TestAsync();
+                return true;
+            }
+
+            if (PageKeys.Is(key, 'p'))
+            {
+                ProviderRow? selected = _Providers.SelectedRow;
+                if (selected == null) Context.Notify("Select a provider to manage its models.", NotificationSeverity.Info);
+                else _ = Context.ManageModelsAsync(selected.Name, () => _ = RefreshAsync());
                 return true;
             }
 

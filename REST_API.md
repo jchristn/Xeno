@@ -876,9 +876,25 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `POST /api/v1/providers/{name}/test`
 
+`GET /api/v1/providers/{provider}/models`
+
+`POST /api/v1/providers/{provider}/pulls`
+
+`DELETE /api/v1/providers/{provider}/models/{model}`
+
+`GET /api/v1/model-pulls`
+
+`GET /api/v1/model-pulls/{id}`
+
+`DELETE /api/v1/model-pulls/{id}`
+
+`POST /api/v1/model-pulls/clear`
+
 `GET /api/v1/models`
 
 `POST /api/v1/models`
+
+`POST /api/v1/models/import`
 
 `PUT /api/v1/models/{provider}/{name}`
 
@@ -950,9 +966,23 @@ These routes are intended for same-machine dashboard use and local diagnostics:
 
 `GET /api/v1/local-inference/requests?page={page}&pageSize={pageSize}`
 
-Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, `clearCredential`, `allowModelManagement`, `shareWithNetwork` (false keeps the provider off the Xeno network), `routeLocalRequests`, and `maxConcurrentRequests` (1 to 256; null inherits `defaultMaxConcurrentRequests`). `allowModelManagement` is valid only for Ollama providers and permits the Xeno server to issue pull/delete model commands through the client WebSocket. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, `supportsEmbeddings`, and `maxConcurrentRequests` (1 to 256; null inherits the provider limit). Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry `latest` returns `{ snapshot, detail, status }`. Local telemetry search bodies use `metric`, `fromUtc`, `toUtc`, `limit`, `offset`, and optional GPU filters and return `{ total, samples }`. Local telemetry rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, and optional GPU filters and return an array of `{ startUtc, endUtc, label, count, average, minimum, maximum }` buckets. Local host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`; search returns `{ total, samples }` and rollups return the same bucket array shape. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
+Local provider create/update request bodies use `name`, `apiType`, `endpoint`, `timeoutMs`, optional `credential`, `clearCredential`, `allowModelManagement`, `shareWithNetwork` (false keeps the provider off the Xeno network), `routeLocalRequests`, and `maxConcurrentRequests` (1 to 256; null inherits `defaultMaxConcurrentRequests`). `allowModelManagement` is valid only for Ollama providers and permits the Xeno server to issue pull/delete model commands through the client WebSocket. It does not gate the local provider model routes below, which work for any Ollama provider. Local model create/update request bodies use `provider`, `name`, `supportsCompletions`, `supportsEmbeddings`, and `maxConcurrentRequests` (1 to 256; null inherits the provider limit). Provider and model mutations persist to `~/.xeno/client.json`, refresh local provider/model snapshots, and request `client.inventory.update` for an already connected server session. `POST /api/v1/settings/reload` re-reads `~/.xeno/client.json` after manual file edits and requests the same inventory update. Local telemetry `latest` returns `{ snapshot, detail, status }`. Local telemetry search bodies use `metric`, `fromUtc`, `toUtc`, `limit`, `offset`, and optional GPU filters and return `{ total, samples }`. Local telemetry rollup bodies use `metric`, `fromUtc`, `toUtc`, `bucketMinutes`, and optional GPU filters and return an array of `{ startUtc, endUtc, label, count, average, minimum, maximum }` buckets. Local host telemetry `metric` values use enum names such as `CpuUtilizationPercent`, `MemoryUtilizationPercent`, and `GpuUtilizationPercent`. Local provider telemetry search and rollup bodies use `metric`, `providerName`, `modelName`, `fromUtc`, `toUtc`, `bucketMinutes`, `limit`, and `offset`; search returns `{ total, samples }` and rollups return the same bucket array shape. Local settings updates modify `LocalDashboard` and `Telemetry` settings in `~/.xeno/client.json`; listener host, listener port, token mode, database filename, host telemetry scheduler, and provider telemetry scheduler changes take effect after restarting the client.
 
 `PUT /api/v1/settings` also accepts `defaultMaxConcurrentRequests` (1 to 256) and the full `localInferenceServer` object, including `routingMode`, `routes`, `discoverLocalModels`, `healthCheckIntervalMs`, and `localQueueTimeoutMs`. Send the whole object back, including `routes`; omitted fields reset to their defaults. Routing and concurrency changes apply to the running listener without a restart.
+
+### Provider models and pulls
+
+These routes back **Manage models** and **Import** in every client front end. They read and change what a provider actually has on disk, which is separate from the advertised models in `client.json`.
+
+`GET /api/v1/providers/{provider}/models` asks the provider for its models right now and returns `{ provider, apiType, endpoint, reachable, error, canPull, canDelete, checkedUtc, models }`. Each model has `name`, `sizeBytes`, `modified`, `family`, `parameterSize`, `quantization`, `digest`, `remote` (an Ollama cloud model with nothing on disk), `advertised`, and `looksLikeEmbeddings`. A provider that does not answer still returns `200`, with `reachable: false` and the reason in `error`. `canPull` and `canDelete` are true only for Ollama providers; other provider types are listed only. An unknown provider returns `404`.
+
+`POST /api/v1/providers/{provider}/pulls` starts pulling a model onto an Ollama provider. Body: `{ "model": "gemma3:27b", "advertise": true }`. It returns `202` with the pull job at once and keeps pulling in the background, after the caller disconnects too. With `advertise: true` the model is advertised when the pull succeeds (as an embedding model when its name looks like one). Starting a pull that is already running for the same provider and model returns the running job instead of a second one. A provider that is not Ollama, or a missing `model`, returns `400`.
+
+A pull job is `{ id, provider, model, state, status, completedBytes, totalBytes, percent, error, advertiseOnSuccess, advertised, startedUtc, updatedUtc, finishedUtc, active }`, where `state` is `Queued`, `Running`, `Succeeded`, `Failed`, or `Cancelled`, `status` is the provider's latest progress line, and `percent` is null until the provider reports a size. `GET /api/v1/model-pulls` returns `{ jobs, active }`, newest first. `GET /api/v1/model-pulls/{id}` returns one job, and `DELETE /api/v1/model-pulls/{id}` cancels it and returns it (a finished job comes back unchanged). Both return `404` for an unknown id. `POST /api/v1/model-pulls/clear` forgets finished jobs and returns `{ removed, removedOne }`. Jobs are kept in memory by the running client (the 50 newest finished ones), so a restart forgets them.
+
+`DELETE /api/v1/providers/{provider}/models/{model}` deletes the model from an Ollama provider's disk, removes every advertisement of it under that provider, and returns `{ provider, model, advertisementsRemoved }`. URL-encode the model name in the path (a `/` becomes `%2F`).
+
+`POST /api/v1/models/import` advertises models a provider already has. Body: `{ "models": [{ "provider": "local-ollama", "name": "llama3.2:latest", "supportsCompletions": true, "supportsEmbeddings": false }] }`. It returns `{ added, skipped, failed }`, each a list of `provider/model` labels; models already advertised are skipped, and failures carry the reason after the label. Added models are saved to `~/.xeno/client.json` and a connected client sends the server an inventory update, as with `POST /api/v1/models`.
 
 ### Local inference routing
 

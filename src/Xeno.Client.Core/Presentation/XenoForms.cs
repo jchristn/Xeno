@@ -29,7 +29,9 @@ namespace Xeno.Client.Presentation
             {
                 Title = "Add Provider",
                 Intro = "A provider is an inference endpoint on this machine (Ollama, vLLM, or any OpenAI-compatible server) whose models this client serves to the Xeno network.",
-                SubmitText = "Add Provider",
+                SubmitText = "Save",
+                AddAnotherText = AddAnotherButtonText,
+                ClearOnAddAnother = new List<string> { "name", "endpoint", "credential" },
                 Fields = ProviderFields(null, workspace.LoadSettings().DefaultMaxConcurrentRequests),
                 SubmitAsync = async (form, token) =>
                 {
@@ -139,7 +141,9 @@ namespace Xeno.Client.Presentation
             {
                 Title = "Add Model",
                 Intro = "Models you add here are advertised to the Xeno network while the client is connected.",
-                SubmitText = "Add Model",
+                SubmitText = "Save",
+                AddAnotherText = AddAnotherButtonText,
+                ClearOnAddAnother = new List<string> { "name" },
                 Fields = new List<XenoFormFieldSpec>
                 {
                     new XenoFormFieldSpec { Key = "provider", Label = "Provider", Kind = XenoSettingKindEnum.Choice, Choices = providers, Value = providerName ?? providers[0] },
@@ -193,6 +197,8 @@ namespace Xeno.Client.Presentation
                 configure.Title = "Edit Model";
                 configure.Intro = "'" + modelName + "' was found on " + provider.Name + " but is not configured. Saving adds it to client.json with these settings, and it is advertised to the Xeno network while the client is connected.";
                 configure.SubmitText = "Save";
+                configure.AddAnotherText = null;
+                configure.ClearOnAddAnother = new List<string>();
                 return configure;
             }
 
@@ -255,7 +261,9 @@ namespace Xeno.Client.Presentation
             {
                 Title = rule == null ? "Add Route Rule" : "Edit Route Rule",
                 Intro = "A route rule decides where one model goes when an app on this machine calls the local endpoint. Without a rule, models a provider here serves are answered here and everything else goes to the Xeno network.",
-                SubmitText = rule == null ? "Add Rule" : "Save Rule",
+                SubmitText = rule == null ? "Save" : "Save Rule",
+                AddAnotherText = rule == null ? AddAnotherButtonText : null,
+                ClearOnAddAnother = rule == null ? new List<string> { "model" } : new List<string>(),
                 Fields = new List<XenoFormFieldSpec>
                 {
                     new XenoFormFieldSpec { Key = "model", Label = "Model", Required = true, Value = rule?.Model ?? model ?? String.Empty, Placeholder = "llama3.1:8b", Help = "The model name apps send. \"llama3.1\" and \"llama3.1:latest\" are the same model." },
@@ -290,6 +298,11 @@ namespace Xeno.Client.Presentation
         /// Label used for the Xeno network in route rule forms.
         /// </summary>
         public const string NetworkTargetChoice = "Xeno network";
+
+        /// <summary>
+        /// Text of the second button on create forms, which saves and keeps the form open for another entry.
+        /// </summary>
+        public const string AddAnotherButtonText = "Save and Add Another";
 
         /// <summary>
         /// Form to sign in to a Xeno server.
@@ -401,7 +414,7 @@ namespace Xeno.Client.Presentation
                 new XenoFormFieldSpec { Key = "endpoint", Label = "Endpoint", Required = true, Value = provider?.Endpoint ?? "http://127.0.0.1:11434", Help = "Base URL of the provider. It must not point at this client's local inference server." },
                 new XenoFormFieldSpec { Key = "credential", Label = "Credential", Secret = true, Placeholder = provider == null ? "(optional)" : (String.IsNullOrWhiteSpace(provider.Credential) ? "(none)" : "(unchanged)"), Help = "Bearer token sent to the provider, if it requires one." },
                 new XenoFormFieldSpec { Key = "timeout", Label = "Timeout (seconds)", Kind = XenoSettingKindEnum.Number, Value = ((provider?.TimeoutMs ?? 300000) / 1000).ToString(CultureInfo.InvariantCulture) },
-                new XenoFormFieldSpec { Key = "modelManagement", Label = "Let the Xeno server pull and delete models (Ollama only)", Kind = XenoSettingKindEnum.Toggle, Value = provider != null && provider.AllowModelManagement ? "true" : "false" },
+                new XenoFormFieldSpec { Key = "modelManagement", Label = "Server can manage models (Ollama only)", Kind = XenoSettingKindEnum.Toggle, Value = provider != null && provider.AllowModelManagement ? "true" : "false" },
                 new XenoFormFieldSpec { Key = "shareWithNetwork", Label = "Share with the Xeno network", Kind = XenoSettingKindEnum.Toggle, Value = provider == null || provider.ShareWithNetwork ? "true" : "false", Help = "Turn off for a provider only you should use, such as your own Ollama Cloud or ollama.com account. Its models stay reachable through this machine's local endpoint." },
                 new XenoFormFieldSpec { Key = "routeLocalRequests", Label = "Use for this machine's local requests", Kind = XenoSettingKindEnum.Toggle, Value = provider == null || provider.RouteLocalRequests ? "true" : "false", Help = "Apps on this machine that call the local endpoint are answered by this provider directly." },
                 new XenoFormFieldSpec { Key = "maxConcurrent", Label = "Max concurrent requests", Value = provider?.MaxConcurrentRequests?.ToString(CultureInfo.InvariantCulture) ?? String.Empty, Placeholder = "(global default " + defaultMaxConcurrentRequests.ToString(CultureInfo.InvariantCulture) + ")", Help = "Across all of this provider's models, network and local requests combined. Leave blank to use the global default." }

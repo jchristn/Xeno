@@ -122,6 +122,45 @@ namespace Xeno.Desktop.Dialogs
         }
 
         /// <summary>
+        /// Import models from the live inventories of the provider endpoints and report what was added.
+        /// </summary>
+        /// <param name="owner">Owner window.</param>
+        /// <param name="session">Session.</param>
+        /// <param name="completed">Called after models were imported.</param>
+        /// <returns>Task.</returns>
+        public static async Task ImportModelsAsync(Window owner, DesktopSession session, Action completed)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            ModelImportResult? result = await ModelImportWindow.ShowAsync(owner, session.Workspace).ConfigureAwait(true);
+            if (result == null)
+            {
+                session.Report(XenoModelImport.Title + ": cancelled, nothing changed.");
+                return;
+            }
+
+            string message = XenoModelImport.Describe(result);
+            session.Report(message);
+            if (result.Failed.Count > 0) await XenoDialogs.MessageAsync(owner, XenoModelImport.Title, message, XenoToneEnum.Warning).ConfigureAwait(true);
+            await session.RefreshStatusAsync().ConfigureAwait(true);
+            completed();
+        }
+
+        /// <summary>
+        /// Open Manage Models for a provider: its live models, pulls with progress, and deletes.
+        /// </summary>
+        /// <param name="owner">Owner window.</param>
+        /// <param name="session">Session.</param>
+        /// <param name="provider">Provider name.</param>
+        /// <param name="completed">Called when the dialog closes and after changes, to refresh the page.</param>
+        /// <returns>Task that completes when the dialog closes.</returns>
+        public static async Task ManageModelsAsync(Window owner, DesktopSession session, string provider, Action completed)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            await ManageModelsWindow.ShowAsync(owner, session.Workspace, provider, session.Report, completed).ConfigureAwait(true);
+            completed();
+        }
+
+        /// <summary>
         /// Ping the Xeno server four times and show each reply in a dialog.
         /// </summary>
         /// <param name="owner">Owner window.</param>
@@ -328,10 +367,17 @@ namespace Xeno.Desktop.Dialogs
 
         private static async Task<bool> RunSpecAsync(Window? owner, DesktopSession session, XenoFormSpec spec, Action completed)
         {
-            string? message = await XenoFormDialog.ShowSpecAsync(owner, spec).ConfigureAwait(true);
+            int added = 0;
+            string? message = await XenoFormDialog.ShowSpecAsync(owner, spec, confirmation =>
+            {
+                added++;
+                session.Report(confirmation);
+                completed();
+            }).ConfigureAwait(true);
             if (message == null)
             {
-                session.Report(spec.Title + ": cancelled, nothing changed.");
+                if (added == 0) session.Report(spec.Title + ": cancelled, nothing changed.");
+                else await session.RefreshStatusAsync().ConfigureAwait(true);
                 return false;
             }
 

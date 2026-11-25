@@ -19,6 +19,7 @@ namespace Xeno.Client.Services
     /// </summary>
     public sealed class XenoWorkspace : IDisposable
     {
+        private readonly Lazy<XenoModelPullClient> _ModelPulls = new Lazy<XenoModelPullClient>(() => new XenoModelPullClient());
         #region Public-Members
 
         /// <summary>
@@ -360,6 +361,96 @@ namespace Xeno.Client.Services
             {
                 int removed = ProviderConfiguration.DeleteModel(settings, providerName, modelName);
                 return new MutationResult<int>(removed, removed > 0);
+            }, token);
+        }
+
+        /// <summary>
+        /// Read the models a provider has, live from the provider, marked with whether each is advertised.
+        /// </summary>
+        /// <param name="providerName">Provider name.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Inventory; an unreachable provider is reported in the result.</returns>
+        /// <exception cref="KeyNotFoundException">The provider does not exist.</exception>
+        public Task<ProviderModelInventory> GetProviderInventoryAsync(string providerName, CancellationToken token)
+        {
+            ClientRunnerSettings provider = ProviderConfiguration.FindProvider(LoadSettings(), providerName) ?? throw new KeyNotFoundException("Provider endpoint not found: " + providerName);
+            return ProviderModelManager.GetInventoryAsync(provider, token);
+        }
+
+        /// <summary>
+        /// Delete a model from an Ollama provider's disk and remove its advertisement, if any.
+        /// </summary>
+        /// <param name="providerName">Provider name.</param>
+        /// <param name="modelName">Model name.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>Number of advertisements removed.</returns>
+        /// <exception cref="KeyNotFoundException">The provider does not exist.</exception>
+        /// <exception cref="NotSupportedException">The provider is not Ollama.</exception>
+        /// <exception cref="InvalidOperationException">The provider refused or could not be reached.</exception>
+        public async Task<int> DeleteProviderModelAsync(string providerName, string modelName, CancellationToken token)
+        {
+            ClientRunnerSettings provider = ProviderConfiguration.FindProvider(LoadSettings(), providerName) ?? throw new KeyNotFoundException("Provider endpoint not found: " + providerName);
+            await ProviderModelManager.DeleteModelAsync(provider, modelName, token).ConfigureAwait(false);
+            return await MutateAsync(settings =>
+            {
+                int removed = ProviderModelManager.RemoveAdvertisement(settings, providerName, modelName);
+                return new MutationResult<int>(removed, removed > 0);
+            }, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Start pulling a model onto an Ollama provider. The running Xeno client does the pull, so it outlives this app
+        /// and every front end sees it; without a running client the pull runs in this process.
+        /// </summary>
+        /// <param name="providerName">Provider name.</param>
+        /// <param name="modelName">Model to pull.</param>
+        /// <param name="advertise">Advertise the model once the pull succeeds.</param>
+        /// <param name="token">Cancellation token for the request; it does not cancel the pull.</param>
+        /// <returns>Snapshot of the job; follow it with <see cref="ListModelPulls"/> and <see cref="XenoModelPullClient.JobChanged"/>.</returns>
+        /// <exception cref="KeyNotFoundException">The provider does not exist.</exception>
+        /// <exception cref="NotSupportedException">The provider is not Ollama.</exception>
+        public Task<ModelPullJob> StartModelPullAsync(string providerName, string modelName, bool advertise, CancellationToken token)
+        {
+            return ModelPulls.StartAsync(providerName, modelName, advertise, token);
+        }
+
+        /// <summary>
+        /// Every model pull as last seen, newest first, without a network call (see <see cref="XenoModelPullClient.Snapshot"/>).
+        /// </summary>
+        /// <returns>Snapshots.</returns>
+        public List<ModelPullJob> ListModelPulls()
+        {
+            return ModelPulls.Snapshot();
+        }
+
+        /// <summary>
+        /// Cancel an active model pull, wherever it runs.
+        /// </summary>
+        /// <param name="id">Job id.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>True when the pull was found.</returns>
+        public Task<bool> CancelModelPullAsync(string id, CancellationToken token)
+        {
+            return ModelPulls.CancelAsync(id, token);
+        }
+
+        /// <summary>
+        /// The model pull client every front end shares in this process.
+        /// </summary>
+        public XenoModelPullClient ModelPulls => _ModelPulls.Value;
+
+        /// <summary>
+        /// Advertise several provider models and save. Already-advertised models are skipped.
+        /// </summary>
+        /// <param name="items">Models.</param>
+        /// <param name="token">Cancellation token.</param>
+        /// <returns>What was added, skipped, and failed.</returns>
+        public Task<ModelImportResult> ImportModelsAsync(IEnumerable<ModelImportItem> items, CancellationToken token)
+        {
+            return MutateAsync(settings =>
+            {
+                ModelImportResult result = ProviderModelManager.ImportModels(settings, items);
+                return new MutationResult<ModelImportResult>(result, result.Added.Count > 0);
             }, token);
         }
 
@@ -855,6 +946,7 @@ namespace Xeno.Client.Services
             _Server.Dispose();
             _Chat?.Dispose();
             _Usage?.Dispose();
+            if (_ModelPulls.IsValueCreated) _ModelPulls.Value.Dispose();
             _ConfigLock.Dispose();
             _DataLock.Dispose();
         }

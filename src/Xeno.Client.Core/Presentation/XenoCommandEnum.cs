@@ -138,6 +138,11 @@ namespace Xeno.Client.Presentation
         /// <summary>
         /// Refresh charts every minute.
         /// </summary>
-        AutoRefresh60
+        AutoRefresh60,
+
+        /// <summary>
+        /// Import models from the live inventories of the configured provider endpoints.
+        /// </summary>
+        ImportModels
     }
 }

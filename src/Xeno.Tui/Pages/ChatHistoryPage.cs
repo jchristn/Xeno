@@ -78,7 +78,7 @@ namespace Xeno.Tui.Pages
             Column(_Table, "Went to", row => row.Route, 19);
             Column(_Table, "Outcome", row => row.Outcome, 9);
             Column(_Table, "Time", row => row.Time, 7);
-            Column(_Table, "Rating", row => row.Rating, 12);
+            Column(_Table, "Rating", row => row.Rating, 12, false);
             _Table.RowStyle = row => row.Turn.Status == ChatTurnStatusEnum.Error ? Context.Theme.Error : (TUIKit.CellStyle?)null;
             _Table.RowActivated += index => _ = ShowDetailAsync();
             _Models = Table<ChatModelBreakdown>("No chat turns in this range.", row => row.Model);
@@ -88,7 +88,7 @@ namespace Xeno.Tui.Pages
             Column(_Models, "Median time", row => ChatFormat.Duration(row.P50Ms), 12);
             Column(_Models, "Thumbs up", row => row.ThumbsUp.ToString(CultureInfo.InvariantCulture), 10);
             Column(_Models, "Thumbs down", row => row.ThumbsDown.ToString(CultureInfo.InvariantCulture), 12);
-            Column(_Models, "Tokens", row => row.CompletionTokens.ToString("N0", CultureInfo.CurrentCulture), 10);
+            Column(_Models, "Tokens", row => row.CompletionTokens.ToString("N0", CultureInfo.CurrentCulture), 10, false);
             FramedStack filters = new FramedStack(SplitOrientation.Horizontal);
             Frame(filters, _Range, StackSize.Weighted(1, 14), "Range");
             Frame(filters, _Route, StackSize.Weighted(1, 16), "Went to");
