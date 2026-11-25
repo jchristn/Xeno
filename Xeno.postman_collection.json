@@ -122,6 +122,10 @@
       "value": "http://127.0.0.1:11434"
     },
     {
+      "key": "modelPullId",
+      "value": ""
+    },
+    {
       "key": "localTelemetrySampleId",
       "value": "tel_..."
     },
@@ -909,6 +913,84 @@
                   ]
                 }
               }
+            },
+            {
+              "name": "List Provider Models",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}/models",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers",
+                    "{{localProviderName}}",
+                    "models"
+                  ]
+                },
+                "description": "Read the models the provider has right now, live from its endpoint: name, sizeBytes, parameterSize, quantization, modified, family, digest, remote, and whether each is advertised. Returns { provider, apiType, endpoint, reachable, error, canPull, canDelete, checkedUtc, models }. canPull and canDelete are true only for Ollama providers; other providers are listed only. An unreachable provider returns reachable false with the error instead of failing."
+              }
+            },
+            {
+              "name": "Pull Model",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}/pulls",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers",
+                    "{{localProviderName}}",
+                    "pulls"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"{{modelName}}\",\n  \"advertise\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Start pulling a model onto an Ollama provider. Returns 202 with the pull job ({ id, provider, model, state, status, completedBytes, totalBytes, percent, error, advertiseOnSuccess, advertised, startedUtc, updatedUtc, finishedUtc, active }); follow it with Get Model Pull. The pull runs in the Xeno client and keeps going after the caller disconnects. advertise true advertises the model once the pull succeeds. A provider that is not Ollama returns 400."
+              }
+            },
+            {
+              "name": "Delete Provider Model",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/providers/{{localProviderName}}/models/{{modelName}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "providers",
+                    "{{localProviderName}}",
+                    "models",
+                    "{{modelName}}"
+                  ]
+                },
+                "description": "Delete a model from an Ollama provider's disk and remove any advertisement for it. Returns { provider, model, advertisementsRemoved }. A provider that is not Ollama returns 400."
+              }
             }
           ]
         },
@@ -1019,6 +1101,138 @@
                     "{{modelName}}"
                   ]
                 }
+              }
+            },
+            {
+              "name": "Import Models",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/models/import",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "models",
+                    "import"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"models\": [\n    {\n      \"provider\": \"{{localProviderName}}\",\n      \"name\": \"{{modelName}}\",\n      \"supportsCompletions\": true,\n      \"supportsEmbeddings\": false\n    },\n    {\n      \"provider\": \"{{localProviderName}}\",\n      \"name\": \"{{embeddingModelName}}\",\n      \"supportsCompletions\": false,\n      \"supportsEmbeddings\": true\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Advertise models a provider already has, in one call. Returns { added, skipped, failed } as lists of provider/model names; models already advertised are skipped. Saved to client.json, and a connected client sends the server an inventory update."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Model Pulls",
+          "item": [
+            {
+              "name": "List Model Pulls",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/model-pulls",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "model-pulls"
+                  ]
+                },
+                "description": "Every model pull the Xeno client is running or has finished since it started, newest first: { jobs, active }. state is Queued, Running, Succeeded, Failed, or Cancelled."
+              }
+            },
+            {
+              "name": "Get Model Pull",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/model-pulls/{{modelPullId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "model-pulls",
+                    "{{modelPullId}}"
+                  ]
+                },
+                "description": "One pull job by id. Returns 404 when the client does not know the id."
+              }
+            },
+            {
+              "name": "Cancel Model Pull",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/model-pulls/{{modelPullId}}",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "model-pulls",
+                    "{{modelPullId}}"
+                  ]
+                },
+                "description": "Cancel a queued or running pull and return the job. Cancelling a finished pull returns it unchanged."
+              }
+            },
+            {
+              "name": "Clear Finished Model Pulls",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{localDashboardUrl}}/api/v1/model-pulls/clear",
+                  "host": [
+                    "{{localDashboardUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "model-pulls",
+                    "clear"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Forget finished pulls (succeeded, failed, or cancelled). Running pulls stay. Returns { removed, removedOne }."
               }
             }
           ]

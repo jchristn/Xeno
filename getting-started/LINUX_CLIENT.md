@@ -86,6 +86,15 @@ $XENO provider add --name local-ollama --type Ollama --endpoint http://127.0.0.1
 $XENO model add --provider local-ollama --name llama3.2:latest --type completion
 ```
 
+If Ollama already has the models you want to share, import them instead of adding each one. The first command lists what the provider has; the second advertises every model that is not advertised yet.
+
+```bash
+$XENO model import local-ollama
+$XENO model import local-ollama --all
+```
+
+The `--allow-model-management` flag from the previous step only lets the Xeno server pull and delete models on this provider remotely. You can always pull and delete models yourself, from the CLI or from **Manage models** in any client app.
+
 9. Review the client configuration.
 
 ```bash
@@ -331,6 +340,10 @@ $XENO provider list
 $XENO provider update --name local-ollama --endpoint http://127.0.0.1:11434 --timeout 300000
 $XENO model list
 $XENO model update --provider local-ollama --name llama3.2:latest --type completion
+$XENO provider models local-ollama
+$XENO provider pull local-ollama qwen2.5-coder:14b --advertise
+$XENO provider pulls
+$XENO provider delete-model local-ollama qwen2.5-coder:14b
 $XENO reload
 $XENO dashboard
 $XENO dashboard open
@@ -341,4 +354,4 @@ $XENO reset
 
 If you installed a service from **Start On Login** or **Start On Boot**, use `systemctl` for the client lifecycle instead of `$XENO stop` and `$XENO restart`. `$XENO stop` asks the running worker to exit; systemd then restarts it after `RestartSec`, and the replacement clears the stop request on startup, so the client comes back a few seconds later. `$XENO restart` stops the worker and also starts its own detached client, which can leave two workers running under one client ID. Use `systemctl --user restart xeno-client.service` for a login service, or `sudo systemctl restart xeno-client.service` for a boot service. The remaining commands are safe under a service: the read-only ones above, and `$XENO reload`, which flags the running worker to re-advertise its inventory without touching the process.
 
-Use the local dashboard to create, update, and delete provider endpoints and advertised models, inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `~/.xeno/client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `$XENO reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory.
+Use the local dashboard to create, update, and delete provider endpoints and advertised models, import models a provider already has, pull and delete a provider's models (**Manage models** on Providers), inspect local request history, review host/provider telemetry, read logs, and manage local settings. Provider/model changes made through the dashboard or CLI are saved to `~/.xeno/client.json` and request an inventory update when the client is connected. If you edit `client.json` directly, run `$XENO reload` or use the Settings page reload action so the connected server receives the updated provider/model inventory. A pull started with `$XENO provider pull` runs in the client, so the dashboard and the desktop and terminal apps show its progress too; press Ctrl+C to cancel it, or pass `--detach` to leave it running.
