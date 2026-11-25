@@ -2,8 +2,6 @@
 
 ## [Unreleased]
 
-- Fixed: `xeno provider pulls` reported "Unknown provider command" instead of listing pulls.
-
 ## [0.3.0] - 2026-11-25 (alpha)
 
 - Manage a provider's models from every client front end: see what the provider has on disk right now (size, parameters, quantization, modified time, and whether each is advertised), pull a model with a progress bar, cancel a pull, and delete a model, which also stops advertising it. Open it from **Manage models** on a provider's row menu or its Local endpoint row in the web dashboard, the provider row menu or Providers button in the desktop app, or `p` on Providers or Local endpoint in the terminal app. Pull and delete work with Ollama providers; vLLM and OpenAI-compatible providers are listed only.
@@ -14,6 +12,7 @@
 - Every table has a **Columns** control: in the web dashboard's pagination bar (remembered per browser), the desktop table header, and the terminal table frame (`[Columns]` or `v`), remembered in `frontend.json`. CLI tables take `--columns a,b,c` or `--columns all`. Wide tables start with at most six columns.
 - The provider form's model management toggle is now labeled **Server can manage models** in the web dashboard. It only controls whether the Xeno server may pull and delete models on this machine; you can always manage models locally.
 - Added local dashboard API routes: `GET /api/v1/providers/{provider}/models`, `POST /api/v1/providers/{provider}/pulls`, `DELETE /api/v1/providers/{provider}/models/{model}`, `GET /api/v1/model-pulls`, `GET` and `DELETE /api/v1/model-pulls/{id}`, `POST /api/v1/model-pulls/clear`, and `POST /api/v1/models/import`, with Postman requests and API Explorer samples. See [REST_API.md](REST_API.md#provider-models-and-pulls).
+- `xeno provider pulls` lists pulls (it reported "Unknown provider command" in the first 0.3.0 build).
 
 ## [0.2.0] - 2026-11-19 (alpha)
 
