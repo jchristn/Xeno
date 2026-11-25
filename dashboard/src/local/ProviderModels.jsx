@@ -359,6 +359,7 @@ export function ImportModelsDialog({ formId, onImported, providers }) {
   const [inventories, setInventories] = useState({});
   const [picked, setPicked] = useState({});
   const [kinds, setKinds] = useState({});
+  const [filters, setFilters] = useState({ model: '', provider: '', size: '', serves: '' });
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
@@ -405,10 +406,22 @@ export function ImportModelsDialog({ formId, onImported, providers }) {
   const chosen = candidates.filter((model) => !model.advertised && picked[model.key]);
   const available = candidates.filter((model) => !model.advertised);
 
+  const servesLabels = { completions: t('completions'), embeddings: t('embeddings'), both: t('completionsAndEmbeddings') };
+  const filterColumns = [
+    { key: 'model', label: t('model'), value: (model) => model.name },
+    { key: 'provider', label: t('provider'), value: (model) => model.provider },
+    { key: 'size', label: t('size'), value: (model) => formatSize(model.sizeBytes) },
+    { key: 'serves', label: t('serves'), value: (model) => servesLabels[kinds[model.key] || 'completions'] }
+  ];
+  const activeFilters = filterColumns.filter((column) => filters[column.key].trim() !== '');
+  const shown = activeFilters.length === 0 ? candidates : candidates.filter((model) => activeFilters.every((column) =>
+    String(column.value(model) ?? '').toLowerCase().includes(filters[column.key].trim().toLowerCase())));
+
+  // Select all / none act on the rows the filters leave visible.
   function setAll(value) {
     setPicked((current) => {
       const next = { ...current };
-      available.forEach((model) => { next[model.key] = value; });
+      shown.filter((model) => !model.advertised).forEach((model) => { next[model.key] = value; });
       return next;
     });
   }
@@ -474,6 +487,7 @@ export function ImportModelsDialog({ formId, onImported, providers }) {
       <div className="import-models-toolbar">
         <span className="muted-text">{t('importSelectedCount', { count: chosen.length, total: available.length })}</span>
         <span className="button-row">
+          {activeFilters.length > 0 ? <button className="action-button" onClick={() => setFilters({ model: '', provider: '', size: '', serves: '' })} type="button"><X size={15} />{t('clearFilters')}</button> : null}
           <button className="action-button" disabled={available.length === 0} onClick={() => setAll(true)} title={t('tooltipSelectAllModels')} type="button">{t('selectAll')}</button>
           <button className="action-button" disabled={available.length === 0} onClick={() => setAll(false)} title={t('tooltipSelectNoModels')} type="button">{t('selectNone')}</button>
         </span>
@@ -488,11 +502,29 @@ export function ImportModelsDialog({ formId, onImported, providers }) {
               <th>{t('size')}</th>
               <th>{t('serves')}</th>
             </tr>
+            <tr className="table-filter-row">
+              <th className="checkbox-cell" />
+              {filterColumns.map((column) => (
+                <th key={column.key}>
+                  <input
+                    aria-label={t('filterColumn', { column: column.label })}
+                    onChange={(event) => setFilters((current) => ({ ...current, [column.key]: event.target.value }))}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}
+                    placeholder={t('filterColumn', { column: column.label })}
+                    title={t('tooltipImportFilter', { column: column.label })}
+                    type="text"
+                    value={filters[column.key]}
+                  />
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {candidates.length === 0 ? (
               <tr><td className="empty-cell" colSpan={5}>{selectedProviders.length === 0 ? t('importPickProvider') : t('noProviderModels')}</td></tr>
-            ) : candidates.map((model) => (
+            ) : shown.length === 0 ? (
+              <tr><td className="empty-cell" colSpan={5}>{t('importNoFilterMatches')}</td></tr>
+            ) : shown.map((model) => (
               <tr className={model.advertised ? 'muted-row' : ''} key={model.key}>
                 <td className="checkbox-cell">
                   <input aria-label={t('importModelCheckbox', { model: model.name })} checked={model.advertised || !!picked[model.key]} disabled={model.advertised} onChange={(event) => setPicked((current) => ({ ...current, [model.key]: event.target.checked }))} type="checkbox" />

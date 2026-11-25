@@ -106,6 +106,7 @@ namespace Test.Shared
                     CliHygieneTestSuites.CliHygieneSuite(),
                     ProviderModelCliTestSuites.ProviderModelSuite(),
                     ColorSchemeTestSuites.ColorSchemeSuite(),
+                    TypographyTestSuites.TypographySuite(),
                     AutoStartTestSuites.AutoStartSuite(),
                     UsageChartTestSuites.ChartSuite(),
                     UsageTuiTestSuites.TuiUsageSuite(),

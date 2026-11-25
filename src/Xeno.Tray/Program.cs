@@ -52,9 +52,8 @@ namespace Xeno.Tray
                 .UsePlatformDetect()
                 .With(new FontManagerOptions
                 {
-                    // Match the desktop app: default to the bundled Inter so the agent's windows render the same on
-                    // every OS, including Linux hosts that do not ship Inter.
-                    DefaultFamilyName = "avares://Xeno.Desktop.Common/Assets/Fonts/Inter.ttf#Inter"
+                    // Match the desktop app: the OS's own UI font, with the bundled Inter only when none is installed.
+                    DefaultFamilyName = XenoFonts.SansFamilyName
                 })
                 .With(new MacOSPlatformOptions { ShowInDock = false })
                 .LogToTrace();

@@ -1749,6 +1749,7 @@ function modelModal(t, model, providers, refresh, setModal) {
 function importModelsModal(t, providers, refresh) {
   return {
     title: t('importModels'),
+    size: 'full',
     body: <ImportModelsDialog formId="import-models-form" onImported={() => refresh()} providers={providers} />,
     actions: <button className="primary-button" form="import-models-form" title={t('tooltipImportSelectedModels')} type="submit"><Download size={16} />{t('importSelected')}</button>
   };

@@ -23,7 +23,19 @@
   --sidebar-active: #ffffff;
   --shadow-soft: 0 16px 40px rgba(25, 32, 38, 0.08);
   --radius: 8px;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Noto Sans CJK JP", Arial, sans-serif;
+  /* Font stacks match XenoTypography.CssSansStack and CssMonoStack (Xeno.Client.Core). Each OS uses its own UI and code
+     fonts; bundled Inter is the fallback for Linux hosts without Noto Sans, Ubuntu, or Cantarell. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Noto Sans", Ubuntu, Cantarell, Inter, "Noto Sans CJK JP", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis-weight: none;
+}
+
+b,
+strong {
+  font-weight: 600;
 }
 
 html[data-theme='dark'] {
@@ -109,7 +121,7 @@ textarea {
   width: 100%;
   min-height: 360px;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 
@@ -228,8 +240,9 @@ textarea {
 .login-tenant-confirmation span {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .login-tenant-confirmation strong {
@@ -271,7 +284,7 @@ textarea {
 .login-secondary-action span {
   color: var(--color-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .register-shell {
@@ -331,7 +344,7 @@ textarea {
 }
 
 .registration-choice span {
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.35;
 }
 
@@ -355,7 +368,7 @@ textarea {
 .register-field-error {
   color: var(--color-danger);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .register-status {
@@ -403,14 +416,15 @@ textarea {
 .registration-credential-table thead th {
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .registration-credential-table tbody th {
   width: 140px;
   color: var(--color-text);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .registration-credential-table .copyable-value {
@@ -418,7 +432,7 @@ textarea {
 }
 
 .registration-credential-table .copyable-value code {
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   overflow: auto;
   text-overflow: clip;
 }
@@ -434,7 +448,7 @@ textarea {
   border-radius: 6px;
   padding: 0 12px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   text-decoration: none;
 }
 
@@ -502,7 +516,7 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--color-text);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 28px;
   white-space: nowrap;
@@ -614,7 +628,7 @@ textarea {
   background: rgba(255, 255, 255, 0.05);
   color: #dce6ed;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   width: fit-content;
 }
 
@@ -632,8 +646,9 @@ textarea {
 .eyebrow {
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .sidebar-group-label {
@@ -677,7 +692,7 @@ button.sidebar-link {
 .sidebar-link.active {
   background: #ffffff;
   color: #182026;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 html[data-theme='dark'] .sidebar-link.active {
@@ -797,7 +812,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-text);
   padding: 0 10px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   max-width: 360px;
 }
 
@@ -809,7 +824,7 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 7px;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .topbar-server-url span {
@@ -834,7 +849,7 @@ html[data-theme='dark'] .primitive-list-item {
 .language-selector label {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .language-selector select {
@@ -885,7 +900,7 @@ html[data-theme='dark'] .primitive-list-item {
 .status-row > span:first-child {
   color: var(--color-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .status-chip {
@@ -985,8 +1000,9 @@ html[data-theme='dark'] .primitive-list-item {
 .metric-copy small {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .metric-copy span {
@@ -1009,7 +1025,7 @@ html[data-theme='dark'] .primitive-list-item {
 
 .metric-copy small {
   min-width: 0;
-  font-weight: 700;
+  font-weight: 500;
   overflow-wrap: anywhere;
   text-transform: none;
 }
@@ -1131,7 +1147,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-muted);
   padding: 0 14px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .api-explorer-tab:hover,
@@ -1171,14 +1187,15 @@ html[data-theme='dark'] .primitive-list-item {
 }
 
 .api-explorer-response-indicator span {
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .api-explorer-response-indicator strong {
   color: var(--color-text);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .api-explorer-response-body,
@@ -1201,7 +1218,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel-soft);
   color: var(--color-text);
   padding: 14px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -1280,7 +1297,7 @@ html[data-theme='dark'] .primitive-list-item {
   border-radius: 5px;
   background: var(--color-panel);
   padding: 1px 5px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
 }
 
@@ -1313,12 +1330,12 @@ html[data-theme='dark'] .primitive-list-item {
 
 .api-explorer-markdown th {
   background: var(--color-panel);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .api-explorer-markdown a {
   color: var(--color-accent);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .api-explorer-streaming {
@@ -1332,7 +1349,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-info);
   padding: 8px 10px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .streaming-dot {
@@ -1557,7 +1574,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-accent);
   cursor: pointer;
   font: inherit;
-  font-weight: 800;
+  font-weight: 600;
   padding: 0;
   text-align: left;
 }
@@ -1749,7 +1766,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin-left: auto;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .chart-refresh select {
@@ -1777,7 +1794,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel);
   color: var(--color-muted);
   padding: 0 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .chart-controls button.active,
@@ -1800,14 +1817,15 @@ html[data-theme='dark'] .primitive-list-item {
 .axis-label {
   fill: var(--color-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .axis-title {
   fill: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .chart-tooltip {
@@ -1883,7 +1901,7 @@ html[data-theme='dark'] .primitive-list-item {
   flex-wrap: wrap;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .chart-legend span {
@@ -1962,10 +1980,11 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel-soft);
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   padding: 11px 12px;
   text-align: left;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -2060,7 +2079,7 @@ html[data-theme='dark'] .primitive-list-item {
   max-width: min(300px, 100%);
   overflow: hidden;
   color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -2265,7 +2284,7 @@ html[data-theme='dark'] .primitive-list-item {
 .pagination-summary {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .pagination-summary select {
@@ -2276,7 +2295,7 @@ html[data-theme='dark'] .primitive-list-item {
 .pagination-refresh {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .pagination-refresh select {
@@ -2308,12 +2327,12 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 6px;
   padding: 0 9px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .column-picker-count {
   color: var(--color-muted);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .column-picker-popover {
@@ -2389,7 +2408,7 @@ html[data-theme='dark'] .primitive-list-item {
 .pagination-page {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   padding: 0 4px;
 }
 
@@ -2465,8 +2484,9 @@ html[data-theme='dark'] .primitive-list-item {
 .leaderboard-quick-range-panel > span {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .leaderboard-quick-ranges {
@@ -2513,7 +2533,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-danger);
   padding: 10px 12px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .nuke-result-panel {
@@ -2583,8 +2603,9 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .nuke-result-summary strong {
@@ -2606,13 +2627,13 @@ html[data-theme='dark'] .primitive-list-item {
 .nuke-count-table th {
   color: var(--color-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   text-align: left;
 }
 
 .nuke-count-table td {
   color: var(--color-accent);
-  font-weight: 900;
+  font-weight: 600;
   text-align: right;
 }
 
@@ -2625,7 +2646,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-text);
   padding: 10px 12px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .leaderboard-table-wrapper {
@@ -2644,7 +2665,7 @@ html[data-theme='dark'] .primitive-list-item {
 
 .leaderboard-rank-cell {
   color: var(--color-muted);
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .leaderboard-model-cell {
@@ -2708,7 +2729,7 @@ html[data-theme='dark'] .primitive-list-item {
 .not-found-card strong {
   color: var(--color-accent);
   font-size: clamp(82px, 17vw, 188px);
-  font-weight: 900;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 0.9;
 }
@@ -2718,7 +2739,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   color: var(--color-muted);
   font-size: clamp(16px, 2vw, 20px);
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.45;
 }
 
@@ -2738,7 +2759,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-warning-soft);
   color: var(--color-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .settings-restart-banner.success-state {
@@ -2769,13 +2790,13 @@ html[data-theme='dark'] .primitive-list-item {
   align-items: center;
   color: var(--color-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .setting-impact {
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .setting-impact.restart {
@@ -2835,13 +2856,13 @@ html[data-theme='dark'] .primitive-list-item {
 .service-console-title h3 {
   margin: 0;
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .service-console-url {
   color: var(--color-muted);
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2874,7 +2895,7 @@ html[data-theme='dark'] .primitive-list-item {
 .service-console-credential dt {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .service-console-credential dd {
@@ -2927,7 +2948,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: color-mix(in srgb, var(--color-panel-soft) 88%, #9ca3af);
   color: var(--color-text);
   padding: 14px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
   white-space: pre;
@@ -2975,7 +2996,7 @@ html[data-theme='dark'] .primitive-list-item {
 
 .explorer-item code,
 .explorer-endpoint code {
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -3001,7 +3022,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-text);
   display: inline-flex;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   min-height: 24px;
   padding: 3px 8px;
 }
@@ -3022,7 +3043,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: #11181d;
   color: #dbe7ef;
   padding: 14px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
 }
@@ -3057,7 +3078,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 4px 0 0;
   color: var(--color-text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .form-field {
@@ -3089,9 +3110,10 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-muted);
   display: inline-flex;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   gap: 8px;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .checkbox-field input {
@@ -3101,8 +3123,9 @@ html[data-theme='dark'] .primitive-list-item {
 .form-field span {
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .form-field-heading {
@@ -3136,7 +3159,7 @@ html[data-theme='dark'] .primitive-list-item {
 .form-status {
   margin: 0;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .form-status.success {
@@ -3182,7 +3205,7 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 6px;
   color: var(--color-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: none;
 }
 
@@ -3204,7 +3227,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   color: var(--color-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .segmented-control {
@@ -3225,7 +3248,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: transparent;
   color: var(--color-muted);
   padding: 0 10px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .segmented-control button.active,
@@ -3255,7 +3278,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   color: var(--color-muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.45;
 }
 
@@ -3265,7 +3288,7 @@ html[data-theme='dark'] .primitive-list-item {
 
 .explorer-json-editor {
   min-height: 178px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -3278,7 +3301,7 @@ html[data-theme='dark'] .primitive-list-item {
   width: 100%;
   min-height: 220px;
   border-radius: 8px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .config-editor {
@@ -3332,8 +3355,9 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel-soft);
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .record-summary-table td {
@@ -3378,7 +3402,7 @@ html[data-theme='dark'] .primitive-list-item {
 .record-field-label {
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -3434,7 +3458,7 @@ html[data-theme='dark'] .primitive-list-item {
   border-bottom: 1px solid var(--color-border);
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   padding: 7px 10px;
   text-align: left;
   vertical-align: middle;
@@ -3565,6 +3589,13 @@ html[data-theme='dark'] .primitive-list-item {
   max-height: min(95vh, calc(100vh - 48px));
 }
 
+.modal-panel.full {
+  width: 95vw;
+  max-width: 95vw;
+  height: 95vh;
+  max-height: 95vh;
+}
+
 .modal-panel.small {
   width: min(520px, 100%);
 }
@@ -3640,7 +3671,7 @@ html[data-theme='dark'] .primitive-list-item {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--color-text);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 
@@ -3652,7 +3683,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-text);
   padding: 4px 8px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
 }
 
 .method-pill.success {
@@ -3673,14 +3704,14 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 8px;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .request-payload-header span {
   display: block;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .request-detail-section {
@@ -3729,13 +3760,13 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel-soft);
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 600;
 }
 
 .request-detail-table td {
   color: var(--color-text);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .request-detail-table td span {
@@ -3872,7 +3903,7 @@ html[data-theme='dark'] .primitive-list-item {
   background: var(--color-panel);
   color: var(--color-text);
   padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -3989,7 +4020,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-danger);
   padding: 10px 12px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .model-performance-running {
@@ -4035,9 +4066,10 @@ html[data-theme='dark'] .primitive-list-item {
 .model-performance-event-list span {
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 600;
   line-height: 1.2;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .model-performance-progress-heading strong {
@@ -4079,7 +4111,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -4126,7 +4158,7 @@ html[data-theme='dark'] .primitive-list-item {
 
 .model-performance-event-list strong {
   min-width: 0;
-  font-weight: 800;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -4256,14 +4288,14 @@ html[data-theme='dark'] .primitive-list-item {
 .performance-chart-value {
   fill: var(--color-text);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .performance-chart-tick-label,
 .performance-chart-axis-label {
   fill: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .performance-samples-section {
@@ -4708,8 +4740,9 @@ html[data-theme='dark'] .primitive-list-item {
 .endpoint-hero-facts dt {
   color: var(--color-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .endpoint-urls dd {
@@ -4752,7 +4785,7 @@ html[data-theme='dark'] .primitive-list-item {
   margin: 0;
   color: var(--color-text);
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -4922,7 +4955,7 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 5px;
   overflow: hidden;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5179,7 +5212,7 @@ html[data-theme='dark'] .primitive-list-item {
 .chat-incomplete {
   color: var(--color-warning);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .chat-failure {
@@ -5222,7 +5255,7 @@ html[data-theme='dark'] .primitive-list-item {
   padding: 0;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .chat-thinking-body {
@@ -5477,7 +5510,7 @@ html[data-theme='dark'] .primitive-list-item {
   gap: 6px;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .chat-filter select {
@@ -5560,7 +5593,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-muted);
   padding: 0 12px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .chat-toolbar .time-range-button-row button.active,
@@ -6139,7 +6172,7 @@ html[data-theme='dark'] .primitive-list-item {
   color: var(--color-info);
   padding: 0 12px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .topbar-pulls span:not(.topbar-pulls-meter) {
@@ -6199,7 +6232,7 @@ html[data-theme='dark'] .primitive-list-item {
   padding: 0 4px;
   color: var(--color-muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .import-provider-option {
@@ -6210,9 +6243,36 @@ html[data-theme='dark'] .primitive-list-item {
   cursor: pointer;
 }
 
+/* In the full-size modal the form fills the panel and the table takes whatever height is left. */
+.modal-panel.full .modal-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-panel.full .import-models-dialog {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .import-models-scroll {
+  flex: 1 1 auto;
+  min-height: 240px;
   max-height: 46vh;
-  overflow-y: auto;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.modal-panel.full .import-models-scroll {
+  max-height: none;
+}
+
+.import-models-scroll thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .import-models-dialog td select {

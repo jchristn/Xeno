@@ -14,9 +14,14 @@ namespace Xeno.Client.Presentation
         #region Public-Members
 
         /// <summary>
-        /// Identifier of the original Xeno purple and green scheme, used when nothing else is chosen.
+        /// Identifier of the default scheme (Xeno Dusk since 0.4.1), used when nothing else is chosen.
         /// </summary>
         public const string DefaultId = "xeno";
+
+        /// <summary>
+        /// Identifier of the original purple-and-green scheme, the default before 0.4.1.
+        /// </summary>
+        public const string ClassicId = "xeno-classic";
 
         /// <summary>
         /// Identifier of the user's own scheme, stored in <see cref="XenoFrontEndPreferences.DesktopCustomColors"/>.
@@ -310,7 +315,7 @@ namespace Xeno.Client.Presentation
 
         private static List<XenoColorScheme> BuildCatalog()
         {
-            XenoColorSet xenoLight = new XenoColorSet
+            XenoColorSet classicLight = new XenoColorSet
             {
                 Background = "#f7f5f9", Panel = "#ffffff", PanelSoft = "#f4f0f6", Text = "#2a1530", Muted = "#6e5f75", Border = "#e3dbe8",
                 Accent = XenoBrand.GreenDeep, AccentFill = XenoBrand.GreenDeep, ThemeAccentText = true,
@@ -321,7 +326,7 @@ namespace Xeno.Client.Presentation
                 Sidebar = "#55295f", SidebarText = "#efe6f2", SidebarMuted = "#b9a6c1", SidebarActive = "#4bbf80", SidebarActiveText = XenoBrand.PurpleInk,
                 Series = new List<string> { XenoBrand.GreenShade, XenoBrand.Purple, "#a15d00", "#0f6e8f", "#c73737", XenoBrand.Green }
             };
-            XenoColorSet xenoDark = new XenoColorSet
+            XenoColorSet classicDark = new XenoColorSet
             {
                 Background = "#150b18", Panel = "#211327", PanelSoft = "#2b1933", Text = "#f3ecf5", Muted = "#b4a3bb", Border = "#3d2846",
                 Accent = XenoBrand.Green, AccentFill = XenoBrand.GreenDeep, ThemeAccentText = true,
@@ -332,9 +337,65 @@ namespace Xeno.Client.Presentation
                 Series = new List<string> { XenoBrand.Green, XenoBrand.Lavender, "#fbbf24", "#38bdf8", "#f87171", XenoBrand.GreenShade }
             };
 
+            // Xeno Dusk, the default: purple-gray surfaces one step apart, a soft mint accent, and muted status and
+            // chart colors, so the brand's purple and green sit together without the neon-on-near-black clash.
+            XenoColorSet duskLight = new XenoColorSet
+            {
+                Background = "#f6f5f8", Panel = "#ffffff", PanelSoft = "#f3f1f6", Text = "#2a2430", Muted = "#655d6c", Border = "#e2dee7",
+                Accent = "#2e7550", AccentFill = "#2e7550", AccentText = "#ffffff", Success = "#2e7550", SuccessSoft = "#e5f2ea", Warning = "#8f6213",
+                WarningSoft = "#f8f0de", Danger = "#b04444", DangerSoft = "#f8e9e9", Info = "#664b80", InfoSoft = "#efeaf4", Sidebar = "#3b3243",
+                SidebarText = "#ece7f0", SidebarMuted = "#b1a7b9", SidebarActive = "#544a5e", SidebarActiveText = "#ffffff",
+                Series = new List<string> { "#3f8f63", "#7a5e96", "#b0812a", "#4f86a6", "#b85a5a", "#8fbfa3" }
+            };
+            XenoColorSet duskDark = new XenoColorSet
+            {
+                Background = "#1a171e", Panel = "#221e27", PanelSoft = "#29252f", Text = "#e8e3eb", Muted = "#a69fad", Border = "#37313e",
+                Accent = "#7cc79b", AccentFill = "#3d7a58", AccentText = "#f2f7f4", Success = "#7cc79b", SuccessSoft = "#22332a", Warning = "#d9b36a",
+                WarningSoft = "#362f22", Danger = "#e08585", DangerSoft = "#3a2527", Info = "#b8a5d0", InfoSoft = "#2d2736", Sidebar = "#1f1b24",
+                SidebarText = "#d9d3de", SidebarMuted = "#9a92a2", SidebarActive = "#35303c", SidebarActiveText = "#f0ecf3",
+                Series = new List<string> { "#7cc79b", "#b8a5d0", "#d9b36a", "#82b4d1", "#e08585", "#a9d8bc" }
+            };
+            // Slate: neutral graphite with the same mint accent.
+            XenoColorSet slateLight = new XenoColorSet
+            {
+                Background = "#f5f6f7", Panel = "#ffffff", PanelSoft = "#f1f3f4", Text = "#22272b", Muted = "#5f676e", Border = "#dfe3e6",
+                Accent = "#2c7a57", AccentFill = "#2c7a57", AccentText = "#ffffff", Success = "#2c7a57", SuccessSoft = "#e4f2eb", Warning = "#8c6316",
+                WarningSoft = "#f7efdd", Danger = "#ad4545", DangerSoft = "#f7e9e9", Info = "#3f6f91", InfoSoft = "#e8f0f6", Sidebar = "#2e3439",
+                SidebarText = "#e8ecef", SidebarMuted = "#a4adb4", SidebarActive = "#454d54", SidebarActiveText = "#ffffff",
+                Series = new List<string> { "#3a8b66", "#5682a3", "#b0832d", "#7d6aa0", "#b85c5c", "#8cc0a6" }
+            };
+            XenoColorSet slateDark = new XenoColorSet
+            {
+                Background = "#17191b", Panel = "#1f2224", PanelSoft = "#262a2d", Text = "#e5e8ea", Muted = "#9ea5ab", Border = "#33383c",
+                Accent = "#7fc4a0", AccentFill = "#3b7659", AccentText = "#f1f7f4", Success = "#7fc4a0", SuccessSoft = "#203029", Warning = "#d6b26e",
+                WarningSoft = "#342e22", Danger = "#dd8686", DangerSoft = "#382527", Info = "#a3a8dc", InfoSoft = "#222d35", Sidebar = "#1b1e20",
+                SidebarText = "#d5dadd", SidebarMuted = "#949ca2", SidebarActive = "#30353a", SidebarActiveText = "#eef1f3",
+                Series = new List<string> { "#7fc4a0", "#a3a8dc", "#d6b26e", "#b2a3d1", "#dd8686", "#a9d6bf" }
+            };
+            // Plum: muted purple with a lavender accent close in hue to the surfaces; green only for success.
+            XenoColorSet plumLight = new XenoColorSet
+            {
+                Background = "#f7f5f9", Panel = "#ffffff", PanelSoft = "#f4f1f7", Text = "#2b2233", Muted = "#675c71", Border = "#e4dfea",
+                Accent = "#6a4c8c", AccentFill = "#6a4c8c", AccentText = "#ffffff", Success = "#2f7a52", SuccessSoft = "#e5f2ea", Warning = "#8f6213",
+                WarningSoft = "#f8f0de", Danger = "#b04444", DangerSoft = "#f8e9e9", Info = "#4f6f99", InfoSoft = "#eaeff6", Sidebar = "#433650",
+                SidebarText = "#eee8f3", SidebarMuted = "#b6aac1", SidebarActive = "#5d4e6d", SidebarActiveText = "#ffffff",
+                Series = new List<string> { "#7a5ea0", "#3f8f63", "#b0812a", "#4f86a6", "#b85a5a", "#b9a5d3" }
+            };
+            XenoColorSet plumDark = new XenoColorSet
+            {
+                Background = "#1b1720", Panel = "#231e29", PanelSoft = "#2b2531", Text = "#ebe5f0", Muted = "#aaa0b4", Border = "#3a3243",
+                Accent = "#c0a8dc", AccentFill = "#6f5494", AccentText = "#f6f1fa", Success = "#86c9a2", SuccessSoft = "#23332b", Warning = "#d9b36a",
+                WarningSoft = "#362f22", Danger = "#e08585", DangerSoft = "#3a2527", Info = "#9fb0e8", InfoSoft = "#252c37", Sidebar = "#201b26",
+                SidebarText = "#ddd5e4", SidebarMuted = "#9d93a7", SidebarActive = "#3a3146", SidebarActiveText = "#f3edf8",
+                Series = new List<string> { "#c0a8dc", "#86c9a2", "#d9b36a", "#9fb0e8", "#e08585", "#9a82bd" }
+            };
+
             return new List<XenoColorScheme>
             {
-                Scheme(DefaultId, "Xeno", "The original purple and green.", xenoLight, xenoDark),
+                Scheme(DefaultId, "Xeno Dusk", "Purple-gray with a soft mint accent.", duskLight, duskDark),
+                Scheme(ClassicId, "Xeno Classic", "The original saturated purple and bright green.", classicLight, classicDark),
+                Scheme("slate", "Slate", "Neutral graphite with a soft mint accent.", slateLight, slateDark),
+                Scheme("plum", "Plum", "Muted purple with a lavender accent.", plumLight, plumDark),
                 Scheme("graphite", "Graphite", "Neutral grays with a clear blue accent.",
                     Set("#f5f6f8", "#ffffff", "#1f2328", "#0969da", "#24292f", "#0969da"),
                     Set("#0d1117", "#161b22", "#e6edf3", "#58a6ff", "#010409", "#1f6feb", "#1f6feb")),

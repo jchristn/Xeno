@@ -92,9 +92,9 @@ namespace Xeno.Desktop
                 .UsePlatformDetect()
                 .With(new FontManagerOptions
                 {
-                    // Default every control to the bundled Inter so the app looks the same on Windows, macOS, and Linux
-                    // hosts that lack Inter (otherwise Avalonia falls back to the platform font, e.g. DejaVu on Ubuntu).
-                    DefaultFamilyName = "avares://Xeno.Desktop.Common/Assets/Fonts/Inter.ttf#Inter"
+                    // Default every control to the OS's own UI font (SF Pro, Segoe UI, Noto Sans/Ubuntu/Cantarell), with
+                    // the bundled Inter only when none is installed. Avalonia's own default is Helvetica on macOS.
+                    DefaultFamilyName = XenoFonts.SansFamilyName
                 })
                 .With(new MacOSPlatformOptions
                 {

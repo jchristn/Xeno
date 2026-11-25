@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-25 (alpha)
+
+0.4.0 was tagged but never published. This is the first release that ships its changes, listed under 0.4.0 below.
+
+- Every app now uses the operating system's own fonts instead of the bundled Inter: SF Pro and SF Mono on macOS, Segoe UI and Cascadia Mono or Consolas on Windows, and Noto Sans, Ubuntu, or Cantarell with DejaVu Sans Mono on Linux. The web dashboards, desktop app, tray agent, and the server's API page share one list (`XenoTypography`). Inter stays bundled as the fallback for Linux hosts without any of those fonts.
+- Lighter text. The web dashboards used weights up to 900 and now go no heavier than 600, with grayscale font smoothing on macOS. Uppercase labels get a little letter spacing.
+- Fixed: semibold text in the desktop app and tray agent was a thickened copy of the regular weight, because Avalonia could not use the weights inside the bundled variable Inter. With the system fonts, regular, medium, and semibold are real weights.
+- New default color scheme for the desktop app and tray agent: **Xeno Dusk**, purple-gray surfaces a step apart with a soft mint accent and muted status and chart colors. In dark mode the old default put a neon green on near-black purple and filled the selected sidebar item with bright green; Dusk keeps the same purple-and-green identity without the clash. Anyone on the default gets Dusk. The old colors are kept as **Xeno Classic**, and two new schemes are built in: **Slate** (neutral graphite with mint) and **Plum** (muted purple with lavender). Choose one in Settings > Appearance.
+- **Import models from providers** in the local web dashboard now fills 95% of the window. The model table takes the rest of the height with a header that stays put while you scroll, and each column has a filter box (Model, Provider, Size, Serves). **Select all** and **Select none** apply to the rows the filters show.
+- The Docker image defaults in `docker/compose.yaml` and `docker/compose.cluster.yaml` now name the current version.
+
 ## [0.4.0] - 2026-11-25 (alpha)
 
 - Advertise or unadvertise a model in one step from **Models on {provider}** in the desktop app: a provider's model row now has **Advertise** and **Unadvertise** actions. Unadvertising removes the advertisement from `client.json` without deleting the model from the provider (deleting a model still stops advertising it). Advertising is available for any provider, not only Ollama.

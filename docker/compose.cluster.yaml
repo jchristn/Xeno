@@ -27,7 +27,7 @@ name: xeno
 
 services:
   xeno-server-2:
-    image: ${XENO_SERVER_IMAGE:-jchristn77/xeno-server:v0.3.0}
+    image: ${XENO_SERVER_IMAGE:-jchristn77/xeno-server:v0.4.1}
     container_name: xeno-server-2
     ports:
       - "9001:9000"

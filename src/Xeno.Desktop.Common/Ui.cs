@@ -18,7 +18,7 @@ namespace Xeno.Desktop.Common
         /// <summary>
         /// Monospace font family used for identifiers, URLs, and logs.
         /// </summary>
-        public static readonly FontFamily Mono = new FontFamily("Menlo, Consolas, 'DejaVu Sans Mono', monospace");
+        public static readonly FontFamily Mono = new FontFamily(XenoFonts.MonoFamilyName);
 
         #endregion
 

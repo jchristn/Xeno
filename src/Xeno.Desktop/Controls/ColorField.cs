@@ -66,7 +66,7 @@ namespace Xeno.Desktop.Controls
             });
             pick.Flyout = flyout;
 
-            HexBox = new TextBox { Text = Value, Width = 92, FontFamily = new FontFamily("Menlo, Consolas, monospace") };
+            HexBox = new TextBox { Text = Value, Width = 92, FontFamily = Ui.Mono };
             AutomationProperties.SetName(HexBox, label + " hex value");
             HexBox.KeyDown += (sender, args) =>
             {

@@ -895,3 +895,46 @@ test('tables have a Columns control with narrow defaults that remembers choices'
   await page.locator('.column-picker-popover').getByRole('button', { name: 'Reset' }).click();
   await expect(page.locator('.data-panel').first().locator('thead tr').first().locator('th')).toHaveCount(7);
 });
+
+test('import models dialog fills the window and filters by column', async ({ page }) => {
+  await page.route('**/api/v1/providers**', async (route) => route.fulfill({ json: providersResponse }));
+  await page.route('**/api/v1/models**', async (route) => route.fulfill({ json: modelsResponse }));
+  await page.route('**/api/v1/providers/local-ollama/models', async (route) => route.fulfill({ json: {
+    provider: 'local-ollama',
+    reachable: true,
+    models: [
+      { name: 'llama3.2:latest', sizeBytes: 2019393189, advertised: true, looksLikeEmbeddings: false },
+      { name: 'qwen2.5-coder:32b', sizeBytes: 19851349856, advertised: false, looksLikeEmbeddings: false },
+      { name: 'nomic-embed-text:latest', sizeBytes: 274302450, advertised: false, looksLikeEmbeddings: true }
+    ]
+  } }));
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.goto('/index-local.html');
+  await page.locator('.sidebar-link', { hasText: 'Advertised Models' }).click();
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Import models from providers' })).toBeVisible();
+  const box = await dialog.boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(1366 * 0.94);
+  expect(box.height).toBeGreaterThanOrEqual(900 * 0.94);
+
+  const rows = dialog.locator('.import-models-scroll tbody tr');
+  await expect(rows).toHaveCount(3);
+  await dialog.getByPlaceholder('Filter Model').fill('QWEN');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('qwen2.5-coder:32b');
+
+  await dialog.getByPlaceholder('Filter Model').fill('');
+  await dialog.getByPlaceholder('Filter Serves').fill('embed');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('nomic-embed-text:latest');
+
+  await dialog.getByRole('button', { name: 'Select none' }).click();
+  await expect(dialog.locator('.import-models-toolbar')).toContainText('1 of 2 selected');
+
+  await dialog.getByPlaceholder('Filter Provider').fill('nothing-matches');
+  await expect(rows.first()).toContainText('No models match the filters.');
+  await dialog.getByRole('button', { name: 'Clear Filters' }).click();
+  await expect(rows).toHaveCount(3);
+});

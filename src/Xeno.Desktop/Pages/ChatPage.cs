@@ -815,7 +815,7 @@ namespace Xeno.Desktop.Pages
             string state = pending ? "needs approval" : call.Success ? "done" : call.Error != null ? "failed" : "running";
             XenoToneEnum tone = pending ? XenoToneEnum.Warning : call.Success ? XenoToneEnum.Success : call.Error != null ? XenoToneEnum.Danger : XenoToneEnum.Info;
             StackPanel body = new StackPanel { Spacing = 6 };
-            body.Children.Add(Ui.Row(new TextBlock { Text = "🔧 " + call.ToolName, FontFamily = new FontFamily("Menlo, Consolas, monospace"), VerticalAlignment = VerticalAlignment.Center }, Ui.Badge(state, tone),
+            body.Children.Add(Ui.Row(new TextBlock { Text = "🔧 " + call.ToolName, FontFamily = Ui.Mono, VerticalAlignment = VerticalAlignment.Center }, Ui.Badge(state, tone),
                 Ui.Muted(call.DurationMs > 0 ? ChatFormat.Duration(call.DurationMs) : String.Empty)));
             if (pending && turnId != null)
             {
@@ -825,7 +825,7 @@ namespace Xeno.Desktop.Pages
             }
 
             string details = "Arguments: " + call.Arguments + (call.Result != null ? "\n\nResult: " + call.Result : String.Empty) + (call.Error != null ? "\n\nError: " + call.Error : String.Empty);
-            body.Children.Add(new Expander { Header = "Details", Content = new SelectableTextBlock { Text = details, TextWrapping = TextWrapping.Wrap, FontSize = 11.5, FontFamily = new FontFamily("Menlo, Consolas, monospace") } });
+            body.Children.Add(new Expander { Header = "Details", Content = new SelectableTextBlock { Text = details, TextWrapping = TextWrapping.Wrap, FontSize = 11.5, FontFamily = Ui.Mono } });
             return new Border { BorderBrush = palette.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Background = pending ? palette.WarningSoft : palette.PanelSoft, Padding = new Thickness(10, 7), Child = body };
         }
 

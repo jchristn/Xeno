@@ -45,7 +45,7 @@ namespace Test.Shared
                             Need(failures, where, "muted/panel", c.Muted, c.Panel, 4.5);
                             Need(failures, where, "muted/panelSoft", c.Muted, c.PanelSoft, 4.5);
                             Need(failures, where, "sidebarText/sidebar", c.SidebarText, c.Sidebar, 4.5);
-                            Need(failures, where, "sidebarMuted/sidebar", c.SidebarMuted, c.Sidebar, scheme.Id == XenoColorSchemes.DefaultId ? 3.0 : 4.5);
+                            Need(failures, where, "sidebarMuted/sidebar", c.SidebarMuted, c.Sidebar, scheme.Id == XenoColorSchemes.ClassicId ? 3.0 : 4.5);
                             Need(failures, where, "activeText/active", c.SidebarActiveText, c.SidebarActive, 4.5);
                             Need(failures, where, "accent/panel", c.Accent, c.Panel, 3.0);
                             if (c.AccentText != null) Need(failures, where, "accentText/accentFill", c.AccentText, c.AccentFill, 4.5);
@@ -55,7 +55,7 @@ namespace Test.Shared
                             Need(failures, where, "info/soft", c.Info, c.InfoSoft, 3.0);
                             if (XenoRgb.Parse(c.Info).Distance(XenoRgb.Parse(c.Success)) < 60) failures.Add(where + " info " + c.Info + " looks like success " + c.Success + " (the two chart series would match)");
                             if (c.Series.Count < 5) failures.Add(where + " has only " + c.Series.Count + " chart colors.");
-                            if (scheme.Id != XenoColorSchemes.DefaultId)
+                            if (scheme.Id != XenoColorSchemes.ClassicId)
                             {
                                 XenoColorScheme copy = XenoColorSchemes.CreateCustom(scheme);
                                 foreach (string problem in XenoColorSchemes.Check(dark ? copy.Dark : copy.Light, dark)) failures.Add(where + " as custom: " + problem);
@@ -65,12 +65,22 @@ namespace Test.Shared
 
                     Check(failures.Count == 0, "Contrast failures:" + Environment.NewLine + String.Join(Environment.NewLine, failures));
                 }),
-                Case(suite, "DefaultSchemeKeepsTheOriginalColors", "The Xeno scheme resolves to the colors the desktop app has always used", () =>
+                Case(suite, "DefaultIsDuskAndClassicKeepsTheOriginalColors", "The default is Xeno Dusk, and Xeno Classic keeps the colors the desktop app used before 0.4.1", () =>
                 {
-                    XenoResolvedColors light = XenoColorSchemes.Resolve(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), false);
-                    XenoResolvedColors dark = XenoColorSchemes.Resolve(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), true);
-                    Check(light.Background == "#f7f5f9" && light.Sidebar == "#55295f" && light.SidebarActive == "#4bbf80" && light.AccentFill == XenoBrand.GreenDeep && light.AccentText == null, "Light default changed.");
-                    Check(dark.Background == "#150b18" && dark.Accent == XenoBrand.Green && dark.AccentFill == XenoBrand.GreenDeep && dark.Muted == "#b4a3bb", "Dark default changed.");
+                    XenoColorScheme dusk = XenoColorSchemes.Find(XenoColorSchemes.DefaultId);
+                    XenoResolvedColors duskLight = XenoColorSchemes.Resolve(dusk, false);
+                    XenoResolvedColors duskDark = XenoColorSchemes.Resolve(dusk, true);
+                    Check(dusk.Name == "Xeno Dusk", "The default should be named Xeno Dusk, got " + dusk.Name + ".");
+                    Check(duskLight.Background == "#f6f5f8" && duskLight.Sidebar == "#3b3243" && duskLight.Accent == "#2e7550", "Light Dusk changed.");
+                    Check(duskDark.Background == "#1a171e" && duskDark.Sidebar == "#1f1b24" && duskDark.Accent == "#7cc79b" && duskDark.SidebarActive == "#35303c", "Dark Dusk changed.");
+
+                    XenoColorScheme classic = XenoColorSchemes.Find(XenoColorSchemes.ClassicId);
+                    XenoResolvedColors light = XenoColorSchemes.Resolve(classic, false);
+                    XenoResolvedColors dark = XenoColorSchemes.Resolve(classic, true);
+                    Check(classic.Name == "Xeno Classic", "Classic scheme missing.");
+                    Check(light.Background == "#f7f5f9" && light.Sidebar == "#55295f" && light.SidebarActive == "#4bbf80" && light.AccentFill == XenoBrand.GreenDeep && light.AccentText == null, "Light classic changed.");
+                    Check(dark.Background == "#150b18" && dark.Accent == XenoBrand.Green && dark.AccentFill == XenoBrand.GreenDeep && dark.Muted == "#b4a3bb", "Dark classic changed.");
+                    Check(XenoColorSchemes.Find("slate").Name == "Slate" && XenoColorSchemes.Find("plum").Name == "Plum", "Slate and Plum should be built in.");
                 }),
                 Case(suite, "CustomSchemesAreDerivedAndChecked", "A custom scheme needs six colors, derives the rest, and reports unreadable pairs", () =>
                 {

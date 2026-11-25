@@ -10526,18 +10526,18 @@ namespace Xeno.Server
   <title>Xeno Swagger</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>
-    body { margin: 0; background: #f7f8fb; color: #1f2937; font-family: Inter, Arial, sans-serif; }
+    body { margin: 0; background: #f7f8fb; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Noto Sans", Ubuntu, Cantarell, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
     .xeno-auth-panel { display: grid; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #d9dee8; background: #ffffff; }
     .xeno-auth-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
     .xeno-auth-header h1 { margin: 0; font-size: 17px; }
     .xeno-auth-header p { margin: 0; color: #5f6b7a; font-size: 13px; }
     .xeno-auth-grid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 10px; }
-    .xeno-auth-grid label { display: grid; gap: 5px; color: #374151; font-size: 12px; font-weight: 700; }
+    .xeno-auth-grid label { display: grid; gap: 5px; color: #374151; font-size: 12px; font-weight: 600; }
     .xeno-auth-grid input { min-width: 0; height: 34px; border: 1px solid #cfd6e2; border-radius: 6px; padding: 0 9px; font: inherit; }
     .xeno-auth-actions { display: flex; align-items: center; gap: 8px; }
-    .xeno-auth-actions button { height: 34px; border: 1px solid #cfd6e2; border-radius: 6px; background: #ffffff; color: #111827; padding: 0 12px; font-weight: 700; cursor: pointer; }
+    .xeno-auth-actions button { height: 34px; border: 1px solid #cfd6e2; border-radius: 6px; background: #ffffff; color: #111827; padding: 0 12px; font-weight: 600; cursor: pointer; }
     .xeno-auth-actions button.primary { border-color: #2f6fec; background: #2f6fec; color: #ffffff; }
-    #xeno-auth-status { color: #147a3d; font-size: 12px; font-weight: 700; }
+    #xeno-auth-status { color: #147a3d; font-size: 12px; font-weight: 600; }
     @media (max-width: 1100px) { .xeno-auth-grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); } }
     @media (max-width: 640px) { .xeno-auth-grid { grid-template-columns: 1fr; } }
   </style>
