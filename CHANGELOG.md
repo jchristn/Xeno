@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- `scripts/{macos,linux,windows,wsl,wsl2}` have `run-at-startup` and `remove-from-startup`: start Xeno Agent (or, under WSL, the client worker) when you sign in, for your user only. `remove` also deletes the entry. See [scripts/README.md](scripts/README.md#start-at-sign-in).
+
 ## [0.3.0] - 2026-11-25 (alpha)
 
 - Manage a provider's models from every client front end: see what the provider has on disk right now (size, parameters, quantization, modified time, and whether each is advertised), pull a model with a progress bar, cancel a pull, and delete a model, which also stops advertising it. Open it from **Manage models** on a provider's row menu or its Local endpoint row in the web dashboard, the provider row menu or Providers button in the desktop app, or `p` on Providers or Local endpoint in the terminal app. Pull and delete work with Ollama providers; vLLM and OpenAI-compatible providers are listed only.

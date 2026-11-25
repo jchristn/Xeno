@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Remove the Xeno installation from this WSL distro: stops the client worker, quits the desktop app and the tray
-# agent, uninstalls the xeno global tool, and deletes ~/.local/share/xeno/app and the launcher entries. Succeeds
-# when nothing is installed. Your client configuration and history in ~/.xeno are kept; use factory-reset.sh to
-# delete them.
+# agent, uninstalls the xeno global tool, and deletes ~/.local/share/xeno/app, the launcher entries, and the Windows
+# Startup launcher run-at-startup.sh wrote. Succeeds when nothing is installed. Your client configuration and history
+# in ~/.xeno are kept; use factory-reset.sh to delete them.
 # WSL 2 version: removes the install in this distro only; use scripts\windows\remove.bat for Windows.
 #
 # Usage: remove.sh
@@ -65,6 +65,10 @@ do_remove() {
         rm -rf "$target"
     fi
     rm -f "$applications/xeno.desktop" "$applications/xeno-agent.desktop"
+    if wsl_startup_exists xeno-client; then
+        echo "[remove] Removing the Windows Startup launcher for this distro's client..."
+        wsl_startup_remove xeno-client || true
+    fi
     echo "[remove] Completed. Client data in $(xeno_client_home) was kept."
 }
 

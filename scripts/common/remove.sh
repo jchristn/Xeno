@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Remove the Xeno installation: stops the client worker, quits the desktop app and the tray agent, uninstalls the
 # xeno global tool, and deletes the installed apps (~/Applications/Xeno.app on macOS, ~/.local/share/xeno/app and
-# the launcher entries on Linux). Your client configuration and history in ~/.xeno are kept; use factory-reset.sh
+# the launcher entries on Linux), plus the sign-in entry run-at-startup.sh wrote. Your client configuration and history in ~/.xeno are kept; use factory-reset.sh
 # to delete them.
 #
 # Usage: remove.sh
@@ -55,6 +55,12 @@ else
         rm -rf "${TARGET}"
     fi
     rm -f "${APPLICATIONS}/xeno.desktop" "${APPLICATIONS}/xeno-agent.desktop"
+fi
+
+STARTUP_ENTRY="$(xeno_startup_entry)"
+if [ -f "${STARTUP_ENTRY}" ]; then
+    echo "[remove] Removing the sign-in entry ${STARTUP_ENTRY}"
+    rm -f "${STARTUP_ENTRY}"
 fi
 
 echo "[remove] Completed. Client data in $(xeno_client_home) was kept."

@@ -21,6 +21,7 @@ code 2. `build`, `test`, and `run-cli` pass every argument, `-h` included, on to
 | `run-desktop` | yes | yes | yes | needs an X server | needs WSLg |
 | `run-tray` | yes | yes | yes | refused (no tray) | refused (no tray) |
 | `install`, `reinstall`, `update`, `remove`, `factory-reset` | yes | yes | yes | yes | yes |
+| `run-at-startup`, `remove-from-startup` | yes | yes | yes | yes (client worker) | yes (client worker) |
 
 Platform-only helpers, which the scripts above use:
 
@@ -31,6 +32,26 @@ Platform-only helpers, which the scripts above use:
 - `scripts/windows/build-apps.bat`: builds xeno, xeno-desktop, and xeno-tray for the `run-*.bat` files.
 - `scripts/windows/local-stack.ps1`: starts and checks the background server and dashboard for `run-local.bat`.
 - `scripts/wsl/_wsl-common.sh` and `scripts/wsl2/_wsl-common.sh`: the WSL helper functions (sourced, never run).
+
+## Start at sign-in
+
+`run-at-startup` makes Xeno start when you sign in, using the apps and tool `install` put in place, so run
+`install` first. It registers only for your user account and needs no admin rights. Running it again rewrites the
+entry; `remove-from-startup` deletes it, and `remove` does too.
+
+| Platform | What starts | Entry |
+|---|---|---|
+| macOS | Xeno Agent (`~/Applications/Xeno.app`) | LaunchAgent `~/Library/LaunchAgents/ai.xenocloud.xeno.scripts-agent.plist` |
+| Linux | Xeno Agent (`~/.local/share/xeno/app/xeno-tray`) | XDG autostart entry `~/.config/autostart/xeno-tray.desktop` |
+| Windows | Xeno Agent (`%LOCALAPPDATA%\Programs\Xeno\xeno-tray.exe`) | Value `Xeno Agent` in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
+| WSL 1, WSL 2 | The client worker (`xeno connect --foreground`), since WSL has no tray | Hidden launcher `xeno-client-wsl-<distro>.vbs` in the Windows Startup folder |
+
+Xeno Agent connects the client when it starts, the same as the sign-in item the installers add. The installers' items
+use other names (`ai.xenocloud.xeno.agent` on macOS, `HKLM` on Windows), so both can exist; only one agent runs at a
+time, and `remove-from-startup` leaves the installers' items alone. On Linux the user entry has the package's file
+name, so it replaces the package's entry for you instead of starting a second agent. Autostart entries run only with
+a desktop session; for a headless Linux machine, run the client as a service instead (Start On Boot in
+[getting-started/LINUX_CLIENT.md](../getting-started/LINUX_CLIENT.md)).
 
 ## Run from source
 
@@ -88,7 +109,9 @@ dashboard it started are stopped. `run-local.sh` writes their output to:
 | `install.sh` | Installs `xeno` as a global .NET tool, then installs the desktop app and the tray agent (details below). An existing install is replaced. |
 | `reinstall.sh` | Does what `remove.sh` does, then what `install.sh` does. It checks its arguments first, so a typo removes nothing. |
 | `update.sh` | Stops the client worker, reinstalls, and starts the worker again if it was running. |
-| `remove.sh` | Stops the worker, quits the apps, and uninstalls the tool and the apps. Keeps `~/.xeno`. Succeeds when nothing is installed, and fails when the tool cannot be uninstalled (for example while `xeno tui` runs on Windows). Without `dotnet`, it still removes the apps and says the tool uninstall was skipped. |
+| `remove.sh` | Stops the worker, quits the apps, and uninstalls the tool and the apps, and removes the entry `run-at-startup.sh` added. Keeps `~/.xeno`. Succeeds when nothing is installed, and fails when the tool cannot be uninstalled (for example while `xeno tui` runs on Windows). Without `dotnet`, it still removes the apps and says the tool uninstall was skipped. |
+| `run-at-startup.sh [--now]` | Starts Xeno Agent when you sign in; the agent connects the client, like the installers' sign-in item. Run `install.sh` first. `--now` also starts it now. See [Start at sign-in](#start-at-sign-in). |
+| `remove-from-startup.sh` | Undoes `run-at-startup.sh`. A running agent or client keeps running. Succeeds when nothing was registered. |
 | `factory-reset.sh [--all] [-y]` | Deletes the client's history, logs, state, and preferences but keeps `client.json`. With `--all`, also deletes `client.json`. |
 | `macos/build-app.sh [--install]` | Builds `Xeno.app` in `artifacts/macos`. With `--install`, also copies it to `~/Applications`. |
 

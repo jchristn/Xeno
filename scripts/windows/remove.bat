@@ -1,8 +1,8 @@
 @echo off
 REM Remove the Xeno installation: stops the client worker, quits the desktop app and the tray agent, uninstalls the
-REM xeno global tool, and deletes %LOCALAPPDATA%\Programs\Xeno and the Start menu shortcuts. Succeeds when nothing is
-REM installed. Your client configuration and history in %USERPROFILE%\.xeno are kept; use factory-reset.bat to delete
-REM them.
+REM xeno global tool, and deletes %LOCALAPPDATA%\Programs\Xeno, the Start menu shortcuts, and the sign-in entry
+REM run-at-startup.bat set. Succeeds when nothing is installed. Your client configuration and history in
+REM %USERPROFILE%\.xeno are kept; use factory-reset.bat to delete them.
 REM
 REM Usage: remove.bat
 setlocal
@@ -41,6 +41,11 @@ if exist "%XENO_INSTALL_DIR%" goto :apps_locked
 :shortcuts
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Xeno.lnk" >nul 2>nul
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Xeno Agent.lnk" >nul 2>nul
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "Xeno Agent" >nul 2>nul
+if errorlevel 1 goto :startup_done
+echo [remove] Removing the sign-in entry "Xeno Agent" from HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "Xeno Agent" /f >nul 2>nul
+:startup_done
 
 echo [remove] Completed. Client data in %XENO_HOME_DIR% was kept.
 endlocal & exit /b 0

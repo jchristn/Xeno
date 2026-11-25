@@ -103,6 +103,22 @@ xeno_linux_install_dir() {
     echo "${XDG_DATA_HOME:-${HOME}/.local/share}/xeno/app"
 }
 
+# LaunchAgent label run-at-startup.sh uses on macOS. It differs from the installers' ai.xenocloud.xeno.agent so the
+# two never collide in launchd.
+xeno_startup_label() {
+    echo "ai.xenocloud.xeno.scripts-agent"
+}
+
+# The sign-in entry run-at-startup.sh writes: a LaunchAgent plist on macOS, an XDG autostart entry on Linux. On Linux
+# it has the package's file name (xeno-tray.desktop), so it replaces the package's entry for this user, not doubles it.
+xeno_startup_entry() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "${HOME}/Library/LaunchAgents/$(xeno_startup_label).plist"
+    else
+        echo "${XDG_CONFIG_HOME:-${HOME}/.config}/autostart/xeno-tray.desktop"
+    fi
+}
+
 # The client home directory currently in effect.
 xeno_client_home() {
     echo "${XENO_CLIENT_HOME:-${HOME}/.xeno}"

@@ -182,7 +182,7 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
     bin_dir = temp / 'bin'
     bin_dir.mkdir()
     for name in ['dotnet', 'uname', 'pgrep', 'pkill', 'npm', 'curl', 'ip', 'cmd.exe', 'wslpath', 'wscript.exe',
-                 'apt-get', 'apt-cache']:
+                 'apt-get', 'apt-cache', 'launchctl']:
         (bin_dir / name).write_text(FAKE)
         (bin_dir / name).chmod(0o755)
     # sudo -v (refresh the credentials) succeeds and is logged; anything else runs the command.
@@ -272,7 +272,8 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
                 check(p.returncode == 0 and 'Usage:' in p.stdout and not calls, plat, script, flag, p.stdout, p.stderr)
     strict = {'install': ['--bogus'], 'reinstall': ['--bogus'], 'update': ['--bogus'], 'remove': ['extra'],
               'factory-reset': ['--bogus'], 'run-client': ['--bogus'], 'run-dashboard': ['extra'],
-              'run-server': ['a.json', 'extra'], 'run-local': None}
+              'run-server': ['a.json', 'extra'], 'run-local': None, 'run-at-startup': ['--bogus'],
+              'remove-from-startup': ['extra']}
     for plat in UNIX:
         for script, bad in strict.items():
             for flag in ['-h', '--help']:
@@ -577,6 +578,54 @@ with tempfile.TemporaryDirectory(prefix='xeno scripts ') as temp:
         check(p.returncode == 0 and sorted(x.name for x in client.iterdir()) == ['client.json'], plat, p.stdout, p.stderr)
         p, calls = run(plat, 'factory-reset', '--all', '--yes')
         check(p.returncode == 0 and not client.exists(), plat, p.stderr)
+
+    # run-at-startup and remove-from-startup: refuse without an install, write and delete the sign-in entry, and remove
+    # (the whole install) deletes it too.
+    def make_exec(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(FAKE)
+        path.chmod(0o755)
+    for plat in UNIX:
+        fresh_home()
+        p, calls = run(plat, 'run-at-startup')
+        check(p.returncode == 1 and 'run-at-startup] ERROR' in p.stderr and 'install.sh first' in p.stderr, plat, p.stderr)
+        if plat == 'macos':
+            make_exec(home / 'Applications/Xeno.app/Contents/MacOS/xeno-tray')
+            entry = home / 'Library/LaunchAgents/ai.xenocloud.xeno.scripts-agent.plist'
+            expected = str(home / 'Applications/Xeno.app/Contents/MacOS/xeno-tray')
+        elif plat == 'linux':
+            make_exec(home / '.local/share/xeno/app/xeno-tray')
+            entry = home / '.config/autostart/xeno-tray.desktop'
+            expected = 'Exec=' + str(home / '.local/share/xeno/app/xeno-tray')
+        else:
+            make_exec(home / '.dotnet/tools/xeno')
+            entry = temp / 'appdata/Microsoft/Windows/Start Menu/Programs/Startup/xeno-client-wsl-Test.vbs'
+            expected = "'connect' '--foreground'"
+        p, calls = run(plat, 'run-at-startup')
+        check(p.returncode == 0 and entry.exists() and expected in entry.read_text(), plat, p.stdout, p.stderr)
+        if plat.startswith('wsl'):
+            text = entry.read_text()
+            check("'XENO_AGENT_AUTOSTART=0'" in text and 'wsl.exe -d ""Test""' in text and entry.read_bytes().endswith(b'\r\n'), plat, text)
+        if plat == 'macos':
+            check('<string>ai.xenocloud.xeno.scripts-agent</string>' in entry.read_text() and not calls, plat, calls)
+            p, calls = run(plat, 'run-at-startup', '--now')
+            check(p.returncode == 0 and [c[:2] for c in calls if c[0] == 'launchctl'] == [['launchctl', 'bootout'], ['launchctl', 'bootstrap']], plat, calls)
+        if plat.startswith('wsl'):
+            p, calls = run(plat, 'run-at-startup', '--now')
+            check(p.returncode == 0 and ['tool:xeno', 'stop'] in [c[:2] for c in calls]
+                  and any(c[0] == 'wscript.exe' for c in calls), plat, calls, p.stderr)
+        p, calls = run(plat, 'remove-from-startup')
+        check(p.returncode == 0 and not entry.exists() and 'no longer starts' in p.stdout, plat, p.stdout, p.stderr)
+        p, calls = run(plat, 'remove-from-startup')
+        check(p.returncode == 0 and 'Nothing to remove' in p.stdout, plat, p.stdout, p.stderr)
+        p, calls = run(plat, 'run-at-startup')
+        check(entry.exists(), plat)
+        p, calls = run(plat, 'remove')
+        check(p.returncode == 0 and not entry.exists(), plat, p.stdout, p.stderr)
+    for name in ['run-at-startup', 'remove-from-startup', 'remove']:
+        text = (root / f'scripts/windows/{name}.bat').read_text()
+        check('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' in text and '"Xeno Agent"' in text, name)
+    check('reg add "%RUN_KEY%" /v "Xeno Agent"' in (root / 'scripts/windows/run-at-startup.bat').read_text())
 
     # macOS: install builds and installs Xeno.app (needs the macOS image tools).
     if platform.system() == 'Darwin' and shutil.which('iconutil') and shutil.which('sips'):
