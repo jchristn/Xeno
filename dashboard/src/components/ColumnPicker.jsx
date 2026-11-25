@@ -78,12 +78,15 @@ export function useColumnVisibility(allKeys, defaultKeys, tableId) {
 export default function ColumnPicker({ columns, onChange, onReset, visibleKeys }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const [position, setPosition] = useState(null);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      setPosition(null);
+      return undefined;
+    }
 
     function updatePosition() {
       const rect = triggerRef.current?.getBoundingClientRect();
@@ -147,7 +150,7 @@ export default function ColumnPicker({ columns, onChange, onReset, visibleKeys }
         <span className="column-picker-count">{shown}/{columns.length}</span>
       </button>
       {open ? createPortal(
-        <div aria-label={t('columns')} className="column-picker-popover" data-row-click-ignore="true" ref={menuRef} role="dialog" style={{ left: position.left, top: position.top }}>
+        <div aria-label={t('columns')} className="column-picker-popover" data-row-click-ignore="true" ref={menuRef} role="dialog" style={position ? { left: position.left, top: position.top } : { left: 0, top: 0, visibility: 'hidden' }}>
           <div className="column-picker-heading">
             <strong>{t('columns')}</strong>
             <span>{t('columnsShown', { shown, total: columns.length })}</span>

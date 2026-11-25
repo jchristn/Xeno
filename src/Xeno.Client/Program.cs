@@ -5087,7 +5087,7 @@ namespace Xeno.Client
             Console.WriteLine("      Delete one configured provider endpoint.");
             Console.WriteLine("  xeno provider add --name <name> --type <api-type> --endpoint <url> [--credential <value>] [--allow-model-management]");
             Console.WriteLine("      Add an Ollama, OpenAI, Gemini, or compatible endpoint.");
-            Console.WriteLine("      --allow-model-management permits dashboard pull/delete commands for Ollama providers.");
+            Console.WriteLine("      --allow-model-management lets the Xeno server pull and delete models on this Ollama provider. Local management (xeno provider pull/delete-model) always works.");
             Console.WriteLine("  xeno provider update --name <name> [--new-name <name>] [--type <api-type>] [--endpoint <url>] [--timeout <ms>] [--credential <value>|--clear-credential] [--allow-model-management|--no-model-management]");
             Console.WriteLine("      Update a configured provider endpoint and request inventory re-advertisement when connected.");
             Console.WriteLine("  Routing and concurrency options (add and update):");
