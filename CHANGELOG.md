@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25 (alpha)
+
+- Advertise or unadvertise a model in one step from **Models on {provider}** in the desktop app: a provider's model row now has **Advertise** and **Unadvertise** actions. Unadvertising removes the advertisement from `client.json` without deleting the model from the provider (deleting a model still stops advertising it). Advertising is available for any provider, not only Ollama.
+- Fixed: the desktop app froze ("not responding") and showed `SQLite Error 5: 'database is locked'`. The client worker, desktop app, and tray agent share one local SQLite database, and a read in one could block a write in another for up to half a minute before failing. The shared database now uses WAL journaling and a busy timeout, so reading and writing happen at the same time.
+- Fixed: a desktop table's columns no longer line up with their rows after the **Columns** control was added. The header and the rows now reserve the same space for the Columns control, so every column lines up again. This fixes every table in the desktop app, including **Models on {provider}**.
+- The sidebar's hovered item now has a clear highlight with readable text in both light and dark modes. It previously used the toolkit default, which barely showed against the dark sidebar and turned the item's text dark.
+- Softened the default purple-and-green palette: a lighter sidebar bar and a calmer green for the selected item, so the two brand colors sit closer together.
+- Bundled the Inter font in the desktop app, the tray agent, and the web dashboards, so Xeno renders the same on every operating system, including Linux hosts that do not ship Inter (for example an NVIDIA DGX Spark). Before, those fell back to a different system font and looked noticeably different from macOS and Windows.
 - `scripts/{macos,linux,windows,wsl,wsl2}` have `run-at-startup` and `remove-from-startup`: start Xeno Agent (or, under WSL, the client worker) when you sign in, for your user only. `remove` also deletes the entry. See [scripts/README.md](scripts/README.md#start-at-sign-in).
 
 ## [0.3.0] - 2026-11-25 (alpha)

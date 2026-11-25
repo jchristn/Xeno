@@ -316,7 +316,9 @@ namespace Xeno.Client.Presentation
                 Accent = XenoBrand.GreenDeep, AccentFill = XenoBrand.GreenDeep, ThemeAccentText = true,
                 Success = XenoBrand.GreenDeep, SuccessSoft = "#e3f8eb", Warning = "#a15d00", WarningSoft = "#fff4df", Danger = "#c73737", DangerSoft = "#fdecec",
                 Info = XenoBrand.Purple, InfoSoft = "#f1e8f4",
-                Sidebar = XenoBrand.Purple, SidebarText = "#efe6f2", SidebarMuted = "#b9a6c1", SidebarActive = XenoBrand.Green, SidebarActiveText = XenoBrand.PurpleInk,
+                // A lighter purple bar and a calmer green for the selected item, so the two brand hues sit closer
+                // together instead of the neon green chip on near-black purple.
+                Sidebar = "#55295f", SidebarText = "#efe6f2", SidebarMuted = "#b9a6c1", SidebarActive = "#4bbf80", SidebarActiveText = XenoBrand.PurpleInk,
                 Series = new List<string> { XenoBrand.GreenShade, XenoBrand.Purple, "#a15d00", "#0f6e8f", "#c73737", XenoBrand.Green }
             };
             XenoColorSet xenoDark = new XenoColorSet
@@ -325,7 +327,8 @@ namespace Xeno.Client.Presentation
                 Accent = XenoBrand.Green, AccentFill = XenoBrand.GreenDeep, ThemeAccentText = true,
                 Success = XenoBrand.Green, SuccessSoft = "#123a22", Warning = "#fbbf24", WarningSoft = "#412f15", Danger = "#f87171", DangerSoft = "#442121",
                 Info = XenoBrand.Lavender, InfoSoft = "#352040",
-                Sidebar = XenoBrand.PurpleDeep, SidebarText = "#e6dbea", SidebarMuted = "#a48fad", SidebarActive = XenoBrand.Green, SidebarActiveText = XenoBrand.PurpleInk,
+                // Calmer green for the selected item, to soften the green-on-purple contrast in the sidebar.
+                Sidebar = XenoBrand.PurpleDeep, SidebarText = "#e6dbea", SidebarMuted = "#a48fad", SidebarActive = "#4bbf80", SidebarActiveText = XenoBrand.PurpleInk,
                 Series = new List<string> { XenoBrand.Green, XenoBrand.Lavender, "#fbbf24", "#38bdf8", "#f87171", XenoBrand.GreenShade }
             };
 

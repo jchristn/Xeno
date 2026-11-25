@@ -5,11 +5,13 @@ namespace Xeno.Desktop
     using System.Linq;
     using Avalonia;
     using Avalonia.Controls;
+    using Avalonia.Controls.Presenters;
     using Avalonia.Controls.Shapes;
     using Avalonia.Input;
     using Avalonia.Layout;
     using Avalonia.Media;
     using Avalonia.Media.Imaging;
+    using Avalonia.Styling;
     using Avalonia.Threading;
     using Xeno.Client.Hosting;
     using Xeno.Client.Presentation;
@@ -259,6 +261,7 @@ namespace Xeno.Desktop
                         BorderThickness = new Thickness(0),
                         Foreground = palette.SidebarText
                     };
+                    button.Classes.Add("nav");
                     ToolTip.SetTip(button, page.Description);
                     button.Click += (sender, args) => Navigate(target);
                     _NavButtons[target] = button;
@@ -267,7 +270,45 @@ namespace Xeno.Desktop
             }
 
             sidebar.Children.Add(new ScrollViewer { Content = nav });
-            return new Border { Background = palette.Sidebar, Child = sidebar };
+            Border host = new Border { Background = palette.Sidebar, Child = sidebar };
+            AddNavStateStyles(host.Styles, palette);
+            return host;
+        }
+
+        // The sidebar nav items are plain Buttons, so without these their hover and pressed look comes from the Fluent
+        // theme, which is tuned for light/dark surfaces and not for the dark sidebar: the highlight barely shows and the
+        // text turns dark. These styles give an unselected item a clearly lifted sidebar-tinted highlight with the
+        // sidebar's own text color, and keep a selected item on its active colors while hovered.
+        private static void AddNavStateStyles(Styles styles, XenoPalette palette)
+        {
+            Color sidebar = ((ISolidColorBrush)palette.Sidebar).Color;
+            Color text = ((ISolidColorBrush)palette.SidebarText).Color;
+            IBrush hover = new SolidColorBrush(Mix(sidebar, text, 0.14));
+            IBrush pressed = new SolidColorBrush(Mix(sidebar, text, 0.22));
+
+            void Add(bool active, string state, IBrush background, IBrush foreground)
+            {
+                Style style = new Style(selector =>
+                {
+                    Selector button = selector.OfType<Button>().Class("nav");
+                    button = active ? button.Class("active") : button.Not(inner => inner.Class("active"));
+                    return button.Class(state).Template().OfType<ContentPresenter>().Name("PART_ContentPresenter");
+                });
+                style.Setters.Add(new Setter(ContentPresenter.BackgroundProperty, background));
+                style.Setters.Add(new Setter(ContentPresenter.ForegroundProperty, foreground));
+                styles.Add(style);
+            }
+
+            Add(false, ":pointerover", hover, palette.SidebarText);
+            Add(false, ":pressed", pressed, palette.SidebarText);
+            Add(true, ":pointerover", palette.SidebarActive, palette.SidebarActiveText);
+            Add(true, ":pressed", palette.SidebarActive, palette.SidebarActiveText);
+        }
+
+        private static Color Mix(Color first, Color second, double amount)
+        {
+            byte Blend(byte from, byte to) => (byte)Math.Round(from + (to - from) * amount);
+            return Color.FromRgb(Blend(first.R, second.R), Blend(first.G, second.G), Blend(first.B, second.B));
         }
 
         private Border BuildStatusCard(XenoPalette palette)
@@ -367,6 +408,8 @@ namespace Xeno.Desktop
                 pair.Value.Background = active ? palette.SidebarActive : Brushes.Transparent;
                 pair.Value.Foreground = active ? palette.SidebarActiveText : palette.SidebarText;
                 pair.Value.FontWeight = active ? FontWeight.SemiBold : FontWeight.Normal;
+                if (active && !pair.Value.Classes.Contains("active")) pair.Value.Classes.Add("active");
+                else if (!active) pair.Value.Classes.Remove("active");
             }
         }
 

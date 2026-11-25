@@ -3,6 +3,7 @@ namespace Xeno.Desktop
     using System;
     using System.Threading;
     using Avalonia;
+    using Avalonia.Media;
     using Xeno.Client.Hosting;
     using Xeno.Client.Presentation;
     using Xeno.Client.Services;
@@ -89,6 +90,12 @@ namespace Xeno.Desktop
         {
             return AppBuilder.Configure<App>()
                 .UsePlatformDetect()
+                .With(new FontManagerOptions
+                {
+                    // Default every control to the bundled Inter so the app looks the same on Windows, macOS, and Linux
+                    // hosts that lack Inter (otherwise Avalonia falls back to the platform font, e.g. DejaVu on Ubuntu).
+                    DefaultFamilyName = "avares://Xeno.Desktop.Common/Assets/Fonts/Inter.ttf#Inter"
+                })
                 .With(new MacOSPlatformOptions
                 {
                     ShowInDock = true,

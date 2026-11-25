@@ -3,7 +3,7 @@
   <!-- The one place the Xeno version is set. Every project under src/ inherits it, the Publisher names installers
        from it, and the release workflow checks the tag against it. The SDKs under src/sdk set their own versions. -->
   <PropertyGroup>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
   </PropertyGroup>
 
 </Project>

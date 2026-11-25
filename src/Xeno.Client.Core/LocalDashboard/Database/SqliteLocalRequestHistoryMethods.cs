@@ -46,9 +46,8 @@ namespace Xeno.Client.LocalDashboard.Database
                 ? "Data Source=" + filename + ";Pooling=False;Foreign Keys=True;"
                 : _Settings.ConnectionString;
 
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = SchemaSql();
@@ -66,9 +65,8 @@ namespace Xeno.Client.LocalDashboard.Database
             ArgumentNullException.ThrowIfNull(settings);
             token.ThrowIfCancellationRequested();
             int maxBodyBytes = Math.Max(0, settings.MaxBodyBytes);
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
                     await UpsertMainAsync(connection, transaction, entry, token).ConfigureAwait(false);
@@ -119,9 +117,8 @@ namespace Xeno.Client.LocalDashboard.Database
         {
             token.ThrowIfCancellationRequested();
             List<LocalRequestHistoryEntry> entries = new List<LocalRequestHistoryEntry>();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT * FROM local_request_history ORDER BY received_utc DESC LIMIT $limit;";
@@ -150,9 +147,8 @@ namespace Xeno.Client.LocalDashboard.Database
         {
             if (String.IsNullOrWhiteSpace(id)) return null;
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 LocalRequestHistoryEntry? entry = null;
                 using (SqliteCommand command = connection.CreateCommand())
                 {
@@ -174,9 +170,8 @@ namespace Xeno.Client.LocalDashboard.Database
         {
             if (String.IsNullOrWhiteSpace(id)) return false;
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "DELETE FROM local_request_history WHERE id = $id;";
@@ -191,9 +186,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task<int> DeleteAllAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "DELETE FROM local_request_history;";
@@ -208,9 +202,8 @@ namespace Xeno.Client.LocalDashboard.Database
             token.ThrowIfCancellationRequested();
             int safeBucketMinutes = Math.Max(1, bucketMinutes);
             List<LocalRequestHistorySummaryBucket> buckets = CreateBuckets(fromUtc, toUtc, safeBucketMinutes);
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT received_utc, outcome FROM local_request_history WHERE received_utc >= $fromUtc AND received_utc < $toUtc;";
@@ -238,9 +231,8 @@ namespace Xeno.Client.LocalDashboard.Database
         /// <inheritdoc />
         public async IAsyncEnumerable<UsageRecord> EnumerateServedUsageAsync(DateTime fromUtc, DateTime toUtc, [EnumeratorCancellation] CancellationToken token)
         {
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT h.received_utc, h.model_name, h.provider_name, h.status_code, h.outcome, h.duration_ms, t.duration_ms AS t_duration, t.time_to_headers_ms, t.time_to_first_byte_ms, t.prompt_tokens, t.completion_tokens, t.total_tokens "
@@ -270,9 +262,8 @@ namespace Xeno.Client.LocalDashboard.Database
         {
             ArgumentNullException.ThrowIfNull(records);
             int added = 0;
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
                     foreach (LocalInferenceRequestRecord record in records)
@@ -315,9 +306,8 @@ namespace Xeno.Client.LocalDashboard.Database
         /// <inheritdoc />
         public async IAsyncEnumerable<UsageRecord> EnumerateLocalInferenceUsageAsync(DateTime fromUtc, DateTime toUtc, [EnumeratorCancellation] CancellationToken token)
         {
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT received_utc, model, route, provider, status_code, fallback, latency_ms, first_byte_ms, queued_ms, prompt_tokens, completion_tokens FROM local_inference_requests WHERE received_utc >= $fromUtc AND received_utc < $toUtc;";
@@ -338,9 +328,8 @@ namespace Xeno.Client.LocalDashboard.Database
         /// <inheritdoc />
         public async Task<int> PruneLocalInferenceAsync(DateTime cutoffUtc, CancellationToken token)
         {
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "DELETE FROM local_inference_requests WHERE received_utc < $cutoff;";
@@ -374,9 +363,8 @@ namespace Xeno.Client.LocalDashboard.Database
         {
             token.ThrowIfCancellationRequested();
             LocalDashboardStatisticsResponse response = new LocalDashboardStatisticsResponse();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
@@ -412,9 +400,8 @@ FROM local_request_history;
         {
             ArgumentNullException.ThrowIfNull(providers);
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
                     using (SqliteCommand deleteCommand = connection.CreateCommand())
@@ -459,9 +446,8 @@ VALUES
         {
             ArgumentNullException.ThrowIfNull(providers);
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
                     using (SqliteCommand deleteCommand = connection.CreateCommand())
@@ -509,9 +495,8 @@ VALUES
         {
             if (String.IsNullOrWhiteSpace(key)) throw new ArgumentException("Metadata key is required.", nameof(key));
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = """
@@ -534,9 +519,8 @@ ON CONFLICT(key) DO UPDATE SET
         {
             if (String.IsNullOrWhiteSpace(key)) return null;
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT value FROM local_dashboard_metadata WHERE key = $key;";

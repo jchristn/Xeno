@@ -3,6 +3,7 @@ namespace Xeno.Tray
     using System;
     using Avalonia;
     using Avalonia.Controls;
+    using Avalonia.Media;
     using Xeno.Client.Hosting;
     using Xeno.Desktop.Common;
 
@@ -49,6 +50,12 @@ namespace Xeno.Tray
         {
             return AppBuilder.Configure<App>()
                 .UsePlatformDetect()
+                .With(new FontManagerOptions
+                {
+                    // Match the desktop app: default to the bundled Inter so the agent's windows render the same on
+                    // every OS, including Linux hosts that do not ship Inter.
+                    DefaultFamilyName = "avares://Xeno.Desktop.Common/Assets/Fonts/Inter.ttf#Inter"
+                })
                 .With(new MacOSPlatformOptions { ShowInDock = false })
                 .LogToTrace();
         }

@@ -12,6 +12,7 @@ namespace Xeno.Client.Chat
     using System.Threading.Tasks;
     using Microsoft.Data.Sqlite;
     using SQLitePCL;
+    using Xeno.Client.LocalDashboard.Database;
     using Xeno.Core.Helpers;
 
     /// <summary>
@@ -488,17 +489,7 @@ namespace Xeno.Client.Chat
         private async Task<SqliteConnection> OpenAsync(CancellationToken token)
         {
             if (String.IsNullOrEmpty(_ConnectionString)) throw new InvalidOperationException("The chat store is not initialized.");
-            SqliteConnection connection = new SqliteConnection(_ConnectionString);
-            try
-            {
-                await connection.OpenAsync(token).ConfigureAwait(false);
-                return connection;
-            }
-            catch
-            {
-                connection.Dispose();
-                throw;
-            }
+            return await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false);
         }
 
         private static async Task<int> ExecuteAsync(SqliteConnection connection, SqliteTransaction? transaction, string sql, Action<SqliteCommand>? bind, CancellationToken token)

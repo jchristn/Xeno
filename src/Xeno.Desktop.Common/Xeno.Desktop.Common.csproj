@@ -27,4 +27,10 @@
     <EmbeddedResource Include="..\..\assets\logo.ico" LogicalName="Xeno.Desktop.Common.logo.ico" />
   </ItemGroup>
 
+  <!-- Inter (SIL Open Font License) is bundled so the desktop app and tray render the same on every OS, including
+       Linux hosts (e.g. the DGX Spark) that do not ship Inter or a Segoe/SF-like UI font. -->
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\Fonts\Inter.ttf" />
+  </ItemGroup>
+
 </Project>

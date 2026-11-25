@@ -38,9 +38,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task InitializeAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = SchemaSql();
@@ -57,9 +56,8 @@ namespace Xeno.Client.LocalDashboard.Database
             token.ThrowIfCancellationRequested();
             ClientTelemetrySampleRecord record = BuildRecord(snapshot);
             string? snapshotJson = settings.PersistRawSnapshot ? JsonUtil.Serialize(snapshot, true) : null;
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteTransaction transaction = connection.BeginTransaction())
                 {
                     using (SqliteCommand command = connection.CreateCommand())
@@ -92,9 +90,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task<ClientTelemetrySampleDetail?> ReadLatestAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT * FROM local_telemetry_samples ORDER BY collected_utc DESC LIMIT 1;";
@@ -118,9 +115,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task<ClientTelemetrySampleDetail?> ReadDetailAsync(string id, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT * FROM local_telemetry_samples WHERE id = $id LIMIT 1;";
@@ -150,9 +146,8 @@ namespace Xeno.Client.LocalDashboard.Database
             DateTime fromUtc = request.FromUtc ?? toUtc.AddHours(-1);
             string metricColumn = MetricColumn(request.Metric);
             ClientTelemetrySearchResult result = new ClientTelemetrySearchResult();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand countCommand = connection.CreateCommand())
                 {
                     countCommand.CommandText = SearchSql("COUNT(*)", metricColumn, request, false);
@@ -190,9 +185,8 @@ namespace Xeno.Client.LocalDashboard.Database
             int bucketMinutes = Math.Clamp(request.BucketMinutes, 1, 1440);
             string metricColumn = MetricColumn(request.Metric);
             List<ClientTelemetryRollupBucket> buckets = BuildEmptyBuckets(fromUtc, toUtc, bucketMinutes);
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT collected_utc, " + metricColumn + " AS metric FROM local_telemetry_samples WHERE collected_utc >= $fromUtc AND collected_utc < $toUtc AND " + metricColumn + " IS NOT NULL ORDER BY collected_utc ASC;";
@@ -218,9 +212,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task<bool> DeleteAsync(string id, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "DELETE FROM local_telemetry_samples WHERE id = $id;";
@@ -234,9 +227,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task<int> DeleteAllAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "DELETE FROM local_telemetry_samples;";
@@ -249,9 +241,8 @@ namespace Xeno.Client.LocalDashboard.Database
         public async Task<int> DeleteOlderThanAsync(DateTime olderThanUtc, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "DELETE FROM local_telemetry_samples WHERE collected_utc < $olderThanUtc;";
@@ -272,9 +263,8 @@ namespace Xeno.Client.LocalDashboard.Database
                 CollectionIntervalMs = settings.CollectionIntervalMs,
                 RetentionDays = settings.RetentionDays
             };
-            using (SqliteConnection connection = new SqliteConnection(_ConnectionString))
+            using (SqliteConnection connection = await LocalSqliteConnection.OpenAsync(_ConnectionString, token).ConfigureAwait(false))
             {
-                await connection.OpenAsync(token).ConfigureAwait(false);
                 using (SqliteCommand command = connection.CreateCommand())
                 {
                     command.CommandText = "SELECT COUNT(*) AS samples, MIN(collected_utc) AS oldest, MAX(collected_utc) AS newest FROM local_telemetry_samples;";

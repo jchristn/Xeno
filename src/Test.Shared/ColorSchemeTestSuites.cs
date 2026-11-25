@@ -69,7 +69,7 @@ namespace Test.Shared
                 {
                     XenoResolvedColors light = XenoColorSchemes.Resolve(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), false);
                     XenoResolvedColors dark = XenoColorSchemes.Resolve(XenoColorSchemes.Find(XenoColorSchemes.DefaultId), true);
-                    Check(light.Background == "#f7f5f9" && light.Sidebar == XenoBrand.Purple.ToLowerInvariant() && light.SidebarActive == XenoBrand.Green && light.AccentFill == XenoBrand.GreenDeep && light.AccentText == null, "Light default changed.");
+                    Check(light.Background == "#f7f5f9" && light.Sidebar == "#55295f" && light.SidebarActive == "#4bbf80" && light.AccentFill == XenoBrand.GreenDeep && light.AccentText == null, "Light default changed.");
                     Check(dark.Background == "#150b18" && dark.Accent == XenoBrand.Green && dark.AccentFill == XenoBrand.GreenDeep && dark.Muted == "#b4a3bb", "Dark default changed.");
                 }),
                 Case(suite, "CustomSchemesAreDerivedAndChecked", "A custom scheme needs six colors, derives the rest, and reports unreadable pairs", () =>

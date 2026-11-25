@@ -191,12 +191,47 @@ namespace Xeno.Desktop.Dialogs
             {
                 new XenoRowAction<ProviderInventoryRow>("Copy Name", item => _ = XenoClipboard.CopyAsync(this, item.Name))
             };
+            if (row.IsAdvertised)
+            {
+                actions.Add(new XenoRowAction<ProviderInventoryRow>("Unadvertise", item => _ = SetAdvertisedAsync(item, false)));
+            }
+            else
+            {
+                actions.Add(new XenoRowAction<ProviderInventoryRow>("Advertise", item => _ = SetAdvertisedAsync(item, true)));
+            }
+
             if (_Inventory != null && _Inventory.CanDelete)
             {
                 actions.Add(new XenoRowAction<ProviderInventoryRow>("Delete...", item => _ = DeleteAsync(item)) { Destructive = true });
             }
 
             return actions;
+        }
+
+        private async Task SetAdvertisedAsync(ProviderInventoryRow row, bool advertise)
+        {
+            _Error.IsVisible = false;
+            try
+            {
+                if (advertise)
+                {
+                    await _Workspace.AddModelAsync(_Provider, row.Name, true, false, CancellationToken.None).ConfigureAwait(true);
+                    _Report(row.Name + " is now advertised on " + _Provider + ".");
+                }
+                else
+                {
+                    await _Workspace.DeleteModelAsync(_Provider, row.Name, CancellationToken.None).ConfigureAwait(true);
+                    _Report(row.Name + " is no longer advertised on " + _Provider + ".");
+                }
+
+                _Changed();
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is KeyNotFoundException || ex is NotSupportedException)
+            {
+                ShowError(ex.Message);
+            }
+
+            await LoadAsync().ConfigureAwait(true);
         }
 
         private void StartPullFromButton()

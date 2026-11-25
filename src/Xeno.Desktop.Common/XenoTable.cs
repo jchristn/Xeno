@@ -60,6 +60,8 @@ namespace Xeno.Desktop.Common
 
         #region Private-Members
 
+        private const double ColumnsGutterWidth = 96;
+
         private readonly List<XenoTableColumn<TRow>> _Columns;
         private readonly string _TableId;
         private List<XenoTableColumn<TRow>> _Visible = new List<XenoTableColumn<TRow>>();
@@ -98,32 +100,29 @@ namespace Xeno.Desktop.Common
             Background = palette.Panel;
             ClipToBounds = true;
 
-            ApplyColumns(_Header);
-            BuildHeader();
             _ColumnsButton = new Button
             {
                 Content = XenoTableColumns.ControlText,
                 FontSize = 11,
                 Padding = new Thickness(8, 1),
-                Margin = new Thickness(8, -2, -4, -2),
+                Margin = new Thickness(8, 0, 0, 0),
                 Background = Brushes.Transparent,
                 Foreground = palette.Muted,
                 BorderThickness = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center
             };
             ToolTip.SetTip(_ColumnsButton, "Choose which columns this table shows.");
             _ColumnsButton.Click += (sender, args) => ShowColumnChooser();
-            DockPanel headerRow = new DockPanel();
-            DockPanel.SetDock(_ColumnsButton, Dock.Right);
-            headerRow.Children.Add(_ColumnsButton);
-            headerRow.Children.Add(_Header);
+            ApplyColumns(_Header);
+            BuildHeader();
             Border headerHost = new Border
             {
                 Background = palette.PanelSoft,
                 BorderBrush = palette.Border,
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(12, 8),
-                Child = headerRow
+                Child = _Header
             };
 
             _List.Background = Brushes.Transparent;
@@ -315,6 +314,10 @@ namespace Xeno.Desktop.Common
             {
                 grid.ColumnDefinitions.Add(new ColumnDefinition(column.IsStar ? new GridLength(column.Width, GridUnitType.Star) : new GridLength(column.Width)));
             }
+
+            // A trailing gutter the width of the Columns control, reserved on both the header and the rows so their
+            // columns line up. Without it the header, which hosts the Columns button, would be narrower than the rows.
+            grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(ColumnsGutterWidth)));
         }
 
         private void BuildHeader()
@@ -339,6 +342,9 @@ namespace Xeno.Desktop.Common
                 Grid.SetColumn(text, i);
                 _Header.Children.Add(text);
             }
+
+            Grid.SetColumn(_ColumnsButton, _Visible.Count);
+            _Header.Children.Add(_ColumnsButton);
         }
 
         private Control BuildRow(TRow row)
