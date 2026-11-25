@@ -24,7 +24,7 @@ namespace Xeno.Client
         private static bool IsProviderModelCommand(string value)
         {
             string sub = value.ToLowerInvariant();
-            return sub == "models" || sub == "pull" || sub == "delete-model" || sub == "remove-model" || sub == "rm-model";
+            return sub == "models" || sub == "pull" || sub == "pulls" || sub == "delete-model" || sub == "remove-model" || sub == "rm-model";
         }
 
         private static async Task<int> HandleProviderModelCommandAsync(string[] args)

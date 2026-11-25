@@ -212,6 +212,17 @@ namespace Test.Shared
                     Check(ModelPullProgressText.PlainLine(job).StartsWith("llama3: 50.0%", StringComparison.Ordinal), "The plain progress line is wrong: " + ModelPullProgressText.PlainLine(job));
                     return Task.CompletedTask;
                 }),
+                new TestCaseDescriptor(suite, "CliProviderPullsRoutes", "xeno provider pulls lists and clears pulls instead of reporting an unknown command", executeAsync: async delegate
+                {
+                    using (ClientHomeScope home = new ClientHomeScope())
+                    {
+                        LocalUsageTestSuites.CliResult list = await LocalUsageTestSuites.RunCliAsync(home.Directory, "provider", "pulls").ConfigureAwait(false);
+                        Check(list.ExitCode == 0, "provider pulls failed: " + list.Error + list.Output);
+                        Check(list.Output.Contains("No model pulls", StringComparison.Ordinal), "Expected the empty pull list: " + list.Output);
+                        LocalUsageTestSuites.CliResult clear = await LocalUsageTestSuites.RunCliAsync(home.Directory, "provider", "pulls", "--clear").ConfigureAwait(false);
+                        Check(clear.ExitCode == 0 && clear.Output.Contains("Cleared", StringComparison.Ordinal), "provider pulls --clear failed: " + clear.Error + clear.Output);
+                    }
+                }),
                 new TestCaseDescriptor(suite, "CliProviderModelsAndColumns", "xeno provider models lists live models in a narrow table and honors --columns", executeAsync: async delegate
                 {
                     using (ClientHomeScope home = new ClientHomeScope())
